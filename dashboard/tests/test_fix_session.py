@@ -384,3 +384,117 @@ def mock_lanes(read):
     from sd_dashboard import now_screen
 
     return patch.object(now_screen, "_lanes", read)
+
+
+class TheApplyReview(FixCase):
+    """pack sd:6699: Apply review on a piece starts claude on the fixed apply prompt, in the piece's repository."""
+
+    def piece(self, report="current"):
+        """A piece whose adversarial.md is `current` (stamped with its draft's digest), `unstamped`, or None: absent."""
+        from sd_db import upsert_repo, writing
+
+        folder = self.work / "content" / "2026" / "fixture"
+        folder.mkdir(parents=True)
+        (folder / "index.md").write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\nAn argument.\n")
+        upsert_repo(self.connection, str(self.work), pieces_source="file")
+        state = writing.import_piece(self.connection, str(self.work), "2026/fixture", who="operator")
+        upsert_repo(self.connection, str(self.work), pieces_source="row")
+        stamp = f"<!-- reconciled-with-draft: {state['writing']['gates']['digest']} on 2026-09-20 gen=0 -->\n\n"
+        if report:
+            (folder / "adversarial.md").write_text((stamp if report == "current" else "") + "Adversarial fixture report\n")
+        return state["item"]["id"]
+
+    def test_apply_review_starts_the_apply_prompt_in_the_pieces_repository(self):
+        self.running()
+        item = self.piece()
+        status, _, state = self.fix(item, apply="adversarial")
+        self.assertEqual(status, 200, state)
+        self.assertEqual(self.calls()[1][:4], ["workspace", "create", "--cwd", str(self.work)])
+        sent = self.calls()[3][3]
+        self.assertEqual(sent, fix_session.prompt("idea", item, apply=True))
+        for said in (f"adversarial review of piece sd:{item}", "sd writing reconcile", "--artifact adversarial",
+                     "Commit nothing", "publish nothing"):
+            self.assertIn(said, sent)
+        self.assertEqual(state["fix"]["session"], "apply-review")
+
+    def test_apply_review_needs_a_piece_with_its_report(self):
+        self.running()
+        for item in (self.task(), self.piece(report=False)):
+            status, _, said = self.fix(item, apply="adversarial")
+            self.assertEqual(status, 400, said)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.fix(self.task(), apply="other")[0], 400)
+
+    def test_apply_review_refuses_a_report_that_answers_no_current_draft(self):
+        """pack sd:6977: an adversarial.md that exists but carries no stamp of this draft is not a current review."""
+        self.running()
+        item = self.piece(report="unstamped")
+        status, _, said = self.fix(item, apply="adversarial")
+        self.assertEqual(status, 400, said)
+        self.assertIn("adversarial.md is unstamped", said["error"])
+        self.assertIn("run Refresh review first", said["error"])
+        self.assertEqual(self.calls(), [])
+
+
+class TheGrill(FixCase):
+    """pack sd:6700: Grill on a piece starts claude on the fixed grill prompt; Apply answers on the answers prompt."""
+
+    def piece(self):
+        from sd_db import upsert_repo, writing
+
+        folder = self.work / "content" / "2026" / "fixture"
+        folder.mkdir(parents=True)
+        (folder / "index.md").write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\nAn argument.\n")
+        upsert_repo(self.connection, str(self.work), pieces_source="file")
+        item = writing.import_piece(self.connection, str(self.work), "2026/fixture", who="operator")["item"]["id"]
+        upsert_repo(self.connection, str(self.work), pieces_source="row")
+        return item
+
+    def ask(self, item, body="Who is this for?\nOption: Engineers\nOption: Managers\nRecommendation: Engineers"):
+        return workflow.add_item_note(self.connection, item, kind="question", who="claude", body=body)["note"]
+
+    def test_grill_starts_the_grill_prompt_in_the_pieces_repository(self):
+        self.running()
+        item = self.piece()
+        status, _, state = self.fix(item, grill="ask")
+        self.assertEqual(status, 200, state)
+        self.assertEqual(self.calls()[1][3], str(self.work))
+        self.assertEqual(self.calls()[3][3], fix_session.prompt("idea", item, grill="ask"))
+        self.assertIn(f"`sd task note {item} ", self.calls()[3][3])
+        self.assertIn("--kind question", self.calls()[3][3])
+        self.assertEqual(state["fix"]["session"], "grill")
+
+    def test_apply_answers_waits_for_every_question_and_one_ruling(self):
+        self.running()
+        item = self.piece()
+        for says in ("answer one grill question first", "1 grill question is open"):
+            with self.subTest(says=says):
+                if says.startswith("1"):
+                    self.ask(item)
+                status, _, answer = self.fix(item, grill="apply")
+                self.assertEqual(status, 400, answer)
+                self.assertIn(says, answer["error"])
+        self.assertEqual(self.calls(), [])
+
+    def test_apply_answers_starts_the_answers_prompt_once_answered(self):
+        from sd_dashboard import decisions
+
+        self.running()
+        item = self.piece()
+        note = self.ask(item)
+        decisions.answer(self.connection, item, note["id"], "Engineers", expected_revision=self.revision(item), who="dashboard")
+        status, _, state = self.fix(item, grill="apply")
+        self.assertEqual(status, 200, state)
+        self.assertEqual(self.calls()[3][3], fix_session.prompt("idea", item, grill="apply"))
+        self.assertIn("Ruling on note #", self.calls()[3][3])
+        self.assertIn("Commit nothing", self.calls()[3][3])
+        self.assertEqual(state["fix"]["session"], "apply-answers")
+
+    def test_grill_on_a_task_and_a_bad_grill_value_launch_nothing(self):
+        self.running()
+        task = self.task()
+        status, _, answer = self.fix(task, grill="ask")
+        self.assertEqual(status, 400)
+        self.assertIn("is not a writing piece", answer["error"])
+        self.assertEqual(self.fix(task, grill="other")[0], 400)
+        self.assertEqual(self.calls(), [])

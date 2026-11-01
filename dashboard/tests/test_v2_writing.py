@@ -24,7 +24,7 @@ from sd_dashboard import places, server, v2, writing_screen
 from sd_db import upsert_repo, writing
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
-from test_v2_tasks import SHELL, STAND_IN
+from test_v2_tasks import COMMANDS_JS, SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
 
@@ -109,6 +109,37 @@ class TheDocument(Pieces):
                          {"claim": "c1aim0000000", "url": "https://example.test/p", "phase": "published", "href": "https://example.test/p"})
         self.assertIsNone(by[self.ids["parked"]]["publication"]["href"])
 
+    def test_each_piece_carries_its_adversarial_reports_currency_against_the_draft(self):
+        """pack sd:6977: the digest stamp Apply review gates on; an unstamped report is not current however new it is."""
+        folder = self.root / "content" / "2026" / "fixture"
+        by = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}
+        self.assertEqual(by[self.ids["fixture"]]["adversarial"]["state"], "unstamped")
+        digest = writing.piece_state(self.connection, self.ids["fixture"])["writing"]["gates"]["digest"]
+        (folder / "adversarial.md").write_text(f"<!-- reconciled-with-draft: {digest} on 2026-09-20 gen=0 -->\n\nReport\n")
+        by = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}
+        self.assertEqual(by[self.ids["fixture"]]["adversarial"], {"state": "current", "detail": f"draft {digest}"})
+
+    def test_each_piece_carries_its_open_grill_questions_and_its_rulings(self):
+        # pack sd:6700: the piece's open question notes, oldest first, each with its options; and the count it ruled.
+        from sd_dashboard import decisions
+        from sd_db import workflow
+
+        item = self.ids["fixture"]
+        asked = [workflow.add_item_note(self.connection, item, kind="question", who="claude", body=body)["note"]["id"]
+                 for body in ("Who is this for?\nOption: Engineers (Recommended)\nOption: Managers",
+                             "What is the one point?\nOption: Rows win (Recommended)\nOption: Files win")]
+        grill = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[item]["grill"]
+        self.assertEqual(grill, {"open": [{"note": asked[0], "question": "Who is this for?",
+                                           "options": ["Engineers (Recommended)", "Managers"]},
+                                          {"note": asked[1], "question": "What is the one point?",
+                                           "options": ["Rows win (Recommended)", "Files win"]}],
+                                 "answered": 0})
+        revision = workflow.item_state(self.connection, item)["revision"]
+        decisions.answer(self.connection, item, asked[0], "Engineers (Recommended)", expected_revision=revision,
+                         who="dashboard")
+        grill = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[item]["grill"]
+        self.assertEqual(([q["note"] for q in grill["open"]], grill["answered"]), ([asked[1]], 1))
+
     def test_no_field_holds_a_local_path(self):
         text = json.dumps(writing_screen.document(self.connection, now=NOW))
         self.assertNotIn(self.tmp.name, text)
@@ -128,7 +159,7 @@ class ThePage(Pieces):
         self.assertIn("<title>Writing · system</title>", body)
         self.assertEqual(Refused(body).found, [])
         scripts = re.findall(r'<script src="/ui/([^"?]+)', body)
-        self.assertEqual(scripts, ["theme.js", "markup.js", "icons.js", "sections.js", "read.js", "writing.js", "shell.js"])
+        self.assertEqual(scripts, ["theme.js", "markup.js", "icons.js", "sections.js", "read.js", "commands.js", "writing.js", "shell.js"])
         for path in re.findall(r'(?:src|href)="(/ui/[^"]+)"', body):
             self.assertEqual(self.request(path)[0], 200, path)
 
@@ -166,7 +197,8 @@ def piece(id, title, stage, **fields):
              "owner": "row", "ready_recorded": False, "publication": None, "next": [], "corrections": [],
              "files": {"index.md": {"bytes": 4096, "mtime": "2026-09-20T10:00:00Z"}, "research.md": {"bytes": 2048, "mtime": "2026-09-19T10:00:00Z"},
                        "fact-check.md": {"bytes": 1024, "mtime": "2026-09-19T10:00:00Z"}, "adversarial.md": {"bytes": 1024, "mtime": "2026-09-19T10:00:00Z"}},
-             "draft": ["First paragraph.", "Second paragraph."], "words": 1200}
+             "draft": ["First paragraph.", "Second paragraph."], "words": 1200, "grill": {"open": [], "answered": 0},
+             "adversarial": {"state": "stale", "detail": "reconciled with 0123456789ab, draft is now ba9876543210"}}
     entry.update(fields)
     return entry
 
@@ -204,6 +236,10 @@ COMMANDS = [
     ["piece.revive", "Revive", "v", "undo", True],
     ["piece.readiness", "Readiness", "r", "safe", False],
     ["piece.publish", "Publish", "u", "confirm", False],
+    ["piece.grill", "Grill", None, "safe", False],
+    ["piece.apply-answers", "Apply answers", None, "safe", False],
+    ["piece.review", "Refresh review", None, "safe", False],
+    ["piece.apply-review", "Apply review", None, "safe", False],
 ]
 
 SHELL_MORE = r"""
@@ -221,7 +257,7 @@ class TheScript(unittest.TestCase):
     def run_page(self, body, answer=None, search="", prelude=""):
         answer = answer or "(path) => path === '/api/writing' ? [200, DOC] : [200, { revision: 'f'.repeat(64) }]"
         script = (STAND_IN + f"location.search = {json.dumps(search)};\nvar DOC = {json.dumps(DOC)};\n" + MARKUP_JS
-                  + "\nconst mk = window.markup.html;\n" + SHELL + SHELL_MORE + READ_SHELL + f"\nANSWER = {answer};\n" + prelude + PAGE_JS
+                  + "\nconst mk = window.markup.html;\n" + SHELL + SHELL_MORE + READ_SHELL + f"\nANSWER = {answer};\n" + prelude + COMMANDS_JS + PAGE_JS
                   + "\nvar R = {};\n(async () => { try {\n(WIN_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
                   + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
                   + "function run() { OUT.R = R; OUT.page_attention = window.PAGE_ATTENTION; OUT.html = Object.fromEntries(Object.entries(ELS).map(([k, e]) => [k, e.html]));"
@@ -312,6 +348,88 @@ R.icon = btn.html;""")
         self.assertEqual(out["posts"], [["/api/items/12/stage", {"stage": "ready", "revision": f"{12:064x}"}, 64]])
         self.assertEqual(out["gets"], ["/api/writing", "/api/writing"], "the page did not reread after the write")
         self.assertEqual(out["toasts"][-1], ["#12 Review → Ready · readiness recorded", False])
+
+    #: pack sd:6700: piece 12 with two open grill questions, one with options and one in words, and one answered.
+    GRILLED = ("DOC.pieces[1].grill = { open: [{ note: 71, question: 'Who is this for?', options: ['Engineers', 'Managers'] },"
+               " { note: 72, question: 'What is the one point?', options: [] }], answered: 1 };\n")
+
+    def test_grill_asks_first_and_posts_fix_with_grill_ask(self):
+        out = self.run_page("R.off = [cmd('piece.grill').when(C.get('12')), cmd('piece.grill').when(C.get('13'))];"
+                            " shellRun(cmd('piece.grill'), C.get('12')); await flush();",
+                            answer="(path) => path === '/api/writing' ? [200, DOC] : [200, { fix: { session: 'grill', pane: 'w9:p1' } }]")
+        self.assertEqual(out["R"]["off"], [True, True])
+        self.assertEqual(out["confirms"], ["piece.grill"])
+        self.assertEqual(out["posts"][0][:2], ["/api/items/12/fix", {"grill": "ask", "revision": f"{12:064x}"}])
+        self.assertEqual(out["toasts"][-1], ["Grill started · #12 · herdr pane w9:p1", False])
+        self.assertEqual(out["gets"][-1], "/api/writing", "the page did not read again once the session started")
+        out = self.run_page("R.off = cmd('piece.grill').when(C.get('12'));", prelude=self.GRILLED)
+        self.assertEqual(out["R"]["off"], "2 grill questions open; answer them first")
+
+    def test_apply_answers_waits_for_every_answer_then_posts_fix_with_grill_apply(self):
+        out = self.run_page("R.off = [cmd('piece.apply-answers').when(C.get('12')), cmd('piece.apply-answers').when(C.get('11'))];",
+                            prelude=self.GRILLED)
+        self.assertEqual(out["R"]["off"], ["2 grill questions open; answer them first", "no grill question answered yet; press Grill first"])
+        done = "DOC.pieces[1].grill = { open: [], answered: 2 };\n"
+        out = self.run_page("R.on = cmd('piece.apply-answers').when(C.get('12')); shellRun(cmd('piece.apply-answers'), C.get('12')); await flush();",
+                            answer="(path) => path === '/api/writing' ? [200, DOC] : [200, { fix: { session: 'apply-answers', pane: 'w9:p2' } }]",
+                            prelude=done)
+        self.assertIs(out["R"]["on"], True)
+        self.assertEqual(out["confirms"], ["piece.apply-answers"])
+        self.assertEqual(out["posts"][0][:2], ["/api/items/12/fix", {"grill": "apply", "revision": f"{12:064x}"}])
+        self.assertEqual(out["toasts"][-1], ["Apply answers started · #12 · herdr pane w9:p2", False])
+
+    def test_details_walks_the_open_questions_and_posts_each_answer(self):
+        # An option button posts that option; the free-text one posts what is typed. Each answer reads the pieces again.
+        click = ("const d = ELS.details; d.querySelector = s => s === '#grill-text' ? { value: '  The cost of a gate  ' } : null;"
+                 " const at = v => ({ target: { closest: s => s === '[data-grill-answer]' ? { dataset: { grillAnswer: v } } : null } });")
+        out = self.run_page("document.dispatchEvent(new CustomEvent('shell:open', { detail: '12' })); R.html = ELS.details.html; " + click
+                            + " d.listeners.click.forEach(f => f(at('Managers'))); await flush();", prelude=self.GRILLED)
+        html = out["R"]["html"]
+        self.assertIn("Question 1 of 2", html)
+        self.assertIn("Who is this for?", html)
+        self.assertIn('data-grill-answer="Engineers"', html)
+        self.assertIn("1 answered", html)
+        self.assertEqual(out["posts"], [["/api/decisions/answer", {"item": 12, "note": 71, "option": "Managers", "revision": f"{12:064x}"}, 64]])
+        self.assertEqual(out["gets"][-1], "/api/writing")
+        words = "DOC.pieces[1].grill.open.shift();\n"
+        out = self.run_page("document.dispatchEvent(new CustomEvent('shell:open', { detail: '12' })); R.html = ELS.details.html; " + click
+                            + " d.listeners.click.forEach(f => f(at(''))); await flush();", prelude=self.GRILLED + words)
+        self.assertIn("Question 1 of 1", out["R"]["html"])
+        self.assertIn('id="grill-text"', out["R"]["html"])
+        self.assertEqual(out["posts"][0][1], {"item": 12, "note": 72, "option": "The cost of a gate", "revision": f"{12:064x}"})
+
+    def test_refresh_review_starts_the_pieces_adversarial_review(self):
+        """pack sd:6699: Refresh review posts the shared adversarial route with kind piece."""
+        run = "{ id: 'piece-12-20260920T100000Z', kind: 'piece', item: 12, result: '/w/adversarial.md'"
+        answer = (f"(path) => path === '/api/writing' ? [200, DOC] : path === '/api/adversarial' ? [202, {run}, state: 'queued' }}]"
+                  f" : [200, {run}, state: 'done', filed: 'written' }}]")
+        out = self.run_page("shellRun(cmd('piece.review'), C.get('12')); await flush(); await flush();", answer=answer)
+        self.assertEqual(out["posts"][0][:2], ["/api/adversarial", {"kind": "piece", "target": "12"}])
+        toasts = [t[0] for t in out["toasts"]]
+        self.assertIn("Review started · run piece-12-20260920T100000Z", toasts)
+        self.assertIn("Adversarial review written · run piece-12-20260920T100000Z · /w/adversarial.md", toasts)
+        self.assertEqual(out["gets"][-1], "/api/writing", "the page did not read again once the review landed")
+
+    def test_apply_review_shows_once_adversarial_md_answers_the_current_draft(self):
+        """pack sd:6699: Apply review asks first, then posts Fix with apply: adversarial and the revision. pack sd:6977:
+        the report's digest stamp decides, not file times: a newer stale report stays off, an older current one is on."""
+        stale = "DOC.pieces[1].files['adversarial.md'] = { bytes: 1024, mtime: '2026-09-21T10:00:00Z' };\n"
+        out = self.run_page("R.off = [cmd('piece.apply-review').when(C.get('12')), cmd('piece.apply-review').when(C.get('11'))];",
+                            prelude=stale)
+        self.assertEqual(out["R"]["off"], ["adversarial.md is stale: reconciled with 0123456789ab, draft is now ba9876543210;"
+                                           " run Refresh review first"] * 2)
+        newer = "DOC.pieces[1].adversarial = { state: 'current', detail: 'draft ba9876543210' };\n"
+        out = self.run_page("R.on = cmd('piece.apply-review').when(C.get('12')); shellRun(cmd('piece.apply-review'), C.get('12')); await flush();",
+                            answer="(path) => path === '/api/writing' ? [200, DOC] : [200, { fix: { session: 'apply-review', pane: 'w9:p1' } }]",
+                            prelude=newer)
+        self.assertIs(out["R"]["on"], True)
+        self.assertEqual(out["confirms"], ["piece.apply-review"])
+        self.assertEqual(out["posts"][0][:2], ["/api/items/12/fix", {"apply": "adversarial", "revision": f"{12:064x}"}])
+        self.assertEqual(out["toasts"][-1], ["Apply review started · #12 · herdr pane w9:p1", False])
+
+    def test_the_page_loads_the_shared_commands_before_its_script(self):
+        page = (V2 / "writing.html").read_text(encoding="utf-8")
+        self.assertLess(page.index('<script src="/ui/commands.js">'), page.index('<script src="/ui/writing.js">'))
 
     def test_off_moves_name_their_reason(self):
         out = self.run_page("const w = (id, key) => cmd(id).when(C.get(key));"

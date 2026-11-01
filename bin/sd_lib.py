@@ -1280,8 +1280,9 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
 
 
 #: The kinds a repository row declares (sd:5109), the library's `repos.DECLARATION_KINDS`:
-#: the first four each the object a `.github/sd-<kind>.json` file held before migration 37.
-DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status", "experiment")
+#: the first four each the object a `.github/sd-<kind>.json` file held before migration 37;
+#: `policy` the repository's rules for agents (sd:6715).
+DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status", "experiment", "policy")
 
 
 def repo_declaration(root: pathlib.Path | str, kind: str, environ: Mapping[str, str] | None = None) -> Any:
@@ -1356,6 +1357,8 @@ def declaration_problems(kind: str, value: Any) -> list[str]:
         from sd_db import repos  # noqa: PLC0415 - this commit's lib (sd:3278)
 
         return repos.experiment_problems(value)
+    if kind == "policy":
+        return sibling("sd_repo_policy", "sd_repo_policy.py").problems(value)
     return [f"{kind!r} is not a declaration kind; expected {', '.join(DECLARATION_KINDS)}"]
 
 
@@ -2753,22 +2756,32 @@ def _spellings(item: "str | tuple[str, ...]") -> tuple[str, ...]:
     return (item,) if isinstance(item, str) else tuple(item)
 
 
-def held_at_merge(message: str, parents: str) -> bool | None:
+def held_at_merge(message: str, parents: str, ancestor: "Callable[[int], str] | None" = None) -> bool | None:
     """Whether this squash landed on a parent other than the one its review
     covered; `None` when its trailer block names no reviewed base.
 
     `parents` is git's `%P` for the commit, first parent first. Reconcile and
     every trailer reader ask this one question, so the row's hold and git's
     answer cannot disagree about the same commit (#1179).
+
+    A rebase merge lands N commits, and its tip says `Reviewed-base: <sha> ~N`
+    (sd:6790): the base is then the tip's Nth ancestor, which `ancestor(N)`
+    names. Without `ancestor` such a tip is held, never assumed delivered.
     """
     for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
         name, _, value = line.rstrip().partition(" ")
         if name == REVIEWED_BASE_TRAILER:
+            sha, _, landed = value.strip().partition(" ~")
+            if landed:
+                if ancestor is None or not landed.isdigit():
+                    return True
+                return sha != ancestor(int(landed))
             return value.strip() != (parents.split() or [""])[0]
     return None
 
 
-def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = None) -> bool:
+def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = None,
+            ancestor: "Callable[[int], str] | None" = None) -> bool:
     """True when this message's trailer block -- its last paragraph, which is
     what makes a trailer a trailer -- closes `item`. Reading the whole message
     would let a commit that quoted a trailer close the item it named.
@@ -2782,7 +2795,7 @@ def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = N
     written before the base advanced under it. A later closing commit, written
     once the combined tree is verified, closes the item as usual.
     """
-    if parents is not None and held_at_merge(message, parents):
+    if parents is not None and held_at_merge(message, parents, ancestor):
         return False
     wanted = _spellings(item)
     for line in trailer_block(message).splitlines():
@@ -2796,9 +2809,16 @@ def _closed_by(root: pathlib.Path, ref: str, item: "str | tuple[str, ...]") -> b
     """Whether a commit reachable from `ref` closes `item`; a ref git cannot
     resolve closes nothing. `--grep` only narrows the walk; `_closes` decides."""
     grep = f"{DELIVERS_TRAILER}|{CLOSES_TRAILER}"
-    raw = git_output(["log", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
-    return any(_closes(message, item, parents)
-               for _, parents, message in (c.split("\x1f", 2) for c in raw.split("\x1e") if c.count("\x1f") >= 2))
+    # First parent only: a merge commit lands its branch's own commits on the
+    # history too, and only the merge's message was validated (sd:6790).
+    raw = git_output(["log", "--first-parent", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
+    return any(_closes(message, item, parents, functools.partial(_ancestor, root, commit.strip()))
+               for commit, parents, message in (c.split("\x1f", 2) for c in raw.split("\x1e") if c.count("\x1f") >= 2))
+
+
+def _ancestor(root: pathlib.Path, commit: str, count: int) -> str:
+    """`commit`'s `count`th first-parent ancestor, or `""` when git cannot name it."""
+    return git_output(["rev-parse", f"{commit}~{count}"], root) or ""
 
 
 def upstream(root: pathlib.Path) -> tuple[str, str]:
@@ -3049,6 +3069,10 @@ _TRAILER_LINE = re.compile(r"^[A-Za-z0-9-]+[ \t]*:")
 _CONTINUATION = re.compile(r"^[ \t]+\S")
 
 
+#: The boundary between paragraphs: a line that is blank or whitespace only, as git reads it.
+PARAGRAPH = re.compile(r"\n[ \t]*\r?\n")
+
+
 def trailer_block(message: str) -> str:
     """The trailer block of `message`, the end of `message.rstrip()`; `""` when it has none.
 
@@ -3064,7 +3088,7 @@ def trailer_block(message: str) -> str:
     spelled once here so the readers cannot drift.
     """
     text = message.rstrip()
-    paragraphs = re.split(r"\n[ \t]*\r?\n", text)
+    paragraphs = PARAGRAPH.split(text)
     lines = paragraphs[-1].splitlines()
     if not lines or not _TRAILER_LINE.match(lines[0]):
         return ""

@@ -157,6 +157,10 @@ _STATUS_SINCE = """
 """
 
 
+#: The idea kinds (pack sd:6743): they show in the Writing and Vault views, never in a work count.
+IDEA_KINDS = ("idea", "work-idea", "personal-idea")
+#: SQL true for a row of a work kind: every kind but `IDEA_KINDS`.
+WORK_KIND = f"item.kind NOT IN ({', '.join(repr(kind) for kind in IDEA_KINDS)})"
 #: The field that moves a learning row to a Documents view (pack sd:6262): `books` or `videos`.
 #: `records.move_documents` sets it and `records.return_documents` takes it off; the row keeps its id and notes.
 DOCUMENT_TYPE = "document-type"
@@ -1113,6 +1117,11 @@ def status_changes(connection: sqlite3.Connection, item: int) -> list[sqlite3.Ro
             (item,),
         ).fetchall()
     )
+
+
+def assignment_exists(connection: sqlite3.Connection, assignment: int) -> bool:
+    """Whether the store holds assignment `assignment` (Show assignment's check, sd:6682)."""
+    return connection.execute("SELECT 1 FROM assignment WHERE id = ?", (assignment,)).fetchone() is not None
 
 
 def item_assignments(connection: sqlite3.Connection, item: int) -> list[sqlite3.Row]:

@@ -1,7 +1,9 @@
 // Watches (sd:6264): the store's market rows and the market-watch job that refreshes them (watches_screen.py). The page
 // reads /api/watches through the shell's reader and draws the Documents list grammar: a filter bar, a sorted and paged
 // ledger, and the one Details pane. Refresh watches (sd:6697) is Run now on the job (commands.retry, /api/jobs/market-watch/retry);
-// Refresh watch and Add watch run watch.refresh and watch.add through /api/actions/run (commands.runAction), and Details shows
+// Refresh watch, Add watch, Remove, Restore and Delete run watch.refresh, watch.add, watch.remove, watch.restore and
+// watch.delete through
+// /api/actions/run (commands.runAction), and Details shows
 // the answer. A refresh date is the profile's own: an active watch past the bound reads stale, never fresh.
 (() => {
   const { html, put, plural } = window.markup;
@@ -87,7 +89,7 @@
         ${facts.map(([k, x]) => html`<dt>${k}</dt><dd>${x}</dd>`)}
         <dt>URL</dt><dd>${link(r.url) ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer">${r.url}</a>` : r.url_text ? html`${r.url_text} <span class="why">(not a link that parses)</span>` : '— none in its Sources'}</dd>
         <dt>Item</dt><dd><a href="${window.shell.itemHref(r.item)}">#${r.item}</a></dd></dl>
-      <p class="why">The date is the newest one market-watch wrote into the profile. Refresh watch starts claude on this one watch; the date moves when its run writes the profile. The status moves in Tasks.</p>`);
+      <p class="why">The date is the newest one market-watch wrote into the profile. Refresh watch starts claude on this one watch; the date moves when its run writes the profile. Activate, Pause and Unpause move the status.</p>`);
     window.shell.commands.select(r.id);
   }
   function unselect() {
@@ -130,6 +132,15 @@
     capability: o.error ? { allowed: false, reason: o.error } : o.state === 'running' ? { allowed: false, reason: 'market-watch is running now' } : o.capabilities?.retry });
   const kick = o => window.shell.post('/api/jobs/market-watch/retry', { revision: o.revision })
     .then(out => reader.reread().then(() => window.commands.answered(out, 'market-watch', 'started', 'Refresh watches started · market-watch refreshes the next three active watches')));
+  // Activate, Pause and Unpause (sd:6694): the stage move Tasks' Stage field makes, POST /api/items/<n>/stage with the row's
+  // revision; each shows only on the stage it moves from, so a declined watch gets none. Undo moves it back.
+  const stage = (o, to, revision) => window.shell.post(`/api/items/${o.item}/stage`, { revision, stage: to }).then(out => reader.reread().then(() => out));
+  const move = (id, label, key, from, to, does, done) => ({ id, on: 'watch', label, does, key, risk: 'undo', executes: true,
+    primary: o => o.stage === from, when: o => o.stage === from || `${o.stage}: ${label} moves ${from === 'active' ? 'an' : 'a'} ${from} watch`,
+    cli: () => 'no sd verb: sd store set refuses a status the kind keeps for a person', sends: o => `POST /api/items/${o.item}/stage {revision, stage: ${to}}`,
+    run: o => stage(o, to, o.revision).then(out => ({ text: `${o.title} is ${to} · ${done}${out.mirror && !out.mirror.ok
+      ? ` · mirror not updated: ${out.mirror.reason || 'see Health'}` : ''}`, revision: out.revision })),
+    undo: (o, v) => stage(o, from, v.revision) });
   const register = () => window.shell.commands.register(
     { ...window.commands.retry({ job, run: kick }), label: 'Refresh watches', primary: () => true,
       does: 'Runs the market-watch job now: it refreshes the next three active watches in its queue and writes their profiles.' },
@@ -141,15 +152,32 @@
     { id: 'watch.open', on: 'watch', label: 'Open link', does: 'Opens the watch\'s first source in a new tab.', key: 'o', icon: 'arrow-up-right', risk: 'safe',
       when: o => link(o.url) || 'no http or https link in its Sources', cli: o => `open ${shq(o.url)}`,
       run: o => { window.open(o.url, '_blank', 'noopener'); return `Opened in a new tab · ${o.title}`; } },
-    { id: 'watch.item', on: 'watch', label: 'Open item', does: 'Opens the watch\'s row in Tasks, where its status moves.', key: 'i', risk: 'safe',
+    { id: 'watch.item', on: 'watch', label: 'Open item', does: 'Opens the watch\'s row in Tasks.', key: 'i', risk: 'safe',
       cli: o => `sd task show ${o.item}`, run: o => window.shell.openItem(o.item) },
-    { id: 'watch.add', on: 'watch list', label: 'Add watch', does: 'Files a candidate watch for a URL; you activate it in Tasks.', key: 'a', icon: 'plus', risk: 'safe', executes: true, primary: () => true,
+    { id: 'watch.add', on: 'watch list', label: 'Add watch', does: 'Files a candidate watch for a URL; Activate makes it active.', key: 'a', icon: 'plus', risk: 'safe', executes: true, primary: () => true,
       fields: () => [{ name: 'url', label: 'URL', required: true, placeholder: 'https://', help: 'An http or https link: a company site or a repository.' },
         { name: 'name', label: 'Name', placeholder: 'optional', help: 'Empty: the repository\'s name or the site\'s host.' }],
       consequence: () => 'This files a candidate market row with sd store add: the URL is its first source. market-watch refreshes it once you make it active.',
       cli: (o, v) => `sd store add sdw.market ${shq(v?.name || 'NAME')} --field content-type=company --section ${shq(`Sources=- ${v?.url || 'URL'}`)}`,
       sends: () => 'POST /api/actions/run {action: watch.add, url, name}',
-      run: (o, v) => window.commands.runAction(o, 'watch.add', { url: v?.url || '', name: v?.name || '' }).then(said => reader.reread().then(() => said)) });
+      run: (o, v) => window.commands.runAction(o, 'watch.add', { url: v?.url || '', name: v?.name || '' }).then(said => reader.reread().then(() => said)) },
+    // After Refresh watch, so a stale active row keeps Refresh as its primary.
+    move('watch.activate', 'Activate', 'a', 'candidate', 'active', 'Makes this candidate an active watch; market-watch starts refreshing it.', 'market-watch refreshes it from its next run'),
+    move('watch.pause', 'Pause', 'p', 'active', 'paused', 'Pauses this watch; market-watch stops refreshing it.', 'market-watch skips it until it is unpaused'),
+    move('watch.unpause', 'Unpause', 'p', 'paused', 'active', 'Makes this paused watch active again.', 'market-watch refreshes it from its next run'),
+    // sd:6703: Remove retires (stage declined, which market-watch skips); Delete removes the row for good.
+    { id: 'watch.remove', on: 'watch', label: 'Remove', does: 'Declines the watch: market-watch stops refreshing it; its profile stays.', key: 'm', risk: 'confirm', executes: true,
+      when: o => o.stage !== 'declined' || 'declined already', consequence: o => `This moves ${o.title} to declined. market-watch refreshes it no more; its profile and Sources stay, and Delete removes it for good.`,
+      cli: o => `no sd verb: the dashboard moves #${o.item} to declined, as Tasks moves it`, sends: o => `POST /api/actions/run {action: watch.remove, item: ${o.item}}`,
+      run: o => window.commands.runAction(o, 'watch.remove', { item: o.item }).then(said => reader.reread().then(() => said)) },
+    { id: 'watch.restore', on: 'watch', label: 'Restore', does: 'Brings a declined watch back as a candidate; Activate makes it active.', key: 'e', risk: 'confirm', executes: true,
+      when: o => o.stage === 'declined' || `${o.stage}: Restore brings back a declined watch`, consequence: o => `This moves ${o.title} from declined to candidate. Activate makes it active again.`,
+      cli: o => `no sd verb: the dashboard moves #${o.item} to candidate, as Tasks moves it`, sends: o => `POST /api/actions/run {action: watch.restore, item: ${o.item}}`,
+      run: o => window.commands.runAction(o, 'watch.restore', { item: o.item }).then(said => reader.reread().then(() => said)) },
+    { id: 'watch.delete', on: 'watch', label: 'Delete', does: 'Deletes the watch\'s row for good, with its profile and Sources.', key: 'x', risk: 'confirm', executes: true,
+      consequence: o => `This deletes ${o.title} (#${o.item}) for good: its profile, its Sources and its notes are lost. sd-db item remove files a removal record and backs the store up first. Remove keeps them.`,
+      cli: o => `sd-db item remove ${o.item} --who dashboard --reason ${shq(`Deleted on the dashboard: sdw.market ${o.title}`)}`, sends: o => `POST /api/actions/run {action: watch.delete, item: ${o.item}}`,
+      run: o => window.commands.runAction(o, 'watch.delete', { item: o.item }).then(said => reader.reread().then(() => said)) });
   window.PAGE_LIST = { rows: () => $('rows').querySelectorAll('tr[data-id]'), current: () => SELECTED, select: key => show(key) };
   document.addEventListener('DOMContentLoaded', () => {
     reader = start();

@@ -28,6 +28,7 @@ import sd_local_gate
 import sd_ship_body
 import sd_ship_dispositions as sd_ship_dispositions
 import sd_ship_hold
+import sd_ship_jenkins
 import sd_ship_squash
 from sd_ship_bindings import binding_manifest, review_binding
 from sd_ship_history import ItemHistory, digest
@@ -427,16 +428,48 @@ def commit_paths(root: pathlib.Path, args) -> None:
     run(root, ["git", "--literal-pathspecs", "commit", "--only", "--file=-", "--", *paths], input=message)
 
 
-def squash_allowed(base: str, protection: dict) -> None:
-    """Refuse when the base ruleset forbids the one method `merge` uses.
+def merge_allowed(base: str, protection: dict, method: str = "squash") -> None:
+    """Refuse when the base ruleset forbids the method the policy declares (sd:6790).
 
     GitHub would refuse the PUT, or a bypass would land what the branch
     forbids (sd:1379).
     """
     methods = protection.get("allowed_merge_methods")
-    if methods is not None and "squash" not in methods:
-        raise Refusal(f"the {base} ruleset allows only {', '.join(methods) or 'no'} merge methods and sd-ship "
-                      f"merges by squash; allow squash in the ruleset or merge this pull request by hand")
+    if methods is not None and method not in methods:
+        raise Refusal(f"the {base} ruleset allows only {', '.join(methods) or 'no'} merge methods and this "
+                      f"repository's policy merges by {method}; make the ruleset and the policy agree",
+                      code="policy_merge_method", state="operator_decision",
+                      next_action=f"Allow {method} in the {base} ruleset, or declare a merge_method it allows.")
+
+
+#: The repository field that says GitHub allows each merge method.
+ALLOW_FIELD = {"squash": "allow_squash_merge", "rebase": "allow_rebase_merge", "merge": "allow_merge_commit"}
+#: The trailers sd-ship writes into a rebase tip, taken out again when a later prepare writes them anew.
+SHIP_TRAILERS = (sd_lib.ITEM_TRAILER, sd_lib.DELIVERS_TRAILER, sd_lib.REVIEWED_BASE_TRAILER)
+#: The trailers that close an item; a rebase lands a branch commit's own as `Refs:` (sd:6790).
+CLOSING_TRAILERS = (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER)
+
+
+def without_closes(message: str) -> str:
+    """`message` with each closing trailer in its trailer block turned into `Refs:` and no `Reviewed-base:`.
+
+    A rebase lands every branch commit's message on the base, and only the trailers prepare composes
+    are validated against the claim (sd:6790); a builder's `Closes:` would otherwise close an item
+    the receipt leaves open.
+    """
+    text = message.strip()
+    # The last boundary `trailer_block` reads, a whitespace-only line too, or a `Closes:` survives.
+    boundaries = list(sd_lib.PARAGRAPH.finditer(text))
+    if not boundaries or not sd_lib.trailer_block(text):
+        return text
+    rest, last = text[:boundaries[-1].start()], text[boundaries[-1].end():]
+    lines: list[str] = []
+    for line in last.splitlines():
+        if line.startswith(CLOSING_TRAILERS):
+            line = "Refs:" + line.partition(":")[2]
+        if not line.startswith(sd_lib.REVIEWED_BASE_TRAILER) and line not in lines:
+            lines.append(line)
+    return f"{rest}\n\n" + "\n".join(lines)
 
 
 #: The words that mark a merge warning as the Copilot ancestor clearance.
@@ -1415,11 +1448,15 @@ class Ship(SharedReview):
         # an operator's checkout implicitly to make a check pass.
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
-        if getattr(self.args, "catch_up", False):
+        # Under rebase each commit lands as it is: `rebase_branch` below
+        # catches up by rebasing, never by a merge commit (sd:6790).
+        rebase = self.merge_method() == "rebase"
+        if getattr(self.args, "catch_up", False) and not rebase:
             dropped = self.dropped_catch_ups(base, head)
             if dropped or not self.current_with(base, head):
                 head = self.catch_up(base, head, dropped)
-        self.assert_current_base(base, head)
+        if not rebase:
+            self.assert_current_base(base, head)
         title = self.args.title or self.state.get("title") or self.default_title(base, head)
         if not title or re.match(r"(?i)wip\b", title):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
@@ -1452,6 +1489,12 @@ class Ship(SharedReview):
         self.persist_copilot_direction()
         fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim, "closing": closing}
         self.save(title=title, body=body, base=base, invoker=self.invoker(), **fields)
+        pushed_from = head
+        if rebase:
+            head = self.rebase_branch(base, head)
+            self.assert_current_base(base, head)
+            if closing is not None:
+                self.save(closing={**closing, "head": head})
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
         # first to check the `Work:` line, which the skill said happened
@@ -1484,25 +1527,44 @@ class Ship(SharedReview):
         self.check_review(head)
         if current_head(self.root) != head:
             raise Refusal("HEAD moved before push")
+        lease = self.lease(head, pushed_from) if rebase else []
         self.save(phase="push_dispatch", head=head)
-        git(self.root, "push", "origin", f"{head}:refs/heads/{self.branch}")
+        git(self.root, "push", *lease, "origin", f"{head}:refs/heads/{self.branch}")
         if current_head(self.root) != head:
             raise Refusal("HEAD moved during push; remote still contains only the reviewed commit")
         # Only an open pull request binds. A merged or closed one that once
         # used this branch name keeps its frozen head, so binding it refused
         # every later push as a changed head (sd:2656).
-        pulls = self.api.pages(f"{self.api.prefix}/pulls?state=open&head={quote_branch(self.repository, self.branch)}&base={base}")
-        candidates = [pull for pull in pulls if pull.get("head", {}).get("ref") == self.branch
-                      and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository
-                      and pull.get("base", {}).get("ref") == base]
+        def matching(state: str) -> list[dict]:
+            pulls = self.api.pages(f"{self.api.prefix}/pulls?state={state}"
+                                   f"&head={quote_branch(self.repository, self.branch)}&base={base}")
+            return [pull for pull in pulls if pull.get("head", {}).get("ref") == self.branch
+                    and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository
+                    and pull.get("base", {}).get("ref") == base]
+
+        candidates = matching("open")
         if len(candidates) > 1:
             raise Refusal("multiple PRs match this branch; resolve explicitly before continuing")
         if not candidates:
-            if self.state.get("create_dispatched"):
-                raise Refusal("prior PR creation outcome is uncertain; an empty search cannot authorize another PR")
+            # A create a 5xx left uncertain (sd:6858) may run again: GitHub
+            # makes at most one open PR per head and base, and answers 422
+            # to a second. A closed one at this head means someone closed
+            # what the create made, so that one refuses.
+            retry = bool(self.state.get("create_dispatched"))
+            if retry and any(
+                    pull.get("head", {}).get("sha") == head for pull in matching("closed")):
+                raise Refusal("the PR an earlier create made at this head is closed; reopen it or push a new head")
             self.save(create_dispatched=True, phase="create_dispatch")
-            pull = self.api.api(f"{self.api.prefix}/pulls", method="POST",
-                                body={"title": title, "body": body, "head": self.branch, "base": base, "draft": False})
+            try:
+                pull = self.api.api(f"{self.api.prefix}/pulls", method="POST",
+                                    body={"title": title, "body": body, "head": self.branch, "base": base,
+                                          "draft": False})
+            except Refusal:
+                # A refused retry (422) or a lost answer: the one GitHub holds, if any.
+                candidates = matching("open") if retry else []
+                if len(candidates) != 1:
+                    raise
+                pull = candidates[0]
         else:
             pull = candidates[0]
         number = pull.get("number")
@@ -1843,7 +1905,11 @@ class Ship(SharedReview):
             self.store.manual_merge_guard(self.connection, self.repo["path"])
 
     def squash_body(self, reviewed_base: str = "") -> str:
-        body = self.state["body"].rstrip() + "\n\n"
+        return self.state["body"].rstrip() + "\n\n" + self.ship_trailers(reviewed_base)
+
+    def ship_trailers(self, reviewed_base: str = "") -> str:
+        """`Item:`, each `Delivers:` and `Reviewed-base:`, one line each; none without an item."""
+        body = ""
         if not self.args.no_item:
             body += f"{sd_lib.ITEM_TRAILER} sd:{self.args.item}\n"
             delivered = ([self.args.item] if self.state.get("deliver") else []) + list(self.co_delivered())
@@ -1986,12 +2052,16 @@ class Ship(SharedReview):
                 for row in claim.get("criteria") or [] if row.get("passed") is False and isinstance(row.get("waived"), dict)]
 
     def squash_message(self, reviewed: str) -> tuple[str, dict]:
-        """The squash message, with the owed `Closes:` lines inside its one trailer block (sd:1600)."""
+        """The squash message, with the owed `Closes:` lines inside its one trailer block (sd:1600).
+
+        The title in `state` and the body then take the declared commit convention (`conventional`).
+        """
         body = self.squash_body(reviewed)
         carried, left = sd_ship_squash.owed_closes(
             self.connection, self.repository, body,
             lambda item: slug(self.store.identity(self.connection, item)["repo"]["remote"] or ""))
         body += "".join(f"{sd_lib.CLOSES_TRAILER} sd:{debt['item']}\n" for debt in carried)
+        self.state["title"], body = self.conventional(self.state["title"], body)
         return body, {
             "carried_closes": carried, "closes_left": [debt["item"] for debt in left]}
 
@@ -2207,16 +2277,17 @@ class Ship(SharedReview):
         # Under `repo.ci = local` no remote check is coming, and `gh pr checks
         # --watch` fails on a pull request that has none; the local gate
         # below runs to completion in this process, so it is the wait (sd:1875).
-        if self.args.watch and not self.state.get("watch_started") and self.api.ci != "local":
+        if self.args.watch and not self.state.get("watch_started") and self.api.ci != "local" and not self.jenkins_ci():
             self.save(watch_started=True)
             run(self.root, ["gh", "pr", "checks", str(observed["number"]), "--repo", self.repository,
                             "--watch", "--fail-fast"], timeout=self.args.wait_seconds)
         metadata = self.merge_ownership()
         base = metadata.get("default_branch")
-        if base != self.state["base"] or metadata.get("allow_squash_merge") is not True:
-            raise Refusal("default branch changed or squash merging is disabled")
+        method = self.merge_method()
+        if base != self.state["base"] or metadata.get(ALLOW_FIELD[method]) is not True:
+            raise Refusal(f"default branch changed or {method} merging is disabled")
         protection = self.api.gate(base, head)  # the object, or the declared gap at this head (sd:1110)
-        squash_allowed(base, protection)
+        self.merge_rules(base, observed["number"], head, protection)
         # `repo.ci = local` (sd:1843): no Actions run, so the checks run here,
         # at the reviewed head in a clean worktree, before readiness reads them.
         if self.api.ci == "local":
@@ -2225,11 +2296,7 @@ class Ship(SharedReview):
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
-        reviewed = self.reviewed_base(head, base)
-        # The live title is the squash subject; it closes nothing (sd:3704).
-        title = squash_title(observed, self.state["title"])
-        self.state["title"] = title
-        body, closes = self.squash_message(reviewed)
+        body, closes = self.landing_message(method, observed, head, self.reviewed_base(head, base))
         # The squash message is composed here and read by `git
         # interpret-trailers --parse` afterwards, and those two only agree
         # while the trailers sit in the message's *last* paragraph. One blank
@@ -2254,7 +2321,7 @@ class Ship(SharedReview):
         if self.merge_head() != head:
             raise Refusal("HEAD moved immediately before merge")
         self.merge_authority()
-        self.still_gated(base, head, protection)
+        self.still_allowed(base, observed["number"], head, protection)
         # `row_authorized_merge` is written here, with the phase that says a
         # merge is going out, and it is written on every dispatch rather than
         # only when there is something to say: `still_gated` above took the
@@ -2263,19 +2330,308 @@ class Ship(SharedReview):
         # ownership-only merge therefore cannot inherit a claim from a merge
         # that never happened (sd:1347).
         self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority, **closes,
-                  warnings=self.dispatch_warnings(), merge_invoker=self.invoker())
+                  warnings=self.dispatch_warnings(), merge_invoker=self.invoker(), merge_method=method)
         # Again after the receipt, whose write can wait on the database lock; a
         # refusal here leaves `merge_dispatch` as a refused merge call does.
         self.still_hosted()
         try:
+            # A rebase lands each commit's own message; GitHub takes no title or message for it.
+            message = {} if method == "rebase" else {
+                "commit_title": f"{self.state['title']} (#{observed['number']})", "commit_message": body}
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
-                         body={"sha": head, "merge_method": "squash", "commit_title": f"{title} (#{observed['number']})",
-                               "commit_message": body})
+                         body={"sha": head, "merge_method": method, **message})
         except Refusal:
             # A response can be lost after GitHub merged. Read back the same
             # PR once; never call merge again to discover what happened.
             return self.reconcile()
         return self.reconcile()
+
+    def landing_message(self, method: str, observed: dict, head: str, reviewed: str) -> tuple[str, dict]:
+        """The message the merge lands: the prepared rebase tip's, else the squash or merge commit's (sd:6790)."""
+        if method == "rebase":
+            return self.prepared_tip(head, reviewed)
+        # The live title is the squash subject; it closes nothing (sd:3704).
+        self.state["title"] = squash_title(observed, self.state["title"])
+        return self.squash_message(reviewed)
+
+    def landed_hold(self, commit: str) -> tuple[str, bool]:
+        """The base `commit` landed on and whether it is held there (#1179).
+
+        A rebase lands N commits, and `commit` is the last: its base is its
+        Nth ancestor (sd:6790). The message's own `Reviewed-base:` decides,
+        as it does for every git reader of `Delivers:`; a message composed
+        before that trailer falls back to ancestry, where None is "no" and
+        "cannot tell" alike.
+        """
+        landed = int(self.state.get("landed_commits") or 1) if self.state.get("merge_method") == "rebase" else 1
+        parent = git(self.root, "rev-parse", f"{commit}~{landed}")
+        held = sd_lib.held_at_merge(git(self.root, "show", "-s", "--format=%B", commit), parent,
+                                    lambda count: git(self.root, "rev-parse", f"{commit}~{count}"))
+        if held is None:
+            held = sd_lib.git_output(["merge-base", "--is-ancestor", parent, self.state["reviewed_head"]], self.root) is None
+        return parent, held
+
+    def merge_method(self) -> str:
+        """The policy's `merge_method`: squash unless the repository declares rebase or merge (sd:6790)."""
+        return sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py").effective(self.declared_policy())["merge_method"]
+
+    def rebase_branch(self, base: str, head: str) -> str:
+        """The branch as a rebase merge lands it, its tip carrying the squash's trailers (sd:6790).
+
+        Each commit lands on the base as it is, so the branch is made linear and its `fixup!` commits fold
+        into theirs: on origin/<base> under --catch-up, else on the base it already holds. Every commit but
+        the tip must name an item and pass the commit convention, and each closing trailer a commit wrote
+        becomes `Refs:`; the tip's message then gets `Item:`, `Delivers:`, `Reviewed-base: <base> ~N` and
+        the owed `Closes:`. A merge commit whose own edit the replay would drop refuses. The tree never
+        changes, and the review and the gate run at the head this returns, which `lease` force-pushes.
+        """
+        if git(self.root, "status", "--porcelain", "--untracked-files=no"):
+            raise Refusal("a rebase repository's prepare rewrites the branch and needs a clean working tree",
+                          code="dirty_worktree", boundary="input", state="operator_decision",
+                          next_action="Commit or stash the changes, then run prepare again.")
+        remote = f"refs/remotes/origin/{base}"
+        onto = git(self.root, "merge-base", head, remote)
+        self.rebase_onto(head, onto, "-i", "--autosquash")
+        # Linearizing drops merge commits; one that edited a file on its own
+        # (a conflict resolution, say) would lose that edit here (sd:6790).
+        if git(self.root, "rev-parse", "HEAD^{tree}") != git(self.root, "rev-parse", f"{head}^{{tree}}"):
+            git(self.root, "reset", "-q", "--keep", head)
+            raise Refusal(f"rebasing {self.branch} would change the tree: a merge commit on it holds an edit of "
+                          "its own, which a rebase merge drops; the branch is unchanged",
+                          code="rebase_changes_tree", boundary="input", state="operator_decision",
+                          next_action="Move the merge commit's own edit into an ordinary commit, then run "
+                                      "prepare again.")
+        if getattr(self.args, "catch_up", False) and onto != git(self.root, "rev-parse", remote):
+            onto = git(self.root, "rev-parse", remote)
+            self.rebase_onto(head, onto)
+        self.relink(onto, (self.state.get("rebase_tip") or {}).get("commit"))
+        commits = git(self.root, "rev-list", "--reverse", f"{onto}..HEAD").split()
+        if not commits:
+            raise Refusal(f"{self.branch} lands no commit on {base}", code="empty_branch", boundary="input",
+                          state="operator_decision", next_action="Commit the change, then run prepare again.")
+        for commit in commits[:-1]:
+            self.refuse_landing_commit(commit)
+        tip = commits[-1]
+        stored = self.state.get("rebase_tip") or {}
+        original = stored["message"] if stored.get("commit") == tip else git(self.root, "show", "-s", "--format=%B", tip)
+        message, _ = self.compose_tip(original, onto, len(commits))
+        if message.strip() != git(self.root, "show", "-s", "--format=%B", tip).strip():
+            run(self.root, ["git", "commit", "--amend", "--no-verify", "--allow-empty", "--file=-"], input=message)
+        head = current_head(self.root)
+        self.save(rebase_tip={"commit": head, "message": original}, landed_commits=len(commits))
+        return head
+
+    def rebase_onto(self, head: str, onto: str, *flags: str) -> None:
+        """`git rebase` onto `onto`; a conflict aborts, puts the branch back at `head` and refuses."""
+        if sd_lib.git_output(["-c", "sequence.editor=true", "rebase", *flags, "--no-autostash", "--no-verify", onto],
+                             self.root) is None:
+            sd_lib.git_output(["rebase", "--abort"], self.root)
+            if current_head(self.root) != head:
+                git(self.root, "reset", "--keep", head)
+            raise Refusal(f"rebasing {self.branch} onto {onto[:12]} conflicts; the branch is unchanged",
+                          code="merge_conflict", boundary="ci", state="operator_decision",
+                          next_action=f"Run git rebase {onto[:12]}, resolve the conflict, then run prepare again.")
+
+    def relink(self, onto: str, prepared: str | None) -> None:
+        """Rewrite each commit after `onto` whose message carries a closing trailer (`without_closes`).
+
+        Same trees and authors; a commit with nothing to change and an unchanged parent is kept as it is,
+        and so is the tip an earlier prepare wrote (`prepared`) while it is still the tip: `compose_tip`
+        checks its trailers again. Buried under a later commit, it is kept only while it closes what the new
+        tip closes; otherwise it is rewritten like any other, or its `Delivers:` would close an item the
+        current claim dropped, and the review it had restarts (`reviewed_head_orphaned`).
+        """
+        parent = onto
+        commits = git(self.root, "rev-list", "--reverse", f"{onto}..HEAD").split()
+        for commit in commits:
+            message = git(self.root, "show", "-s", "--format=%B", commit)
+            kept = commit == prepared and (commit == commits[-1] or self.closes_alike(message))
+            changed = message.strip() if kept else without_closes(message)
+            if changed == message.strip() and git(self.root, "rev-parse", f"{commit}^") == parent:
+                parent = commit
+                continue
+            name, email, date = git(self.root, "show", "-s", "--format=%an%x00%ae%x00%aI", commit).split("\0")
+            parent = run(self.root, ["env", f"GIT_AUTHOR_NAME={name}", f"GIT_AUTHOR_EMAIL={email}",
+                                     f"GIT_AUTHOR_DATE={date}", "git", "commit-tree", f"{commit}^{{tree}}",
+                                     "-p", parent, "-F", "-"], input=changed + "\n")
+        if parent != current_head(self.root):
+            git(self.root, "reset", "-q", "--keep", parent)
+
+    def closes_alike(self, message: str) -> bool:
+        """Whether `message` closes just what a tip prepared now would (sd:6790)."""
+        def closes(text: str) -> list[str]:
+            return sorted(line for line in text.splitlines() if line.startswith(CLOSING_TRAILERS))
+        return closes(message) == closes(self.compose_tip(message, "", 1)[0])
+
+    def refuse_landing_commit(self, commit: str) -> None:
+        """Refuse a commit a rebase would land on the base without an item or against the convention (sd:6790)."""
+        message = git(self.root, "show", "-s", "--format=%B", commit)
+        subject = message.partition("\n")[0]
+        if not re.search(r"\bsd:\d+\b", message):
+            raise Refusal(f"commit {commit[:12]} ({subject!r}) names no item, and a rebase lands it on the base as it is",
+                          code="commit_convention", boundary="input", state="operator_decision",
+                          next_action="Reword the commit to name its item, such as `Refs: sd:N`, then run prepare again.")
+        declared = self.declared_policy() or {}
+        if "commit_convention" not in declared:
+            return
+        policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
+        try:
+            checked = policy.check_message(message, declared["commit_convention"])
+        except policy.ConventionRefused as error:
+            checked, problem = None, str(error)
+        else:
+            problem = "its type is an alias the convention rewrites"
+        if checked is None or checked.strip() != message.strip():
+            raise Refusal(f"this repository's commit convention refuses commit {commit[:12]} ({subject!r}), "
+                          f"which a rebase lands as it is: {problem}",
+                          code="commit_convention", state="operator_decision",
+                          next_action="Reword the commit to meet the convention, then run prepare again.")
+
+    def compose_tip(self, original: str, reviewed: str, landed: int) -> tuple[str, dict]:
+        """The rebase tip's message: `original` with the trailers a squash would carry (sd:6790).
+
+        Joined to the tip's own trailer block when it has one, so git reads both as one; the trailers an
+        earlier prepare wrote are taken out first. `~N` names how many commits land, and is left out at one.
+        """
+        subject, *rest_ = sd_lib.PARAGRAPH.split(without_closes(original), maxsplit=1)
+        rest = rest_[0] if rest_ else ""
+        if sd_lib.trailer_block(original):
+            paragraphs = sd_lib.PARAGRAPH.split(rest)
+            kept = [line for line in paragraphs[-1].splitlines() if not line.startswith(SHIP_TRAILERS)]
+            rest = "\n\n".join(paragraphs[:-1] + (["\n".join(kept)] if kept else []))
+        trailers = self.ship_trailers(reviewed + (f" ~{landed}" if landed > 1 else ""))
+        joiner = "\n" if rest and sd_lib.trailer_block(f"{subject}\n\n{rest}") else "\n\n"
+        body = (rest + joiner if rest else "") + trailers
+        carried, left = sd_ship_squash.owed_closes(
+            self.connection, self.repository, body,
+            lambda item: slug(self.store.identity(self.connection, item)["repo"]["remote"] or ""))
+        body += "".join(f"{sd_lib.CLOSES_TRAILER} sd:{debt['item']}\n" for debt in carried)
+        subject, body = self.conventional(subject, body)
+        return f"{subject}\n\n{body}", {"carried_closes": carried, "closes_left": [debt["item"] for debt in left]}
+
+    def prepared_tip(self, head: str, reviewed: str) -> tuple[str, dict]:
+        """The rebase tip's message, refused unless prepare wrote it at this head and base (sd:6790)."""
+        stored = self.state.get("rebase_tip") or {}
+        landed = len(git(self.root, "rev-list", f"{reviewed}..{head}").split())
+        expected, closes = self.compose_tip(stored.get("message") or "", reviewed, landed)
+        actual = git(self.root, "show", "-s", "--format=%B", head)
+        if stored.get("commit") != head or actual.strip() != expected.strip():
+            raise Refusal(f"the tip {head[:12]} does not carry the trailers a merge on {reviewed[:12]} needs; "
+                          "prepare again to write them", code="rebase_tip_stale", boundary="input",
+                          state="retryable_failure", next_action="Run sd-ship prepare again, then merge.")
+        self.save(landed_commits=landed)
+        return actual, closes
+
+    def lease(self, head: str, before: str) -> list[str]:
+        """`--force-with-lease` pinned to what the remote branch holds, when that is a head this branch had (sd:6790).
+
+        A rebase rewrites the pushed branch, so the push replaces it; the lease refuses anything pushed
+        between this read and the push, and a remote head this checkout never held refuses here.
+        """
+        listed = git(self.root, "ls-remote", "origin", f"refs/heads/{self.branch}").split()
+        remote = listed[0] if listed else ""
+        # Each reviewed head was this checkout's, a review `--restart-review` set aside too.
+        reviews = [self.state] + list(self.state.get("superseded_reviews") or [])
+        known = {head, before, str(self.state.get("head") or "")} | {
+            str(entry.get("head")) for review in reviews for entry in review.get("passes") or []}
+        # A commit this clone lacks is someone else's push, never an ancestor.
+        if remote and remote not in known and not sd_ship_squash.reaches(self.root, remote, before):
+            raise Refusal(f"origin/{self.branch} is at {remote[:12]}, which this checkout never held; "
+                          "a rebase push would drop it", code="head_moved", boundary="input",
+                          state="operator_decision",
+                          next_action=f"Fetch origin/{self.branch}, bring its commits in, then run prepare again.")
+        return [f"--force-with-lease=refs/heads/{self.branch}:{remote}"]
+
+    def merge_rules(self, base: str, number: int, head: str, protection: dict) -> None:
+        """The base ruleset's merge methods, the repository's policy (sd:6715), then its Jenkins job (sd:6880)."""
+        merge_allowed(base, protection, self.merge_method())
+        self.freeze_hold()
+        self.policy_hold(number, head)
+        jenkins = self.jenkins_ci()
+        if jenkins:  # the job the policy names is the CI, waited on at this exact head
+            sd_ship_jenkins.wait_green(jenkins, number, head,
+                                       wait_seconds=self.args.wait_seconds if self.args.watch else 0)
+            self.api.jenkins_green = head
+
+    def still_allowed(self, base: str, number: int, head: str, protection: dict) -> None:
+        """`still_gated`, then the policy again: an approval can be dismissed during the gate's minutes."""
+        self.still_gated(base, head, protection)
+        self.freeze_hold()
+        self.policy_hold(number, head)
+
+    def freeze_hold(self) -> None:
+        """Refuse a merge inside the repository's freeze window, `sd-db repo freeze` (sd:6879).
+
+        Read before the gate and again just before the merge: a window can open during the gate's minutes.
+        """
+        sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+        from sd_db.writes import freeze_window
+        window = freeze_window(self.connection, self.repository)
+        if window is not None:
+            raise Refusal(f"{self.repository} is frozen until {window['until']}: {window['reason']}",
+                          code="freeze_window", state="operator_decision",
+                          next_action="Wait for the window to end, or lift it with `sd-db repo freeze <path> off`, "
+                                      "then retry merge.")
+
+    def policy_hold(self, number: int, head: str) -> None:
+        """Refuse what the repository's `policy` declaration does not allow at merge time (sd:6715).
+
+        `review.human` counts the human approvals of `head` GitHub holds now, not at enqueue. No declaration
+        is the managed default, squash with no human review; a policy that could not be read refuses, since an
+        org repository's rules are then unknown. `merge_method` is `merge_rules`' (sd:6790).
+        """
+        policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
+        held = policy.effective(self.declared_policy())
+        need = held["review"].get("human") or 0
+        if not need:
+            return
+        approved = policy.approvals(self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews"), head)
+        if len(approved) < need:
+            who = ", ".join(held["review"].get("reviewers") or []) or "the repository's reviewers"
+            raise Refusal(f"this repository's policy requires {need} human approval{'s' if need > 1 else ''} of "
+                          f"{head[:12]}; {len(approved)} approve it{': ' + ', '.join(approved) if approved else ''}",
+                          code="approval_required", state="operator_decision",
+                          next_action=f"Ask {who} to approve the pull request at this head, then retry merge.")
+
+    def jenkins_ci(self) -> dict | None:
+        """The policy's `ci` when it names Jenkins, else None (sd:6880)."""
+        ci = (self.declared_policy() or {}).get("ci") or {}
+        return ci if ci.get("provider") == "jenkins" else None
+
+    def declared_policy(self) -> dict | None:
+        """The repository's `policy` declaration, None for none; a failed read refuses (sd:6715)."""
+        try:
+            return sd_lib.repo_declaration(self.root, "policy")
+        except (sd_lib.DatabaseUnreadable, sd_lib.ConfigError) as error:
+            raise Refusal(f"the repository's policy was not read, so its merge rules are unknown: {error}",
+                          code="policy_unread", state="retryable_failure",
+                          next_action="Restore the workflow database read, then retry merge.") from None
+
+    def conventional(self, title: str, body: str) -> tuple[str, str]:
+        """The squash title and body under the declared `commit_convention` (sd:6715).
+
+        A footer line in the body moves into the trailer block this merge
+        appends (`footer_last`), and an alias type in the title is
+        rewritten; any other rule the message
+        breaks refuses before GitHub writes it. `title_max` counts the title,
+        not the ` (#N)` GitHub adds. No declared convention returns both as
+        they are.
+        """
+        declared = self.declared_policy()
+        if not declared or "commit_convention" not in declared:
+            return title, body
+        policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
+        convention = declared["commit_convention"]
+        body = policy.footer_last(body, convention.get("footer"))
+        try:
+            message = policy.check_message(f"{title}\n\n{body}", convention)
+        except policy.ConventionRefused as error:
+            raise Refusal(f"this repository's commit convention refuses the squash message: {error}",
+                          code="commit_convention", state="operator_decision",
+                          next_action="Retitle the pull request or edit its body to meet the convention, "
+                                      "then retry merge.") from None
+        title, _, rest = message.partition("\n\n")
+        return title, rest if body.endswith("\n") else rest.rstrip("\n")
 
     def merge_local_gate(self, observed: dict, base: str, head: str) -> None:
         """The merge's `sd/local-gate` at `head` under `repo.ci = local`, saved on the receipt; refuse a failure."""
@@ -2351,13 +2707,7 @@ class Ship(SharedReview):
         # contain the base; a squash parent outside it means the base advanced
         # in between, and the landed tree is a combination nobody reviewed or
         # checked. The merge is a fact to record; delivery is not (sd:1089).
-        parent = git(self.root, "rev-parse", f"{commit}^1")
-        # The squash's own `Reviewed-base:` decides, as it does for every git
-        # reader of `Delivers:`. A message composed before that trailer falls
-        # back to ancestry, where None is "no" and "cannot tell" alike.
-        held = sd_lib.held_at_merge(git(self.root, "show", "-s", "--format=%B", commit), parent)
-        if held is None:
-            held = sd_lib.git_output(["merge-base", "--is-ancestor", parent, self.state["reviewed_head"]], self.root) is None
+        parent, held = self.landed_hold(commit)
         if held and not self.args.no_item:
             answer = self.hold_at_merge(commit, parent, evidence)
             if answer is not None:
@@ -2997,7 +3347,7 @@ def main(argv=None) -> int:
         return 3
     try:
         from sd_db import ship
-        from sd_db.database import connect, default_path
+        from sd_db.database import Patient, connect, default_path
         from sd_db.errors import SdDbError
         from sd_db.workflow import WorkflowError
     except ImportError as error:
@@ -3012,7 +3362,8 @@ def main(argv=None) -> int:
         sd_lib.refuse_unmanaged(root, unmanaged_refusal, args.database)
         database = args.database or default_path()
         readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.dispositions_file is None)
-        connection = connect(database, write=not readonly)
+        # A write a locked database refused is sent again, not a failed lane entry (sd:6855).
+        connection = Patient(connect(database, write=not readonly))
         try:
             if args.command in ("review", "verify-review") and not args.no_item:
                 raise Refusal("item-backed review and clearance run inside prepare and merge; --no-item selects the standalone record path")

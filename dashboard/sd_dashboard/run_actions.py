@@ -9,10 +9,12 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | ------------------ | -------------------------------------------- | --------------------------------------------- |
 | job.log            | an installed job (`operations.job_state`)    | `cron-jobs.sh logs <job> 200`                 |
 | job.print          | the same; its launchd service                | `launchctl print <service>`                   |
+| assignment.get     | an assignment row's number                   | `sd assignments get <n>`                      |
 | storage.du         | a configured storage folder or one inside it | `du -k -d 1 <folder>`, largest first          |
 | volume.df          | a mount point or a configured storage folder | `df -h <path>`                                |
 | port.lsof          | an integer port                              | `lsof -nP -iTCP:<port> -sTCP:LISTEN`          |
 | credentials.probe  | nothing                                      | `credentials.check`, as `sd-db credentials`   |
+| credentials.signin | a probe `credentials.signin` finds on disk   | its consent URL, or its login in herdr        |
 | check.run          | a Health check row id this module knows      | the row's read, see `CHECKS`                  |
 | sensor.read        | a tile in Home's tile list                   | `GET /api/states/<entity>`                    |
 | skill.scan         | nothing                                      | `sd skill scan`                               |
@@ -24,6 +26,13 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | repo.pull          | `pull_refusal`, read again under the lock    | `git pull --ff-only`, under the lane's lock   |
 | watch.refresh      | an active market row, the vault's routine    | claude, one market-watch entity, in herdr     |
 | watch.add          | an http(s) URL, an optional name             | `sd store add sdw.market <name> ...`          |
+| watch.remove       | a market row not declined                    | `records.edit_row`, stage declined            |
+| watch.restore      | a declined market row                        | `records.edit_row`, stage candidate           |
+| watch.delete       | a market row                                 | `sd-db item remove <id>`, preview then apply  |
+| topic.add          | a topic title                                | `sd store add sdw.topic <title> ...`          |
+| topic.remove       | a topic row not retired                      | `records.edit_row`, stage retired             |
+| topic.restore      | a retired topic row                          | `records.edit_row`, stage candidate           |
+| topic.delete       | a topic row                                  | `sd-db item remove <id>`, preview then apply  |
 
 A step is bounded (`Step.seconds`), and its output is kept to its last `OUTPUT_CHARS` characters. The answer is
 `{action, line, exit, output, cut}` for a step that ran, whatever its exit. A refusal before the step ran is a
@@ -36,7 +45,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
+import threading
+import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +76,12 @@ WATCH_ROUTINE = "System/Scheduled Tasks/market-watch/SKILL.md"
 URL_MAX = 2000
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,99}")
 SKILL = re.compile(r"[a-z0-9][a-z0-9-]{0,79}")
+#: The bound on a login printing its device URL and code, in seconds (sd:6957).
+LOGIN_SECONDS = 20
+#: Google's consent URL in start_google_auth's answer, which words it as Markdown.
+CONSENT = re.compile(r"https://accounts\.google\.com/[^\s)\]>\"'`]+")
+DEVICE_URL = re.compile(r"https://[^\s)\]>\"'`]+")
+DEVICE_CODE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4}\b")
 SOURCE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
 
 
@@ -77,7 +95,8 @@ class Step:
     argv: tuple[str, ...] = ()
     cwd: str | None = None
     stdin: str | None = None
-    call: Callable[[], tuple[int, str]] | None = None
+    #: Answers `(exit, output)`, or `(exit, output, extra)` whose fields join the answer (a login's `url`).
+    call: Callable[[], tuple] | None = None
     seconds: int = SECONDS
     env: dict | None = None
     #: How the output reads in Details: a step may sort or word it (`du`'s sizes, the largest first).
@@ -148,6 +167,18 @@ def job_print(connection, values, jobs=None) -> Step:
     return Step(line=f"launchctl print {state['service']}", argv=("launchctl", "print", state["service"]))
 
 
+def assignment_get(connection, values, jobs=None) -> Step:
+    """Show assignment (sd:6682): the record `sd assignments get` prints, for an assignment row the store holds."""
+    from sd_db import reads
+
+    n = _fields(values, {"assignment"})["assignment"]
+    if type(n) is not int or n < 1:
+        raise ValueError("Name the assignment by its number; nothing ran.")
+    if not reads.assignment_exists(connection, n):
+        raise ValueError(f"#{n} is not an assignment; nothing ran.")
+    return Step(line=f"sd assignments get {n}", argv=(_command("sd"), "assignments", "get", str(n)))
+
+
 def _storage_roots(connection) -> list[Path]:
     from . import health_collectors
 
@@ -211,12 +242,14 @@ def port_lsof(connection, values, jobs=None) -> Step:
                 shape=lambda code, out: out if out.strip() else f"Nothing listens on TCP port {port}.")
 
 
-def _credentials(connection) -> Callable[[], tuple[int, str]]:
+def _credentials(connection, only: str | None = None) -> Callable[[], tuple[int, str]]:
     def call():
         from sd_db import credentials
 
-        body = credentials.check(connection, env=os.environ)
-        return 0, "\n".join(credentials.describe(probe) for probe in body["probes"])
+        body = credentials.check(connection, env=os.environ, **({"only": only} if only else {}))
+        family = only.split(":")[0] if only else None
+        return 0, "\n".join(credentials.describe(probe) for probe in body["probes"]
+                            if family is None or str(probe.get("id", "")).split(":")[0] == family)
 
     return call
 
@@ -226,11 +259,96 @@ def credentials_probe(connection, values, jobs=None) -> Step:
     return Step(line="sd-db credentials", call=_credentials(connection), seconds=60)
 
 
+def _google_consent(account: str) -> Callable[[], tuple]:
+    """workspace-mcp's start_google_auth for one account: its consent URL rides the answer, never the output or a log."""
+    def call():
+        from . import notes_screen
+
+        url, _, _ = notes_screen.workspace()
+        client = notes_screen._mail_intake().Mcp(url, timeout=30)
+        try:
+            client.connect()
+            said = client.call("start_google_auth", {"service_name": "Google Workspace", "user_google_email": account})
+        except Exception as error:  # noqa: BLE001 - whatever broke, there is no URL to show
+            return 1, f"workspace-mcp at {url} gave no consent URL: {error}"
+        finally:
+            notes_screen.close_session(url, client)
+        found = CONSENT.search(said)
+        if found is None:
+            return 1, f"workspace-mcp answered with no consent URL: {said[:300]}"
+        return 0, f"workspace-mcp waits for {account}'s consent; nothing opened a browser.", \
+            {"url": found.group(0), "account": account}
+
+    return call
+
+
+def _device_login(argv: tuple[str, ...], account: str) -> Callable[[], tuple]:
+    """A login that prints a device URL and code, then waits for the code: answered with both, left running to finish."""
+    def call():
+        try:
+            child = subprocess.Popen(list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, text=True, start_new_session=True)
+        except OSError as error:
+            return 1, f"{argv[0]} did not start: {error}; nothing ran."
+        lines: list[str] = []
+
+        def drain():
+            for line in child.stdout or ():
+                lines.append(line)
+
+        threading.Thread(target=drain, daemon=True).start()
+        deadline = time.monotonic() + LOGIN_SECONDS
+        while time.monotonic() < deadline:
+            said = "".join(lines)
+            url, code = DEVICE_URL.search(said), DEVICE_CODE.search(said)
+            if url and code:
+                return 0, f"{argv[0]} waits for the code for {account}; it stops on its own when the code expires.", \
+                    {"url": url.group(0), "code": code.group(0), "account": account}
+            if child.poll() is not None:
+                break
+            time.sleep(0.1)
+        if child.poll() is None:
+            child.kill()
+        return 1, "".join(lines).strip() or f"{argv[0]} printed no URL and code in {LOGIN_SECONDS} s."
+
+    return call
+
+
+def credentials_signin(connection, values, jobs=None) -> Step:
+    """Sign in (sd:6722, sd:6957): a Google account's consent URL or an SSO profile's device URL and code to copy into
+    the right browser profile, never opened here; any other login in a new herdr workspace, read from disk now."""
+    from sd_db import credentials
+
+    probe = _text(_fields(values, {"probe"})["probe"], "probe")
+    text = credentials.signin(probe, os.environ)
+    if text is None:
+        raise ValueError(f"{probe} is not a credential this machine can sign in; nothing ran.")
+    family, _, name = probe.partition(":")
+    if family == "google":
+        return Step(line=f"workspace-mcp start_google_auth user_google_email={name}", call=_google_consent(name),
+                    seconds=60)
+    if text.startswith("! aws sso login "):
+        argv = (*shlex.split(text[2:]), "--no-browser", "--use-device-code")
+        return Step(line=shlex.join(argv), call=_device_login(argv, f"AWS profile {name}"), seconds=LOGIN_SECONDS + 5)
+    home = Path.home()
+    label = "signin-" + re.sub(r"[^a-z0-9]+", "-", probe.lower()).strip("-")
+    return Step(line=f"cd {home} && claude {shlex.quote(text)}", call=_herdr(home, label, text), seconds=100)
+
+
+def _credential_check(connection, row: str) -> Step:
+    """A credential row's Re-check runs its own probe family again (sd:6722); a heartbeat row runs every probe."""
+    from sd_db import credentials
+
+    probe = row.removeprefix("cred:")
+    only = probe if probe.split(":")[0] in credentials.FAMILIES else None
+    return Step(line="sd-db credentials", call=_credentials(connection, only), seconds=60)
+
+
 #: Health check rows whose read this module runs, by the id's prefix; every other check's Re-check reads Health again.
 CHECKS = {
-    "doc:": lambda connection: Step(line="local-machine-setup/machine-setup.sh doctor", seconds=120,
-                                    argv=("/bin/sh", str(CHECKOUT / "local-machine-setup" / "machine-setup.sh"), "doctor")),
-    "cred:": lambda connection: Step(line="sd-db credentials", call=_credentials(connection), seconds=60),
+    "doc:": lambda connection, row: Step(line="local-machine-setup/machine-setup.sh doctor", seconds=120,
+                                         argv=("/bin/sh", str(CHECKOUT / "local-machine-setup" / "machine-setup.sh"), "doctor")),
+    "cred:": _credential_check,
 }
 
 
@@ -239,7 +357,7 @@ def check_run(connection, values, jobs=None) -> Step:
     found = next((make for prefix, make in CHECKS.items() if row.startswith(prefix)), None)
     if found is None:
         raise ValueError(f"{row} has no read the dashboard runs; Re-check reads Health again.")
-    return found(connection)
+    return found(connection, row)
 
 
 def sensor_read(connection, values, jobs=None):
@@ -571,14 +689,127 @@ def watch_add(connection, values, jobs=None) -> Step:
     return Step(line="sd store add " + " ".join(shlex.quote(a) for a in args), argv=(_command("sd"), "store", "add", *args))
 
 
+def topic_add(connection, values, jobs=None) -> Step:
+    """Add topic: a candidate topic row through `sd store add`, as Add watch files a market row (sd:6703). The brief
+    routines read active topics only, so it waits for the operator to activate it in Tasks."""
+    from datetime import date
+
+    title = _text(_fields(values, {"title"})["title"], "topic")
+    title = re.sub(r"\s+", " ", re.sub(r"[/\\:()~#\[\]|\"]", " ", title)).strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if not slug or title.startswith("-") or len(title) > 120:
+        raise ValueError("Name the topic: a title starts with a letter or digit and has at most 120 characters; nothing ran.")
+    today = date.today().isoformat()
+    args = ["sdw.topic", title, "--field", f"slug={slug}", "--field", f"dateCreated={today}",
+            "--section", f"Provenance=Added on the dashboard's Briefs page, {today}."]
+    return Step(line="sd store add " + " ".join(shlex.quote(a) for a in args), argv=(_command("sd"), "store", "add", *args))
+
+
+# ---------- Remove and Delete (sd:6703) ----------
+
+#: The stage Remove moves a row to: the one its routine skips. market-watch refreshes active watches and the brief
+#: routines read active topics, so a removed row keeps its body, Memory and Sources and gets no new run.
+RETIRED = {"market": "declined", "topic": "retired"}
+
+
+def _store_row(connection, values, kind: str) -> dict:
+    """The `sdw.<kind>` row the page names by its item number, read from the store here, never taken from the page."""
+    from sd_db import records
+
+    item = _fields(values, {"item"})["item"]
+    if type(item) is not int:
+        raise ValueError(f"Name the {kind} row by its item number; nothing ran.")
+    row = next((r for r in records.list_rows(connection, kind) if r["id"] == item), None)
+    if row is None:
+        raise ValueError(f"#{item} is not a {kind} row; nothing ran.")
+    return row
+
+
+def _move(kind: str, restore: bool = False):
+    """Remove: the row's stage moves to `RETIRED[kind]`; Restore moves it from there back to candidate (sd-writing
+    sd:6828 added that move). Both go through `records.edit_row`, as Tasks moves a base row. The dashboard is the
+    operator, so the plugin's `human-only` stage is its to set; `sd store set` refuses it to agents."""
+
+    def check(connection, values, jobs=None) -> Step:
+        from sd_db import records, workflow
+
+        row = _store_row(connection, values, kind)
+        current = row.get("stage") or ""
+        stage = "candidate" if restore else RETIRED[kind]
+        if restore and current != RETIRED[kind]:
+            raise ValueError(f"{row['title']} is {current}, not {RETIRED[kind]}; nothing ran.")
+        if current == stage:
+            raise ValueError(f"{row['title']} is {stage} already; nothing ran.")
+        rules = records.rules_for(kind, home=Path.home())
+        if rules.transitions is not None and stage not in rules.transitions.get(current, []):
+            raise ValueError(f"{row['title']} is {current}: its plugin allows no move to {stage}; nothing ran.")
+
+        def call():
+            try:
+                revision = workflow.item_state(connection, row["id"])["revision"]
+                records.edit_row(connection, row["id"], rules, revision=revision, who="dashboard", stage=stage)
+            except workflow.WorkflowError as error:
+                return 1, str(error)
+            return 0, f"{row['title']}: stage {current} -> {stage}. Its body stays; " + (
+                "Activate it in Tasks." if restore else "Restore brings it back, Delete removes the row.")
+
+        return Step(line=f"stage {current} -> {stage} on #{row['id']} (records.edit_row, as Tasks moves it)", call=call)
+
+    return check
+
+
+def _delete(kind: str):
+    """Delete: the row, its notes and its assignments go for good, through `sd-db item remove`. Its preview's
+    fingerprint is handed to its apply at once, and only when the verb's default store is the database the row was read
+    from. The verb files its removal record and backs the store up first, and
+    refuses a row another one still needs (an open question, a running assignment)."""
+
+    def check(connection, values, jobs=None) -> Step:
+        from sd_db import database
+
+        row = _store_row(connection, values, kind)
+        # `sd-db item remove` opens the default store, and the dashboard may serve another (`--database`): the same id
+        # there is another row, so Delete runs only when both are one file (review of build/sd-206).
+        served = next((r[2] for r in connection.execute("PRAGMA database_list") if r[1] == "main"), "")
+        target = Path(str(database.default_path(Path.home())))
+        if not served or Path(served).resolve() != target.resolve():
+            raise ValueError(f"sd-db item remove opens {target}, another database than the one this dashboard serves "
+                             f"({served or 'no file'}); nothing ran. Delete #{row['id']} with sd-db on its own store.")
+        verb = [_command("sd-db"), "item", "remove", str(row["id"]), "--who", "dashboard",
+                "--reason", f"Deleted on the dashboard: sdw.{kind} {row['title']}"]
+
+        def call():
+            said = []
+            try:
+                preview = subprocess.run(verb, capture_output=True, text=True, timeout=30, check=False)
+                said.append((preview.stdout + preview.stderr).strip())
+                found = re.search(r"^sd-db: fingerprint: ([0-9a-f]+)$", preview.stdout, re.M)
+                if preview.returncode != 0 or not found:
+                    return preview.returncode or 1, "\n".join(said)
+                done = subprocess.run([*verb, "--apply", "--if-fingerprint", found.group(1)], capture_output=True,
+                                      text=True, timeout=80, check=False)
+                said.append((done.stdout + done.stderr).strip())
+                return done.returncode, "\n".join(said)
+            except subprocess.TimeoutExpired:
+                return None, "\n".join([*said, f"sd-db item remove gave no answer, so whether #{row['id']} is gone is not known."])
+            except OSError as error:
+                return 1, f"{verb[0]} did not start: {error}; nothing ran."
+
+        return Step(line=" ".join(shlex.quote(a) for a in ["sd-db", *verb[1:]]), call=call, seconds=120)
+
+    return check
+
+
 #: Every action a page may post, by name: its label for the journal and Details, and its check.
 ACTIONS = {
     "job.log": ("Show log", job_log),
     "job.print": ("Print", job_print),
+    "assignment.get": ("Show assignment", assignment_get),
     "storage.du": ("Show biggest", storage_du),
     "volume.df": ("Show use", volume_df),
     "port.lsof": ("Inspect listener", port_lsof),
     "credentials.probe": ("Probe again", credentials_probe),
+    "credentials.signin": ("Sign in", credentials_signin),
     "check.run": ("Re-check", check_run),
     "sensor.read": ("Read state", sensor_read),
     "skill.scan": ("Scan", skill_scan),
@@ -590,14 +821,23 @@ ACTIONS = {
     "repo.pull": ("Pull", repo_pull),
     "watch.refresh": ("Refresh watch", watch_refresh),
     "watch.add": ("Add watch", watch_add),
+    "watch.remove": ("Remove watch", _move("market")),
+    "watch.restore": ("Restore watch", _move("market", restore=True)),
+    "watch.delete": ("Delete watch", _delete("market")),
+    "topic.add": ("Add topic", topic_add),
+    "topic.remove": ("Remove topic", _move("topic")),
+    "topic.restore": ("Restore topic", _move("topic", restore=True)),
+    "topic.delete": ("Delete topic", _delete("topic")),
 }
 
 
 def run(name: str, step: Step) -> tuple[int, dict]:
     """The step, bounded: 200 with its exit and output tail, or 504 when it ran past its bound."""
     answer = {"action": name, "label": ACTIONS[name][0], "line": step.line}
+    extra: dict = {}
     if step.call is not None:
-        code, output = step.call()
+        code, output, *more = step.call()
+        extra = more[0] if more else {}
     else:
         try:
             done = subprocess.run(list(step.argv), cwd=step.cwd, input=step.stdin if step.stdin is not None else "",
@@ -614,7 +854,7 @@ def run(name: str, step: Step) -> tuple[int, dict]:
         output = step.shape(code, output)
     output = output.rstrip()
     cut = len(output) > OUTPUT_CHARS
-    return 200, {**answer, "exit": code, "output": output[-OUTPUT_CHARS:], "cut": cut}
+    return 200, {**answer, **extra, "exit": code, "output": output[-OUTPUT_CHARS:], "cut": cut}
 
 
 def request(values: dict, *, jobs=None):

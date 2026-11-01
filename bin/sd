@@ -884,8 +884,23 @@ def registry(config: dict[str, object]) -> list[str]:
     return [str(p) for p in plugins]
 
 
-#: How long a scan waits for a plugin root to answer (sd:2540).
+#: How long a scan waits for a plugin root to answer on a quiet machine (sd:2540).
 ROOT_READ_SECONDS = 5.0
+
+
+def root_read_seconds() -> float:
+    """ROOT_READ_SECONDS stretched by the one-minute load per core, at most 3x.
+
+    A gate at load 3 per core read a local manifest past 5 s and skipped it:
+    a starved process is not a hung mount (pack sd:6798). An unreadable load
+    reads as quiet.
+    """
+
+    try:
+        load = os.getloadavg()[0] / (os.cpu_count() or 1)
+    except OSError:
+        load = 1.0
+    return ROOT_READ_SECONDS * min(3.0, max(1.0, load))
 
 
 def scan(roots: list[str], wanted: str | None = None, *,
@@ -938,7 +953,8 @@ def scan(roots: list[str], wanted: str | None = None, *,
                 return {wanted: answered[root]} if wanted is not None else None
         return None
 
-    deadline = time.monotonic() + ROOT_READ_SECONDS
+    bound = root_read_seconds()
+    deadline = time.monotonic() + bound
     while pending:
         if wanted is not None and (owner := owner_in_registry_order()) is not None:
             return owner
@@ -950,12 +966,12 @@ def scan(roots: list[str], wanted: str | None = None, *,
         if manifest is not None:
             answered[root] = (path, manifest)
     if pending and complete:
-        raise Refusal(f"plugin root(s) {', '.join(pending)} did not answer within {ROOT_READ_SECONDS:g}s, "
+        raise Refusal(f"plugin root(s) {', '.join(pending)} did not answer within {bound:.2g}s, "
                       f"so no prefix can be shown unclaimed; make each readable or remove it from the "
                       f"machine config, then run this again")
     for root in pending:
         print(f"warning: skipped plugin root {root}: its {MANIFEST_NAME} did not answer within "
-              f"{ROOT_READ_SECONDS:g}s", file=sys.stderr)
+              f"{bound:.2g}s", file=sys.stderr)
     found: dict[str, tuple[pathlib.Path, dict[str, object]]] = {}
     silent: list[str] = []
     for root in order:
@@ -966,7 +982,7 @@ def scan(roots: list[str], wanted: str | None = None, *,
                 continue
             if silent and wanted in (None, prefix):
                 raise Refusal(f"prefix {prefix!r} is ambiguous: plugin root(s) {', '.join(silent)}, "
-                              f"registered before {root}, did not answer within {ROOT_READ_SECONDS:g}s "
+                              f"registered before {root}, did not answer within {bound:.2g}s "
                               f"and may own it; make each readable or remove it from the machine "
                               f"config, then run this again")
             found[prefix] = answered[root]
@@ -1105,7 +1121,8 @@ def described(roots: list[str]) -> list[dict[str, object]]:
     for index, root in enumerate(roots):
         threading.Thread(target=describe_root, args=(index, root), daemon=True, name=f"sd plugin root {root}").start()
     entries: dict[int, dict[str, object]] = {}
-    deadline = time.monotonic() + ROOT_READ_SECONDS
+    bound = root_read_seconds()
+    deadline = time.monotonic() + bound
     while len(entries) < len(roots):
         try:
             index, entry = answers.get(timeout=max(0.0, deadline - time.monotonic()))
@@ -1114,7 +1131,7 @@ def described(roots: list[str]) -> list[dict[str, object]]:
         if isinstance(entry, BaseException):
             raise entry
         entries[index] = entry
-    silent = f"its {MANIFEST_NAME} did not answer within {ROOT_READ_SECONDS:g}s"
+    silent = f"its {MANIFEST_NAME} did not answer within {bound:.2g}s"
     for index, root in enumerate(roots):
         if index not in entries:
             print(f"warning: skipped plugin root {root}: {silent}", file=sys.stderr)

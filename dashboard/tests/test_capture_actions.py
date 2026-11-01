@@ -79,6 +79,25 @@ class CaptureActions(BrowserSession):
         self.assertEqual(writes.item_by_external(self.connection, "task-ref", "dependabot:example/project")["id"],
                          later["item"]["id"])
 
+    def test_a_doctor_ref_files_in_the_system_repo_once_and_reuses_the_open_item(self):
+        """pack sd:6684: Fix on a doctor row files its finding in the system repo, or reuses the open item that has it."""
+        upsert_repo(self.connection, "/repos/system")
+        with patch.dict("os.environ", {"SYSTEM_TOOLS_ROOT": "/repos/system"}):
+            status, _, first = self.post("/api/items", {"title": "brew is old", "body": "Doctor: WARN brew is old",
+                                                        "ref": "doctor:0123456789ab"})
+            self.assertEqual(status, 201)
+            row = self.connection.execute("SELECT source, external_id, repo FROM item WHERE id = ?",
+                                          (first["item"]["id"],)).fetchone()
+            self.assertEqual(tuple(row), ("task-ref", "doctor:0123456789ab", "/repos/system"))
+            again = self.post("/api/items", {"title": "brew is old", "ref": "doctor:0123456789ab"})[2]
+            self.assertEqual(again["item"]["id"], first["item"]["id"])
+            # A done item does not hold the finding: the next Fix files a new one, which takes the ref.
+            workflow.change_status(self.connection, first["item"]["id"], "done", who="operator")
+            third = self.post("/api/items", {"title": "brew is old", "ref": "doctor:0123456789ab"})[2]
+            self.assertNotEqual(third["item"]["id"], first["item"]["id"])
+            self.assertEqual(writes.item_by_external(self.connection, "task-ref", "doctor:0123456789ab")["id"],
+                             third["item"]["id"])
+
     def test_a_ref_that_is_not_a_github_issue_or_on_a_followup_is_refused(self):
         before = self.snapshot()
         for payload in ({"title": "x", "ref": "job:repo-sync:42"}, {"title": "x", "ref": "github:example/project#0"},
@@ -101,8 +120,15 @@ class CaptureActions(BrowserSession):
                 status, _, body = self.request(f"/api/items/{item}/capture-context")
                 self.assertEqual(status, 200)
                 context = json.loads(body)
+                body = f"Captured {kind}"
+                if kind == "question":
+                    status, _, result = self.post(f"/api/items/{item}/notes", {
+                        "revision": context["revision"], "kind": kind, "body": body})
+                    self.assertEqual(status, 400)
+                    self.assertIn("Option:", result["error"])
+                    body += "\nOption: Keep (Recommended)\nOption: Drop"
                 status, _, result = self.post(f"/api/items/{item}/notes", {
-                    "revision": context["revision"], "kind": kind, "body": f"Captured {kind}"})
+                    "revision": context["revision"], "kind": kind, "body": body})
                 self.assertEqual(status, 200)
                 self.assertEqual(result["note"]["item"], item)
                 self.assertEqual(result["note"]["kind"], kind)

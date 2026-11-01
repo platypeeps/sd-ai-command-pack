@@ -164,7 +164,7 @@ class ShipDouble(GitHubDouble):
             return 200, {"login": "fixture"}
         if method == "GET" and path == prefix:
             code, value = super()._route(method, path, body)
-            value["allow_squash_merge"] = True
+            value.update(allow_squash_merge=True, allow_rebase_merge=True, allow_merge_commit=True)
             value["permissions"]["admin"] = self.admin
             return code, value
         if method == "GET" and path == f"{prefix}/collaborators":
@@ -253,7 +253,8 @@ class ShipDouble(GitHubDouble):
             if self.moved:
                 self.remote.commit_on(pull.head, "raced\n\nAuthored-with: human", files={"raced.py": "changed\n"})
             pull.merged_head = pull.head_sha(self.remote)
-            pull.title = body["commit_title"] + "\n\n" + body["commit_message"]
+            if "commit_title" in body:  # a rebase takes no message (sd:6790)
+                pull.title = body["commit_title"] + "\n\n" + body["commit_message"]
             commit = self.remote.merge(number, sha=body["sha"], method=body["merge_method"])
             if self.lose_merge:
                 raise RemoteRefusal(503, "merge response lost")
@@ -1616,6 +1617,284 @@ roles:
             self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
+    def test_a_freeze_window_refuses_the_merge_and_a_lift_lets_it_land(self):
+        """sd:6879. sd-ship merge reads the repository's freeze window before the gate and refuses inside it."""
+        from sd_db.writes import set_freeze
+        self.prepare()
+        repository = self.operation().repository
+        set_freeze(self.connection, repository, "2099-01-01T00:00:00Z", "release 4.2", now="2098-12-31T00:00:00Z")
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "is frozen until 2099-01-01T00:00:00\\+00:00: release 4.2") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "freeze_window")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        set_freeze(self.connection, repository, None)
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+
+    def delivering(self):
+        """`prepare --deliver` with the acceptance file a delivery needs."""
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [
+            {"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        return self.prepare("--deliver", "--acceptance-file", str(acceptance))
+
+    def rebase_branch(self):
+        """The fixture commit named for the item, a second commit, and a `fixup!` of the first (sd:6790)."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--amend", "-q", "-m", f"change\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        _git(self.root, "push", "-q", "--force", "origin", "topic")  # as `lane enqueue` pushes the tip
+        (self.root / "second.py").write_text("second = 1\n")
+        _git(self.root, "add", "second.py")
+        _git(self.root, "commit", "-q", "-m", f"fix: second\n\nCloses: sd:{self.item}\nAuthored-with: human")
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-q", "-am", "fixup! change\n\nAuthored-with: human")
+        return _git(self.root, "rev-parse", "origin/main")
+
+    def test_a_rebase_policy_lands_each_commit_with_the_trailers_on_the_tip(self):
+        """sd:6790. Under merge_method rebase prepare folds the fixup, puts Item:, Delivers: and
+        `Reviewed-base: <base> ~2` on the tip, and force-pushes it with a lease; the merge lands both
+        commits by rebase and reconcile delivers the item at the landed tip."""
+        base = self.rebase_branch()
+        self.delivering()
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(_git(self.remote.path, "rev-parse", "topic"), head)
+        self.assertEqual(_git(self.root, "rev-list", "--count", f"{base}..{head}"), "2")
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        landed = _git(self.remote.path, "log", "--format=%B%x1e", f"{base}..main").split("\x1e")
+        tip, first = landed[0].strip(), landed[1].strip()
+        self.assertTrue(tip.startswith("fix: second\n\n"), tip)
+        self.assertIn(f"Item: sd:{self.item}\nDelivers: sd:{self.item}\nReviewed-base: {base} ~2", tip)
+        self.assertNotIn("Closes:", ship.sd_lib.trailer_block(tip), tip)  # the builder's became Refs:
+        self.assertIn(f"Refs: sd:{self.item}", ship.sd_lib.trailer_block(tip), tip)
+        self.assertTrue(first.startswith("change\n\n") and "Delivers:" not in first, first)
+        self.assertEqual(_git(self.remote.path, "show", "main:src.py"), "value = 2")
+        self.assertEqual(result["merge_commit"], _git(self.remote.path, "rev-parse", "main"))
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id = ?", (self.item,)).fetchone()[0],
+                         "done")
+
+    def test_a_rebase_lands_no_closing_trailer_prepare_did_not_validate(self):
+        """sd:6790 review. A rebase lands every commit's message on main, so a `Closes:` or `Delivers:`
+        a builder wrote becomes `Refs:`; only the trailers prepare composes close anything."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--amend", "-q", "-m", "change\n\nDelivers: sd:43\nAuthored-with: human")
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", "fix: tip\n\nCloses: sd:42\nAuthored-with: human")
+        _git(self.root, "push", "-q", "--force", "origin", "topic")
+        self.prepare()
+        base = _git(self.root, "rev-parse", "origin/main")
+        messages = _git(self.root, "log", "--format=%B%x1e", f"{base}..HEAD").split("\x1e")
+        for message in messages:
+            for number in ("sd:42", "sd:43"):
+                self.assertFalse(ship.sd_lib._closes(message, number), message)
+        tip = messages[0].strip()
+        self.assertIn("Refs: sd:42", tip)
+        self.assertIn(f"Item: sd:{self.item}", tip)
+        self.assertIn("Refs: sd:43", messages[1])
+
+    def test_a_whitespace_only_blank_line_still_ends_the_trailer_block_a_rebase_rewrites(self):
+        """sd:6790 review. Git and `trailer_block` take a space- or tab-only line as the blank one before
+        the trailers; sanitizing must split there too, or a builder's `Closes:` lands and closes."""
+        for blank in (" ", "\t", " \t", "\r"):
+            with self.subTest(blank=repr(blank)):
+                message = f"fix: partial sd:1\n{blank}\nCloses: sd:43\nDelivers: sd:44"
+                self.assertTrue(ship.sd_lib._closes(message, "sd:43"), "the unsanitized message closes")
+                cleaned = ship.without_closes(message)
+                for number in ("sd:43", "sd:44"):
+                    self.assertFalse(ship.sd_lib._closes(cleaned, number), cleaned)
+                self.assertIn("Refs: sd:43", cleaned)
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--amend", "-q", "--cleanup=verbatim", "-m",
+             "change\n\t\nDelivers: sd:43\nAuthored-with: human")
+        _git(self.root, "commit", "--allow-empty", "-q", "--cleanup=verbatim", "-m",
+             "fix: tip\n \nCloses: sd:42\nAuthored-with: human")
+        _git(self.root, "push", "-q", "--force", "origin", "topic")
+        self.prepare()
+        base = _git(self.root, "rev-parse", "origin/main")
+        messages = _git(self.root, "log", "--format=%B%x1e", f"{base}..HEAD").split("\x1e")
+        for message in messages:
+            for number in ("sd:42", "sd:43"):
+                self.assertFalse(ship.sd_lib._closes(message, number), message)
+        tip = ship.sd_lib.trailer_block(messages[0])
+        self.assertIn("Refs: sd:42", tip)
+        self.assertIn(f"Item: sd:{self.item}", tip)
+
+    def test_a_rebase_that_would_drop_a_merge_commits_own_edit_refuses(self):
+        """sd:6790 review. Linearizing drops merge commits; a catch-up merge that also edited a file would
+        lose that edit, so prepare refuses when the replayed tree differs and pushes nothing."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--amend", "-q", "-m", f"change\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        _git(self.root, "push", "-q", "--force", "origin", "topic")
+        pushed = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "later main work\n\nAuthored-with: human", files={"main.py": "x = 1\n"})
+        _git(self.root, "fetch", "-q", "origin", "main")
+        _git(self.root, "merge", "-q", "--no-ff", "--no-commit", "origin/main")
+        (self.root / "resolution.py").write_text("edited = 1\n")
+        _git(self.root, "add", "resolution.py")
+        _git(self.root, "commit", "-q", "-m", f"Merge origin/main\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(ship.Refusal, "would change the tree") as caught:
+            self.prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "rebase_changes_tree")
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
+        self.assertEqual(_git(self.remote.path, "rev-parse", "topic"), pushed)
+
+    def test_a_buried_prepared_tip_closes_nothing_the_new_claim_dropped(self):
+        """sd:6790 review. A prepare delivering this item and a second one writes both on the tip; a later
+        commit buries it, and a prepare naming this item alone must leave no `Delivers:` of the second on
+        any landed commit. That rewrites the reviewed tip, so the review restarts."""
+        self.rebase_branch()
+        other = create_item(self.connection, kind="work", title="other", status="in_progress",
+                            repo=str(self.operator), branch="topic")
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [
+            {"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance), "--item", str(other))
+        self.assertIn(f"Delivers: sd:{other}", _git(self.root, "show", "-s", "--format=%B", "HEAD"))
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", f"fix: third\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        with self.assertRaises(ship.Refusal) as caught:
+            self.prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "reviewed_head_orphaned")
+        self.prepare("--restart-review", "the claim dropped an item")
+        base = _git(self.root, "rev-parse", "origin/main")
+        messages = [part.strip() for part in _git(self.root, "log", "--format=%B%x1e", f"{base}..HEAD").split("\x1e")]
+        for message in messages:
+            self.assertFalse(ship.sd_lib._closes(message, f"sd:{other}"), message)
+        for buried in messages[1:]:
+            self.assertNotIn("Reviewed-base:", buried)
+
+    def test_a_rebase_branch_commit_naming_no_item_refuses_at_prepare(self):
+        """sd:6790. A rebase lands every commit on main as it is, so one that names no item refuses before
+        the review or a push."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", "fix: tip\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, r"commit [0-9a-f]{12} \('change'\) names no item") as caught:
+            self.prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "commit_convention")
+        self.assertEqual(self.remote.pull_requests, {})
+
+    def test_a_rebase_tip_a_later_commit_buried_is_written_again(self):
+        """sd:6790. A commit after prepare leaves the old tip's trailers mid-branch and a tip without them;
+        merge refuses that head, and the next prepare writes the trailers on the new tip."""
+        self.rebase_branch()
+        self.delivering()
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", f"fix: third\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaises(ship.Refusal):
+                self.merge()
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertIn(" ~3", _git(self.root, "show", "-s", "--format=%B", head))
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_rebase_push_refuses_a_remote_head_this_checkout_never_held(self):
+        """sd:6790. The force push is leased to a head this branch had; another writer's push refuses."""
+        self.rebase_branch()
+        self.remote.commit_on("topic", "someone else\n\nAuthored-with: human", files={"other.py": "x = 1\n"})
+        with self.assertRaisesRegex(ship.Refusal, "which this checkout never held"):
+            self.delivering()
+        self.assertEqual(self.remote.pull_requests, {})
+
+    def test_a_merge_policy_lands_a_merge_commit_carrying_the_trailers(self):
+        """sd:6790. merge_method merge sends a merge commit whose message carries Item: and Delivers:."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "merge"})
+        self.delivering()
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        parents = _git(self.remote.path, "rev-list", "--parents", "-n", "1", "main").split()
+        self.assertEqual(len(parents), 3)
+        self.assertIn(f"Delivers: sd:{self.item}", _git(self.remote.path, "show", "-s", "--format=%B", "main"))
+
+    def test_a_policy_method_the_repository_disallows_refuses_before_any_merge(self):
+        """sd:6790. A policy that says rebase where GitHub's repository setting forbids it refuses."""
+        self.rebase_branch()
+        self.prepare()
+        route = self.double._route
+        def forbid(method, path, body):
+            code, value = route(method, path, body)
+            if method == "GET" and path == f"/repos/{self.remote.slug}":
+                value["allow_rebase_merge"] = False
+            return code, value
+        with patch.object(self.double, "_route", forbid), patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "rebase merging is disabled"):
+                self.merge()
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+
+    def test_the_squash_message_takes_the_declared_convention(self):
+        """sd:6715, run 210 blocker. The squash subject's alias type is rewritten before GitHub writes it; a
+        squash message the convention still refuses (no footer) refuses the merge, naming the rule."""
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "types": ["doc", "fix"], "aliases": {"docs": "doc"}, "footer": r"^Ref: LOG-\d+$"}})
+        self.prepare("--title", "docs: words")
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, r"no footer line matches") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "commit_convention")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "types": ["doc", "fix"], "aliases": {"docs": "doc"}}})
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertTrue(self.remote.pull(1).title.startswith("doc: words (#1)\n\n"), self.remote.pull(1).title)
+
+    def test_a_declared_footer_in_the_body_moves_into_the_trailer_block(self):
+        """sd:6715, review of build 244. squash_body adds a paragraph of Item:/Delivers: trailers after the body,
+        so the author's `Ref: LOG-1` footer sat in the second-last paragraph and the convention refused it."""
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "footer": r"^Ref: LOG-\d+$"}})
+        body = self.directory / "body.md"
+        body.write_text("Concrete change.\n\nRef: LOG-1\n")
+        self.prepare("--title", "fix: words", "--body-file", str(body))
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        message = self.remote.pull(1).title
+        self.assertEqual(message.count("Ref: LOG-1"), 1, message)
+        self.assertIn("Ref: LOG-1", message.rstrip("\n").split("\n\n")[-1], message)
+
+    def test_dismissed_approval_holds_the_merge(self):
+        """sd:6715, design § Failure table. review.human is read at merge time, bound to the head commit: an
+        approval of an earlier commit (dismissed by a push) or by a bot holds the merge; one of the head merges."""
+        set_declaration(self.connection, str(self.operator), "policy", {"review": {"human": 1}})
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        review = {"state": "APPROVED", "submitted_at": "2026-09-19T20:00:00Z", "body": ""}
+        self.double.review_payload["reviews"] = [
+            {**review, "user": {"login": "reviewer-a", "type": "User"}, "commit_id": "0" * 40},
+            {**review, "user": {"login": "helper[bot]", "type": "Bot"}, "commit_id": head},
+            {**review, "user": {"login": "reviewer-b", "type": "User"}, "commit_id": head},
+            {**review, "state": "DISMISSED", "user": {"login": "reviewer-b", "type": "User"}, "commit_id": head}]
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, r"requires 1 human approval of .*; 0 approve it") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "approval_required")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        self.double.review_payload["reviews"].append(
+            {**review, "user": {"login": "reviewer-a", "type": "User"}, "commit_id": head})
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_jenkins_policy_holds_the_merge_until_the_head_build_is_green(self):
+        """sd:6880, design § Failure table. A policy naming Jenkins makes its job the CI: an unreachable Jenkins
+        holds the merge as ci_unreachable, never green; a green build of the head merges."""
+        ci = {"provider": "jenkins", "url": "http://127.0.0.1:9", "job": "team/repo/PR-{pr}"}
+        set_declaration(self.connection, str(self.operator), "policy", {"ci": ci})
+        self.prepare()
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaises(ship.Refusal) as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "ci_unreachable")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        head = _git(self.root, "rev-parse", "HEAD")
+        green = {"result": "SUCCESS", "building": False, "actions": [{"lastBuiltRevision": {"SHA1": head}}]}
+        with patch.object(ship.time, "sleep"), \
+                patch.object(ship.sd_ship_jenkins, "head_build", return_value=green) as read:
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(read.call_args.args[:3], (ci, 1, head))
+
     def test_a_pending_refusal_names_who_did_review_the_head(self):
         """sd:3499. A renamed Copilot bot's review read as pending forever,
         with "wait, then retry"; the refusal names the logins that reviewed the head."""
@@ -2280,6 +2559,42 @@ roles:
                                    "--abandon-copilot-review", "chose to stop waiting")
         with self.assertRaisesRegex(ship.Refusal, "requires explicit manual merge authority"):
             operation.merge()
+
+    def test_a_locked_database_once_does_not_fail_the_merge(self):
+        """pack sd:6855: merge's first write meets one `database is locked`, retries, and merges."""
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+
+        met = []
+
+        class Locked:
+            """A connection whose first `BEGIN IMMEDIATE` fails once, as a held write lock does."""
+            def __init__(self, connection):
+                self.connection = connection
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def execute(self, sql, parameters=()):
+                if not met and sql == "BEGIN IMMEDIATE":
+                    met.append(sql)
+                    raise sqlite3.OperationalError("database is locked")
+                return self.connection.execute(sql, parameters)
+
+        def locked_connect(*args, **kwargs):
+            return Locked(connect(*args, **kwargs))
+
+        output, previous = io.StringIO(), pathlib.Path.cwd()
+        try:
+            with (patch("sd_db.database.connect", locked_connect), patch("sd_db.database.LOCK_WAITS", (0.01,)),
+                  contextlib.redirect_stdout(output)):
+                code = ship.main(["-C", str(self.root), "merge", "--item", str(self.item), "--manual",
+                                  "--expected-head", head, "--database", str(self.database), "--json"])
+        finally:
+            os.chdir(previous)
+        self.assertEqual(met, ["BEGIN IMMEDIATE"], "the lock was met")
+        self.assertEqual(code, 0, output.getvalue())
+        self.assertEqual(json.loads(output.getvalue())["phase"], "merged")
 
     def test_merge_takes_no_runner_lease(self):
         """sd:3085. The sd runner is gone, so `--run` and its lease went with it."""
@@ -3537,14 +3852,49 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
             self.unanswered("--deliver").prepare()
 
-    def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
+    def test_a_create_a_5xx_left_uncertain_is_recovered_by_one_more_create(self):
+        # sd:6858: GitHub answered 5xx and made no pull request; the next
+        # prepare finds none, open or closed, at this head, so it creates
+        # again. GitHub refuses a second open one per head and base.
         self.double.no_create_result = True
         with self.assertRaises(ship.Refusal):
             self.prepare()
         self.double.no_create_result = False
-        with self.assertRaisesRegex(ship.Refusal, "empty search"):
+        self.assertEqual(self.prepare()["pull_request"]["number"], 1)
+        self.assertEqual(len(self.remote.pull_requests), 1)
+        self.assertEqual(len([call for call in self.remote.calls
+                              if call.method == "POST" and call.path.endswith("/pulls")]), 2)
+
+    def test_a_create_whose_pr_was_closed_since_still_refuses(self):
+        # The uncertain create did make one, and someone closed it: that is
+        # an operator's act, so no second pull request is made.
+        self.double.lose_create = True
+        with self.assertRaises(ship.Refusal):
             self.prepare()
-        self.assertEqual(len([call for call in self.remote.calls if call.method == "POST"]), 1)
+        self.remote.pull(1).state = "CLOSED"
+        with self.assertRaisesRegex(ship.Refusal, "closed"):
+            self.prepare()
+        self.assertEqual(len(self.remote.pull_requests), 1)
+
+    def test_a_retried_create_github_refuses_reads_the_one_it_made(self):
+        # The list missed the pull request the lost create made, and GitHub
+        # refuses the second create (422): the re-read binds that one.
+        self.double.lose_create = True
+        with self.assertRaises(ship.Refusal):
+            self.prepare()
+        self.double.lose_create = False
+        original, seen = self.double._route, []
+
+        def lagging(method, path, body):
+            if method == "GET" and urlsplit(path).path.endswith("/pulls") and "base=" in path and not seen:
+                seen.append(path)
+                return 200, []
+            if method == "POST" and urlsplit(path).path.endswith("/pulls"):
+                raise RemoteRefusal(422, "A pull request already exists")
+            return original(method, path, body)
+        with patch.object(self.double, "_route", lagging):
+            self.assertEqual(self.prepare()["pull_request"]["number"], 1)
+        self.assertEqual(len(self.remote.pull_requests), 1)
 
     def test_lost_create_response_finds_one_matching_pr(self):
         self.double.lose_create = True
@@ -3998,13 +4348,17 @@ roles:
         self.assertIn("waited 5s", str(refused.exception))
 
     def test_merge_wait_runs_once_the_holder_releases(self):
-        """sd:1937. With the lock released at 2 s, `--wait 5` runs the merge once."""
-        self.hold_ship_lock(self.operation().repository, seconds=2)
+        """sd:1937. With the lock released at 1 s, `--wait 60` runs the merge once.
+
+        The wait is far past the release: a 5 s wait against a 2 s holder lost the race
+        when gate load slowed the holder's release (sd:6855 review).
+        """
+        self.hold_ship_lock(self.operation().repository, seconds=1)
         started = time.monotonic()
         with patch.object(ship.Ship, "merge", return_value={"ok": True}) as merge:
-            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "5"), receipts, False)
+            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "60"), receipts, False)
         self.assertEqual(merge.call_count, 1)
-        self.assertLess(time.monotonic() - started, 2 + receipts.WAIT_POLL_SECONDS + 2)
+        self.assertGreaterEqual(time.monotonic() - started, 0.5, "the merge waited for the holder")
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
         self.hold_ship_lock(self.operation().repository)
@@ -6496,6 +6850,31 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"], {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
         key = receipts.receipt_key(self.remote.slug, "topic", self.item)
         self.assertEqual(receipts.read(self.connection, key)[1]["protection"]["declared_gap"], "unprotected")
+
+    def jenkins_green(self, *, workflows=None) -> None:
+        """A policy naming Jenkins, its build of the head green, and no check run or status on GitHub."""
+        self.declare(workflows=workflows)
+        set_declaration(self.connection, str(self.operator), "policy", {"ci": {
+            "provider": "jenkins", "url": "http://127.0.0.1:9", "job": "team/repo/PR-{pr}"}})
+        self.prepare()
+        next(iter(self.remote.pull_requests.values())).checks = []
+        self.double.workflow_runs = []
+        build = {"result": "SUCCESS", "building": False, "actions": [{"lastBuiltRevision": {"SHA1": self.head()}}]}
+        patcher = patch.object(ship.sd_ship_jenkins, "head_build", return_value=build)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_green_jenkins_build_validates_the_head_under_a_declared_gap(self):
+        """sd:6880, review of build 317. every_check refused ci_missing on a head only Jenkins validated."""
+        self.jenkins_green(workflows={})
+        with patch.object(ship.time, "sleep"):
+            self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_a_green_jenkins_build_still_needs_the_heads_pull_request_runs(self):
+        self.jenkins_green()
+        with patch.object(ship.time, "sleep"):
+            self.refuse(r"workflow .* has no successful pull_request run", "ci_missing")
 
     # -- sd:1843: `repo.ci = local` swaps pull_request runs for sd/local-gate --
 

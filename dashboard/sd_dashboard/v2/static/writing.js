@@ -163,10 +163,24 @@ addEventListener('DOMContentLoaded', () => {
         <span class="label">Publish gate</span>
         ${P.ok ? html`<p class="why">Open: stage Ready, gates pass, readiness recorded for this draft. Publish is copy only, since it posts outside: <code>sd writing publication-claim</code>, then <code>publication-dispatch</code> on the recorded claim.</p>` : html`<p class="why">Closed. Publish stays off until each of these clears:</p><ul>${P.why.map(w => html`<li>${w}</li>`)}</ul>`}
       </div>
+      ${grillPane(p)}
       <h3>Act</h3>${C.bar(String(p.id))}
       <div class="actions"><button class="btn quiet sm" type="button" id="open-ed">${ICON('pen-line')}Open in editor</button></div>
       <p class="foot">Observed ${utc(D.read)} from the workflow database and the piece files in <code>${p.repo}/${p.folder}/${p.piece}/</code>.</p>`);
     el.querySelector('#open-ed')?.addEventListener('click', () => setView('editor'));
+  }
+
+  // pack sd:6700: the first open grill question, with a button per option or a box for words.
+  function grillPane(p) {
+    const g = p.grill || { open: [], answered: 0 }, q = g.open[0];
+    if (!q) return g.answered ? html`<h3 class="label">Grill</h3><p class="why">${g.answered} answered, none open. Apply answers edits the draft to follow them.</p>` : '';
+    return html`<h3 class="label">Grill</h3><div class="grill" aria-label="Grill question">
+      <p class="why">Question 1 of ${g.open.length}${g.answered ? ` · ${g.answered} answered` : ''}</p>
+      <p class="q">${q.question}</p>
+      ${q.options.length ? html`<div class="actions">${q.options.map(o => html`<button class="btn sm" type="button" data-grill-answer="${o}">${o}</button>`)}</div>`
+        : html`<label class="label" for="grill-text">Your answer</label><textarea id="grill-text" rows="3"></textarea>
+          <div class="actions"><button class="btn sm" type="button" data-grill-answer="">Answer</button></div>`}
+    </div>`;
   }
 
   // ---------- Editor ----------
@@ -211,6 +225,8 @@ addEventListener('DOMContentLoaded', () => {
   // each other's inverse, so each undoes the other with the revision its own write returned.
   let target = null, reading = null;
   const P_ = o => byId(o.id);
+  // pack sd:6977: the report's digest stamp says whether it answers this draft; file times do not.
+  const reviewed = p => { const a = p.adversarial; return a?.state === 'current' || `adversarial.md is ${a ? `${a.state}: ${a.detail}` : 'not readable'}; run Refresh review first`; };
   const nextOf = p => target && p.next.includes(target) ? target : p.next[0];
   const write = (p, suffix, body) => window.shell.post(`/api/items/${p.id}/${suffix}`, { ...body, revision: p.revision })
     .then(out => { reading?.reread(); return out; }, e => { reading?.load(); throw e; });
@@ -218,6 +234,17 @@ addEventListener('DOMContentLoaded', () => {
     .then(out => ({ text: parked ? `#${p.id} parked` : `#${p.id} revived at ${SL[p.stage] || p.stage}`, revision: out.revision })); };
   const parkUndo = parked => (o, v) => window.shell.post(`/api/items/${o.id}/${parked ? 'revive' : 'park'}`, { revision: v.revision })
     .then(() => reading?.reread(), e => { reading?.load(); throw e; });
+  const asked = p => { const n = p.grill?.open.length; return n ? `${markup.plural(n, 'grill question')} open; answer them first` : ''; };
+  const fixPost = (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision }).then(out => { reading?.reread(); return out; });
+  // An answer is Decide's: /api/decisions/answer writes the ruling and resolves the question under the piece's revision.
+  document.getElementById('details').addEventListener('click', e => {
+    const b = e.target.closest?.('[data-grill-answer]'), p = byId(selected), q = p?.grill?.open[0];
+    if (!b || !q) return;
+    const option = (b.dataset.grillAnswer || document.getElementById('details').querySelector('#grill-text')?.value || '').trim();
+    if (!option) { toast('Type an answer first.'); return; }
+    window.shell.post('/api/decisions/answer', { item: p.id, note: q.note, option, revision: p.revision })
+      .then(() => reading?.reread(), err => { toast(`#${p.id} not answered: ${err.message}`); reading?.load(); });
+  });
   const CMDS = [
     { id: 'piece.stage', on: 'piece', label: 'Stage', does: 'Moves the piece to its next stage; going back needs a reason.', key: 's', icon: 'arrow-up-right', risk: 'confirm',
       cli: o => `sd writing stage --piece ${P_(o).piece} --stage ${nextOf(P_(o)) || '…'}`,
@@ -252,7 +279,23 @@ addEventListener('DOMContentLoaded', () => {
       when: o => { const P = publishState(P_(o)); return P.ok || P.why.join(' '); },
       consequence: () => 'Publishes to the destinations in sd-plugin.json; the canonical destination comes first. The publication claim records the URL. It posts outside, so the dashboard sends nothing: copy the two lines.',
       run: o => `Copy the two lines to publish #${P_(o).id}; publishing posts outside, so the dashboard does not run them` },
+    // pack sd:6700: Grill writes the piece's questions as notes; Details walks them; Apply answers edits the draft to follow them.
+    window.commands.grill('piece', 'ask', { item: o => P_(o).id, post: fixPost,
+      ready: o => { const p = P_(o); return !p ? 'not listed' : !p.words ? 'no draft to grill yet' : asked(p) || true; } }),
+    window.commands.grill('piece', 'apply', { item: o => P_(o).id, post: fixPost,
+      ready: o => { const p = P_(o); return !p ? 'not listed' : asked(p) || (p.grill?.answered ? true : 'no grill question answered yet; press Grill first'); } }),
+    // pack sd:6699: Refresh review is the shared adversarial review with kind piece; it rewrites the piece's adversarial.md.
+    window.commands.adversarialReview('piece', { id: 'piece.review', label: 'Refresh review',
+      does: 'Starts a codex review of the draft in the background; it rewrites adversarial.md.',
+      payload: o => ({ kind: 'piece', target: String(o.id) }),
+      when: o => { const p = P_(o); return !p ? 'not listed' : p.words ? true : 'no draft to review yet'; } }),
+    // Apply review is the shared Fix with apply: adversarial; the page reads again once the session starts.
+    window.commands.applyReview('piece', { item: o => P_(o).id,
+      ready: o => { const p = P_(o); return !p ? 'not listed' : reviewed(p); },
+      post: fixPost }),
   ];
+  // A piece's review that lands rewrites adversarial.md, so the page reads again for its time.
+  document.addEventListener('adversarial:run', e => { if (e.detail.run.kind === 'piece' && e.detail.run.filed) reading?.reread(); });
   C.register(...CMDS);
   const cmd = id => CMDS.find(c => c.id === id);
   function move(id, to) {

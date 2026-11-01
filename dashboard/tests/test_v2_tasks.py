@@ -813,7 +813,7 @@ class TheScript(ScreenCase):
             ["work.cancel", "item", "confirm", "w", True, True, False],
             ["note.resolve", "note", "confirm", "v", None, True, False],
             ["asg.cancel", "assignment", "confirm", "x", None, True, False],
-            ["asg.get", "assignment", "safe", "o", False, True, False],  # copy only: Details show it (sd:3524)
+            ["asg.get", "assignment", "safe", "o", True, True, False],  # runs sd assignments get (sd:6682)
             ["item.build", "item", "safe", None, True, True, False],  # Build (pack sd:6095)
             ["realm-sweep.run", "sweep", "safe", None, True, True, False],  # Realm Personal and Work (sd:5096, sd:5097)
         ])
@@ -911,6 +911,17 @@ pick('p', ''); R.url2 = OUT.urls[OUT.urls.length - 1];""", search="?kind=task,wo
         self.assertIn('<option value="base:blog-idea" selected>blog-idea (plugin kind)</option></select>', filters)
         self.assertIn("A blog idea", out["R"]["board"])
         self.assertNotIn("Port the page", out["R"]["board"])
+
+    def test_ideas_leave_the_rows_and_counts_until_kind_picks_them(self):
+        """pack sd:6743: an idea kind shows in the Writing and Vault views only; Kind picks it, as the Vault view."""
+        self.assertEqual(self.doc["ideas"], ["idea", "work-idea", "personal-idea"])
+        self.doc["rows"] = [*self.doc["rows"], {**self.doc["rows"][0], "id": 902, "title": "A vault idea", "kind": "idea", "base": "blog-idea"}]
+        out = self.run_page("R.board = ELS['view-board'].html; R.filters = ELS.filters.html;")
+        self.assertNotIn("A vault idea", out["R"]["board"])
+        self.assertEqual(out["counts"]["all"], 3)
+        self.assertIn('<option value="idea">idea</option>', out["R"]["filters"])
+        for search in ("?kind=idea", "?base=blog-idea"):
+            self.assertIn("A vault idea", self.run_page("R.board = ELS['view-board'].html;", search=search)["R"]["board"])
 
     def test_repo_is_a_multiselect_dropdown_and_two_repos_show_their_union(self):
         """sd:5158: Repo is a menu of checkboxes; two picks show the tasks of both, and the address names both."""

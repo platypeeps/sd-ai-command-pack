@@ -197,6 +197,19 @@ class TheAssets(BrowserSession):
         self.assertIn("put($('track-plot'), marks.length ? html`<svg ", TODAY_JS)
 
 
+    def test_each_in_motion_table_carries_its_caption(self):
+        """pack sd:6975: each In motion table says in one line what it holds."""
+        section = re.search(r'<section aria-labelledby="motion-h">(.*?)</section>',
+                            (V2 / "today.html").read_text(encoding="utf-8"), re.S).group(1)
+        tables = re.findall(r"<table\b.*?</table>", section, re.S)
+        self.assertEqual(len(tables), 2)
+        captions = [" ".join(Parsed(m.group(1)).text) if (m := re.search(r"<caption>(.*?)</caption>", t, re.S)) else None
+                    for t in tables]
+        self.assertEqual(captions, [
+            "Headless build runs: items, stage, start, ETA from past runs, model and cost.",
+            "Open items with a live worktree, lane entry, sd-* command or herdr agent, longest-running first.",
+        ])
+
 class TheShellPort(BrowserSession):
     def test_the_shell_builds_nothing_the_policy_refuses(self):
         for source in (SHELL_JS, TODAY_JS):

@@ -31,10 +31,13 @@ MCP_OUT = ("Checking MCP server health...\n\n"
 
 class Fakes:
     def __init__(self, *, github=(200, {"github-authentication-token-expiration": "2026-11-01 00:00:00 UTC"}),
-                 ha=(401, {}), gh=0, mcp=(0, MCP_OUT)):
+                 ha=(401, {}), gh=0, mcp=(0, MCP_OUT), sdm=(9, ""), auth=(0, '{"loggedIn": true, "orgId": "' + PAT + '"}'),
+                 sts=(0, ""), grant=200):
         self.answers = {credentials.GITHUB_USER: github, "http://ha.example.test:8123/api/": ha}
-        self.programs = {"gh": (gh, "Logged in to github.com account example (keyring)\n- Token: " + PAT), "claude": mcp}
-        self.gets, self.runs = [], []
+        self.programs = {"gh": (gh, "Logged in to github.com account example (keyring)\n- Token: " + PAT),
+                         "claude mcp": mcp, "claude auth": auth, "sdm": sdm, "aws": sts}
+        self.grant = grant
+        self.gets, self.runs, self.posts = [], [], []
 
     def get(self, url, token):
         self.gets.append(url)
@@ -45,7 +48,13 @@ class Fakes:
 
     def run(self, argv, timeout):
         self.runs.append(argv)
-        return self.programs[argv[0]]
+        return self.programs[" ".join(argv[:2]) if argv[0] == "claude" else argv[0]]
+
+    def post(self, url, form):
+        self.posts.append((url, form["grant_type"]))
+        if isinstance(self.grant, Exception):
+            raise self.grant
+        return self.grant
 
 
 class Probes(unittest.TestCase):
@@ -56,10 +65,93 @@ class Probes(unittest.TestCase):
         self.db = connect(Path(self.tmp.name) / "sd.db")
         self.addCleanup(self.db.close)
 
-    def check(self, env=ENV, **fakes):
+    def check(self, env=ENV, only=None, **fakes):
         fake = Fakes(**fakes)
-        body = credentials.check(self.db, env=env, get=fake.get, run=fake.run, now="2026-10-06T09:10:00Z")
+        body = credentials.check(self.db, env=env, get=fake.get, run=fake.run, post=fake.post, now="2026-10-06T09:10:00Z",
+                                 only=only)
+        self.order = [probe["id"] for probe in body["probes"]]
         return {probe["id"]: probe for probe in body["probes"]}, fake
+
+    def logins(self, google=True):
+        """A home with two workspace-mcp accounts and three AWS profiles, two of which sign in (sd:6722)."""
+        home = Path(self.tmp.name) / "home"
+        (home / ".aws").mkdir(parents=True)
+        (home / ".aws" / "config").write_text("[default]\nlogin_session = arn:example\n[profile dev]\nsso_session = corp\n"
+                                             "[profile keys]\nregion = us-east-1\n[sso-session corp]\nsso_start_url = x\n")
+        folder = home / ".google_workspace_mcp" / "credentials"
+        folder.mkdir(parents=True)
+        if google:
+            for account in ("a@example.test", "b@example.test"):
+                (folder / f"{account}.json").write_text(json.dumps({
+                    "token": PAT, "refresh_token": HA, "client_id": "id", "client_secret": "s",
+                    "token_uri": "https://oauth.example.test/token"}))
+        (folder / "oauth_states.json").write_text("[]")
+        return {**ENV, "HOME": str(home)}
+
+    def test_each_login_is_a_probe_with_its_sign_in(self):
+        """sd:6722: Google, AWS, SDM and Claude logins, each with the line Sign in starts; no value stored."""
+        probes, fake = self.check(env=self.logins(), grant=400)
+        self.assertEqual(self.order[4:], ["google:a@example.test", "google:b@example.test", "aws:default", "aws:dev",
+                                          "sdm", "claude"])
+        self.assertEqual(probes["google:a@example.test"], {"id": "google:a@example.test", "name": "Google login (a@example.test)",
+                                                           "signin": "workspace-mcp start_google_auth for a@example.test",
+                                                           "present": True, "valid": False})
+        self.assertEqual(fake.posts, [("https://oauth.example.test/token", "refresh_token")] * 2)
+        self.assertEqual((probes["aws:default"]["signin"], probes["aws:dev"]["signin"]),
+                         ("aws login --profile default", "aws sso login --profile dev"))
+        self.assertEqual(probes["aws:dev"]["signed_in"], True)
+        self.assertIn(["aws", "sts", "get-caller-identity", "--profile", "dev"], fake.runs)
+        self.assertEqual((probes["sdm"]["signed_in"], probes["claude"]["signed_in"]), (False, True))
+        self.assertNotIn(PAT, "\n".join(self.db.iterdump()))
+        self.assertNotIn(HA, "\n".join(self.db.iterdump()))
+
+    def test_a_status_command_that_fails_otherwise_is_a_reason(self):
+        probes, _ = self.check(env=self.logins(), sdm=(2, ""), auth=(0, "not json"), grant=500)
+        self.assertEqual((probes["sdm"].get("signed_in"), probes["sdm"]["reason"]), (None, "sdm status exited 2"))
+        self.assertEqual(probes["claude"]["signed_in"], False)
+        self.assertEqual(probes["google:a@example.test"]["reason"], "answered HTTP 500")
+
+    def test_a_token_file_of_another_shape_is_unreadable_and_siblings_still_probe(self):
+        """A valid JSON file that is not an object, or holds a non-string field, is one unreadable probe."""
+        env = self.logins()
+        folder = Path(env["HOME"]) / ".google_workspace_mcp" / "credentials"
+        shapes = {"c": "[]", "d": "null", "e": '"text"', "f": json.dumps({
+            "refresh_token": "r", "client_id": "id", "client_secret": "s", "token_uri": ["https://x"]})}
+        for name, text in shapes.items():
+            (folder / f"{name}@example.test.json").write_text(text)
+        probes, fake = self.check(env=env)
+        for name in shapes:
+            self.assertEqual(probes[f"google:{name}@example.test"].get("reason"), "token file unreadable", name)
+        self.assertEqual((probes["google:a@example.test"]["valid"], len(fake.posts)), (True, 2))
+
+    def test_check_now_runs_one_family_and_keeps_the_rest(self):
+        env = self.logins()
+        self.check(env=env, sdm=(9, ""))
+        before = list(self.order)
+        probes, fake = self.check(env=env, only="sdm", sdm=(0, ""))
+        self.assertEqual(fake.runs, [["sdm", "status"]])
+        self.assertEqual((self.order, probes["sdm"]["signed_in"]), (before, True))
+        probes, fake = self.check(env=env, only="google:b@example.test")
+        self.assertEqual((len(fake.posts), self.order), (2, before))
+        with self.assertRaises(ValueError):
+            self.check(env=env, only="nothing")
+
+    def test_check_now_keeps_the_full_runs_timestamp(self):
+        """Review advisory note #36093: Probe again must not hide an overdue nightly run."""
+        env = self.logins()
+        self.check(env=env)
+        credentials.check(self.db, env=env, get=Fakes().get, run=Fakes().run, post=Fakes().post,
+                          now="2026-10-09T09:10:00Z", only="sdm")
+        self.assertEqual((credentials.read(self.db) or ("",))[0], "2026-10-06T09:10:00Z")
+
+    def test_sign_in_is_read_from_disk_for_a_known_probe_only(self):
+        env = self.logins()
+        self.assertEqual(credentials.signin("aws:dev", env), "! aws sso login --profile dev")
+        self.assertEqual(credentials.signin("sdm", env), "! sdm-login")
+        self.assertEqual(credentials.signin("claude", env), "! claude auth login")
+        self.assertIn("user_google_email=a@example.test", credentials.signin("google:a@example.test", env) or "")
+        for unknown in ("aws:keys", "aws:nope", "google:c@example.test", "gh", "sdm:x", "aws:dev; rm -rf /"):
+            self.assertIsNone(credentials.signin(unknown, env), unknown)
 
     def test_a_rate_limited_answer_is_a_reason_not_a_rejection(self):
         probes, _ = self.check(github=(403, {}), ha=(403, {}))
@@ -75,7 +167,8 @@ class Probes(unittest.TestCase):
         self.assertEqual(probes["mcp"]["servers"], [{"name": "github", "status": "connected"},
                                                     {"name": "plugin:slack:slack", "status": "needs_auth"},
                                                     {"name": "local", "status": "failed"}])
-        self.assertEqual(fake.runs, [["gh", "auth", "status", "--hostname", "github.com"], ["claude", "mcp", "list"]])
+        self.assertEqual(fake.runs, [["gh", "auth", "status", "--hostname", "github.com"], ["claude", "mcp", "list"],
+                                     ["sdm", "status"], ["claude", "auth", "status"]])
         row = self.db.execute("SELECT timestamp, body FROM state WHERE kind = 'heartbeat' AND key = ?",
                               (credentials.HEARTBEAT_KEY,)).fetchone()
         self.assertEqual(row["timestamp"], "2026-10-06T09:10:00Z")
@@ -114,6 +207,54 @@ class Probes(unittest.TestCase):
         probes, _ = self.check(github=(200, {}))
         self.assertEqual((probes["github_pat"]["valid"], probes["github_pat"]["expires"]), (True, None))
 
+    def test_aws_reads_each_profile_and_region_and_names_a_failed_read(self):
+        """sd:6713: my running AWS resources, one bounded aws call per read; a failure is named, not an empty list."""
+        answers = {"ec2": (0, json.dumps([{"id": "i-1", "name": "box", "since": "2026-10-01T00:00:00Z"}])),
+                   "cloudformation": (255, "")}
+        calls = []
+
+        def run(argv, timeout):
+            if argv[0] != "aws":
+                return Fakes().run(argv, timeout)
+            calls.append(argv)
+            return answers[argv[11]]
+
+        body = credentials.check(self.db, env={"SD_AWS_READ": "me:us-east-1"}, get=Fakes().get, run=run,
+                                 now="2026-10-06T09:10:00Z")
+        self.assertEqual(body["aws"], {
+            "resources": [{"type": "EC2 instance", "profile": "me", "region": "us-east-1", "id": "i-1", "name": "box",
+                           "since": "2026-10-01T00:00:00Z"}],
+            "errors": ["me us-east-1 CloudFormation stack: aws exited 255"]})
+        self.assertEqual([argv[:7] for argv in calls], [["aws", "--profile", "me", "--region", "us-east-1",
+                                                         "--cli-connect-timeout", "10"]] * 2)
+        self.assertNotIn("aws", credentials.check(self.db, env={}, get=Fakes().get, run=run))
+
+    def test_aws_entry_without_a_region_is_an_error_not_an_empty_read(self):
+        """sd:6713 review: `me` or `me:` reads nothing, so it is named, never a green zero."""
+        def run(argv, timeout):
+            self.assertNotEqual(argv[0], "aws")
+            return Fakes().run(argv, timeout)
+
+        for setting in ("me", "me:", ":us-east-1"):
+            body = credentials.check(self.db, env={"SD_AWS_READ": setting}, get=Fakes().get, run=run)
+            self.assertEqual(body["aws"], {"resources": [], "errors": [
+                f"SD_AWS_READ entry {setting!r}: want profile:region,region"]})
+
+
+    def test_probe_again_keeps_the_nightly_aws_read(self):
+        """A one-family re-probe neither drops nor reruns the last AWS read (sd:6713 with sd:6722)."""
+        def run(argv, timeout):
+            return (0, "[]") if argv[0] == "aws" else Fakes().run(argv, timeout)
+
+        env = {"SD_AWS_READ": "me:us-east-1"}
+        full = credentials.check(self.db, env=env, get=Fakes().get, run=run, now="2026-10-06T09:10:00Z")
+
+        def no_aws(argv, timeout):
+            self.assertNotEqual(argv[0], "aws")
+            return Fakes().run(argv, timeout)
+
+        again = credentials.check(self.db, env=env, get=Fakes().get, run=no_aws, only="sdm")
+        self.assertEqual(again["aws"], full["aws"])
 
 class Redirects(unittest.TestCase):
     """A token goes only where it was addressed: `_get` follows no redirect (sd:2203 review)."""

@@ -115,6 +115,8 @@ def _document(connection, *, now: str) -> dict:
     ages = [{"key": bucket.key, "label": bucket.label} for bucket in reads.age_histogram([], now=now)]
     return {"read": now, "statuses": list(STATUSES), "ages": ages, "rows": out, "attention": _attention(out, now=now),
             "lead": _has_lead(connection),
+            # pack sd:6743: the idea kinds, off every row and count until Kind picks one (the Vault view).
+            "ideas": list(reads.IDEA_KINDS),
             "realms": {key: found[key] for key in ("state", "source", "problems")},
             # The Personal and Work views' Run sweep (sd:5096, sd:5097): each realm's last run, and whether one runs now.
             "sweeps": {realm: sweep.status(None, realm) for realm in sweep.REALMS[1:]}}

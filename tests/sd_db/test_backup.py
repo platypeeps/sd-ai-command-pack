@@ -912,13 +912,13 @@ def one_migration_back(database):
     """
     raw = sqlite3.connect(database, isolation_level=None)
     try:
-        # The reverse of 044_shadow_merge_state.sql, which its header carries as `--   ` lines: `shadow`
-        # loses its three merge columns, and the version goes to 43. The helper is rewritten with every migration:
+        # The reverse of 045_repo_issues_policy.sql, which its header carries as `--   ` lines: `repo`
+        # gets `github_issues` back, and the version goes to 44. The helper is rewritten with every migration:
         # a migration that adds a table or a column would be refused if left in place.
-        text = (SCHEMA_DIR / "044_shadow_merge_state.sql").read_text()
+        text = (SCHEMA_DIR / "045_repo_issues_policy.sql").read_text()
         script = "\n".join(line[4:] for line in text.splitlines() if line.startswith("--   "))
-        assert "PRAGMA user_version = 43" in script, \
-            "044's reverse is not where this helper expects it"
+        assert "PRAGMA user_version = 44" in script, \
+            "045's reverse is not where this helper expects it"
         raw.executescript(script)
         assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION - 1
     finally:
@@ -1264,7 +1264,8 @@ class MigrateNeedsABackupOfThisStore(BackupCase):
         # Round 3: a writer puts its frames in the log before it publishes the
         # commit. The read-only run takes the write lock around the
         # fingerprint and the read that fixes its view, so it waits for the
-        # commit and copies it.
+        # commit and copies it. The wait is a minute here: under gate load
+        # the writer's 1 s hold outran the 5 s busy timeout (build 312 gate).
         self.one_back_with_an_item()
         holding = threading.Event()
 
@@ -1283,7 +1284,8 @@ class MigrateNeedsABackupOfThisStore(BackupCase):
         thread.start()
         self.assertTrue(holding.wait(10))
         try:
-            snapshot = run(home=self.home)
+            with mock.patch.object(backup_module, "BUSY_TIMEOUT", 60_000):
+                snapshot = run(home=self.home)
         finally:
             thread.join()
         copy = sqlite3.connect(f"file:{snapshot.directory / 'sd.db'}?mode=ro", uri=True)

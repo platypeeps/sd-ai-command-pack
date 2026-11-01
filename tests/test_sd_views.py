@@ -49,7 +49,7 @@ def fill(connection) -> dict[str, int]:
 
     item("report", "nightly-sweep: needs attention", kind="report", repo=APP, fields={"attention": "two stale rows"})
     asked = item("asked", "Pick a store", repo=APP)
-    add_note(connection, asked, "question", "Which store holds the rows?\nOption: Pack\nOption: Database")
+    add_note(connection, asked, "question", "Which store holds the rows?\nOption: Pack (Recommended)\nOption: Database")
     for number in range(1, 8):
         owed = item(f"owed{number}", f"Owed work number {number}", repo=LIB, priority=number % 3)
         add_note(connection, owed, "followup", f"Chase the vendor about {number}")
@@ -84,7 +84,7 @@ GATE = {"holders": [{"slot": 1, "pid": 7, "label": "app tests", "since": "2026-0
         "waiters": [{"place": 1, "pid": 8, "label": "lib tests", "since": "2026-09-06T17:58:00Z", "cwd": "/tmp"}]}
 
 TODAY = """\
-1 attention · 0 on this machine · 1 decisions · 2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled · 7 followups · 1 work
+1 attention · 0 on this machine · 1 decisions · 2 landing · 2 queues · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled · 7 followups · 1 work
 
 Attention (1)
 ID  Repo  State     Why             Title                           When
@@ -104,6 +104,12 @@ ID   Repo  State    Position  Title             When
 ---  ----  -------  --------  ----------------  ---------
 #11  app   running  1         Land the cache    11:50 MDT
 #12  app   pending  2         Land the index    12:00 MDT
+
+Queues (2)
+ID   Repo  State    Queue  Detail   Title             When
+---  ----  -------  -----  -------  ----------------  --------
+#11  app   running  lane   prepare  Land the cache    10 m ago
+#12  app   pending  lane   -        Land the index    now
 
 Delivered (1)
 ID   Repo  State   PR   Commit     Title             When
@@ -249,7 +255,7 @@ class SdToday(Zone):
         grilled = sd_db.create_item(self.connection, kind="task", title="Weekly grill", source="task-ref",
                                     external_id="grill:2026-09-07")
         for number in range(2):
-            add_note(self.connection, grilled, "question", f"Keep mechanism {number}?\nOption: Keep\nOption: Drop")
+            add_note(self.connection, grilled, "question", f"Keep mechanism {number}?\nOption: Keep (Recommended)\nOption: Drop")
         found = today.sections(self.connection, now=NOW, gate=GATE)
         lines = sd_views.render_sections(found, now=MOMENT, width=100).splitlines()
         at = lines.index("Decisions (1)")

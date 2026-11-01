@@ -497,7 +497,8 @@ def file(connection: sqlite3.Connection, batch: Any, *, who: str, now: str | Non
         writes.set_item_fields(connection, item, source=REF_SOURCE, external_id=ref)
         add_note(connection, item, "comment", _header_body(found, digest, kept), session=who)
         for question in kept:
-            add_note(connection, item, "question", _question_body(question), session=who)
+            add_note(connection, item, "question", _question_body(question), session=who,
+                     labelling=True)
     return {"item": item, "ref": ref, "created": True, "filed": len(kept), "dropped": dropped}
 
 
@@ -835,7 +836,8 @@ def _approval_task(connection: sqlite3.Connection, batch: dict, question: dict, 
     Its repo is the batch's, else the one the header's Source names (`_source_repo`).
     """
     repo = batch["item"]["repo"] or _source_repo(connection, batch["header"]["source"])
-    task = workflow.capture_task(connection, title=question["text"].splitlines()[0], body=body,
+    # P3, the usual rank: an automated filer names one (sd:6726); the operator moves it from there.
+    task = workflow.capture_task(connection, title=question["text"].splitlines()[0], body=body, priority=3,
                                  repo=repo, who=who, session=session)["item"]["id"]
     writes.set_item_fields(connection, task, source=REF_SOURCE, external_id=f"{APPROVED}:{question['note']}")
     return task

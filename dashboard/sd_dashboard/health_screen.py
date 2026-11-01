@@ -37,6 +37,9 @@ adds no collector:
   revision. The dashboard's own row adds `runtime.served_behind`, the check
   `dashboard.sh health` makes (sd:3528); its service is protected, so the row
   offers the kickstart line to copy.
+- AWS (sd:6713): one row, the operator's running AWS resources by region
+  with age and a console link, from the `aws` part of the same nightly
+  credentials heartbeat. No action: the console does the rest.
 - Doctor (sd:3393): `health_collectors.doctor_scan`, `machine-setup.sh
   doctor` in a child under its own deadline. Its answer is kept for
   `DOCTOR_FRESH_SECONDS`, since the doctor runs `brew doctor`; the page waits
@@ -60,6 +63,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import os
+import re
 import shlex
 import sqlite3
 import subprocess
@@ -70,6 +74,7 @@ from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from sd_db import protection as protection_module
 from sd_db import reads, repos
@@ -98,13 +103,15 @@ AREAS = (
     ("mir", "Vault mirror", "sd-db records render → state heartbeat records-mirror · "
      "sd reports brief render → state heartbeat brief-copies", ()),
     ("doc", "Doctor", "machine-setup.sh doctor · its ok, WARN and FAIL lines", ()),
+    ("aws", "AWS", "sd-db credentials (nightly) → heartbeat credentials:nightly · aws ec2 describe-instances and "
+     "cloudformation describe-stacks per SD_AWS_READ profile and region", ()),
 )
 #: The page's views, by the operator's task (sd:2115): id, name and the areas each reads, in AREAS' order within it.
 #: Machine is this Mac (its disks, services, ports and doctor); Checkouts the local git cleanups; GitHub what the nightly
 #: sync stored; Jobs the heartbeats unattended jobs leave. Each is one request, `/api/health/<view>`.
 VIEWS = (
     ("checkouts", "Checkouts", ("wt", "br")),
-    ("machine", "Machine", ("disk", "svc", "ports", "ctr", "doc")),
+    ("machine", "Machine", ("disk", "svc", "ports", "ctr", "doc", "aws")),
     ("github", "GitHub", ("prot", "dep", "sec")),
     ("jobs", "Jobs", ("cred", "mir")),
 )
@@ -716,6 +723,9 @@ def _credential_row(probe: dict, now: datetime) -> dict:
     name, pid = probe.get("name") or probe.get("id") or "?", probe.get("id") or "?"
     row = {"id": f"cred:{pid}", "type": "credential", "kind": "Credentials · " + name.split(" (")[0],
            "facts": {"Credential": name}, "cli": CREDENTIALS_CLI}
+    if isinstance(probe.get("signin"), str):
+        # sd:6722: Sign in starts the login in herdr; the server reads the line again from disk, never from this row.
+        row["signin"] = probe["signin"]
     facts = row["facts"]
     for key, label in (("present", "Present"), ("valid", "Accepted"), ("signed_in", "Signed in"), ("expires", "Expires")):
         if key in probe:
@@ -735,7 +745,8 @@ def _credential_row(probe: dict, now: datetime) -> dict:
         return {**row, "state": "warning", "what": f"{name}: absent", "detail": "not set in the job's environment (env.sh)"}
     if probe.get("valid") is False or probe.get("signed_in") is False:
         return {**row, "state": "warning", "what": f"{name}: rejected",
-                "detail": "the service refused it" if "valid" in probe else "gh auth status failed"}
+                "detail": "the service refused it" if "valid" in probe else
+                "signed out: Sign in starts the login" if "signin" in row else "gh auth status failed"}
     if probe.get("reason"):
         return {**row, "state": "unknown", "what": f"{name}: not read", "detail": probe["reason"]}
     if probe.get("expires"):
@@ -777,6 +788,58 @@ def _credential_rows(found: tuple[str, dict] | None, *, now: str) -> tuple[list[
                      "facts": {"Observed": stamp}, "cli": CREDENTIALS_CLI,
                      "problem": [stamp]})  # the age drifts each day; a later stamp is a new stall (sd:1896)
     return rows, {"at": stamp}
+
+
+_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
+
+
+def _console(resource: dict) -> str:
+    """The resource's AWS console page; '' for a region that is not one."""
+    region, rid = str(resource.get("region") or ""), quote(str(resource.get("id") or ""), safe="")
+    if not _REGION.match(region) or not rid:
+        return ""
+    base = f"https://{region}.console.aws.amazon.com"
+    if resource.get("type") == "EC2 instance":
+        return f"{base}/ec2/home?region={region}#InstanceDetails:instanceId={rid}"
+    return f"{base}/cloudformation/home?region={region}#/stacks/stackinfo?stackId={rid}"
+
+
+def _age(since, now: datetime) -> str:
+    try:
+        days = (now - _when(str(since))).days
+    except ValueError:
+        return "age unknown"
+    return "under a day" if days < 1 else f"{days} {_plural(days, 'day', 'days')}"
+
+
+def _aws_rows(found: tuple[str, dict] | None, *, now: str) -> tuple[list[dict], dict]:
+    """One row: my running AWS resources by region, each a console link; a failed read is unknown, never clean."""
+    row = {"id": "aws", "type": "check", "kind": "AWS", "cli": CREDENTIALS_CLI, "facts": {"Setting": "SD_AWS_READ"}}
+    if found is None:
+        return [{**row, "state": "unknown", "what": "AWS resources not yet observed",
+                 "detail": "the nightly credentials job reads them"}], {"at": None}
+    stamp, body = found
+    aws = body.get("aws")
+    if not isinstance(aws, dict):
+        return [{**row, "state": "ok", "what": "AWS read not configured",
+                 "detail": "set SD_AWS_READ='profile:region,region' in env.sh"}], {"at": stamp}
+    moment = _when(now)
+    found_rows = sorted((one for one in aws.get("resources") or [] if isinstance(one, dict)),
+                        key=lambda one: (str(one.get("region")), str(one.get("since"))))
+    regions: dict[str, int] = {}
+    for one in found_rows:
+        regions[str(one.get("region"))] = regions.get(str(one.get("region")), 0) + 1
+    listed = [{"text": f"{one.get('region')} · {one.get('type')} {one.get('name')} · {_age(one.get('since'), moment)}",
+               "href": _console(one)} for one in found_rows]
+    errors = [str(error) for error in aws.get("errors") or []]
+    what = f"{len(found_rows)} running AWS {_plural(len(found_rows), 'resource', 'resources')}"
+    row = {**row, "what": what, "detail": " · ".join(f"{region} {count}" for region, count in regions.items())
+           or "none running", "facts": {**row["facts"], "Observed": stamp}, "list_head": "Resources",
+           "list": listed + errors}
+    if errors:
+        return [{**row, "state": "unknown", "what": f"{what}; {len(errors)} {_plural(len(errors), 'read', 'reads')} "
+                 "failed", "problem": errors}], {"at": stamp}
+    return [{**row, "state": "ok"}], {"at": stamp}
 
 
 MIRROR_CLI = "sd-db records render"
@@ -866,12 +929,12 @@ def _doctor_rows(found: dict) -> tuple[list[dict], dict]:
         if check["mark"] in DOCTOR_STATE:
             text = check["text"]
             rows.append({"id": "doc:" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],
-                         "state": DOCTOR_STATE[check["mark"]], "type": "check", "what": text.split(" — ")[0],
+                         "state": DOCTOR_STATE[check["mark"]], "type": "doctor check", "what": text.split(" — ")[0],
                          "detail": " ".join([text, *check["more"]]), "kind": f"Doctor · {check['mark']}",
                          "facts": {"Line": check["mark"]}, "cli": DOCTOR_CLI})
     passed = [check for check in found["checks"] if check["mark"] == "ok"]
     rest = [check for check in found["checks"] if check["mark"] in ("--", "SKIP")]
-    rows.append({"id": "doc:ok", "state": "ok", "type": "check",
+    rows.append({"id": "doc:ok", "state": "ok", "type": "doctor check",
                  "what": f"{len(passed)} doctor {_plural(len(passed), 'check passes', 'checks pass')}",
                  "detail": f"{len(rest)} not checked here · {found['fails']} hard {_plural(found['fails'], 'failure', 'failures')}",
                  "kind": "Doctor", "facts": {"Passed": str(len(passed)), "Not checked": str(len(rest))},
@@ -1149,6 +1212,7 @@ def _readers(connection: sqlite3.Connection, *, now: str, fleet=None, ports=None
         "mir": lambda: _with_row(_mirror_rows(read_mirror(connection)),
                                  _brief_copies_row(lambda: read_brief_copies(connection), now=now)),
         "doc": lambda: _doctor_rows(read_doctor()),
+        "aws": lambda: _aws_rows(read_creds(connection), now=now),
     }
 
 
@@ -1267,7 +1331,7 @@ def part(connection: sqlite3.Connection, view: str, *, now: str, **seams) -> dic
 #: How long a walker's answer stands for `summary`, which starts a scan in the background past it.
 SUMMARY_FRESH_SECONDS = 60.0
 #: Areas `summary` reads afresh: they read only the database. Every other area shows its last answer.
-CHEAP = ("prot", "dep", "sec", "cred", "mir")
+CHEAP = ("prot", "dep", "sec", "cred", "mir", "aws")
 RANK = {"warning": 0, "caution": 1, "unknown": 2, "queued": 3, "ok": 4}
 
 

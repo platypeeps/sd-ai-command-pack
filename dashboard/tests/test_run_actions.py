@@ -166,6 +166,82 @@ class TheReads(Run):
                 status, _, body = self.post("/api/actions/run", ids)
                 self.assertEqual((status, body["output"], body["line"]), (200, "GitHub PAT: ok\ngh CLI: failed", "sd-db credentials"))
 
+    def test_sign_in_starts_the_login_read_from_disk_in_herdr(self):
+        """sd:6722: the probe names the login; `credentials.signin` reads it again, and an unknown one runs nothing."""
+        launched = []
+        with patch("sd_db.credentials.signin", lambda probe, env: "! sdm-login" if probe == "sdm" else None), \
+             patch.object(fix_session, "_launch", lambda directory, label, text: launched.append((label, text)) or "p1"):
+            status, body = self.run_("credentials.signin", probe="sdm")
+            self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Sign in"))
+            status, body = self.run_("credentials.signin", probe="aws:nope")
+        self.assertEqual(status, 400)
+        self.assertIn("aws:nope is not a credential this machine can sign in", body["error"])
+        self.assertEqual(launched, [("signin-sdm", "! sdm-login")])
+
+    def test_google_sign_in_answers_that_accounts_consent_url_and_starts_no_pane(self):
+        """sd:6957: workspace-mcp's start_google_auth for the one account; the URL rides the answer, not the output."""
+        calls, launched = [], []
+
+        class Mcp:
+            session = None
+
+            def __init__(self, url, timeout):
+                pass
+
+            def connect(self):
+                pass
+
+            def call(self, name, arguments):
+                calls.append((name, arguments["user_google_email"]))
+                return f"Click [here](https://accounts.google.com/o/oauth2/auth?login_hint={arguments['user_google_email']}) to sign in."
+
+        fake = type("MailIntake", (), {"Mcp": Mcp})
+        with patch("sd_db.credentials.signin", lambda probe, env: "Sign workspace-mcp in"), \
+             patch("sd_dashboard.notes_screen._mail_intake", lambda: fake), \
+             patch.object(fix_session, "_launch", lambda directory, label, text: launched.append(label) or "p1"):
+            answers = [self.run_("credentials.signin", probe=f"google:{who}@example.test")[1] for who in "ab"]
+        self.assertEqual(calls, [("start_google_auth", "a@example.test"), ("start_google_auth", "b@example.test")])
+        self.assertEqual([(a["exit"], a["account"], a["url"]) for a in answers],
+                         [(0, f"{who}@example.test", f"https://accounts.google.com/o/oauth2/auth?login_hint={who}@example.test")
+                          for who in "ab"])
+        self.assertTrue(all("https://" not in a["output"] for a in answers))
+        self.assertEqual(launched, [])
+
+    def test_aws_sso_sign_in_answers_the_device_url_and_code_and_leaves_the_login_waiting(self):
+        """sd:6957: `aws sso login --no-browser --use-device-code` runs on; the answer carries what it printed."""
+        bin_dir = Path(self.tmp.name) / "fakebin"
+        bin_dir.mkdir()
+        pid_file = Path(self.tmp.name) / "aws.pid"
+        aws = bin_dir / "aws"
+        aws.write_text(f"#!/bin/sh\necho $$ > {pid_file}\necho \"$@\" > {pid_file}.argv\n"
+                       "printf 'Browser will not be automatically opened.\\nPlease visit the following URL:\\n\\n"
+                       "https://device.sso.example.test/\\n\\nThen enter the code:\\n\\nABCD-EFGH\\n'\nexec sleep 30\n")
+        aws.chmod(aws.stat().st_mode | stat.S_IEXEC)
+        try:
+            with patch("sd_db.credentials.signin", lambda probe, env: "! aws sso login --profile dev"), \
+                 patch.dict(os.environ, {"PATH": f"{bin_dir}:{os.environ['PATH']}"}), \
+                 patch.object(fix_session, "_launch", lambda *a: self.fail("no herdr pane for an SSO login")):
+                status, body = self.run_("credentials.signin", probe="aws:dev")
+            self.assertEqual((status, body["exit"], body["url"], body["code"], body["account"]),
+                             (200, 0, "https://device.sso.example.test/", "ABCD-EFGH", "AWS profile dev"))
+            self.assertEqual(Path(f"{pid_file}.argv").read_text().split(),
+                             ["sso", "login", "--profile", "dev", "--no-browser", "--use-device-code"])
+            os.kill(int(pid_file.read_text()), 0)  # still waiting for the code
+        finally:
+            if pid_file.exists():
+                try:
+                    os.kill(int(pid_file.read_text()), 9)
+                except ProcessLookupError:
+                    pass
+
+    def test_a_credential_rows_re_check_runs_its_own_probe_only(self):
+        seen = []
+        with patch("sd_db.credentials.check", lambda connection, env, **only: seen.append(only) or {"probes": []}):
+            for row in ("cred:google:a@example.test", "cred:stale"):
+                status, _, _ = self.post("/api/actions/run", {"action": "check.run", "row": row})
+                self.assertEqual(status, 200)
+        self.assertEqual(seen, [{"only": "google:a@example.test"}, {}])
+
     def test_read_state_reads_only_a_tile_in_the_tile_list(self):
         tiles = "tile|Water|binary_sensor.water_leak|Leak\n"
         with patch.object(home_screen, "_current", lambda connection, config: ("file", tiles)), \
@@ -231,6 +307,23 @@ class TheWrites(Run):
                 self.assertIn(said, body["error"])
         self.assertEqual((self.ran(), self.launched), ([], []))
         self.assertEqual(self.snapshot(), before)
+
+    def test_show_assignment_runs_sd_assignments_get_for_a_known_assignment(self):
+        """sd:6682: the page names the assignment by its number; the server runs the line for a row it holds."""
+        n = self.assignment(self.item("Port the page"))
+        self.connection.commit()
+        status, body = self.run_("assignment.get", assignment=n)
+        self.assertEqual((status, body["exit"], body["line"]), (200, 0, f"sd assignments get {n}"), body)
+        self.assertEqual(self.ran(), [f"sd assignments get {n}"])
+
+    def test_show_assignment_refuses_what_is_not_an_assignment_number(self):
+        n = self.assignment(self.item("Port the page"))
+        self.connection.commit()
+        self.refused([({"action": "assignment.get", "assignment": str(n)}, 400, "by its number"),
+                      ({"action": "assignment.get", "assignment": True}, 400, "by its number"),
+                      ({"action": "assignment.get", "assignment": 0}, 400, "by its number"),
+                      ({"action": "assignment.get", "assignment": n + 99}, 400, "is not an assignment"),
+                      ({"action": "assignment.get"}, 400, "takes assignment")])
 
     def test_capture_idea_runs_sd_store_add_with_the_idea_as_one_argument(self):
         status, body = self.run_("idea.capture", text="Gates; and $(why) they wait\n")

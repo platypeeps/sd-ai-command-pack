@@ -20,5 +20,13 @@ in a herdr workspace in the vault on the routine's per-entity refresh for
 that one row. Add watch takes a URL and an optional name and runs
 `watch.add`: `sd store add sdw.market` files a candidate row with the URL as
 its first source. Details shows each answer, a refusal or a failed step
-with its output. The status moves in Tasks (Open item). The page reads
+with its output. Activate (on a candidate), Pause (on an active
+watch) and Unpause (on a paused one) move the status through
+`/api/items/<n>/stage` with the row's revision, as Tasks moves a stage;
+Undo moves it back, and a declined watch gets none (sd:6694). Remove
+(`watch.remove`, sd:6703) moves a row to declined, which market-watch
+skips; its profile and Sources stay. Restore (`watch.restore`) moves a
+declined row back to candidate. Delete (`watch.delete`) runs `sd-db item
+remove` on the row, preview then apply, which files a removal record and
+backs the store up first. All three ask first. The page reads
 through the shell's reader, `read.js`.

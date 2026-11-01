@@ -186,6 +186,8 @@ def route(connection: sqlite3.Connection, path: str, parameters, *, now: str, se
 GITHUB_REF = re.compile(r"github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[1-9][0-9]{0,9}")
 #: Health's Fix on a Dependabot row (sd:6685): one open item per repository, reused while it is open.
 DEPENDABOT_REF = re.compile(r"dependabot:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
+#: A Health doctor row's ref (pack sd:6684): `doc:<hash>` as `doctor:<hash>`, filed in the system repo, reused alike.
+DOCTOR_REF = re.compile(r"doctor:[0-9a-f]{12}")
 
 
 def capture_ref(connection, *, ref, who, **values):
@@ -200,9 +202,10 @@ def capture_ref(connection, *, ref, who, **values):
 
     with workflow.transaction(connection):
         filed = writes.item_by_external(connection, "task-ref", ref)
-        if filed is not None and DEPENDABOT_REF.fullmatch(ref):
-            # A Dependabot ref names a repository, not one alert: its open item is reused, and a done one gives the
-            # ref up (`<ref>@<id>`), so the next Fix files anew under the unique (source, external_id) index.
+        if filed is not None and (DEPENDABOT_REF.fullmatch(ref) or DOCTOR_REF.fullmatch(ref)):
+            # A Dependabot ref names a repository, not one alert, and a doctor ref one finding (pack sd:6684): its open
+            # item is reused, and a done one gives the ref up (`<ref>@<id>`), so the next Fix files anew under the
+            # unique (source, external_id) index.
             if filed["status"] != "done":
                 return workflow.item_state(connection, filed["id"])
             writes.set_item_fields(connection, filed["id"], external_id=f"{ref}@{filed['id']}")
@@ -539,7 +542,7 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
             if match[1] in ("lane-host", "jira-project"):
                 # A Jira key or `off` (sd:5103): `repos.set_jira_project` refuses a bad key by its rule.
                 return isinstance(value, str) and value != ""
-            return value in {"runner-merge": ("manual", "auto"), "github-issues": ("on", "off")}.get(match[1], ("yes", "no"))
+            return value in {"runner-merge": ("manual", "auto"), "github-issues": ("off", "read", "ask")}.get(match[1], ("yes", "no"))
 
         if (set(values) != {"path", "value", "before"} or not isinstance(values["path"], str)
                 or not word(values["value"]) or not word(values["before"]) or values["value"] == values["before"]):
@@ -567,15 +570,20 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
         kind = values.pop("kind", "task")
         parent = values.pop("followup_of", None)
         ref = values.pop("ref", None)
+        reused = isinstance(ref, str) and bool(DEPENDABOT_REF.fullmatch(ref) or DOCTOR_REF.fullmatch(ref))
         if ref is not None and (kind != "task" or not isinstance(ref, str)
-                                or not (GITHUB_REF.fullmatch(ref) or DEPENDABOT_REF.fullmatch(ref))):
-            raise ValueError("A ref files a task, and names a GitHub issue as github:<owner>/<repo>#<number>"
-                             " or a repository's alerts as dependabot:<owner>/<repo>.")
+                                or not (GITHUB_REF.fullmatch(ref) or reused)):
+            raise ValueError("A ref files a task, and names a GitHub issue as github:<owner>/<repo>#<number>,"
+                             " a repository's alerts as dependabot:<owner>/<repo>, or a doctor row as doctor:<hash>.")
         if kind == "task":
             if parent is not None:
                 raise ValueError("Only a followup item names the item it follows up.")
-            if ref is not None and DEPENDABOT_REF.fullmatch(ref):
-                # Fix starts the session on it at once, so no draft is queued.
+            if reused:
+                # Fix starts the session on it at once, so no draft is queued. A doctor finding is the system repo's.
+                if DOCTOR_REF.fullmatch(ref):
+                    from sd_db.config import system_checkout
+
+                    values["repo"] = str(system_checkout())
                 return lambda connection: capture_ref(connection, ref=ref, who="dashboard", **values)
             if ref is not None:
                 return lambda connection: capture_drafted(
@@ -852,6 +860,8 @@ class Dashboard(BaseHTTPRequestHandler):
             return self._document(path[len("/documents/") :])
         if path.startswith("/designs/"):
             return self._design(path[len("/designs/") :])
+        if path.startswith("/lane-shots/"):
+            return self._lane_shot(path[len("/lane-shots/") :])
         if path.startswith("/research/deck/"):
             return self._research_deck(context, path[len("/research/deck/") :])
         if path == "/home/assistant":
@@ -1087,6 +1097,13 @@ class Dashboard(BaseHTTPRequestHandler):
         except BaseException:
             self.badges.remember(split.path, None, read.now, ticket)
             raise
+        if isinstance(answer, tuple) and len(answer) == 3:
+            # A picture's bytes (sd:6690, HOA's thumbnails): an image type only, never a page or a script.
+            status, body, kind = answer
+            self.badges.remember(split.path, None, read.now, ticket)
+            if not kind.startswith("image/") or kind == "image/svg+xml":
+                return self._json(502, {"error": f"{kind} is not a picture this page draws."})
+            return self._send(status, body, kind)
         status, document = answer if isinstance(answer, tuple) else (200, answer)
         self.badges.remember(split.path, document if status == 200 else None, read.now, ticket)
         return self._json(status, document)
@@ -1145,8 +1162,12 @@ class Dashboard(BaseHTTPRequestHandler):
                 or not session or not re.fullmatch(r"[a-f0-9]{64}", csrf)
                 or not hmac.compare_digest(csrf, self._csrf(session))):
             return self._json(403, {"error": "Open the dashboard again before saving. The browser session, identity or origin is invalid."})
-        if urlsplit(self.path).path == "/api/research/intake/file" and not urlsplit(self.path).query:
-            from . import source_intake
+        if urlsplit(self.path).path in ("/api/research/intake/file", "/api/hoa/attach/file") and not urlsplit(self.path).query:
+            from . import hoa_attach, source_intake
+
+            # sd:6690: HOA's Upload stages the same way, with its own suffixes and cap.
+            bounds = ({"suffixes": hoa_attach.SUFFIXES, "limit": hoa_attach.UPLOAD_BYTES}
+                      if urlsplit(self.path).path == "/api/hoa/attach/file" else {})
 
             # sd:5112: a dropped file's raw bytes, past the JSON bound; the intake request names it by its hash.
             if self.headers.get_content_type() != "application/octet-stream" or self.headers.get("Transfer-Encoding"):
@@ -1154,7 +1175,7 @@ class Dashboard(BaseHTTPRequestHandler):
             try:
                 self.connection.settimeout(source_intake.STAGE_READ_SECONDS)  # one wait; stage bounds the whole upload
                 return self._json(*source_intake.stage(self.headers.get("X-SD-File-Name", ""),
-                                                        self.headers.get("Content-Length", ""), self.rfile))
+                                                        self.headers.get("Content-Length", ""), self.rfile, **bounds))
             except OSError as problem:
                 return self._json(503, {"error": f"The file was not staged: {problem}"})
         if self.headers.get_content_type() != "application/json":
@@ -1303,6 +1324,25 @@ class Dashboard(BaseHTTPRequestHandler):
         if kind.startswith("text/html"):
             return self._send(200, body, kind, policy=POLICY)
         self._send(200, body, kind, overrides=FONT_HEADERS if kind.startswith("font/") else ASSET_HEADERS)
+
+    def _lane_shot(self, tail: str) -> None:
+        """sd:6728: one PNG the lane drew of a changed page, `<repo>/lane/logs/shots-<item>-<stamp>/<page>.png`."""
+        from . import pack_module
+        from .designs import ASSET_HEADERS, read, resolve
+
+        try:
+            root = pack_module("sd_lane").lane_root(dict(os.environ))
+        except ImportError:
+            root = None
+        shape = re.fullmatch(r"[^/]+/lane/logs/shots-[^/]+/[^/]+\.png", tail)
+        found = resolve(tail, root) if root is not None and shape else None
+        if found is None:
+            return self._send(404, error_page(404, "No such screenshot.").encode("utf-8"), "text/html; charset=utf-8")
+        try:
+            body = read(found[0])
+        except OSError as problem:
+            return self._send(503, error_page(503, str(problem)).encode("utf-8"), "text/html; charset=utf-8")
+        self._send(200, body, found[1], overrides=ASSET_HEADERS)
 
     def _v2_asset(self, name: str, query: str = "") -> None:
         from .v2 import asset

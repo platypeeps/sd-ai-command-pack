@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 import time
@@ -61,7 +62,8 @@ REPO_CAP = 3
 BUNDLE_MAX = 3
 BUDGET_MINUTES = 60
 #: A supervisor beats every 30 s; one silent this long, or unspawned this long after its claim, is lost.
-STALE_SECONDS = 180
+#: 600, not 180: a beat a held lock skips no longer ends a 60-minute build (pack sd:6741).
+STALE_SECONDS = 600
 #: Lost runs one bundle may retry before it blocks.
 RETRIES = 1
 # The note on an item a blocked run parked (pack sd:6132).
@@ -72,6 +74,11 @@ STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", 
 DRAFT_STEPS = ("claimed", "drafting")
 #: A note that sends the operator's finding to a bundle's next builder: Send to builder (pack sd:6020).
 FINDING = "Send to builder: "
+#: A lane entry that failed only because prepare's merge of origin/<base> conflicted goes back to its builder on
+#: its own, under its lead, with this finding (pack sd:6940); `CONFLICT_REBUILDS` times, then the operator decides.
+CONFLICT = re.compile(r"\bmerging origin/\S+ into \S+ conflicts\b")
+REBUILD = FINDING + "the lane's merge of origin/main conflicted. "
+CONFLICT_REBUILDS = 2
 #: The model a bundle runs on (Q60): Sonnet only when every member's `fields.work_kind` is `mechanical`.
 OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
@@ -87,7 +94,8 @@ _SAME = " AND ".join(f"{name} IS ?" for name in REAP_READS)
 #: A fix resumes at its review, which reads the head the fix left.
 RESUME = {"claimed": "worktree", "fixing": "reviewing"}
 #: The outcomes that count as a loss at a step; a second one at the same step blocks the bundle.
-LOSSES = ("interrupted", "timed_out", "error_max_turns")
+#: `denied` is a builder refused a tool call (pack sd:6723).
+LOSSES = ("interrupted", "timed_out", "error_max_turns", "denied")
 #: The steps from `enqueued` on: the lease is released, the members are `done`, and step 7 releases the run.
 #: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
@@ -321,6 +329,9 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
     roll back, that member ends `blocked` with the reason, and nothing else
     changes, so the next claim takes the rest.
 
+    Each member's `item.branch` becomes the run's branch, so a design-only
+    build is not left with an empty one (pack sd:6756).
+
     A queued build whose repository `queue` would now refuse (unmanaged, no
     remote, a satellite lane host: `_repo_refusal`) ends `blocked` with that
     reason before the bundle is picked, its item left as it is, and the same
@@ -361,6 +372,7 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
                 for row in bundle:
                     transition(connection, row["item"], "in_progress", who="build",
                                reason=f"build run {ident} claimed assignment {row['id']}")
+                    set_item_fields(connection, row["item"], branch=branch(lead))
         except _Moved:
             moved = connection.execute(
                 f"SELECT assignment.id, assignment.item, item.status FROM assignment JOIN item ON item.id = assignment.item "
@@ -448,13 +460,13 @@ def open_runs(connection) -> list[dict]:
         (SCOPE,))]
 
 
-def ended_runs(connection, since: str, *, limit: int = 50) -> list[dict]:
-    """The build runs released at or after `since`, newest first (Queue's Builds panel, pack sd:6095)."""
+def ended_runs(connection, *, limit: int) -> list[dict]:
+    """The released build runs, newest first, up to `limit` (Queue's Builds panel, pack sd:6095, sd:6834)."""
     return [dict(row) for row in connection.execute(
         "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
-        "WHERE assignment.scope = ? AND runner_run.released_at IS NOT NULL AND runner_run.released_at >= ? "
+        "WHERE assignment.scope = ? AND runner_run.released_at IS NOT NULL "
         "ORDER BY runner_run.released_at DESC, runner_run.run DESC, runner_run.rowid DESC LIMIT ?",
-        (SCOPE, since, limit))]
+        (SCOPE, limit))]
 
 
 def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str:
@@ -637,6 +649,7 @@ def lane_failed(connection, read: dict, reason: str) -> bool:
     """The tick ends an `enqueued` run whose lane entry failed or was skipped: `lane_failed`, released, in one write.
 
     The worktree stays for Retry; the lane's own note names the step.
+    A failure that is only prepare's merge of origin/main conflicting queues the bundle again (`_rebuild`).
     """
     with transaction(connection):
         stamp = clock()
@@ -647,7 +660,37 @@ def lane_failed(connection, read: dict, reason: str) -> bool:
             return False
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
                            (stamp, read["id"]))
+        if CONFLICT.search(reason):
+            _rebuild(connection, read, reason, stamp)
         return True
+
+
+def _rebuild(connection, read: dict, reason: str, stamp: str) -> None:
+    """Queue a bundle whose lane entry conflicted with main again under its lead, as Send to builder does, so the
+    next builder merges main into the same branch (pack sd:6940). Each member still `in_progress` goes back to
+    `ready`; one the operator moved stays out. A lead moved or left out of delivery, or past `CONFLICT_REBUILDS`
+    on the lead's item, queues nothing: the run stays `lane_failed` for the operator."""
+    lead = read["assignment"]
+    members = [member for member in _members(connection, lead, "done")
+               if connection.execute("SELECT status FROM item WHERE id = ?",
+                                     (member["item"],)).fetchone()["status"] == "in_progress"]
+    if not members or members[0]["id"] != lead:
+        return  # without its lead the claim would pick a child's branch and worktree: the operator's call
+    done = connection.execute("SELECT COUNT(*) FROM note WHERE item = ? AND body LIKE ?",
+                              (members[0]["item"], REBUILD + "%")).fetchone()[0]
+    if done >= CONFLICT_REBUILDS:
+        return
+    finding = (f"{REBUILD}Merge origin/main into {read['branch']}, resolve each conflict, run the tests the "
+               f"conflict touched, and commit the merge; the lane said: {reason}"[:2000])
+    for member in members:
+        transition(connection, member["item"], "ready", who="build",
+                   reason=f"build run {read['id']}: the lane's merge of origin/main conflicted")
+        add_note(connection, member["item"], "comment", finding)
+        connection.execute("UPDATE assignment SET status = 'queued', queued_at = ?, started = NULL, ended = NULL, "
+                           "result = ? WHERE id = ?", (stamp, f"requeued by build: {reason}"[:600], member["id"]))
+        add_note(connection, member["item"], "comment",
+                 f"Build assignment {member['id']} queued again by build: rebuild {done + 1} of "
+                 f"{CONFLICT_REBUILDS} after the lane's merge of origin/main conflicted")
 
 
 class Probe:

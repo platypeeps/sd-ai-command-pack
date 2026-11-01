@@ -277,6 +277,9 @@ def scratch(case):
 class StubSd(Pack, BrowserSession):
     """A pack, a session, and `sd` replaced by STUB_SD."""
 
+    #: Each request runs the stub as a real process, so the client waits as long as the route may.
+    http_timeout = skill_intake.INTAKE_SECONDS + 10
+
     def setUp(self):
         super().setUp()
         self.make_pack()
@@ -293,6 +296,10 @@ class StubSd(Pack, BrowserSession):
 
 class TheIntakeRoute(StubSd):
     """POST /api/skills/intake runs `sd skill intake` once, as an argv list, and installs only with --approve (sd:3992)."""
+
+    def test_the_client_waits_as_long_as_the_route_may_run(self):
+        """sd:6895: each request runs a real `sh` stub, so the 5 s quiet-machine wait timed out under load."""
+        self.assertGreater(self.http_timeout, skill_intake.INTAKE_SECONDS)
 
     def intake(self, payload, *, out=None, code=0):
         environment = {"INTAKE_ARGS": str(self.args), "INTAKE_OUT": json.dumps(REPORT) if out is None else out, "INTAKE_EXIT": str(code)}

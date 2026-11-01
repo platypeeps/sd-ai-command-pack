@@ -10,8 +10,24 @@ by its folder name only. Stage asks first and posts
 `POST /api/items/<id>/stage` with the piece's revision; it has no Undo,
 because going back is a correction. Correct asks for a reason and posts the
 same route with `correct`. Park and Revive post `/park` and `/revive` and
-undo each other. Publish and Capture are copy only. The page reads through
+undo each other. Publish and Capture are copy only. Refresh review posts
+`/api/adversarial` with kind `piece`: codex reads the draft in the
+background and rewrites `adversarial.md` (pack sd:6699). Once that file's
+digest stamp names the current draft (pack sd:6977; file times do not
+count), Apply review asks first and posts `/fix` with
+`apply: adversarial`: claude edits the draft for each finding or rejects it
+with a reason, records each with `sd writing reconcile`, and leaves the edit
+uncommitted. It publishes nothing. The page reads through
 the shell's reader, `read.js`. The old list was retired in sd:3402.
+
+Grill (pack sd:6700) asks first, then posts Fix with `{"grill": "ask"}`:
+claude in herdr reads the draft and writes 5 to 10 question notes on the
+piece. `/api/writing` gives each piece `grill`, its open questions and the
+count of its rulings, and Details walks the first open question with a
+button per option or a box for words; each answer posts
+`/api/decisions/answer`, as Decide does. Apply answers, once every question
+is answered, posts Fix with `{"grill": "apply"}`: claude edits the draft to
+follow each ruling and leaves the edit uncommitted.
 
 Not read yet, so drawn as gaps:
 

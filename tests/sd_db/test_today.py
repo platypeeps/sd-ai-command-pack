@@ -107,6 +107,36 @@ class TheSections(TodayCase):
                           "waiters": [{"place": 1, "label": "lane", "since": WHEN}], "error": None})
         self.assertEqual(today.landing(self.connection, gate="permission denied")["gate"]["error"], "permission denied")
 
+    def test_queues_is_ready_items_builds_and_the_lane_in_one_list(self):
+        """Pack sd:6946: the operator asked for these three lists 15+ times in one session."""
+        low, high = self.item("Low", repo=APP, status="ready", priority=3), self.item("High", repo=APP, status="ready", priority=1)
+        queued, stuck = self.item("Queued", repo=APP, status="ready"), self.item("Stuck", repo=LIB, status="blocked")
+        for item, status in ((queued, "queued"), (stuck, "blocked")):
+            ident = create_assignment(self.connection, item=item, role="author", status=status)
+            self.connection.execute("UPDATE assignment SET scope = 'build', queued_at = ? WHERE id = ?", (WHEN, ident))
+        landing = self.item("Landing", repo=APP)
+        self.lane("example-owner/app", "e1", item=landing, status="failed", position=1, step="prepare")
+        rows = today.queues(self.connection, now=NOW)
+        self.assertEqual([(row["queue"], row["id"], row["status"], row["detail"]) for row in rows],
+                         [("ready", high, "ready", "P1"), ("ready", low, "ready", "P3"),
+                          ("build", queued, "queued", "-"), ("build", stuck, "blocked", "-"),
+                          ("lane", landing, "failed", "prepare")])
+        self.assertEqual([row["id"] for row in today.queues(self.connection, repos=[LIB], now=NOW)], [stuck])
+        self.assertEqual(today.sections(self.connection, now=NOW)["summary"]["queues"], 5)
+
+    def test_a_failure_is_due_for_a_push_once_and_a_success_never(self):
+        """Pack sd:6946: a push only when a lane entry or a build fails or blocks, once per entry."""
+        failed, merged = self.item("Failed", repo=APP), self.item("Merged", repo=APP)
+        self.lane("example-owner/app", "e1", item=failed, status="failed", position=1, step="prepare")
+        self.lane("example-owner/app", "e2", item=merged, status="merged", position=2)
+        due = today.push_due(self.connection, now=NOW)
+        self.assertEqual([(row["key"], row["title"]) for row in due],
+                         [("lane:example-owner/app:e1", f"Lane failed: sd:{failed}")])
+        self.assertIn("step prepare", due[0]["body"])
+        self.connection.execute("INSERT INTO state(kind, key, timestamp) VALUES ('watermark', ?, ?)",
+                                (today.PUSHED + due[0]["key"], WHEN))
+        self.assertEqual(today.push_due(self.connection, now=NOW), [])
+
     def test_planned_is_open_items_due_after_today_soonest_first(self):
         later = self.item("Later", due="2026-09-30")
         sooner = self.item("Sooner", due="2026-09-07")
@@ -143,10 +173,22 @@ class TheSections(TodayCase):
         self.assertEqual([(row["id"], row["why"]) for row in today.blocked(self.connection)],
                          [(vendor, "Waits on the vendor"), (bare, ""), (waiting, "Waiting on Alex for the keys")])
 
+    def test_planned_and_blocked_leave_out_the_idea_kinds(self):
+        """pack sd:6743: ideas show in the Writing and Vault views only, never in a work count."""
+        work = self.item("Work", due="2026-09-30")
+        stuck = self.item("Stuck", status="blocked")
+        for kind in ("idea", "work-idea", "personal-idea"):
+            self.item(f"A dated {kind}", kind=kind, due="2026-09-30")
+            self.item(f"A blocked {kind}", kind=kind, status="blocked")
+        self.assertEqual([row["id"] for row in today.planned(self.connection, now=NOW)], [work])
+        self.assertEqual([row["id"] for row in today.blocked(self.connection)], [stuck])
+
     def test_decisions_and_followups_leave_out_plain_questions_and_reports_own(self):
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
-        add_note(self.connection, asked, "question", "A plain question")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
+        # A plain question from before pack sd:6708, which `add_note` now refuses.
+        self.connection.execute("INSERT INTO note (item, timestamp, kind, body) VALUES (?, ?, 'question', ?)",
+                                (asked, "2026-10-01T00:00:00+00:00", "A plain question"))
         chase = add_note(self.connection, asked, "followup", "Chase the vendor")
         report = self.item("Report", kind="report", fields={"attention": "two stale rows"})
         add_note(self.connection, report, "followup", "The report's own")
@@ -159,7 +201,7 @@ class TheSections(TodayCase):
     def test_closing_an_item_keeps_its_unanswered_question_in_decisions(self):
         """Pack sd:6329: a close answers no question; the followups it owed go."""
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Move all 45?\nOption: Approve all\nOption: Videos only")
+        decision = add_note(self.connection, asked, "question", "Move all 45?\nOption: Approve all (Recommended)\nOption: Videos only")
         add_note(self.connection, asked, "followup", "Chase the vendor")
         workflow.change_status(self.connection, asked, "done", who="operator", reason="landed")
         self.assertEqual([(row["id"], row["note"], row["status"]) for row in today.decisions(self.connection)],
@@ -178,12 +220,12 @@ class TheSections(TodayCase):
         """sd:5130: `sd-next` walks the Decisions rows; a batch's questions wait on the Review page."""
         batch = self.batch("B1", questions=2)
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
         # Older state: a ref task that is no batch, and an approval's task, keep their questions as rows.
         bare = self.item("Bare ref", source="task-ref")
-        unbatched = add_note(self.connection, bare, "question", "Keep it?\nOption: Yes\nOption: No")
+        unbatched = add_note(self.connection, bare, "question", "Keep it?\nOption: Yes (Recommended)\nOption: No")
         approved = self.item("Approved", source="task-ref", external_id="review-approved:1")
-        followed = add_note(self.connection, approved, "question", "Ship it?\nOption: Yes\nOption: No")
+        followed = add_note(self.connection, approved, "question", "Ship it?\nOption: Yes (Recommended)\nOption: No")
         self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision, unbatched, followed])
         self.assertEqual(today.review_questions(self.connection), 2)
         self.assertEqual(today.sections(self.connection, now=NOW)["summary"]["review_questions"], 2)
@@ -199,7 +241,7 @@ class TheSections(TodayCase):
         """The batch is left out in the query: 250 older batch questions do not fill `open_notes`' 200."""
         self.batch("Big", questions=250)
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
         self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision])
         self.assertEqual(today.review_questions(self.connection), 250)
 
@@ -210,17 +252,17 @@ class TheSections(TodayCase):
     def grill(self, ref="grill:2026-09-07", repo=APP, questions=2):
         """A weekly grill as the KISS audit files it: `sd task add --ref grill:<date>`, then question notes."""
         item = self.item("Weekly grill", repo=repo, source="task-ref", external_id=ref)
-        return item, [add_note(self.connection, item, "question", f"Keep mechanism {n}?\nOption: Keep\nOption: Drop")
+        return item, [add_note(self.connection, item, "question", f"Keep mechanism {n}?\nOption: Keep (Recommended)\nOption: Drop")
                       for n in range(questions)]
 
     def test_a_grills_questions_are_one_ready_line_not_decisions(self):
         """pack sd:6022: the audit's seed questions wait for the operator to say 'grill', not in every walk."""
         grilled, (first, _) = self.grill()
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
         # Older state: a ref task under another prefix keeps its questions as Decisions rows.
         other = self.item("Other ref", source="task-ref", external_id="grilled:1")
-        kept = add_note(self.connection, other, "question", "Keep it?\nOption: Yes\nOption: No")
+        kept = add_note(self.connection, other, "question", "Keep it?\nOption: Yes (Recommended)\nOption: No")
         self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision, kept])
         self.assertEqual([(row["id"], row["questions"]) for row in today.grill(self.connection)], [(grilled, 2)])
         found = today.sections(self.connection, now=NOW)
@@ -304,7 +346,7 @@ class TheRepositoryFilter(TodayCase):
         mine, theirs, loose = self.item("Mine", repo=APP), self.item("Theirs", repo=LIB), self.item("Loose")
         for item in (mine, theirs, loose):
             add_note(self.connection, item, "followup", f"Chase {item}")
-            add_note(self.connection, item, "question", f"Pick {item}\nOption: A\nOption: B")
+            add_note(self.connection, item, "question", f"Pick {item}\nOption: A (Recommended)\nOption: B")
         self.lane("example-owner/app", "a", item=mine, status="pending", position=1)
         self.lane("example-owner/lib", "b", item=theirs, status="pending", position=2)
         planned = [self.item(f"Due {repo}", repo=repo, due="2026-09-09") for repo in (APP, LIB)]
@@ -334,7 +376,7 @@ class TheRepositoryFilter(TodayCase):
         for repo in (APP, None):
             item = self.item(f"Open {repo}", repo=repo)
             add_note(self.connection, item, "followup", f"Chase {item}")
-            add_note(self.connection, item, "question", f"Pick {item}\nOption: A\nOption: B")
+            add_note(self.connection, item, "question", f"Pick {item}\nOption: A (Recommended)\nOption: B")
             self.item(f"Report {repo}", repo=repo, kind="report", fields={"attention": "look"})
             self.item(f"Due {repo}", repo=repo, due="2026-09-09")
             self.item(f"Stuck {repo}", repo=repo, status="blocked")

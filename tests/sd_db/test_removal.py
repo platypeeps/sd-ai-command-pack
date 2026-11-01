@@ -443,7 +443,7 @@ class ItemRefusals(Store):
         for kind in ("followup", "question"):
             with self.subTest(kind=kind):
                 item = self.item()
-                note = add_note(self.db, item, kind, "open", session="alex")
+                note = add_note(self.db, item, kind, "open\nOption: Yes (Recommended)\nOption: No", session="alex")
                 self.assertEqual([r["key"] for r in self.refused(self.plan(item), "I7")], [note])
                 resolve_note(self.db, note)
                 self.assertEqual(self.refused(self.plan(item), "I7"), [])

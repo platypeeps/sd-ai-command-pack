@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sd_db.schema import SCHEMA_VERSION
@@ -349,7 +350,7 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.sd_db("repo", "add", str(self.checkout))
         self.sd_db("repo", "ci", str(self.checkout), "local")
         self.sd_db("repo", "managed", str(self.checkout), "yes")
-        self.sd_db("repo", "github-issues", str(self.checkout), "on")
+        self.sd_db("repo", "github-issues", str(self.checkout), "ask")
         self.assertEqual(self._list_row()[-1], "manual")
         self.sd_db("repo", "runner-merge", str(self.checkout), "auto")
         self.assertEqual(self._list_row()[-1], "auto")
@@ -376,30 +377,30 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.assertIn("needs a path and yes or no", completed.stderr)
         self.assertEqual(self._list_row()[-5], "no")
 
-    def test_repo_github_issues_sets_the_switch_and_list_shows_it_before_lane_host(self):
-        """sd:4827. `github_issues` sits between `ci` and `lane_host`, so the
+    def test_repo_github_issues_sets_the_policy_key_and_list_shows_it_before_lane_host(self):
+        """sd:4827, pack sd:6849. `policy.issues` sits between `ci` and `lane_host`, so the
         first four fields and the last two stay where their readers find them."""
         self.sd_db("repo", "add", str(self.checkout))
         self.assertEqual(self._list_row()[-3:], ["off", "hub", "manual"])
-        completed = self.sd_db("repo", "github-issues", str(self.checkout), "on")
-        self.assertIn("github_issues off -> on", completed.stdout)
-        self.assertEqual(self._list_row()[-3:], ["on", "hub", "manual"])
+        completed = self.sd_db("repo", "github-issues", str(self.checkout), "ask")
+        self.assertIn("policy.issues off -> ask", completed.stdout)
+        self.assertEqual(self._list_row()[-3:], ["ask", "hub", "manual"])
         self.sd_db("repo", "runner-merge", str(self.checkout), "auto")
-        self.assertEqual(self._list_row()[-3:], ["on", "hub", "auto"])
-        completed = self.sd_db("repo", "github-issues", str(self.checkout), "off")
-        self.assertIn("github_issues on -> off", completed.stdout)
-        self.assertEqual(self._list_row()[-3:], ["off", "hub", "auto"])
+        self.assertEqual(self._list_row()[-3:], ["ask", "hub", "auto"])
+        completed = self.sd_db("repo", "github-issues", str(self.checkout), "read")
+        self.assertIn("policy.issues ask -> read", completed.stdout)
+        self.assertEqual(self._list_row()[-3:], ["read", "hub", "auto"])
 
     def test_repo_github_issues_refuses_a_bad_word_an_unknown_path_and_a_wrong_count(self):
         self.sd_db("repo", "add", str(self.checkout))
-        for word in ("On", "yes", "1", "", " on"):
+        for word in ("on", "Ask", "auto", "1", "", " ask"):
             completed = self.sd_db("repo", "github-issues", str(self.checkout), word, expect=1)
-            self.assertIn("on or off", completed.stdout + completed.stderr)
-        completed = self.sd_db("repo", "github-issues", str(self.home / "absent"), "on", expect=1)
+            self.assertIn("off, read, ask", completed.stdout + completed.stderr)
+        completed = self.sd_db("repo", "github-issues", str(self.home / "absent"), "ask", expect=1)
         self.assertIn("not a registered repository", completed.stdout + completed.stderr)
-        for extra in ([], ["on", "off"]):
+        for extra in ([], ["ask", "off"]):
             completed = self.sd_db("repo", "github-issues", str(self.checkout), *extra, expect=1)
-            self.assertIn("needs a path and on or off", completed.stderr)
+            self.assertIn("needs a path and off, read or ask", completed.stderr)
         self.assertEqual(self._list_row()[-3], "off")
 
     def test_repo_jira_project_sets_and_clears_the_key_and_leaves_list_alone(self):
@@ -426,6 +427,22 @@ class TheMigrationVerbs(MigrationVerbCase):
             self.assertIn("needs a path and a Jira project key or off", completed.stderr)
         completed = self.sd_db("repo", "jira-project", str(self.checkout), "off")
         self.assertIn("jira_project EXAMPLE -> off", completed.stdout)
+
+    def test_repo_freeze_sets_prints_and_lifts_a_window(self):
+        """sd:6879. `repo freeze PATH UNTIL REASON` writes a `freeze` row keyed by owner/name; `off` lifts it."""
+        subprocess.run(["git", "-C", str(self.checkout), "remote", "add", "origin",
+                        "https://github.com/Example/Pack.git"], check=True, capture_output=True)
+        self.sd_db("repo", "add", str(self.checkout))
+        self.assertIn("example/pack not frozen", self.sd_db("repo", "freeze", str(self.checkout)).stdout)
+        until = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(timespec="seconds")
+        completed = self.sd_db("repo", "freeze", str(self.checkout), until, "release 4.2")
+        self.assertIn(f"example/pack frozen until {until}: release 4.2", completed.stdout)
+        self.assertIn("frozen until", self.sd_db("repo", "freeze", str(self.checkout)).stdout)
+        self.assertIn("not frozen", self.sd_db("repo", "freeze", str(self.checkout), "off").stdout)
+        completed = self.sd_db("repo", "freeze", str(self.checkout), until, expect=1)
+        self.assertIn("needs a path", completed.stderr)
+        completed = self.sd_db("repo", "freeze", str(self.home / "absent"), "off", expect=1)
+        self.assertIn("not a registered repository", completed.stdout + completed.stderr)
 
     def test_repo_declare_sets_prints_and_removes_one_kind(self):
         """sd:5109. `repo declare PATH KIND JSON|off` writes the row; `PATH [KIND]` prints it; `$schema` is dropped."""
@@ -484,6 +501,26 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "experiment").stdout), value)
         completed = self.sd_db("repo", "declare", str(self.checkout), "experiment", "off")
         self.assertIn("experiment declared -> none", completed.stdout)
+
+    def test_repo_declare_sets_a_policy_and_refuses_auto_in_an_org_repository(self):
+        """sd:6715. The `policy` kind holds a repository's rules; an org repository never takes `auto`."""
+        self.sd_db("repo", "add", str(self.checkout))
+        value = {"mode": "org", "commit": "ask", "issues": "read", "merge_method": "squash",
+                 "review": {"human": 1, "bots": "triage"},
+                 "commit_convention": {"types": ["feat", "fix", "doc"], "aliases": {"docs": "doc"}, "body": "required"}}
+        completed = self.sd_db("repo", "declare", str(self.checkout), "policy", json.dumps(value))
+        self.assertIn("policy none -> declared", completed.stdout)
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "policy").stdout), value)
+        for word, rule in (('{"mode": "org", "commit": "auto"}', "commit is ask in a org repository"),
+                           ('{"issues": "auto"}', "issues takes off, read or ask"),
+                           ('{"mode": "team"}', "mode is one of managed, org, external"),
+                           ('{"review": {"human": -1}}', "human is the number of approvals"),
+                           ('{"commit_convention": {"types": ["doc"], "aliases": {"docs": "docz"}}}', "names no declared type"),
+                           ('{"freeze": {}}', "unknown key(s) freeze")):
+            with self.subTest(word=word):
+                completed = self.sd_db("repo", "declare", str(self.checkout), "policy", word, expect=1)
+                self.assertIn(rule, completed.stderr)
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "policy").stdout), value)
 
     def test_repo_list_managed_prints_only_the_managed_rows(self):
         other = self.home / "other"

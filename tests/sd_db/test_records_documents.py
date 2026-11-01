@@ -92,14 +92,15 @@ class ThePlan(DocumentsCase):
 class TheMove(DocumentsCase):
     def test_a_moved_row_leaves_tasks_today_and_the_counts_and_keeps_its_id_and_notes(self):
         self.assertTrue({self.video, self.book} <= self.listed())
-        add_note(self.db, self.book, "question", "Which edition?\nOption: first\nOption: second", session="operator")
+        add_note(self.db, self.book, "question", "Which edition?\nOption: first (Recommended)\nOption: second", session="operator")
         # Due and blocked rows, so Today's sections would show them.
         self.db.execute("UPDATE item SET due='2026-10-20' WHERE id=?", (self.video,))
         self.db.execute("UPDATE item SET due='2026-11-20' WHERE id=?", (self.book,))
         self.db.execute("UPDATE item SET status='blocked' WHERE id=?", (self.named,))
         sections = today.sections(self.db, now=NOW)
         ids = {row["id"] for key in ("planned", "blocked", "work") for row in sections[key]}
-        self.assertTrue({self.video, self.named, self.book} <= ids)
+        # pack sd:6743: an idea leaves Planned and Blocked; the overdue one stays in Work.
+        self.assertIn(self.video, ids)
         before = len(self.db.execute("SELECT id FROM note WHERE item=?", (self.video,)).fetchall())
         plan = plan_documents(self.db, books=[self.book])
         moved = move_documents(self.db, books=[self.book], plan=plan.digest, who="operator")

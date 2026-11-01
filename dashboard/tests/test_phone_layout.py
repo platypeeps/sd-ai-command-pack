@@ -125,10 +125,20 @@ class TheBuildControls(unittest.TestCase):
     def test_each_build_control_link_and_fold_is_touch_sized(self):
         for name, css, selector in (("today.css", TODAY_CSS, "#active-tally a"), ("today.css", TODAY_CSS, ".digest .lines a"),
                                     ("today.css", TODAY_CSS, ".active .what a"),
-                                    ("queue.css", QUEUE_CSS, "#builds details.ended summary")):
+                                    ("queue.css", QUEUE_CSS, "#ended details.ended summary")):
             with self.subTest(selector):
                 touch = [body for sels, body in rules(blocks(css, "(pointer: coarse)")) if selector in sels]
                 self.assertTrue(any("min-height: var(--row-touch)" in body for body in touch), f"{selector} in {name}")
+
+
+class TheRowIcons(unittest.TestCase):
+    def test_the_row_actions_sit_on_the_published_marks_middle(self):
+        # pack sd:6704: .pub sat on the middle and .rowact on the baseline, so Read
+        # drew 4 px above the marks in a Briefs or Documents act cell (headless Chrome).
+        for selector in (".pub", ".pub + .rowact"):
+            with self.subTest(selector):
+                found = [body for sels, body in rules(SHELL_CSS) if selector in sels]
+                self.assertTrue(any("vertical-align: middle" in body for body in found), selector)
 
 
 if __name__ == "__main__":

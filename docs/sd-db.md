@@ -274,16 +274,18 @@ A database not yet migrated exits 1 too; neither case answers an empty list.
 
 ## GitHub issues
 
-`repo.github_issues` is 1 for a repository that takes GitHub issues from outside reporters (sd:4827, system sd:4810).
-Every row starts at 0, off: agents use no GitHub issues there and file work as sd items.
-On, an agent maps each open issue to one sd item, comments for the reporter and closes the issue when the item is done.
-The design is `docs/work/2026-10-16-repo-github-issues/design.md`.
+The `policy` declaration's `issues` key says whether a repository takes GitHub issues from outside reporters (sd:4827, pack sd:6849).
+Migration 45 moved the `repo.github_issues` column into it: a row that was on reads `ask`, and the column is gone.
+No key reads `off`: agents use no GitHub issues there and file work as sd items.
+`read`: an agent maps each open issue to one sd item and writes nothing on GitHub.
+`ask`: also, it comments for the reporter and closes the issue when the item is done, each write approved by the operator in the harness prompt (`sd-issue-guard` asks); an unattended run drafts it as a `--kind question` note instead.
+There is no `auto` (note #34749).
 
-    bin/sd-db repo github-issues PATH on        # or off; prints before -> after
+    bin/sd-db repo github-issues PATH ask       # or read, off; prints before -> after
 
-`repo list` shows it as `on` or `off`, between `ci` and `lane_host`; `runner_merge` stays the last field.
-`repos.github_issues` reads it for code: no row reads off, and a database not yet migrated raises `SchemaTooOld`.
-`sd shadow sync` stores every open issue of an `on` repository with a github.com remote, not only the operator's (sd:4880): an unwindowed `is:issue is:open` sweep lists them, five repositories per search, whatever the window.
+`repo list` shows it between `ci` and `lane_host`; `runner_merge` stays the last field.
+`repos.issues_policy` reads it for code: no row and no key read `off`.
+`sd shadow sync` stores every open issue of a `read` or `ask` repository with a github.com remote, not only the operator's (sd:4880): an unwindowed `is:issue is:open` sweep lists them, five repositories per search, whatever the window.
 Absence from a search does not close a row, since GitHub's index can omit an open issue: after a complete sweep, each stored open issue of its repositories that neither it nor this run's buckets saw is read directly (`GET repos/{owner}/{repo}/issues/{n}`, on the sync's budget).
 Only the read's own answer closes it: state `closed`, a `pull_request` key, another issue number, or HTTP 410, which GitHub gives for a deleted issue and for a repository whose Issues are disabled (pack sd:5415); its url spelling decides nothing, so an issue that still answers open under its number stays open, renamed or transferred. Any other failed, refused or over-budget read, a 404 too, leaves it open and prints `intake sweep incomplete`.
 A failed or capped sweep reads and closes nothing, holds no cursor and prints the same line.
@@ -320,6 +322,7 @@ Each key is a kind; each value is the object the old `.github/` file held, or fo
 | `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
 | `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
 | `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids, and optional `url` and `title` (sd:5302) | none |
+| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: it merges by `merge_method` (sd:6790; under rebase, prepare folds `fixup!` commits, writes the trailers on the tip and force-pushes it with a lease), and `review.human` holds the merge until that many humans approve the head; `ci` `{provider: jenkins, url, job}` makes the merge wait for a green Jenkins build of the head (`{pr}` in `job` is the PR number), and an unreachable Jenkins holds it as `ci_unreachable`; `test` `{setup, env, teardown}` is the recipe `sd-check` runs around the checks: unset `env` names or a failed `setup` fail them unrun, and `teardown` runs after them | none |
 
     bin/sd-db repo declare PATH                     # every kind, as JSON
     bin/sd-db repo declare PATH review              # one kind
@@ -332,6 +335,13 @@ It also checks `experiment` itself (`repos.experiment_problems`), since the dash
 `sd_lib.repo_declaration` reads it through `registered_base`, so a linked worktree, a runner clone and a gate's worktree read their repository's row.
 No database on the machine, or a store before 37, reads as nothing declared; a failed read is unknown and each reader refuses or runs in full.
 The `.github/` files are no longer read.
+
+    bin/sd-db repo freeze PATH                      # the open window, or not frozen
+    bin/sd-db repo freeze PATH UNTIL 'reason'       # freeze until UNTIL, at most 31 days
+    bin/sd-db repo freeze PATH off                  # lift it
+
+A freeze window is a `freeze` state row keyed by the repository's GitHub `owner/name`, not a declaration: it is short-lived (sd:6879).
+Inside a window the lane claims no entry, so every entry stays pending in order, and `sd-ship merge` refuses with `freeze_window`.
 
 ## `judgments`: what the judgment models cost, by stage
 
@@ -469,6 +479,21 @@ Each disagreement reads `old→arm`: 1 or 0 for a noul, a position for a choice,
 A pair whose old answer is not a number is counted and not compared.
 Examples are a `--fallback` marker, or a noul asked under a `--gate` other than 0.5.
 A stage with no such pair says `no paired samples with the old mechanism`.
+
+## `telemetry export`: build runs as traces
+
+`sd-db telemetry export [--endpoint URL]` sends every ended build run as one OTLP/JSON trace, Phoenix project `sd-workflow`.
+Spans: the run, then claim, build, each review round, enqueue, lane and merge, from the run's row, notes and cost rows.
+The root carries repo, items, titles, model, cost, tokens, review round, outcome and a failure class (`telemetry.CLASSES`).
+No note body, prompt or `detail` text is sent.
+The run id is the trace id and span ids hash it, so a repeat export is a no-op in Phoenix; each export sends the whole history.
+The endpoint is `--endpoint`, else `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, else `http://127.0.0.1:4338/v1/traces`.
+No collector there prints a skip and exits 0.
+A build's spawn env appends `sd.build_run` and `sd.items` to `OTEL_RESOURCE_ATTRIBUTES`, so Claude Code's own OTel joins the trace.
+
+`sd-db telemetry report [--month YYYY-MM] [--out FILE]` writes the monthly lane report draft for the writing pipeline (pack sd:6947), last month by default, to stdout or `FILE`.
+It reads the same runs: merged PRs with cost and lead time, failure classes against the month before, review rounds and the repeat-blocker rate, denied tool calls, database-lock refusals, and a Phoenix trace link for the first run of each failure class and the three costliest merges.
+Like the export it carries item ids, PR numbers, counts and cost, never a title, note body or `detail`.
 
 ## `review`: one queue of small questions
 

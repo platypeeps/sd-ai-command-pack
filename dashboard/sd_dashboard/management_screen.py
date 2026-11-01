@@ -98,6 +98,14 @@ PIN_BYTES = 65536
 LOG_BYTES = 4096
 
 
+def _issues(connection, path: str) -> str | None:
+    """`policy.issues` for the row (pack sd:6849); None when the declarations do not read."""
+    try:
+        return repos.issues_policy(connection, path)
+    except (repos.SdDbError, sqlite3.Error, TypeError, ValueError, RecursionError):
+        return None
+
+
 def _review(connection, path: str) -> dict:
     """The row's `review` declaration (sd:5159): `declaration: None` when the row declares none.
 
@@ -274,8 +282,8 @@ def _repos(connection) -> list[dict]:
             # sd:3984: a store before migration 33 has no column, and an unread flag is unknown, not no.
             "dependabot": ("yes" if row["dependabot"] else "no") if "dependabot" in row.keys() else None,
             "dependabot_gate": _dependabot_gate(row["remote"]),
-            # sd:4840: a store before migration 35 has no column; an unread setting is unknown, not off.
-            "github_issues": ("on" if row["github_issues"] else "off") if "github_issues" in row.keys() else None,
+            # sd:4840, pack sd:6849: `policy.issues`, off, read or ask; an unread setting is unknown, not off.
+            "github_issues": _issues(connection, row["path"]),
             # sd:5103: the Jira project File Jira issue files in, `off` for none; before migration 36, unknown.
             "jira_project": (row["jira_project"] or "off") if "jira_project" in row.keys() else None,
             "created_at": row["created_at"], "updated_at": row["updated_at"],
@@ -614,7 +622,7 @@ def set_repo(connection: sqlite3.Connection, field: str, path: str, value, befor
         if row is None:
             raise repos.RepoRefusal(f"{path} is not a registered repository")
         current = (("yes" if row[column] else "no") if column in ("managed", "dependabot")
-                   else ("on" if row[column] else "off") if column == "github_issues"
+                   else repos.issues_policy(connection, row["path"]) if column == "github_issues"
                    else (row[column] or "off") if column == "jira_project" else row[column])
         if current != before:
             raise StaleSetting(f"{column} for {path} is {current} now, not {before}; read the page again")

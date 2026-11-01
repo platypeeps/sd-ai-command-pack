@@ -28,8 +28,8 @@ REPOSITORY = "fixture/repo"
 NO_POLL = patch("time.sleep", side_effect=AssertionError("the lock polled"))
 
 #: Hold the lock, say so on stdout, and release after argv[3] seconds. The
-#: last line is the monotonic time it let go, so a waiter's latency is measured
-#: from the release itself; under load the sleep's wake-up runs late (sd:2597).
+#: last line is a monotonic time read after the flock let go, so every lock
+#: attempt that starts later must succeed (sd:2597).
 HOLDER = """
 import sys, time
 from pathlib import Path
@@ -38,8 +38,24 @@ with ship.repository_lock(Path(sys.argv[1]), sys.argv[2],
                           holder={"command": "sd-ship prepare --item 1872", "item": 1872}):
     print("held", flush=True)
     time.sleep(float(sys.argv[3]))
-    print("released", time.monotonic(), flush=True)
+print("released", time.monotonic(), flush=True)
 """
+
+
+def recorded_polls():
+    """Patch `time.sleep` to record each poll: (asked seconds, wake time).
+
+    A wall-clock bound on a waiter flakes under gate load: the waiter's own
+    wake-up runs late (sd:6869). What the lock owes is the poll itself: no
+    sleep past the poll or the deadline, and one attempt after the release.
+    """
+    polls, real = [], time.sleep
+
+    def sleep(seconds):
+        real(seconds)
+        polls.append((seconds, time.monotonic()))
+
+    return polls, patch("time.sleep", sleep)
 
 
 class ShipLockHolder(unittest.TestCase):
@@ -134,31 +150,33 @@ class ShipLockHolder(unittest.TestCase):
     @hub_only
     def test_wait_refuses_at_the_deadline_and_names_the_holder(self):
         child = self.hold()
+        polls, recording = recorded_polls()
         started = time.monotonic()
-        with self.assertRaises(WorkflowError) as refused:
+        with recording, self.assertRaises(WorkflowError) as refused:
             with ship.repository_lock(self.database, REPOSITORY, wait=1.5):
                 self.fail("second owner")
-        elapsed = time.monotonic() - started
-        self.assertGreaterEqual(elapsed, 1.5)
-        self.assertLess(elapsed, 1.5 + ship.WAIT_POLL_SECONDS + 1.0)
+        self.assertGreaterEqual(time.monotonic() - started, 1.5)
+        self.assertTrue(all(asked <= ship.WAIT_POLL_SECONDS for asked, _ in polls), polls)
+        self.assertLessEqual(sum(asked for asked, _ in polls), 1.5)
         self.assertIn(f"pid {child.pid}", str(refused.exception))
         self.assertIn("waited 1.5s", str(refused.exception))
 
     @hub_only
     def test_wait_runs_once_the_holder_releases(self):
-        """Within a poll of the release, timed from the holder's own clock.
+        """At the first attempt after the release, timed from the holder's clock.
 
         `time.monotonic` is one clock for every process on the machine. A
-        bound timed from `hold()` returning also counted the holder's late
-        wake-up under load, and failed at 3.1 s against 2.5 s (sd:2597).
+        wall-clock bound from the release still counted the waiter's own late
+        wake-up under load, and flaked at the gate (sd:2597, sd:6869).
         """
         child = self.hold(seconds=1.0)
-        with ship.repository_lock(self.database, REPOSITORY, wait=10, holder={"item": 9}):
-            acquired = time.monotonic()
+        polls, recording = recorded_polls()
+        with recording, ship.repository_lock(self.database, REPOSITORY, wait=10, holder={"item": 9}):
             self.assertEqual(json.loads(self.lock_path().read_text())["pid"], os.getpid())
         word, released = child.stdout.readline().split()
         self.assertEqual(word, "released")
-        self.assertLess(acquired - float(released), ship.WAIT_POLL_SECONDS + 1.0)
+        self.assertTrue(all(asked <= ship.WAIT_POLL_SECONDS for asked, _ in polls), polls)
+        self.assertLessEqual(sum(1 for _, woke in polls if woke > float(released)), 1, polls)
 
     def test_a_negative_wait_is_refused(self):
         with self.assertRaises(WorkflowError):

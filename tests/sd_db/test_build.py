@@ -172,6 +172,15 @@ class Claim(Case):
         self.assertEqual(self.statuses(items), ["in_progress", "in_progress"])
         self.assertIsNone(self.claim(), "nothing is left queued")
 
+    def test_a_claim_records_the_build_branch_on_every_member_row(self):
+        """pack sd:6756: an empty `item.branch` failed sd-docs-lint on a design-only build."""
+        items = [self.item(), self.item()]
+        self.db.execute("UPDATE item SET branch = 'docs/old' WHERE id = ?", (items[1],))
+        lead = build.queue(self.db, items, who="operator")[0]["id"]
+        self.claim()
+        self.assertEqual([item_state(self.db, item)["item"]["branch"] for item in items],
+                         [f"build/sd-{lead}"] * 2)
+
     def test_a_bundle_of_mechanical_items_runs_sonnet(self):
         build.queue(self.db, [self.item(fields={"work_kind": "mechanical"})], who="operator")
         self.assertEqual(self.claim()["model"], "sonnet")
@@ -450,7 +459,7 @@ class Reap(Case):
         return later(self.bundle["created_at"], build.STALE_SECONDS + 1)
 
     def test_reap_unstarted_run(self):
-        """Failure table, Spawn: no beat for 180 s after the claim: reaped, a fresh row at `worktree`."""
+        """Failure table, Spawn: no beat for `STALE_SECONDS` after the claim: reaped, a fresh row at `worktree`."""
         self.assertEqual(build.reap(self.db, now=later(self.bundle["created_at"], 60)), [])
         settled = build.reap(self.db, now=self.stale())
         self.assertEqual([(row["run"], row["outcome"]) for row in settled], [(self.bundle["id"], "interrupted")])

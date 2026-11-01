@@ -43,6 +43,7 @@ from typing import Any, Callable
 
 from . import build, draft, paths, sessions
 from .build import Probe
+from .database import Patient
 from .ship import this_host
 from .writes import add_note, now, record_cost, record_state
 
@@ -62,9 +63,9 @@ HEARTBEAT = "build-dispatch"
 #: `lane retry` queues again (`prepared` is a merge the lane refused), and a cancel.
 LANE_ENDED = ("failed", "skipped", "prepared", "cancelled")
 
-#: The waits, in seconds, before a supervisor statement a locked database refused is sent again (pack sd:6588).
-#: With each try's own `busy_timeout` they total about a minute, well under `build.STALE_SECONDS`.
-LOCK_WAITS = (1, 2, 4, 8, 16)
+#: The builder's pre-approved calls: the brief's two commit forms (pack sd:6723). A prefix rule cannot pin
+#: the -F file inside the worktree; the brief does.
+ALLOWED = ("Bash(git commit -m:*)", "Bash(git commit -F:*)")
 
 #: The child waits for one byte on its pipe, written once its group is recorded, then execs the command.
 GATE = ("import os, sys\n"
@@ -79,9 +80,11 @@ BRIEF = """You are a headless builder run by the build dispatcher (pack sd:6094)
 
 Build these items, one commit per item, in the worktree {worktree} on branch {branch}:
 {items}
-{findings}
+{findings}{denied}
 Rules:
 - Work only in {worktree}. Read each item with `sd task show N` and the repository's CLAUDE.md first.
+- Write no file outside the worktree but the title and body below, not even in /tmp. Commit with
+  `git commit -m` or `git commit -F <file inside the worktree>`; add new commits and never amend.
 - The dispatcher owns every item's status: never run `sd task status`, never push, never open a pull request.
 - Write a test that fails before each fix, then make it pass; skip no test.
 - End the commit that delivers a whole item with a `Closes: sd:N` trailer: an item no trailer names
@@ -92,8 +95,16 @@ Rules:
 - Write the pull-request body, with `## Summary` and `## Test plan`, to {body}; quote each fail-first line.
   The body is public, so it names no local path (the worktree, a home directory): use repo-relative paths.
   The body carries no `Closes:` line: enqueue takes items by `--item` and refuses one (sd:3704).
+- Fence each failure table and any other line over 72 characters in the body in a code block.
+- Use synthetic names in tests and commits (`operator`, `example.test`), never a real person, host or path:
+  the pre-push leak guard refuses them.
+- Before your report, check the commits since origin/main and the body for both: the supervisor runs
+  the enqueue's line check and the leak guard after you, and sends each failure back to fix.
 - Leave the worktree clean, with your commits on the branch.
-- An item that needs the operator: record it with `sd task note N '<question>' --kind question` and skip it.
+- End only a process you started, by its pid: never `pkill` or `killall`, which end other sessions'
+  gates too (sd:6815).
+- An item that needs the operator: record it with `sd task note N $'<question>\\nOption: <a> (Recommended)\\nOption: <b>'
+  --kind question` and skip it.
 
 Your final message is your report: the commits, the tests run with their result lines, and anything not done.
 """
@@ -136,7 +147,7 @@ is none.>
 
 RESUME = """Your run was interrupted. Continue the brief in {worktree}: finish the items, commit, write the
 title to {title} and the body to {body}, and leave the worktree clean. Your final message is your report.
-"""
+{denied}"""
 
 
 class Unread(Exception):
@@ -209,13 +220,24 @@ def judge(lines: list[str], *, session: str | None = None) -> dict:
         return {**result, "state": "unknown", "why": "the result has no permission_denials list"}
     if denials:
         tools = sorted({str(row.get("tool_name") if isinstance(row, dict) else row) for row in denials})
-        return {**result, "state": "denied", "tools": tools, "why": f"permission denied: {', '.join(tools)}"}
+        return {**result, "state": "denied", "tools": tools, "why": f"permission denied: {', '.join(tools)}",
+                "calls": "; ".join(_denied_call(row) for row in denials)}
     if final.get("subtype") == "error_max_turns":
         return {**result, "state": "max_turns", "why": "the builder hit its turn limit"}
     if final.get("subtype") != "success" or final.get("is_error") is not False:
         return {**result, "state": "failed", "why": f"the result is {final.get('subtype')}, is_error "
                                                     f"{final.get('is_error')}"}
     return {**result, "state": "pass", "why": ""}
+
+
+def _denied_call(row) -> str:
+    """One denial as the retry's brief names it: the tool and its command or path."""
+    if not isinstance(row, dict):
+        return str(row)
+    given = row.get("tool_input")
+    given = given if isinstance(given, dict) else {}
+    what = given.get("command") or given.get("file_path") or given.get("path")
+    return f"{row.get('tool_name')} `{str(what)[:300]}`" if what else str(row.get("tool_name"))
 
 
 def _read(argv: list[str], *, env: dict | None = None) -> str:
@@ -254,9 +276,10 @@ def _lead_item(connection, ident: str) -> tuple[int, list[int]]:
 def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=Probe) -> list[dict]:
     """Step 7's start: each open `enqueued` run whose lane entry merged moves to `cleaning`; one whose entry
     failed, was skipped or was cancelled ends `lane_failed`. An unread lane changes nothing this tick.
+    One that failed only on prepare's merge of main also goes back to its builder (`build.lane_failed`, sd:6940).
 
-    A merged run moves only once `verdict` reads its last supervisor and child gone, so the fresh supervisor
-    never shares the worktree.
+    A merged or failed run moves only once `verdict` reads its last supervisor and child gone, so the fresh
+    supervisor or rebuild never shares the worktree.
     """
     moved = []
     for row in build.open_runs(connection):
@@ -272,17 +295,85 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
         if status == "merged" and build.verdict(row, probe=probe)[0] == build.GONE:
             if build.merged(connection, row):
                 moved.append({"run": row["id"], "step": "cleaning"})
-        elif entry is not None and status in LANE_ENDED:
+        elif (entry is not None and status in LANE_ENDED
+              and build.verdict(row, probe=probe)[0] == build.GONE):  # a rebuild must not share a live worktree
             reason = f"lane entry {entry.get('id')} {status}: {entry.get('reason') or entry.get('code') or 'no reason'}"
             if build.lane_failed(connection, row, reason):
                 moved.append({"run": row["id"], "outcome": "lane_failed"})
     return moved
 
 
+def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
+    """Remove each build worktree, and its branch, that no run owns any more once every item it names is done.
+
+    A blocked or cancelled run keeps its worktree for Retry, and a later build
+    may land the same items; the lane squash-merges, so the branch reads
+    unpushed forever (pack sd:6909). Kept: an unreleased run on the path, an
+    item of any run on it not done, a dirty or unread worktree, one holding an
+    ignored or untracked file, a locked one, a live session other than a
+    builder's. The paths removed.
+
+    An item marked done is no proof its commits landed: a squash merge leaves
+    no ancestry to check, and an item can be closed by hand. So the branch
+    head is first kept at `refs/sd-swept/<branch>`, outside `refs/heads`, and
+    a note on the lead item names it; a head that cannot be kept removes
+    nothing. `git branch <name> refs/sd-swept/<name>` brings it back.
+    """
+    rows = connection.execute(
+        "SELECT runner_run.work_path, runner_run.repo, runner_run.branch, runner_run.session_id, "
+        "runner_run.released_at, item.status, item.id AS item, "
+        "assignment.id = runner_run.assignment AS lead FROM runner_run "
+        "JOIN assignment ON assignment.id = runner_run.assignment OR assignment.parent = runner_run.assignment "
+        "JOIN item ON item.id = assignment.item WHERE assignment.scope = ? AND runner_run.work_path IS NOT NULL",
+        (build.SCOPE,)).fetchall()
+    paths_: dict[str, dict] = {}
+    for row in rows:
+        entry = paths_.setdefault(row["work_path"], {"repo": row["repo"], "branch": row["branch"], "keep": False,
+                                                     "sessions": set(), "lead": row["item"]})
+        entry["keep"] |= row["released_at"] is None or row["status"] != "done"
+        entry["sessions"].add(row["session_id"])
+        if row["lead"]:
+            entry["lead"] = row["item"]
+    removed = []
+    for work, entry in paths_.items():
+        if entry["keep"] or not Path(work).is_dir():
+            continue
+        try:
+            # `git worktree remove` deletes ignored files, and untracked ones that config hides from
+            # status: a tree that holds any keeps them, build output too, since no list names it disposable.
+            if _read([*git, "-C", work, "status", "--porcelain", "--ignored", "--untracked-files=all"]).strip():
+                continue
+        except Unread:
+            continue
+        if sessions.holders(connection, work, machine=this_host(), exclude=tuple(filter(None, entry["sessions"]))):
+            continue
+        repo = str(paths.expand(entry["repo"]))
+        kept = f"refs/sd-swept/{entry['branch']}"
+        try:
+            head = _read([*git, "-C", work, "rev-parse", "--verify", "HEAD"]).strip()
+            if head != _read([*git, "-C", repo, "rev-parse", "--verify", f"refs/heads/{entry['branch']}"]).strip():
+                continue  # a detached HEAD off its branch: two heads to keep, so the sweep keeps both
+            _read([*git, "-C", repo, "update-ref", kept, head])
+        except Unread:
+            continue
+        try:
+            _read([*git, "-C", repo, "worktree", "remove", work])
+        except Unread:
+            continue
+        removed.append(work)
+        add_note(connection, entry["lead"], "comment",
+                 f"Build worktree {work} swept: every item is done; its head {head[:12]} is kept at {kept}")
+        try:
+            _read([*git, "-C", repo, "branch", "-D", entry["branch"]])
+        except Unread:
+            pass  # the worktree is gone and the head kept; a branch left over costs nothing
+    return removed
+
+
 def dispatch(connection, *, owner: str, load: float | None, load_cap: float | None, interactive: list[dict] | None,
              spawn: Callable[[str], Any], lane: Callable[[dict, list[int]], dict | None], why: str = "",
              root: Path | None = None, probe=Probe, kill=build.kill_group) -> dict:
-    """One tick: heartbeat, reap, watch the lane, claim, spawn; what each did.
+    """One tick: heartbeat, reap, watch the lane, sweep, claim, spawn; what each did.
 
     `load`, `load_cap` and `interactive` are read before the claim, outside
     the database; any unread (None) means no claim this tick, as does `why`,
@@ -291,6 +382,7 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     record_state(connection, "heartbeat", key=HEARTBEAT, body={"pid": os.getpid(), "owner": owner})
     reaped = build.reap(connection, probe=probe, kill=kill) + draft.reap(connection, probe=probe, kill=kill)
     moved = watch(connection, lane=lane, probe=probe)
+    swept = sweep(connection)
     claimed: list[str] = []
     while not why and len(claimed) < build.MACHINE_CAP:
         try:
@@ -313,7 +405,7 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
         if row["outcome"] is None and row["supervisor_pid"] is None and row["step"] != "enqueued":
             spawn(row["id"])
             spawned.append(row["id"])
-    return {"reaped": reaped, "moved": moved, "claimed": claimed, "drafted": drafted, "spawned": spawned, "why": why}
+    return {"reaped": reaped, "moved": moved, "swept": swept, "claimed": claimed, "drafted": drafted, "spawned": spawned, "why": why}
 
 
 def spawn(argv: list[str], *, log: Path) -> int:
@@ -338,42 +430,19 @@ def _environ(environ: dict | None) -> dict:
     return env
 
 
-class Patient:
-    """A supervisor's connection: a statement a locked database refused outside a transaction is sent again.
-
-    A statement refused outside a transaction (a `BEGIN`, a read, one
-    autocommit write) wrote nothing, so a retry cannot write twice; one
-    inside a transaction fails as it did. Each try waits its `busy_timeout`.
-    """
-
-    def __init__(self, connection):
-        self.connection = connection
-
-    def __getattr__(self, name: str):
-        return getattr(self.connection, name)
-
-    def execute(self, sql: str, parameters=()):
-        for wait in (*LOCK_WAITS, None):
-            try:
-                return self.connection.execute(sql, parameters)
-            except sqlite3.OperationalError as error:
-                if wait is None or self.connection.in_transaction or not (
-                        "locked" in str(error) or "busy" in str(error)):
-                    raise
-            time.sleep(wait)
-
-
 class Supervisor:
     """One run's supervisor: `run()` walks its steps and returns how it ended."""
 
     def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path,
                  cited: Callable[[Path, str, str, str], Collection[int] | None], environ: dict | None = None,
                  beat_seconds: float = BEAT_SECONDS, timeout: float = TIMEOUT_SECONDS, grace: float = GRACE_SECONDS,
-                 probe=Probe):
+                 probe=Probe, checked: Callable[[Path, str, str, str, str], list[str]] | None = None):
         """`cited(worktree, base, head, body)` is the items the lane reads the branch as delivering, None when unread:
-        the lane's own reader, which lives beside it in `bin/`."""
+        the lane's own reader, which lives beside it in `bin/`. `checked(worktree, base, head, title, body)` is
+        what enqueue and its push would refuse, the line check and the leak guard (pack sd:6926); None checks
+        nothing."""
         self.db: Any = Patient(connection)  # duck-types the connection the writes are annotated with
-        self.ident, self.tools, self.probe, self.cited = ident, tools, probe, cited
+        self.ident, self.tools, self.probe, self.cited, self.checked = ident, tools, probe, cited, checked
         self.beat_seconds, self.timeout, self.grace = beat_seconds, timeout, grace
         self.row = build.run(self.db, ident)
         self.logs = log_dir(log_root, self.row["repo"])
@@ -388,6 +457,11 @@ class Supervisor:
         self.blockers: list[dict] = []
         self.last_beat = 0.0
         self.env = _environ(environ)
+        # Claude Code's own OTel, where the machine turns it on, joins the run's
+        # trace by these (pack sd:6943); the switch and endpoint are system sd:6944's.
+        self.env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(filter(None, (
+            self.env.get("OTEL_RESOURCE_ATTRIBUTES"), f"sd.build_run={ident}",
+            "sd.items=" + ";".join(str(item) for item in (self.lead, *self.others)))))
 
     # ----------------------------------------------------------- the walk
 
@@ -470,6 +544,10 @@ class Supervisor:
     def reviewing(self) -> str | dict:
         self.enter("reviewing")
         head = self.head()
+        # What enqueue would refuse goes back to the builder before a review is spent (pack sd:6926).
+        refused = self.prechecked(head)
+        if refused:
+            return self.blocked_round([{"path": "enqueue check", "line": "-", "summary": text} for text in refused])
         answer: dict | None = None
         for _attempt in range(2):
             out = self.out("review")
@@ -484,10 +562,19 @@ class Supervisor:
         if answer["status"] in ("clean", "advisory"):
             self.reviewed = head
             return "enqueuing"
+        return self.blocked_round(answer["blockers"])
+
+    def prechecked(self, head: str) -> list[str]:
+        if self.checked is None:
+            return []
+        title, body = (path.read_text(encoding="utf-8") if path.exists() else "" for path in (self.title, self.body))
+        return self.checked(self.work, self.base(), head, title.strip(), body)
+
+    def blocked_round(self, blockers: list[dict]) -> str | dict:
         rounds = (self.fresh()["review_round"] or 0) + 1
         if not build.write(self.db, self.ident, review_round=rounds):
             raise Lost
-        self.blockers = answer["blockers"]
+        self.blockers = blockers
         if rounds >= REVIEW_ROUNDS:
             return self.finish("blocked", f"{rounds} review rounds left blockers: {self.summary(self.blockers)}")
         return self.fix()
@@ -616,7 +703,7 @@ class Supervisor:
             f"SELECT id, title FROM item WHERE id IN ({', '.join('?' for _ in items)})", items)}
         return {"worktree": self.work, "branch": self.row["branch"], "title": self.title, "body": self.body,
                 "title_max": TITLE_MAX, "items": "\n".join(f"- sd:{item} {titles.get(item, '')}" for item in items),
-                "findings": self.findings(items)}
+                "findings": self.findings(items), "denied": self.denied()}
 
     def findings(self, items: list[int]) -> str:
         """The Send to builder notes on `items` since the lead's first run, up to this run (pack sd:6020); "" for none.
@@ -638,7 +725,8 @@ class Supervisor:
 
     def claude(self, prompt: str, *, session: str | None, then: str) -> str | dict:
         argv = [*self.tools.claude, "-p", prompt, "--output-format", "stream-json", "--verbose",
-                "--permission-mode", "auto", "--max-turns", str(MAX_TURNS), "--model", self.row["model"] or build.OPUS]
+                "--allowedTools", *ALLOWED, "--permission-mode", "auto", "--max-turns", str(MAX_TURNS),
+                "--model", self.row["model"] or build.OPUS]
         if session:
             argv += ["--resume", session]
         offset = self.log.stat().st_size if self.log.exists() else 0
@@ -661,12 +749,48 @@ class Supervisor:
             problem = self.unfinished()
             return self.finish("blocked", problem) if problem else then
         if verdict["state"] == "denied":
-            return self.finish("blocked", verdict["why"],
-                               question=f"Build run {self.ident}: the builder was denied {', '.join(verdict['tools'])}. "
-                                        f"Allow it, or change the brief, then requeue.")
+            # The first denial at a step is a loss: `_settle` requeues it once, the call in its brief (pack
+            # sd:6723). One with no retry left asks the operator.
+            if self.losses() < build.RETRIES:
+                return self.finish("denied", f"permission denied: {verdict['calls']}"[:2000])
+            return self.finish("blocked", verdict["why"], question=self.denial_question(verdict))
         if verdict["state"] == "max_turns":
             return self.finish("error_max_turns", verdict["why"])
         return self.finish("blocked", f"{verdict['why']}; log {self.log}")
+
+    def denial_question(self, verdict: dict) -> str:
+        """The question a denial asks, with its options (pack sd:6708).
+
+        A requeue is the pick unless the run before was denied the same tools, so the denial looks
+        transient; the same denial twice needs the brief changed.
+        """
+        before = self.db.execute("SELECT outcome, detail FROM runner_run WHERE assignment = ? AND run < ? "
+                                 "ORDER BY run DESC LIMIT 1", (self.row["assignment"], self.row["run"])).fetchone()
+        # A run `_settle` requeued after a denial counts as the same denial again (pack sd:6723).
+        again = before is not None and (before["outcome"] == "denied" or
+                                        (before["outcome"] == "blocked" and before["detail"] == verdict["why"]))
+        options = (["Change the brief, then requeue (Recommended)", "Requeue as is"] if again else
+                   ["Requeue as is (Recommended)", "Change the brief, then requeue"]) + ["Drop the build"]
+        return (f"Build run {self.ident}: the builder was denied {', '.join(verdict['tools'])}"
+                f" ({verdict['calls'][:500]}). "
+                f"Allow it, or change the brief, then requeue.\n"
+                + "\n".join(f"Option: {option}" for option in options))
+
+    def losses(self) -> int:
+        """The losses earlier runs of this bundle had at this run's step: `_settle` retries while under `RETRIES`."""
+        marks = ", ".join("?" for _ in build.LOSSES)
+        return self.db.execute(f"SELECT COUNT(*) FROM runner_run WHERE assignment = ? AND step IS ? AND id != ? "
+                               f"AND outcome IN ({marks})",
+                               (self.row["assignment"], self.fresh()["step"], self.ident, *build.LOSSES)).fetchone()[0]
+
+    def denied(self) -> str:
+        """The call the run before this one was denied, for the brief; "" when it was not denied."""
+        row = self.db.execute("SELECT outcome, detail FROM runner_run WHERE assignment = ? AND run < ? "
+                              "ORDER BY run DESC LIMIT 1", (self.row["assignment"], self.row["run"])).fetchone()
+        if row is None or row["outcome"] != "denied":
+            return ""
+        return (f"\nThe run before this one lost to a denied call: {row['detail']}. Do that step another way:\n"
+                f"write no file outside the worktree, commit with -m or with -F on a file inside it, never amend.\n")
 
     def cost(self, final: dict) -> None:
         usage = final.get("usage")
@@ -797,7 +921,15 @@ class Supervisor:
         if time.monotonic() - self.last_beat < self.beat_seconds:
             return
         self.last_beat = time.monotonic()
-        if not build.beat(self.db, self.ident):
+        try:
+            beaten = build.beat(self.db, self.ident)
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error) and "busy" not in str(error):
+                raise
+            # A lock past every retry skips this beat: the next comes in `beat_seconds`, the reap waits
+            # `build.STALE_SECONDS`. Raised, it killed the supervisor beside a live child (pack sd:6741).
+            return
+        if not beaten:
             raise Lost
         row = self.fresh()
         if row["cancel_requested"] and row["step"] in build.CANCELLABLE:
@@ -925,7 +1057,7 @@ class DraftSupervisor(Supervisor):
         parsed = draft.parse(final.get("result") if isinstance(final, dict) else None)
         if parsed is None:
             return self.finish("blocked", f"the reply has no `## Spec`, or a question short of two Option: "
-                                          f"lines; nothing was written; log {self.log}")
+                                          f"lines or of a recommended one; nothing was written; log {self.log}")
         if not draft.write(self.db, self.ident, *parsed):
             raise Lost
         return {"run": self.ident, "outcome": "done", "questions": len(parsed[1])}

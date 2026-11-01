@@ -17,10 +17,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from .reads import (
+    IDEA_KINDS,
     REVIEW_BATCH,
+    WORK_KIND,
     _now,
     _parse,
     _unparked_clause,
+    backlog_items,
     open_notes,
     scheduled_clause,
     today_items,
@@ -35,11 +38,11 @@ ACTIVE_ASSIGNMENTS = ("queued", "running", "ending")
 #: Lane states in the order `landing` lists them; the queue holds the first two.
 LANE_ORDER = ("running", "pending", "prepared", "handed_back", "failed", "skipped")
 #: The section keys of `sections`, in the order every renderer prints them.
-ORDER = ("attention", "operations", "decisions", "landing", "delivered", "planned", "blocked", "unscheduled", "followups", "work")
+ORDER = ("attention", "operations", "decisions", "landing", "queues", "delivered", "planned", "blocked", "unscheduled", "followups", "work")
 #: A choice line of a decision, as the dashboard's Decisions reads one (sd:3012).
 OPTION_LINE = re.compile(r"^[ \t]*Option:[ \t]*\S", re.MULTILINE)
 #: Kinds that are not work to schedule: ideas wait for promotion, reports for acknowledgement.
-_UNSCHEDULED_SKIPS = ("idea", "work-idea", "personal-idea", "report")
+_UNSCHEDULED_SKIPS = (*IDEA_KINDS, "report")
 _DELIVERED_AT = re.compile(r"\bdelivered at ([0-9a-f]{40,64})\b")
 _CODE_DELIVERY = re.compile(r"Code delivery (\S+) at ([0-9a-f]{40,64})\b")
 _PULL = re.compile(r"/pull/([0-9]+)\b")
@@ -332,9 +335,87 @@ def landing(connection: sqlite3.Connection, *, repos: Iterable[str | None] | Non
     return {"entries": found, "gate": _gate(gate)}
 
 
+#: The build assignment states the Queues panel lists (pack sd:6946).
+BUILD_STATES = ("queued", "running", "blocked")
+
+
+def queues(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None,
+           now: str | None = None, lane: dict | None = None) -> list[dict]:
+    """The three queues in one list, as Today's Queues panel and `sd today` show it (pack sd:6946):
+    `queue` is `ready`, `build` or `lane`, with `status`, `detail` and `since`.
+
+    Ready is each ready item in the backlog's order (priority first) that no
+    build holds. Build is each queued, running or blocked build assignment:
+    `detail` is its newest run's step, or the reason the run ended. Lane is
+    `landing`'s entries (`lane`, when the caller read it already), with the
+    step a stopped entry stopped at and `place` for a queued one.
+    """
+    keep = _keep(repos)
+    where, values = _in("item.repo", keep)
+    built = connection.execute(
+        f"""
+        SELECT assignment.item AS id, item.repo, item.title, assignment.status, assignment.queued_at AS since,
+               run.step, run.outcome, run.detail
+          FROM assignment JOIN item ON item.id = assignment.item
+          LEFT JOIN runner_run AS run ON run.rowid = (SELECT rowid FROM runner_run
+                                                      WHERE runner_run.assignment = assignment.id
+                                                      ORDER BY run DESC LIMIT 1)
+         WHERE assignment.scope = 'build' AND assignment.status IN ({', '.join('?' for _ in BUILD_STATES)})
+           AND {where}
+         ORDER BY assignment.queued_at, assignment.id
+        """, (*BUILD_STATES, *values)).fetchall()
+    building = {row["id"] for row in built}
+    found = [{"queue": "ready", "id": row["id"], "repo": row["repo"], "title": row["title"], "status": "ready",
+              "detail": f"P{row['priority']}" if row["priority"] is not None else "-", "since": row["status_since"]}
+             for row in backlog_items(connection, status="ready", now=now)
+             if (keep is None or row["repo"] in keep) and row["id"] not in building and not row["scheduled"]]
+    found += [{"queue": "build", "id": row["id"], "repo": row["repo"], "title": row["title"], "status": row["status"],
+               "detail": _first_line(row["detail"]) if row["status"] == "blocked" and row["detail"]
+               else row["step"] or "-", "since": row["since"]} for row in built]
+    entries = (lane if lane is not None else landing(connection, repos=keep))["entries"]
+    found += [{"queue": "lane", "id": entry["id"], "repo": entry["repo"], "title": entry["title"],
+               "status": entry["status"], "detail": entry.get("step") or "-", "since": entry["since"],
+               "place": entry["place"]} for entry in entries]
+    return found
+
+
+#: The state key prefix of a failure already pushed, one `watermark` row per entry or run (pack sd:6946).
+PUSHED = "pushed:"
+#: The build run outcomes a push reports.
+FAILED_OUTCOMES = ("blocked", "lane_failed", "timed_out", "error_max_turns")
+#: The lane states a push reports.
+FAILED_LANE = ("failed", "skipped")
+
+
+def push_due(connection: sqlite3.Connection, *, now: str | None = None) -> list[dict]:
+    """Each failure the operator has not had a push for (pack sd:6946): a lane entry that failed or was
+    skipped, and a build run that ended blocked or failed in the last day. Each is `key`, `title` and `body`.
+
+    Success pushes nothing, and each key is pushed once: the caller records `PUSHED + key` after a send.
+    """
+    found = [{"key": f"lane:{entry['repository']}:{entry['entry']}", "title": f"Lane {entry['status']}: sd:{entry['id']}",
+              "body": f"{entry['title']} (step {entry.get('step') or '-'})"}
+             for entry in landing(connection)["entries"] if entry["status"] in FAILED_LANE]
+    since = ((_parse(_now(now)) or datetime.now(timezone.utc)) - timedelta(days=1)).isoformat(timespec="seconds")
+    runs = connection.execute(
+        f"""
+        SELECT run.id, run.outcome, run.detail, assignment.item, item.title
+          FROM runner_run AS run JOIN assignment ON assignment.id = run.assignment
+          JOIN item ON item.id = assignment.item
+         WHERE assignment.scope = 'build' AND run.updated_at >= ?
+           AND run.outcome IN ({', '.join('?' for _ in FAILED_OUTCOMES)})
+         ORDER BY run.updated_at, run.id
+        """, (since, *FAILED_OUTCOMES)).fetchall()
+    found += [{"key": f"build:{row['id']}", "title": f"Build {row['outcome']}: sd:{row['item']}",
+               "body": f"{row['title']}: {_first_line(row['detail'])[:300]}"} for row in runs]
+    pushed = {row[0] for row in connection.execute(
+        "SELECT key FROM state WHERE kind = 'watermark' AND substr(key, 1, ?) = ?", (len(PUSHED), PUSHED))}
+    return [row for row in found if PUSHED + row["key"] not in pushed]
+
+
 def planned(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None,
             now: str | None = None) -> list[dict]:
-    """Open unparked items due after today, soonest first: `status`, `due`, `priority`.
+    """Open unparked work items (`reads.WORK_KIND`) due after today, soonest first: `status`, `due`, `priority`.
 
     Today's and overdue ones are `work`. A scheduled occurrence of a recurring
     series (`reads.opens_on_clause`) is in neither until its lead brings it
@@ -345,7 +426,7 @@ def planned(connection: sqlite3.Connection, *, repos: Iterable[str | None] | Non
              "due": row["due"], "priority": row["priority"]} for row in connection.execute(
         f"""
         SELECT item.* FROM item
-         WHERE item.status != 'done' AND item.due > ? AND {_unparked_clause(connection)}
+         WHERE item.status != 'done' AND item.due > ? AND {WORK_KIND} AND {_unparked_clause(connection)}
            AND NOT {scheduled_clause(connection, "?")} AND {where}
          ORDER BY item.due ASC, item.priority IS NULL, item.priority ASC, item.id ASC
         """,
@@ -379,7 +460,7 @@ def unscheduled(connection: sqlite3.Connection, *, repos: Iterable[str | None] |
 
 
 def blocked(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
-    """Open items that are blocked or whose newest comment says they wait on someone:
+    """Open work items (`reads.WORK_KIND`) that are blocked or whose newest comment says they wait on someone:
     `status`, `why` (the reason on the newest move to blocked, else that comment), `since`."""
     where, values = _in("item.repo", _keep(repos))
     rows = connection.execute(
@@ -393,7 +474,7 @@ def blocked(connection: sqlite3.Connection, *, repos: Iterable[str | None] | Non
                  ORDER BY note.id DESC LIMIT 1) AS comment,
                item.updated_at
           FROM item
-         WHERE item.status != 'done' AND {_unparked_clause(connection)} AND {where}
+         WHERE item.status != 'done' AND {WORK_KIND} AND {_unparked_clause(connection)} AND {where}
          ORDER BY item.id ASC
         """,
         values,
@@ -429,6 +510,7 @@ def sections(connection: sqlite3.Connection, *, repos: Iterable[str | None] | No
         "operations": operations(connection, gate=gate, repos=keep),
         "decisions": decisions(connection, repos=keep),
         "landing": landing(connection, repos=keep, gate=gate),
+        "queues": [],
         "delivered": delivered(connection, repos=keep, now=now),
         "planned": planned(connection, repos=keep, now=now),
         "blocked": blocked(connection, repos=keep),
@@ -436,6 +518,7 @@ def sections(connection: sqlite3.Connection, *, repos: Iterable[str | None] | No
         "followups": followups(connection, repos=keep),
         "work": work(connection, repos=keep, now=now),
     }
+    found["queues"] = queues(connection, repos=keep, now=now, lane=found["landing"])
     by_hand = closed_by_hand(connection, repos=keep, now=now)
     week = ((_parse(_now(now)) or datetime.now(timezone.utc)) + timedelta(days=7)).strftime("%Y-%m-%d")
     summary = {key: len(found[key]) for key in ORDER if key not in ("landing", "operations")}

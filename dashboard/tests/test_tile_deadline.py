@@ -9,8 +9,9 @@ less `TILE_MARGIN`, and every nested timeout is capped at the time left.
 
 Both callers are driven for real: the pack's loader, as a parent shaped like
 `plugins.bounded_run` around `dashboard.sh tile`, and this dashboard's
-resource views through `reports_screen.collect`. Neither can be scaled -- the
-child is a real process -- so these run for the real four seconds.
+resource views through `reports_screen.collect`. The child is a real
+process, so the loader and the vault view run for the real four seconds;
+the toolbox view runs the real tile under a 15-second ceiling (sd:6827).
 """
 import contextlib
 import importlib.util
@@ -189,14 +190,27 @@ class Nested(unittest.TestCase):
 
     def test_a_resource_view_gets_the_tiles_reason_within_its_budget(self):
         # This dashboard's path: the real `sd_tile.py`, read by
-        # `reports_screen.collect` within the view's five seconds.
+        # `reports_screen.collect` within the view's budget. At the real four
+        # seconds a loaded gate started the nested command after the deadline
+        # had passed, so it recorded no pid (sd:6827). The real tile runs
+        # here under a 15-second ceiling and a 20-second view, and the nested
+        # command starts five seconds late, past the real deadline, on
+        # purpose: the stub sleeps a minute, so the run takes the same time.
+        (self.bin / "launchctl").write_text(LAUNCHCTL.replace("\n", "\nsleep 5\n", 1))
+        tile = self.root / "tile.py"
+        tile.write_text(
+            "import importlib.util, sys\n"
+            f"spec = importlib.util.spec_from_file_location('sd_tile', {str(reports_screen.TILE)!r})\n"
+            "sd_tile = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(sd_tile)\n"
+            "sd_tile.TILE_SECONDS = 15.0\nsys.exit(sd_tile.main(sys.argv[1:]))\n")
         started = time.monotonic()
-        with patch.dict(os.environ, self.environment()), self.assertRaises(ValueError) as refused:
+        with patch.object(reports_screen, "TILE", tile), patch.dict(reports_screen.VIEW_SECONDS, {"toolbox": 20.0}), \
+                patch.dict(os.environ, self.environment()), self.assertRaises(ValueError) as refused:
             reports_screen.collect("toolbox")
         elapsed = time.monotonic() - started
         self.assert_none_survive(refused.exception)
         self.assertRegex(str(refused.exception), "^toolbox: PastDeadline.*launchctl ran past this tile's budget")
-        self.assertLess(elapsed, reports_screen.VIEW_SECONDS["toolbox"])
+        self.assertLess(elapsed, 20.0)
 
     def probe_tile(self):
         script = self.root / "tile.py"
