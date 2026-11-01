@@ -455,7 +455,8 @@ let polling = 0;
     // sd:6693: Open | All is the shell's .vseg, the size of every other segment group.
     const seg = (v, word, count) => html`<button type="button" data-f="tasks" data-v="${v}" aria-pressed="${String(obShow === v)}">${word} <span class="n">${String(count)}</span></button>`;
     put($('ob-show'), DOC && !f.error ? html`${seg('open', 'Open', OB.length)}${seg('all', 'All', TASKS().length)}` : html``);
-    put($('ob-kinds'), html`${['all', ...kinds].map(k => html`<button class="chip" type="button" data-kind="${k}" aria-pressed="${String(k === kind)}">${k === 'all' ? 'All' : k} <b>${k === 'all' ? shown.length : n(k)}</b></button>`)}`);
+    // pack sd:7084: no All chip; none pressed is every kind, and a second press on the pressed one clears it.
+    put($('ob-kinds'), html`${kinds.map(k => html`<button class="chip" type="button" data-kind="${k}" aria-pressed="${String(k === kind)}">${k} <b>${n(k)}</b></button>`)}`);
     put($('ob-head'), window.shell.list.sortHead(OB_COLS, OB_ST));
     const rows = obRows();
     put($('ob-body'), !DOC ? html`` : f.error ? html`<tr><td colspan="7">${unknownBlock(f.error)}</td></tr>`
@@ -642,7 +643,7 @@ let polling = 0;
     });
     $('ob-kinds').addEventListener('click', e => {
       const b = e.target.closest('button[data-kind]'); if (!b) return;
-      kind = b.dataset.kind; drawTasks();
+      kind = b.dataset.kind === kind ? 'all' : b.dataset.kind; drawTasks();
     });
     // ---------- Acknowledge (sd:4967) ----------
     // The workflow database's view state, as Designs' Hide: POST /api/hoa/alarm. Undo is the same post with the old value.

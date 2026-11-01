@@ -891,8 +891,8 @@ R.det = ELS.details.html;""", answer=f"() => [200, {json.dumps(cut)}]")
         full = self.run_page("R.ann = ELS.annunciator.html;")["R"]["ann"]
         self.assertNotIn("at least", full)
 
-    def test_the_list_and_the_cadence_are_the_shells_views_with_the_range_in_each(self):
-        """sd:5080: Briefs, Topics and Cadence are PAGE_VIEWS, in that order; the Range chips sit in each view's head."""
+    def test_the_list_and_the_cadence_are_the_shells_views_with_the_range_in_each_filter_row(self):
+        """sd:5080: Briefs, Topics and Cadence are PAGE_VIEWS, in that order; the Range chips lead each filter row (pack sd:7084)."""
         page = (V2 / "briefs.html").read_text(encoding="utf-8")
         self.assertLess(page.index('id="view-list"'), page.index('id="view-topics"'))
         self.assertLess(page.index('id="view-topics"'), page.index('id="view-cadence"'))

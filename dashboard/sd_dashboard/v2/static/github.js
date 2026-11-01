@@ -33,15 +33,16 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'issues', la
   const TIP = 'Runs sd shadow sync: reads pull request and issue state from GitHub, and writes only the local store.';
   function drawSync() {
     const { html, put } = window.markup;
-    if (!SYNC) return LINES.forEach(id => put(document.getElementById(id), html``));
+    if (!SYNC) return LINES.forEach(id => { put(document.getElementById(id), html``); put(document.getElementById(id.replace('-sync', '-said')), html``); });
     window.shell.commands.put({ id: JOB, type: 'job', label: SYNC.name, job: SYNC.name });
     const c = facts().capability, running = SYNC.state === 'running', off = !c?.allowed;
     const said = running ? 'The refresh is running in the background; every view reads again when it ends.'
       : off ? `Refresh from GitHub is off: ${c?.reason || 'launchd refuses a run now'}`
         : 'It runs in the background; every view reads again when it ends.';
     const at = SYNCED?.last_success_at ? html` GitHub read <time class="rel" datetime="${SYNCED.last_success_at}"></time>.` : ' GitHub not read yet.';
-    const line = html`<button class="btn quiet sm" type="button" title="${TIP}" data-cmd="jobs.retry" data-obj="${JOB}"${off ? html` disabled` : ''}><svg class="i" aria-hidden="true"><use href="#i-rotate-ccw"/></svg><span>Refresh from GitHub</span></button> ${said}${at}`;
-    LINES.forEach(id => put(document.getElementById(id), line));
+    // pack sd:7084: the button sits in each view's section head tools; what it does and when GitHub was read stay under it.
+    const button = html`<button class="btn quiet sm" type="button" title="${TIP}" data-cmd="jobs.retry" data-obj="${JOB}"${off ? html` disabled` : ''}><svg class="i" aria-hidden="true"><use href="#i-rotate-ccw"/></svg><span>Refresh from GitHub</span></button>`;
+    LINES.forEach(id => { put(document.getElementById(id), button); put(document.getElementById(id.replace('-sync', '-said')), html`${said}${at}`); });
   }
   document.addEventListener('DOMContentLoaded', () => {
     const retry = window.commands.retry({ job: facts,

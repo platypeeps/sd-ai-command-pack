@@ -1,8 +1,9 @@
 # Management
 
 Management is at `/management` (sd:2118): the managed repositories with their
-review, protection and runtime columns, the checkouts' git state, the ship
-lane, sessions, services and launchd jobs. `GET /api/management`
+review, protection and runtime columns, the checkouts' git state, sessions,
+services and launchd jobs. The ship lane's assignments are Queue's
+Assignments view (pack sd:7115). `GET /api/management`
 (`management_screen.document`) builds one document from reads v1 already
 makes. Each source is read on its own, so one that fails is a named reason, not
 an empty list. Nothing fetches, pulls or calls GitHub: protection is the

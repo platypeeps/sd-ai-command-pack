@@ -199,7 +199,7 @@ class TheAssets(BrowserSession):
 
     def test_each_in_motion_table_carries_its_caption(self):
         """pack sd:6975: each In motion table says in one line what it holds."""
-        section = re.search(r'<section aria-labelledby="motion-h">(.*?)</section>',
+        section = re.search(r'<section id="view-motion" aria-labelledby="motion-h" hidden>(.*?)</section>',
                             (V2 / "today.html").read_text(encoding="utf-8"), re.S).group(1)
         tables = re.findall(r"<table\b.*?</table>", section, re.S)
         self.assertEqual(len(tables), 2)
