@@ -4,7 +4,7 @@ What this slice promises: `/management` answers under the shared policy and
 loads its script before `shell.js`; `/api/management` is one document built
 from the reads v1 already makes (the sd-db repo table with each row's review
 declaration and protection reading, the fleet's git state and
-sessions, the ship lane, services and jobs), where a source that fails is
+sessions, services and jobs), where a source that fails is
 a reason and never an empty list; `/api/repos/<verb>` runs the two sd-db repo
 verbs and refuses a stale `before`.
 
@@ -26,7 +26,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_dashboard import management_screen, server, upload_link, v2
+from sd_dashboard import management_screen, queue_screen, server, upload_link, v2
 from sd_db import repos, upsert_repo, upsert_shadow, workflow, writes
 from sd_db.errors import SdDbError
 from support import NOW, ScreenCase
@@ -124,12 +124,13 @@ class TheDocument(ScreenCase):
 
     def test_every_source_is_read_and_says_so(self):
         doc = self.document()
-        self.assertEqual(doc["sources"], {k: "" for k in ("repos", "pulls", "deep", "git", "lane", "sessions",
+        # pack sd:7115: the lane's assignments moved to Queue, so the page reads no lane.
+        self.assertEqual(doc["sources"], {k: "" for k in ("repos", "pulls", "deep", "git", "sessions",
                                                           "claude", "services", "jobs", "satellites", "upload")})
         self.assertEqual(doc["read"], NOW)
         # sd:3041: the runner stopped, so no archive refresh from runner.sh and no runner heartbeat.
         self.assertNotIn("archive", doc)
-        self.assertNotIn("heartbeat", doc["lane"])
+        self.assertNotIn("lane", doc)
 
     def test_pulls_are_the_open_shadow_pull_requests_by_lower_cased_slug(self):
         """sd:5100: the repo row's Adversarial review: PR picks from these; nothing calls GitHub."""
@@ -330,8 +331,9 @@ class TheDocument(ScreenCase):
         doc = self.document()
         self.assertNotIn("assignments", doc)
         self.assertNotIn("assignments", doc["sources"])
-        self.assertNotIn("merges", doc["lane"])
-        self.assertEqual(sorted(doc["lane"]), ["live", "ready"])
+        lane = queue_screen.runner(self.connection)
+        self.assertNotIn("merges", lane)
+        self.assertEqual(sorted(lane), ["live", "ready"])
         self.assertEqual((doc["sessions"]["registered"], doc["sessions"]["abandoned"]), (2, 1))
         jobs = {job["name"]: job for job in doc["jobs"]}
         self.assertEqual((jobs["nightly-sync"]["state"], jobs["nightly-sync"]["capabilities"]["retry"]["allowed"]), ("failed", True))
@@ -1050,8 +1052,6 @@ class TheScript(PageScript):
             ["declaration.write", "declaration change", "undo", "p", True, True],
             ["sddb.withdraw", "sd-db change", "safe", None, False, False],
             ["declaration.withdraw", "declaration change", "safe", None, False, False],
-            ["asg.get", "assignment", "safe", "o", True, False],
-            ["item.show", "item", "safe", "o", False, False],
             ["wt.prune", "worktrees", "confirm", "p", None, False],
             ["svc.restart", "service", "confirm", "t", None, False],
             ["svc.stop", "service", "confirm", "s", None, False],
@@ -2044,7 +2044,7 @@ const answerNewestFirst = async () => { while (held.length) { held.pop()(); awai
 class TheSharedReader(PageScript):
     """sd:2485: the page reads through shell.read (read.js, sd:2418), so it gets the reader's guards."""
 
-    WHAT = "repos, the lane, sessions, services and jobs"
+    WHAT = "repos, sessions, services and jobs"
 
     def test_only_the_newest_read_draws(self):
         out = self.run_page(HELD + """after.jobs = after.jobs.filter(j => j.name !== 'quiet'); wrote = true;
@@ -2109,14 +2109,14 @@ R.sched = ELS['view-schedules'].html; R.type = C.get('cron:quiet').type;""")
     def test_a_failed_load_clears_the_rows_and_their_commands(self):
         out = self.run_page("""ANSWER = () => [500, {error: 'database is busy'}]; await load(); await flush();
 R.sched = ELS['view-schedules'].html; R.repos = ELS['view-repos'].html; R.type = C.get('cron:quiet').type;
-R.lamps = ['repos', 'lane', 'sessions', 'schedules'].map(v => new RegExp(`data-view="${v}" data-state="([a-z]+)"`).exec(ELS.annunciator.html)[1]);""")
+R.lamps = ['repos', 'sessions', 'schedules'].map(v => new RegExp(`data-view="${v}" data-state="([a-z]+)"`).exec(ELS.annunciator.html)[1]);""")
         self.assertEqual(out["states"][-1], {"kind": "error", "source": "/api/management",
-                                             "text": "Repos, the lane, sessions, services and jobs were not read: database is busy. Reload retries it."})
+                                             "text": "Repos, sessions, services and jobs were not read: database is busy. Reload retries it."})
         self.assertNotIn("nightly-sync", out["R"]["sched"])
         self.assertIn("database is busy", out["R"]["sched"])
         self.assertNotIn("busy</button>", out["R"]["repos"])
         self.assertEqual(out["R"]["type"], "not listed")
-        self.assertEqual(out["R"]["lamps"], ["unknown"] * 4)
+        self.assertEqual(out["R"]["lamps"], ["unknown"] * 3)
         self.assertEqual(out["attention"][-1]["state"], "unknown")
 
 
@@ -2127,25 +2127,27 @@ class TheViews(PageScript):
         page = (V2 / "management.html").read_text(encoding="utf-8")
         self.assertNotRegex(page, r'role="tab|class="subviews|class="sv"')
         out = self.run_page("R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key || null]);")
-        self.assertEqual(out["R"]["views"], [["repos", "Repos", None], ["lane", "Ship lane", None], ["sessions", "Sessions", None],
+        # pack sd:7115: the Ship lane view folded into Queue's Assignments view.
+        self.assertEqual(out["R"]["views"], [["repos", "Repos", None], ["sessions", "Sessions", None],
                                              ["deploys", "Deploys", None], ["schedules", "Schedules", "c"]])
+        self.assertNotIn('id="view-lane"', page)
 
     def test_a_lamp_shows_its_view_and_says_its_state(self):
         out = self.run_page("""R.before = ELS.annunciator.html;
 ELS.annunciator.listeners.click.forEach(f => f({ target: { closest: s => s === 'button.cell' ? { id: '', dataset: { view: 'schedules' } } : null } }));
 await flush(); R.shown = OUT.shown.slice(); R.view = view; R.after = ELS.annunciator.html;""")
         self.assertEqual(re.findall(r'data-view="(\w+)" data-state="(\w+)" aria-pressed="(\w+)"', out["R"]["before"]),
-                         [("repos", "ok", "true"), ("lane", "ok", "false"), ("sessions", "caution", "false"),
+                         [("repos", "ok", "true"), ("sessions", "caution", "false"),
                           ("deploys", "unknown", "false"), ("schedules", "warning", "false")])
         self.assertNotIn('id="refresh"', out["R"]["before"])
         self.assertEqual((out["R"]["shown"], out["R"]["view"]), (["schedules"], "schedules"))
         self.assertIn('data-view="schedules" data-state="warning" aria-pressed="true"', out["R"]["after"])
 
     def test_an_older_view_query_opens_its_view_and_the_address_drops_it(self):
-        out = self.run_page("R.view = view;", search="?view=lane")
-        self.assertEqual((out["R"]["view"], out["shown"]), ("lane", ["lane"]))
+        out = self.run_page("R.view = view;", search="?view=deploys")
+        self.assertEqual((out["R"]["view"], out["shown"]), ("deploys", ["deploys"]))
         self.assertFalse(any("view=" in q for q in out["qs"]), out["qs"])
-        out = self.run_page("R.view = view;", search="?view=lane", hash="#view=sessions")
+        out = self.run_page("R.view = view;", search="?view=deploys", hash="#view=sessions")
         self.assertEqual((out["R"]["view"], out["shown"]), ("sessions", []))
 
 
@@ -2195,27 +2197,17 @@ class TheLastRun(PageScript):
         self.assertIn("logs/.nightly-sync.stamp", out["R"]["failed"])
         self.assertIn("no run stamp", out["R"]["quiet"])
 
-    def test_the_lane_strip_names_no_runner_and_no_archive_refresh(self):
-        """sd:3041: the runner stopped; the strip drew its heartbeat and its archive refresh."""
-        out = self.run_page("R.lane = ELS['view-lane'].html;", search="?view=lane")
-        self.assertNotIn('<span class="label">Runner</span>', out["R"]["lane"])
-        self.assertNotIn('<span class="label">Archive refresh</span>', out["R"]["lane"])
-
-    def test_the_lane_and_sessions_draw_no_runner_assignments_and_no_recent_merges(self):
-        """sd:5472: both sections read assignment rows the idle author runner wrote; the Queue stays."""
-        out = self.run_page("R.lane = ELS['view-lane'].html; R.sess = ELS['view-sessions'].html;", search="?view=lane")
-        lane, sess = out["R"]["lane"], out["R"]["sess"]
-        for text in ("Recent merges", "merged-h", "merge assignments"):
-            self.assertNotIn(text, lane)
+    def test_sessions_draw_no_runner_assignments(self):
+        """sd:5472: Sessions read assignment rows the idle author runner wrote; pack sd:7115 moved the live ones to Queue."""
+        out = self.run_page("R.sess = ELS['view-sessions'].html;", search="?view=sessions")
+        sess = out["R"]["sess"]
         for text in ("Runner assignments", "runner-h", "data-hist", "Assignment history"):
             self.assertNotIn(text, sess)
-        self.assertIn('id="queue-h"', lane)
-        self.assertIn('id="ready-h"', lane)
         self.assertIn('id="claude-h"', sess)
 
     def test_the_merge_setting_reads_lane_merge_in_the_column_the_group_the_tally_the_chip_and_the_details(self):
         """sd:5472: the label only; the setting key runner_merge and the merge: token stay."""
-        out = self.run_page("""R.repos = ELS['view-repos'].html; R.lane = ELS['view-lane'].html;
+        out = self.run_page("""R.repos = ELS['view-repos'].html;
 selectRow('repo:' + DOC0.repos[0].path, false); R.details = ELS.details.html;""", search="?view=repos&merge=manual")
         repos = out["R"]["repos"]
         self.assertRegex(repos, r'data-sort="merge"[^>]*>Lane merge')
@@ -2224,8 +2216,7 @@ selectRow('repo:' + DOC0.repos[0].path, false); R.details = ELS.details.html;"""
         self.assertIn('data-f="merge" data-v="manual" aria-pressed="true"', repos)
         self.assertIn('data-f="merge"', repos)
         self.assertIn("<dt>Lane merge</dt>", out["R"]["details"])
-        self.assertIn('<span class="label">Lane merge</span>', out["R"]["lane"])
-        for key in ("repos", "lane", "details"):
+        for key in ("repos", "details"):
             self.assertNotIn("Runner merge", out["R"][key])
             self.assertNotIn("runner merge", out["R"][key])
 
