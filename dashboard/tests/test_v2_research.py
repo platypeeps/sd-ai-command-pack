@@ -1396,14 +1396,17 @@ R.sel = selected; R.after = ELS['claims-pick'].html;""")
         self.assertEqual(r["sel"], "research/beta")
         self.assertIn('<option value="research/beta" selected>Beta</option>', r["after"])
 
-    def test_draft_experiment_sits_on_the_experiments_tab_not_the_toolbar(self):
-        # sd:5747: the operator moved it; Refresh experiments stays in the toolbar.
+    def test_experiment_actions_sit_in_the_experiments_head_as_other_pages_place_view_actions(self):
+        # sd:5747 moved Draft to the tab; operator 2026-11-01: both actions in the section head's tools, as Watches and Briefs.
         page = (V2 / "research.html").read_text(encoding="utf-8")
         xp = page[page.index('<section id="view-experiments"'):]
+        head = xp[:xp.index("<table")]
         toolbar = page[:page.index('<section id="view-projects"')]
-        self.assertIn('id="draft-exp"', xp[:xp.index("</section>")])
-        self.assertNotIn('id="draft-exp"', toolbar)
-        self.assertIn('id="refresh-exp"', toolbar)
+        tools = head[head.index('<div class="tools">'):]
+        for button in ('id="refresh-exp"', 'id="draft-exp"'):
+            self.assertIn(button, tools)
+            self.assertNotIn(button, toolbar)
+        self.assertNotIn("btn quiet sm", tools)
 
     def test_build_deck_is_off_without_a_deck_json_and_while_a_run_builds(self):
         # The poll's first read fails, which is not known, not settled; the stand-in's timers fire at once, so the second answers.
