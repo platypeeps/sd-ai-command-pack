@@ -723,6 +723,17 @@ R.err = ELS['ad-err'].textContent;""")
         self.assertEqual(out["attention"], {"state": "caution", "n": 2, "what": "unused path skills and use-record faults"})
         self.assertIn("outside-skill (2)", out["html"]["foot"])
 
+    def test_the_facets_have_no_all_chip_and_a_second_press_clears_one(self):
+        """Pack sd:7084: none pressed is every skill; pressing the pressed chip again clears it."""
+        press = ("document.dispatchEvent(new CustomEvent('skills:facet', { detail: 'path' })); R.one = ELS.facets.html;"
+                 " document.dispatchEvent(new CustomEvent('skills:facet', { detail: 'all' })); R.none = ELS.facets.html;")
+        out = self.run_page(press)
+        self.assertNotIn('data-facet="all"', out["R"]["none"])
+        self.assertIn('data-facet="path" aria-pressed="true"', out["R"]["one"])
+        self.assertNotIn('aria-pressed="true"', out["R"]["none"])
+        self.assertIn("const c = e.target.closest?.('[data-facet]'); if (c) return setFacet(filter === c.dataset.facet ? 'all' : c.dataset.facet);",
+                      PAGE_JS)
+
     def test_a_facet_filters_the_ledger_and_the_url_keeps_it(self):
         out = self.run_page("document.dispatchEvent(new CustomEvent('skills:facet', { detail: 'unused' })); R.rows = ELS.rows.html; R.url = String(OUT.urls[OUT.urls.length - 1]);")
         self.assertEqual(re.findall(r'<tr data-id="([^"]+)"', out["R"]["rows"]), ["sd-idle"])

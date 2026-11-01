@@ -100,7 +100,8 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
   }
 
   // ---------- Catalog ledger: filter, sort, page (shell.list, sd:2682) ----------
-  const FACETS = () => [['all', 'All', S.length], ['path', 'Path', onPath.length], ['trial', 'Trial', trials.length], ['contrib', 'Contrib', contrib.length], ['unused', 'Unused on path', unusedPath.length]];
+  // pack sd:7084: no All chip; none pressed is every skill, and a second press on the pressed one clears it.
+  const FACETS = () => [['path', 'Path', onPath.length], ['trial', 'Trial', trials.length], ['contrib', 'Contrib', contrib.length], ['unused', 'Unused on path', unusedPath.length]];
   const KEYS = ['n', 'st', 'u'], LIST = { sort: 'u', dir: -1, size: 25 }, L = { ...LIST, page: 1 };
   const COLS = [[null, html`<span class="sr">State</span>`, 'g'], ['n', 'Skill'], ['st', 'Availability'], ['u', 'Use / week', 'use'], [null, html`<span class="sr">Actions</span>`, 'act']];
   let filter = 'all', q = '';
@@ -171,7 +172,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
   const setFacet = v => { if (!DOC) return; filter = v; L.page = 1; redraw(); };
   document.addEventListener('skills:facet', e => setFacet(e.detail));
   document.addEventListener('click', e => {
-    const c = e.target.closest?.('[data-facet]'); if (c) return setFacet(filter === c.dataset.facet && c.classList.contains('cell') ? 'all' : c.dataset.facet);
+    const c = e.target.closest?.('[data-facet]'); if (c) return setFacet(filter === c.dataset.facet ? 'all' : c.dataset.facet);
   });
   tbody.addEventListener('click', e => {
     if (e.target.closest('.rowact')) return;

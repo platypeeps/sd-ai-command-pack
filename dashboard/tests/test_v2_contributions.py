@@ -621,9 +621,9 @@ shellRun(cmd('contribution.dismiss'), ext); await flush(); R.off = cmd('contribu
         # sd:5486: Open lists the unhidden rows. sd:5753, sd:6701: Hidden, in the Open table's Open | Hidden | All, lists
         # the hidden ones alone and All lists every row; the URL keeps the choice, and Open drops it.
         self.hidden()
-        out = self.run_page(f"""R.rows = ELS.rows.html; R.lamps = ELS.annunciator.html; R.tally = ELS.tally.html; R.bar = ELS['open-filters'].html;
+        out = self.run_page(f"""R.rows = ELS.rows.html; R.lamps = ELS.annunciator.html; R.tally = ELS.tally.html; R.bar = ELS['hidden-seg'].html;
 {self.SHOW_HIDDEN} R.hidden = ELS.rows.html; R.title = ELS['open-title'].textContent; R.htally = ELS.tally.html;
-R.bar2 = ELS['open-filters'].html; R.url = OUT.urls[OUT.urls.length - 1];
+R.bar2 = ELS['hidden-seg'].html; R.url = OUT.urls[OUT.urls.length - 1];
 R.off = [cmd('contribution.hide').when(C.get('{ONE}')), cmd('contribution.unhide').when(C.get('{ONE}')),
   cmd('contribution.unhide').when(C.get('github:{EXTERNAL}'))];
 {self.SHOW_ALL} R.all = ELS.rows.html; R.url3 = OUT.urls[OUT.urls.length - 1];
@@ -691,7 +691,7 @@ R.rows = ELS.rows.html;""", answer=self.VIEWS)
         for search, hash, moved_to in (("", "#view=hidden", "/contributions?hidden=1#view=open"),
                                        ("?scope=internal", "#view=hidden", "/contributions?scope=internal&hidden=1#view=open"),
                                        ("?hidden=1", "", None)):
-            out = self.run_page(f"R.rows = ELS.rows.html; R.bar = ELS['open-filters'].html; {lamp} R.lamped = ELS.rows.html;",
+            out = self.run_page(f"R.rows = ELS.rows.html; R.bar = ELS['hidden-seg'].html; {lamp} R.lamped = ELS.rows.html;",
                                 search=search, extra=moved % json.dumps(hash))
             self.assertEqual(out["moved"], moved_to, (search, hash))
             self.assertEqual(re.findall(ids, out["R"]["rows"]), [ONE], (search, hash))
@@ -1257,13 +1257,19 @@ ELS.annunciator.listeners.click[0]({ target: lamp }); R.on = where(); R.html = E
         self.assertLess(page.index('id="view-settled"'), page.index('<section class="filed" id="view-filed"'))
         self.assertLess(page.index('<section id="view-open"'), page.index('<section class="settled" id="view-settled"'))
 
-    def test_the_scope_is_the_shells_segment_group(self):
-        """sd:6693: the scope radios (.seg) were shorter than Tasks' realm tabs; the scope is the shell's .vseg now."""
+    def test_the_scope_is_two_filter_chips_in_the_row_above_the_sections(self):
+        """Pack sd:7084: Internal and External are filter chips in the row above the section heads, after Open | Hidden |
+        All; none pressed is every repository, and a second press on the pressed one clears it."""
         page = (V2 / "contributions.html").read_text(encoding="utf-8")
-        self.assertIn('<div class="vseg" id="scope" role="group" aria-label="Repositories"></div>', page)
+        self.assertLess(page.index('id="open-filters"'), page.index('<section id="view-open"'))
+        self.assertLess(page.index('id="hidden-seg"'), page.index('id="scope"'))
         self.assertNotIn("repo-scope", (V2 / "static" / "contributions.css").read_text(encoding="utf-8"))
-        out = self.run_page("R.scope = ELS.scope.html;")
-        self.assertRegex(out["R"]["scope"], r'^<button type="button" data-scope="all" aria-pressed="true">All <span class="n">\d+</span></button>')
+        chip = r'data-f="scope" data-v="(\w+)" aria-pressed="(\w+)"'
+        press = "ELS.scope.listeners.click[0]({ target: { closest: s => s === 'button[data-f=\"scope\"]' ? { dataset: { v: 'internal' } } : null } });"
+        out = self.run_page(f"R.none = ELS.scope.html; {press} R.one = ELS.scope.html; {press} R.again = ELS.scope.html;")
+        self.assertEqual(re.findall(chip, out["R"]["none"]), [("internal", "false"), ("external", "false")])
+        self.assertEqual(re.findall(chip, out["R"]["one"]), [("internal", "true"), ("external", "false")])
+        self.assertEqual(re.findall(chip, out["R"]["again"]), [("internal", "false"), ("external", "false")])
 
     def test_trackers_is_a_link_beside_the_views_not_a_second_open(self):
         # sd:5064: the Open | Settled tabs are the page's views; the old Open | Trackers switch repeated Open.

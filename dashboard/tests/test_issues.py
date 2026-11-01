@@ -243,6 +243,23 @@ window.shell = { aside: (() => { const { html } = window.markup;
         self.assertIn("Your GitHub issues outside the repos' issue sources were not read: database is locked", failed["issues"])
         self.assertIn("Jira EXAMPLE-8", failed["issues"])
 
+    def test_your_issues_says_open_once_and_one_chip_adds_the_closed_ones(self):
+        """Pack sd:7084: Open | Hidden | All already says open; the State group is one with closed chip, no second open."""
+        rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix", "reason": "filed",
+                 "url": None, "state": None},
+                {"repo": "upstream/tool", "tracker": "GitHub", "ref": "#6", "key": "github:upstream/tool#6", "title": "Old crash",
+                 "reason": "upstream", "url": None, "state": "closed"}]
+        # A list stand-in that writes each State item as the page passed it, beside the real set-aside group.
+        lists = ("window.shell.list = { fbar: x => x, fseg: (k, n, items) => window.markup.html`${items.map(i =>"
+                 " window.markup.html`<i data-f=\"${k}\" data-v=\"${i.v}\" data-p=\"${String(!!i.pressed)}\">${i.label}</i>`)}` };")
+        chip = r'data-f="iss" data-v="(\w+)" data-p="(\w+)">([^<]+)<span class="n">(\d+)</span>'
+        for search, want in (("", [("closed", "false", "with closed ", "1")]), ("?iss=closed", [("open", "true", "with closed ", "1")])):
+            script = (self.PAGE + lists + f"location.search = '{search}';" + ISSUES_JS
+                      + f"listeners['issues:read']({{ detail: {json.dumps({'issues': rows, 'error': ''})} }}); JSON.stringify(sunk)")
+            bar = dict(run_js(self, script))["issues-filters"]
+            self.assertEqual(re.findall(chip, bar), want, search)
+            self.assertEqual(bar.count(">Open <"), 1, search)
+
     def test_a_failure_is_a_row_naming_it_and_none_is_said(self):
         failed = self.drawn({"issues": [], "error": "database is locked"})
         self.assertIn("Issues could not be read: database is locked. Read again tries again.", failed["issues"])
@@ -583,7 +600,7 @@ class TheGitHubPage(ScreenCase):
         self.assertIn("Fix the widget", out["R"]["rows"])
 
     def test_sync_now_appears_and_runs_the_jobs_retry_command_then_reads_again_when_the_run_ends(self):
-        out = self.run_page("show('issues'); await flush(); R.line = ELS['issues-sync'].html; R.intake = ELS['intake-sync'].html;"
+        out = self.run_page("show('issues'); await flush(); R.line = (ELS['issues-sync'].html + ELS['issues-said'].html); R.intake = (ELS['intake-sync'].html + ELS['intake-said'].html);"
                             " R.label = cmd('jobs.retry').label; R.cli = cmd('jobs.retry').cli(C.get('job:shadow-sync-nightly'));"
                             " act('jobs.retry', 'job:shadow-sync-nightly'); await flush(); R.toast = lastToast().msg;",
                             states=("idle", "running", "idle"))
@@ -600,7 +617,7 @@ class TheGitHubPage(ScreenCase):
 
     def test_sync_now_is_off_with_the_reason_while_the_job_runs_or_is_not_installed(self):
         # The stand-in's timers run at once; a run that never ends would read forever, so this one holds its poll.
-        out = self.run_page("setTimeout = f => 1; show('issues'); await flush(); R.line = ELS['issues-sync'].html;"
+        out = self.run_page("setTimeout = f => 1; show('issues'); await flush(); R.line = (ELS['issues-sync'].html + ELS['issues-said'].html);"
                             " R.off = C.offWhy(cmd('jobs.retry'), C.get('job:shadow-sync-nightly'));",
                             sync={**JOB, "state": "running", "capabilities": {"retry": {"allowed": False, "reason": "the job is already running"}}},
                             states=("running",))
@@ -608,7 +625,7 @@ class TheGitHubPage(ScreenCase):
         self.assertIn("disabled", out["R"]["line"])
         self.assertIn("running in the background", out["R"]["line"])
         missing = {"name": "shadow-sync-nightly", "error": "shadow-sync-nightly is not an installed job (x); local-cron-jobs/cron-jobs.sh install shadow-sync-nightly installs it"}
-        out = self.run_page("show('issues'); await flush(); R.line = ELS['issues-sync'].html;"
+        out = self.run_page("show('issues'); await flush(); R.line = (ELS['issues-sync'].html + ELS['issues-said'].html);"
                             " R.off = C.offWhy(cmd('jobs.retry'), C.get('job:shadow-sync-nightly'));", sync=missing)
         self.assertEqual(out["R"]["off"], missing["error"])
         self.assertIn("Refresh from GitHub is off: shadow-sync-nightly is not an installed job", out["R"]["line"])
@@ -617,7 +634,7 @@ class TheGitHubPage(ScreenCase):
         """pack sd:6702: Pull requests shows the same Refresh from GitHub with when GitHub was last read, and the read
         after the run ends reads Pull requests again too."""
         out = self.run_page("OUT.again = 0; window.githubPulls = { again: () => { OUT.again++; } };"
-                            " show('pulls'); await flush(); R.line = ELS['pulls-sync'].html; R.issues = ELS['issues-sync'].html;"
+                            " show('pulls'); await flush(); R.line = (ELS['pulls-sync'].html + ELS['pulls-said'].html); R.issues = (ELS['issues-sync'].html + ELS['issues-said'].html);"
                             " act('jobs.retry', 'job:shadow-sync-nightly'); await flush();",
                             states=("idle", "running", "idle"), synced={"last_success_at": "2026-10-19T15:30:00Z"})
         r = out["R"]
@@ -628,10 +645,13 @@ class TheGitHubPage(ScreenCase):
         self.assertEqual([p[0] for p in out["posts"]], ["/api/jobs/shadow-sync-nightly/retry"])
         self.assertEqual(out["again"], 1)
 
-    def test_github_draws_the_sync_lines_and_the_intake_filter_bar(self):
+    def test_github_puts_refresh_in_each_section_heads_tools_and_its_line_under_it(self):
+        """Pack sd:7084: a view's actions sit in its section head's tools; the line under the head says what it did."""
         html = (V2 / "github.html").read_text(encoding="utf-8")
-        for found in ('id="pulls-sync"', 'id="issues-sync"', 'id="intake-sync"', 'id="intake-filters"'):
-            self.assertIn(found, html)
+        for view, tally in (("pulls", "github-tally"), ("issues", "issues-tally"), ("intake", "intake-tally")):
+            self.assertIn(f'<div class="tools"><p class="tally" id="{tally}"></p><span id="{view}-sync"></span></div>', html)
+            self.assertIn(f'<p class="why" id="{view}-said"></p>', html)
+        self.assertIn('id="intake-filters"', html)
 
 
 class TheViewRoute(BrowserSession):
