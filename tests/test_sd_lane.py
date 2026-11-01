@@ -2043,7 +2043,7 @@ class Landing(Lane):
         self.merge_lands(tree, 1, head)
         policy = {"release": {"verify": 'test "$SD_RELEASE_VERSION" = 0.1.0'}}
 
-        def killed(world, command, tag, version):
+        def killed(world, command, tag, version, sha):
             raise Killed
         with mock.patch.object(sd_lane.ReleaseWorld, "verify", killed), self.assertRaises(Killed):
             self.released(policy)

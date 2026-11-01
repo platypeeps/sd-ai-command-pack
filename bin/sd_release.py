@@ -6,7 +6,8 @@ resumes there:
 
     version  the next semver from the Conventional Commit types since the last tag (`release_types`)
     tag      push the tag on origin's main                       asks when the policy holds `push` at ask
-    verify   run `verify` with SD_RELEASE_TAG and SD_RELEASE_VERSION; a failure reports, never rolls back
+    verify   run `verify` on the tagged commit with SD_RELEASE_TAG and SD_RELEASE_VERSION; a failure reports,
+             never rolls back
 
 The deploy bump and its merge land with pack sd:7014; until then the policy reader refuses their keys.
 A freeze window (`sd-db repo freeze`) holds the tag. A step that fails or waits keeps its step; only `done`
@@ -20,6 +21,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
 from typing import Any, Callable
 
 import sd_lib
@@ -108,7 +110,7 @@ def _verify(state: dict, release: dict, acts: dict, world: Any, types: list[str]
     if not release.get("verify"):
         return "done"
     try:
-        world.verify(release["verify"], state["tag"], state["version"])
+        world.verify(release["verify"], state["tag"], state["version"], state["sha"])
     except ReleaseError as error:
         state["step"] = "stopped"  # rollback is the org's process, never automatic
         raise Wait(f"{state['tag']} tagged; verify failed: {error}. Nothing was rolled back.", failed=True) from None
@@ -144,7 +146,7 @@ def advance_release(state: dict, release: dict, acts: dict, world: Any,
 
 
 class Repositories:
-    """What the chain reads and does, on disk: `git` in the lane's main checkout, and `verify` there.
+    """What the chain reads and does, on disk: `git` in the lane's main checkout, `verify` in a worktree of it.
 
     `frozen` and `ruling` read the hub; the lane passes them in (`sd_lane.release_chain`).
     """
@@ -200,12 +202,21 @@ class Repositories:
             self._run("git", "tag", tag, sha)
         self._run("git", "push", "-q", "origin", f"refs/tags/{tag}")
 
-    def verify(self, command: str, tag: str, version: str) -> None:
-        """`command` in the source checkout, with the tag and version in its environment."""
-        try:
-            done = sd_lib.run_group(["sh", "-c", command], cwd=self.main, timeout=VERIFY_SECONDS,
-                                    env={**self.env, "SD_RELEASE_TAG": tag, "SD_RELEASE_VERSION": version})
-        except sd_lib.GroupTimeout:
-            raise ReleaseError(f"{command!r} ran past {VERIFY_SECONDS}s") from None
+    def verify(self, command: str, tag: str, version: str, sha: str) -> None:
+        """`command` in a detached worktree at the tagged `sha`, with the tag and version in its environment.
+
+        Not in the main checkout: the landing does not always move it to origin's tip (a pinned or deploying
+        checkout, a failed fast-forward), so its files could be older than the commit the tag names.
+        """
+        with tempfile.TemporaryDirectory(prefix="sd-release-") as scratch:
+            tree = pathlib.Path(scratch) / "verify"
+            self._run("git", "worktree", "add", "-q", "--detach", str(tree), sha)
+            try:
+                done = sd_lib.run_group(["sh", "-c", command], cwd=tree, timeout=VERIFY_SECONDS,
+                                        env={**self.env, "SD_RELEASE_TAG": tag, "SD_RELEASE_VERSION": version})
+            except sd_lib.GroupTimeout:
+                raise ReleaseError(f"{command!r} ran past {VERIFY_SECONDS}s") from None
+            finally:
+                self._run("git", "worktree", "remove", "--force", str(tree), ok=(0, 128))
         if done.returncode:
             raise ReleaseError(f"{command!r} exited {done.returncode}: {(done.stderr or done.stdout).strip()[-300:]}")

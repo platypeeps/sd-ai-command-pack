@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,8 @@ from tests.clean_env import clean_environment  # noqa: E402
 RELEASE = {"verify": "check-rollout"}
 ORG = {"push": "ask", "pr": "ask"}
 MANAGED = {"push": "auto", "pr": "auto"}
+IDENTITY = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.test"}
 
 
 class World:
@@ -50,7 +53,7 @@ class World:
     def push_tag(self, tag, sha):
         self._act(f"push_tag {tag} {sha}")
 
-    def verify(self, command, tag, version):
+    def verify(self, command, tag, version, sha):
         self._act(f"verify {command} {version}")
         if not self.verified:
             raise sd_release.ReleaseError("rollout still on 0.17.2")
@@ -132,14 +135,34 @@ class Chain(unittest.TestCase):
         self.assertEqual((state["step"], world.acts), ("stopped", []))
         self.assertIn("the operator stopped the chain at tag: not now", state["reason"])
 
-    def test_a_tag_only_verify_runs_in_the_source_checkout(self):
+    def test_verify_runs_on_the_tagged_commit_when_the_checkout_is_behind(self):
+        """Review: verify ran in the main checkout, which the landing does not always move to origin's tip, so
+        a stale checkout's tests passed a release, or new verify files were missing."""
         with tempfile.TemporaryDirectory() as scratch:
-            main = pathlib.Path(scratch).resolve()
-            world = sd_release.Repositories(main, clean_environment(), lambda: None, lambda *args: None)
-            world.verify('pwd > where; echo "$SD_RELEASE_TAG $SD_RELEASE_VERSION" >> where', "v0.18.0", "0.18.0")
-            self.assertEqual((main / "where").read_text().split(), [str(main), "v0.18.0", "0.18.0"])
+            tmp = pathlib.Path(scratch).resolve()
+
+            def git(*argv):
+                return subprocess.run(["git", *argv], cwd=main, env=clean_environment(**IDENTITY), check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            main = tmp / "main"
+            main.mkdir()
+            git("init", "-q", "-b", "main")
+            git("commit", "-q", "--allow-empty", "-m", "feat: old")
+            old = git("rev-parse", "HEAD")
+            (main / "check.sh").write_text("git rev-parse HEAD > \"$OUT\"\n", encoding="utf-8")
+            git("add", "check.sh")
+            git("commit", "-q", "-m", "feat: the verify script")
+            tagged = git("rev-parse", "HEAD")
+            git("switch", "-q", "--detach", old)  # the landing left the checkout behind the tagged commit
+            out = tmp / "head"
+            world = sd_release.Repositories(main, clean_environment(**IDENTITY, OUT=str(out)), lambda: None, lambda *args: None)
+            world.verify('sh check.sh && test "$SD_RELEASE_TAG $SD_RELEASE_VERSION" = "v0.18.0 0.18.0"',
+                         "v0.18.0", "0.18.0", tagged)
+            self.assertEqual(out.read_text(encoding="utf-8").strip(), tagged)
             with self.assertRaisesRegex(sd_release.ReleaseError, "exited 3"):
-                world.verify("exit 3", "v0.18.0", "0.18.0")
+                world.verify("exit 3", "v0.18.0", "0.18.0", tagged)
+            self.assertEqual((git("rev-parse", "HEAD"), len(git("worktree", "list").splitlines())), (old, 1),
+                             "the checkout stays where it was and no worktree is left behind")
 
 
 class Saved(unittest.TestCase):
