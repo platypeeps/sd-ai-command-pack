@@ -1931,6 +1931,16 @@ class Landing(Lane):
                                                         "elsewhere"), answer["post_merge"])
         self.assertEqual((self.notes[-1][1], self.note_kinds[-1]), (f"Post-merge: {answer['post_merge']}", "followup"))
 
+    def test_a_variable_the_lanes_environment_omits_never_reaches_the_post_merge(self) -> None:
+        """sd:7051: `{**os.environ, **environ}` put back what the caller dropped, such as a GIT_DIR naming
+        another repository, so the target ran against it."""
+        self.post_merge('@echo "[$$GIT_DIR]" > env.out')
+        environ = clean_environment()  # read before the ambient value is set: it has no GIT_DIR
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(self.tmp / "decoy" / ".git")}):
+            ran = sd_lane.make_post_merge(self.repo, environ, "fast-forwarded to origin/main")
+        self.assertEqual(ran, f"make post-merge passed in {self.repo}")
+        self.assertEqual((self.repo / "env.out").read_text(encoding="utf-8").strip(), "[]")
+
     def test_a_pinned_detached_checkout_runs_the_post_merge_that_refreshes_it(self) -> None:
         """sd:3647. The hub's main checkout is pinned (detached): the fast-forward skips it, and `repo-sync.sh
         refresh`, which the target runs, moves only a pinned checkout. So the target must run for it."""

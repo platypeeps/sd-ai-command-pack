@@ -2775,7 +2775,8 @@ def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> 
         if not (moved.startswith("fast-forwarded") or pinned):
             return f"make post-merge skipped: the main checkout did not fast-forward ({moved})"
         try:
-            done = sd_lib.run_group(command, cwd=main, env={**os.environ, **environ}, timeout=POST_MERGE_SECONDS)
+            # `environ` whole, never over `os.environ`: that put back what the caller dropped, such as GIT_DIR
+            done = sd_lib.run_group(command, cwd=main, env=dict(environ), timeout=POST_MERGE_SECONDS)
         except sd_lib.GroupTimeout:
             return f"make post-merge timed out after {POST_MERGE_SECONDS}s in {main}"
         except OSError as error:
