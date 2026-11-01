@@ -371,7 +371,44 @@ _FORBIDDEN_PRAGMAS = {
        for name in ("page_size", "auto_vacuum")},
 }
 
-_answers: dict[str, tuple[float, float, Role]] = {}
+class Held:
+    """One fence answer and when it was asked (pack sd:7042).
+
+    `get(ask, within)` returns the held answer while it is younger than
+    `within` seconds and the wall clock moved with the monotonic one;
+    otherwise it calls `ask` and holds what it returns. One ask runs at a
+    time. A caller that finds an answer young enough takes no lock, so a
+    slow Tailscale stalls only the callers that need a new answer.
+    """
+
+    def __init__(self) -> None:
+        self._held: tuple[float, float, object] | None = None
+        self._asking = threading.Lock()
+
+    def _young(self, within: float) -> tuple[bool, object]:
+        held = self._held
+        if held is None:
+            return False, None
+        since, at, found = held
+        ticks, wall = time.monotonic(), time.time()
+        return ticks - since < within and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK, found
+
+    def get(self, ask: Callable[[], object], within: float):
+        young, found = self._young(within)
+        if young:
+            return found
+        with self._asking:
+            # Another caller may have asked while this one waited.
+            young, found = self._young(within)
+            if young:
+                return found
+            ticks, wall = time.monotonic(), time.time()
+            found = ask()
+            self._held = (ticks, wall, found)
+            return found
+
+
+_answers: dict[str, Held] = {}
 _answers_guard = threading.Lock()
 
 
@@ -394,25 +431,19 @@ def write_role(path: Path, *, fresh: bool = False) -> Role:
     """
     from .database import open_local
 
-    key = str(path)
-    with _answers_guard:
-        ticks, wall = time.monotonic(), time.time()
-        held = _answers.get(key)
-        if held is not None and not fresh:
-            since, at, found = held
-            if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
-                return found
+    def ask() -> Role:
         try:
             connection = open_local(Path(path), write=False, create=False)
         except Exception as error:  # noqa: BLE001 -- no answer is unknown, named
-            found = Role("unknown", None, f"the database at {path} did not open: {type(error).__name__}: {error}")
-        else:
-            try:
-                found = role(connection)
-            finally:
-                connection.close()
-        _answers[key] = (ticks, wall, found)
-        return found
+            return Role("unknown", None, f"the database at {path} did not open: {type(error).__name__}: {error}")
+        try:
+            return role(connection)
+        finally:
+            connection.close()
+
+    with _answers_guard:
+        held = _answers.setdefault(str(path), Held())
+    return held.get(ask, 0 if fresh else FENCE_SECONDS)
 
 
 #: The raw fix for a mistyped `sd.hub_name` on the real hub: the fence stays

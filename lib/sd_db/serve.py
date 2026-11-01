@@ -831,25 +831,20 @@ class Server(socketserver.ThreadingTCPServer):
         self.node = node
         self.idle_timeout = idle_timeout
         self.owners = Owners()
-        #: `(monotonic, wall, refusal)` of the last fence answer; see `fence`.
-        self.fenced: tuple[float, float, str | None] | None = None
-        self.fence_guard = threading.Lock()
+        #: The last fence answer, a refusal or `None`; see `fence`.
+        self.fenced = hub.Held()
         super().__init__((LOOPBACK if node is None else str(node.address), port), Session)
 
     def fence(self, *, fresh: bool = False) -> str | None:
         """Why this machine no longer holds the hub role, or `None`: asked again past
         `FENCE_SECONDS`, once the wall clock jumped (a sleep), or `fresh`, as a commit
-        asks. Unknown refuses."""
-        with self.fence_guard:
-            ticks, wall = time.monotonic(), time.time()
-            if self.fenced is not None and not fresh:
-                since, at, refusal = self.fenced
-                if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
-                    return refusal
+        asks. Unknown refuses. A frame with a held answer waits on no ask, a
+        commit's included (pack sd:7042)."""
+        def ask() -> str | None:
             found = hub.role_at(self.database)
-            refusal = found.reason if found.refuses else None
-            self.fenced = (ticks, wall, refusal)
-            return refusal
+            return found.reason if found.refuses else None
+
+        return self.fenced.get(ask, 0 if fresh else FENCE_SECONDS)
 
     def admit(self, peer, frame: dict, session: int = 0) -> None:
         """Refuse a session before anything opens, and before any SQL runs."""

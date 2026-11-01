@@ -19,6 +19,8 @@ import os
 import sqlite3
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
@@ -814,6 +816,47 @@ class ThePragmaWrites(FenceCase):
         self.assertEqual((connection.execute("PRAGMA page_size").fetchone()[0],
                           connection.execute("PRAGMA auto_vacuum").fetchone()[0]), (4096, 0))
         self.assertEqual(connection.execute("PRAGMA temp.page_size = 8192").fetchall(), [])
+
+class TheHeldAnswer(FenceCase):
+    """pack sd:7042: a caller with a held answer never waits on another caller's ask."""
+
+    def test_a_held_answer_is_read_while_another_caller_asks(self):
+        held = hub.Held()
+        self.assertEqual(held.get(lambda: "first", hub.FENCE_SECONDS), "first")
+        asking, release = threading.Event(), threading.Event()
+
+        def slow() -> str:
+            asking.set()
+            release.wait(30)
+            return "second"
+
+        asker = threading.Thread(target=held.get, args=(slow, 0))
+        asker.start()
+        try:
+            self.assertTrue(asking.wait(30))
+            self.assertEqual(held.get(lambda: "asked again", hub.FENCE_SECONDS), "first")
+        finally:
+            release.set()
+            asker.join(30)
+        self.assertEqual(held.get(lambda: "asked again", hub.FENCE_SECONDS), "second")
+
+    def test_a_write_with_a_held_answer_does_not_wait_on_a_slow_fresh_ask(self):
+        """Another thread's commit asks a 3 s Tailscale afresh; a write inside the window does not wait."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        self.assertEqual(hub.write_role(self.path).state, "holder")
+        self.node(status_delay=3)
+        committing = threading.Thread(target=hub.write_role, args=(self.path,), kwargs={"fresh": True})
+        committing.start()
+        time.sleep(0.5)
+        started = time.monotonic()
+        try:
+            self.assertEqual(hub.write_role(self.path).state, "holder")
+            waited = time.monotonic() - started
+        finally:
+            committing.join(30)
+        self.assertLess(waited, 1.0, "a held answer waited on another thread's ask")
+
 
 class TheRestore(FenceCase):
     def test_restore_writes_before_the_name_is_taken(self):
