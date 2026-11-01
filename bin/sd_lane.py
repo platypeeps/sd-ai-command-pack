@@ -2620,7 +2620,8 @@ ReleaseWorld = sd_release.Repositories
 
 def release_frozen(queue: Queue) -> Callable[[], str | None]:
     """The freeze window over the repository as one line; None when open."""
-    from sd_db.writes import freeze_window  # noqa: PLC0415
+    sd_lib.import_sd_db()
+    from sd_db.writes import freeze_window  # noqa: PLC0415 - after the helper
 
     def frozen() -> str | None:
         window = on_hub(queue, lambda connection: freeze_window(connection, queue.repository))
