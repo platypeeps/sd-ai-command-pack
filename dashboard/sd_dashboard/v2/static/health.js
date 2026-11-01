@@ -449,8 +449,9 @@
       // sd:6722: one row's probe family only, so a Google check does not wait on claude mcp list.
       { id: 'credential.probe', on: 'credential', label: 'Probe again', does: 'Probes this credential again and shows the result in Details.', key: 'r', icon: 'rotate-ccw', risk: 'safe', primary: () => true, executes: true,
         cli: o => o.cli, sends: o => `POST /api/actions/run {action: check.run, row: ${o.id}}`, run: o => run(o, 'check.run', { row: o.id }) },
-      // sd:6722: Sign in starts the login in a herdr pane, where the browser consent opens; Re-check reads the row again after.
-      { id: 'credential.signin', on: 'credential', label: 'Sign in', does: 'Starts this login in a herdr pane; finish the consent in the browser.', key: 'i', icon: 'log-in', risk: 'safe', executes: true,
+      // sd:6722, sd:6957: Sign in shows a Google or SSO login's URL in Details to copy into that account's browser profile; the
+      // page opens none. Any other login starts in a herdr pane. Probe again reads the row after.
+      { id: 'credential.signin', on: 'credential', label: 'Sign in', does: 'Shows this login\'s URL to copy into the right browser profile.', key: 'i', icon: 'log-in', risk: 'safe', executes: true,
         primary: o => o.state !== 'ok', when: o => !!o.signin || 'this credential has no sign-in', cli: o => o.signin || o.cli,
         sends: o => `POST /api/actions/run {action: credentials.signin, probe: ${o.id.replace(/^cred:/, '')}}`, run: o => run(o, 'credentials.signin', { probe: o.id.replace(/^cred:/, '') }) },
     );

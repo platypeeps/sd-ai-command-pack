@@ -94,7 +94,9 @@
     had?.remove();
     const r = id && RAN.get(id); if (!r) return;
     const { html, put } = window.markup;
-    put(details, html`<section class="ran" data-obj="${id}" aria-live="polite"><h3>${r.label}</h3><p class="why">Exit ${r.exit} · <code>${r.line}</code>${r.cut ? ' · the last part shown' : ''}</p><pre class="code">${r.output || '(no output)'}</pre></section>`, 'append');
+    // sd:6957: a login's URL (and device code) shows here to copy into the right browser profile; the page opens none.
+    const link = r.url ? html`<p class="why">Open on this machine, in the browser profile for ${r.account}: <a href="${r.url}" rel="noopener noreferrer">${r.url}</a> <button class="icon-btn" type="button" data-copy="${r.url}" aria-label="Copy the URL">Copy</button>${r.code ? html` · code <code>${r.code}</code> <button class="icon-btn" type="button" data-copy="${r.code}" aria-label="Copy the code">Copy</button>` : ''}. After consent, Probe again reads this login.</p>` : '';
+    put(details, html`<section class="ran" data-obj="${id}" aria-live="polite"><h3>${r.label}</h3><p class="why">Exit ${r.exit} · <code>${r.line}</code>${r.cut ? ' · the last part shown' : ''}</p>${link}<pre class="code">${r.output || '(no output)'}</pre></section>`, 'append');
   }
   // The output shows at once, for a row or for an object no row selects (Scan's use surfaces); a later Details for the
   // selected row draws that row's output again, or none.

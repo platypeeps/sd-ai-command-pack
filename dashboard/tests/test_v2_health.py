@@ -2051,7 +2051,29 @@ shellRun(c, o); await flush(); shellRun(cmd('credential.probe'), o); await flush
                          [["/api/actions/run", {"action": "credentials.signin", "probe": "aws:dev"}],
                           ["/api/actions/run", {"action": "check.run", "row": "cred:aws:dev"}]])
 
-    SERVICE_ANSWER = ("ANSWER = (path, body) => HEALTH_READ(path) ? HEALTH(path) : path.startsWith('/api/services/') "
+    def test_each_google_account_signs_in_on_its_own_row_with_its_url_to_copy(self):
+        """sd:6957: one Sign in per account; Details shows that account's consent URL to copy, and opens no window."""
+        record_state(self.connection, "heartbeat", key=credentials.HEARTBEAT_KEY, timestamp="2026-09-06T03:10:00Z", body={"probes": [
+            {"id": f"google:{who}", "name": f"Google ({who})", "signin": f"workspace-mcp start_google_auth for {who}",
+             "signed_in": False} for who in ("a@example.test", "b@example.test")]})
+        self.connection.commit()
+        answer = ("ANSWER = (path, body) => HEALTH_READ(path) ? HEALTH(path) : path === '/api/actions/run' ? [200, { action: body.action, "
+                  "label: 'Sign in', line: 'x', exit: 0, output: 'Open the URL', url: 'https://accounts.example.test/o?u=' + body.probe, "
+                  "account: body.probe.slice(7) }] : [404, { error: 'no answer' }];\nwindow.open = (...a) => OUT.opened.push(a); OUT.opened = [];\n")
+        out = self.run_page(answer + """var c = cmd('credential.signin'); R.d = [];
+for (const id of ['cred:google:a@example.test', 'cred:google:b@example.test']) {
+  shellRun(c, C.get(id)); await flush(); R.d.push(document.getElementById('details').html || ''); }""", view="jobs")
+        self.assertEqual([post[1]["probe"] for post in out["posts"]], ["google:a@example.test", "google:b@example.test"])
+        for page, who, other in zip(out["R"]["d"], ("a", "b"), ("b", "a"), strict=True):
+            html = page.split(f'<section class="ran" data-obj="cred:google:{who}@example.test"')[-1].split("</section>")[0]
+            url = f"https://accounts.example.test/o?u=google:{who}@example.test"
+            self.assertIn(f'href="{url}"', html)
+            self.assertIn(f'data-copy="{url}"', html)
+            self.assertIn(f"in the browser profile for {who}@example.test:", html)
+            self.assertNotIn(f"google:{other}@example.test", html)
+        self.assertEqual(out["opened"], [])
+
+    SERVICE_ANSWER = ("ANSWER =(path, body) => HEALTH_READ(path) ? HEALTH(path) : path.startsWith('/api/services/') "
                       "? [STATUS_W, WROTE] : [404, { error: 'no answer' }];\n")
     ACCEPTED = {"request": {"id": "x", "action": "restart", "status": "accepted",
                             "message": "launchctl accepted the request; current state is observed separately"}, "service": {}}
