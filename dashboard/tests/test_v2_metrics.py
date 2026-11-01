@@ -22,10 +22,15 @@ pull request.
 
 from __future__ import annotations
 
+import argparse
+import contextlib
+import datetime
+import io
 import json
 import re
 import sqlite3
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -189,13 +194,106 @@ CONFLICT = "merging origin/main into b1 conflicts; the branch is unchanged"
 
 
 def lane_run(connection, entry, status, finished, *, repository="example/alpha", item=1, head=None, expected=None,
-             reason=None, step="prepare"):
+             reason=None, step="prepare", enqueued=None):
     """One lane entry's latest checkpoint, as sd-ship's lane writes it: a failed entry names no `head`."""
     body = {"id": entry, "item": item, "title": f"Item {item}", "repository": repository, "status": status, "step": step,
-            "expected_head": expected or head or "e" * 40, "head": head, "finished_at": finished, "reason": reason}
+            "expected_head": expected or head or "e" * 40, "head": head, "finished_at": finished, "reason": reason,
+            "enqueued_at": enqueued}
     connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
                        (f"lane:v1:{repository}:{entry}", finished or NOW, json.dumps(body)))
     connection.commit()
+
+
+SHARD = ("the repository gate failed again at a9f4ee0d700b; its review pass stays kept: check (exit 2): "
+         "failed shard dashboard.tests.test_source_intake: 44s exit=1")
+TWO_SHARDS = ("sd-check fail (precheck pass, check fail: shard tests.sd_db.test_runner_exec: 10s exit=1; "
+              "shard dashboard.tests.test_source_intake: 24s exit=1) " + "the repository gate failed after the review")
+TARGET = "the repository gate failed after the review cleared: sd-check fail (check fail: make target test-workspace)"
+
+
+class TheHealth(Fixture):
+    """The weekly KISS audit's numbers (pack sd:6744). NOW is 2026-09-06T12:00Z; the window is 14 days, and last
+    week's is the 14 days that ended 2026-08-30T12:00Z."""
+
+    def build_run(self, ident, created, outcome, detail=None):
+        item = self.item(f"Build {ident}", kind="task")
+        assignment = self.assignment(item, status="running")
+        self.connection.execute("UPDATE assignment SET scope = 'build' WHERE id = ?", (assignment,))
+        self.connection.execute(
+            "INSERT INTO runner_run (id, assignment, run, branch, owner, work_path, retained_path, created_at,"
+            " updated_at, outcome, detail) VALUES (?, ?, 1, 'build/sd-1', 'fixture', '/wt', '/wt', ?, ?, ?, ?)",
+            (ident, assignment, created, created, outcome, detail))
+        self.connection.commit()
+
+    def test_the_lane_splits_each_repositorys_failures_by_class(self):
+        c = self.connection
+        lane_run(c, "a1", "merged", "2026-09-06T10:00:00Z", enqueued="2026-09-06T09:50:00Z")
+        lane_run(c, "a2", "failed", "2026-09-05T10:00:00Z", reason=REVIEW)
+        lane_run(c, "a3", "failed", "2026-09-04T10:00:00Z", reason=SHARD)
+        lane_run(c, "a4", "failed", "2026-09-03T10:00:00Z", reason=CONFLICT)
+        lane_run(c, "a5", "cancelled", "2026-08-25T10:00:00Z")      # in both windows: other
+        lane_run(c, "a6", "running", None)                           # not ended: not counted
+        lane_run(c, "a7", "merged", "2026-08-20T10:00:00Z")          # last week's window only
+        found = metrics_screen.health(c, now=NOW)
+        self.assertEqual((found["days"], found["now"]["since"], found["last_week"]["until"]),
+                         (14, "2026-08-23T12:00:00Z", "2026-08-30T12:00:00Z"))
+        self.assertEqual(found["now"]["lane"], [{"repository": "example/alpha", "entries": 5, "review": 1, "gate": 1,
+                                                 "other": 2, "failed_percent": 80}])
+        self.assertEqual(found["last_week"]["lane"], [{"repository": "example/alpha", "entries": 2, "review": 0,
+                                                       "gate": 0, "other": 1, "failed_percent": 50}])
+
+    def test_gate_failures_count_each_named_suite_in_its_repository(self):
+        c = self.connection
+        lane_run(c, "a1", "failed", "2026-09-05T10:00:00Z", reason=SHARD)
+        lane_run(c, "a2", "failed", "2026-09-05T11:00:00Z", reason=TWO_SHARDS)
+        lane_run(c, "a3", "failed", "2026-09-05T12:00:00Z", reason=TARGET, repository="example/beta")
+        lane_run(c, "a4", "failed", "2026-09-05T13:00:00Z", reason=MERGE_GATE)
+        lane_run(c, "a5", "failed", "2026-09-05T14:00:00Z", reason=REVIEW + " shard x.y: 1s exit=1")
+        suites = metrics_screen.health(c, now=NOW)["now"]["gate_suites"]
+        self.assertEqual([(s["repository"], s["suite"], s["failures"]) for s in suites],
+                         [("example/alpha", "dashboard.tests.test_source_intake", 2),
+                          ("example/alpha", "tests.sd_db.test_runner_exec", 1),
+                          ("example/beta", "test-workspace", 1),
+                          ("example/alpha", "unnamed", 1)])
+
+    def test_builds_count_done_over_ended_and_group_the_reap_reasons(self):
+        self.build_run("r1", "2026-09-05T10:00:00+00:00", "done")
+        self.build_run("r2", "2026-09-04T10:00:00+00:00", "blocked", "build run r2 ended at step reviewing: the review "
+                       "gave no answer twice at fec49dba2b14; see /x")
+        self.build_run("r3", "2026-09-03T10:00:00+00:00", "blocked", "build run r3 ended at step reviewing: the review "
+                       "gave no answer twice at b9bade984589; see /y")
+        self.build_run("r4", "2026-09-02T10:00:00+00:00", "timed_out", "a child ran past 3600 s; its group was ended")
+        self.build_run("r5", "2026-09-02T11:00:00+00:00", None)                    # still running: not ended
+        self.build_run("r6", "2026-08-01T10:00:00+00:00", "interrupted")           # before both windows
+        builds = metrics_screen.health(self.connection, now=NOW)["now"]["builds"]
+        self.assertEqual(builds, {"done": 1, "total": 4, "reasons": [
+            {"reason": "reviewing: the review gave no answer twice at N", "runs": 2},
+            {"reason": "a child ran past N s", "runs": 1}]})
+
+    def test_lead_time_is_enqueue_to_merge_median_and_p90(self):
+        for n, minutes in enumerate((10, 20, 30, 40, 100)):
+            finished = datetime.datetime(2026, 9, 5, 10, n, tzinfo=datetime.timezone.utc)
+            enqueued = finished - datetime.timedelta(minutes=minutes)
+            lane_run(self.connection, f"m{n}", "merged", finished.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                     enqueued=enqueued.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        lane_run(self.connection, "f1", "failed", "2026-09-05T11:00:00Z", reason=REVIEW,
+                 enqueued="2026-09-01T11:00:00Z")                            # not merged: no lead time
+        lead = metrics_screen.health(self.connection, now=NOW)["now"]["lead_minutes"]
+        self.assertEqual(lead, {"merged": 5, "median": 30, "p90": 100})
+
+    def test_sd_reports_health_prints_the_document(self):
+        with mock.patch.object(sys, "path", [str(V2.parents[2] / "bin"), *sys.path]):
+            import sd_controls
+        found = {"days": 14, "unreadable": 0, "now": {}, "last_week": {}}
+        parser = argparse.ArgumentParser()
+        sd_controls.register(parser.add_subparsers(dest="group"))
+        arguments = parser.parse_args(["reports", "health", "--json"])
+        output = io.StringIO()
+        with mock.patch.object(metrics_screen, "health", return_value=found), \
+                mock.patch.object(sd_controls.sd_handoff_rows, "connect"), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(arguments.handler(arguments), 0)
+        self.assertEqual(json.loads(output.getvalue()), found)
 
 
 class TheGateRuns(Fixture):

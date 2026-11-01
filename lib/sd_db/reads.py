@@ -1556,6 +1556,16 @@ def lane_entries(connection: sqlite3.Connection) -> list[sqlite3.Row]:
         " AND key >= ? AND key < ? GROUP BY key)", LANE_KEYS).fetchall()
 
 
+def build_runs(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every build run's `outcome`, `detail` and `created_at`, ended or not, in no set order (pack sd:6744).
+
+    A build run is a `runner_run` whose assignment has the `build` scope; behind `sd reports health`.
+    """
+    return connection.execute(
+        "SELECT runner_run.outcome, runner_run.detail, runner_run.created_at FROM runner_run"
+        " JOIN assignment ON assignment.id = runner_run.assignment WHERE assignment.scope = 'build'").fetchall()
+
+
 def launch_notes(connection: sqlite3.Connection, prefix: str) -> list[sqlite3.Row]:
     """Every `comment` note whose body starts with `prefix`, on an item of any kind that is not done, oldest first.
 
@@ -1568,4 +1578,4 @@ def launch_notes(connection: sqlite3.Connection, prefix: str) -> list[sqlite3.Ro
         (len(prefix), prefix)).fetchall()
 
 
-__all__ += ["lane_entries", "launch_notes"]
+__all__ += ["build_runs", "lane_entries", "launch_notes"]

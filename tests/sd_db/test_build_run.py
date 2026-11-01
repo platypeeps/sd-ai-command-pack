@@ -8,6 +8,7 @@ answer from a plan file and log each call. Each fake but `claude` first
 parses its argv with the real tool's own parser, so a call the tool would
 refuse fails here too.
 """
+import dataclasses
 import importlib
 import json
 import os
@@ -538,7 +539,18 @@ class Supervise(Case):
         """Failure table, Building: a hung builder's group is ended at the timeout; a fresh row retries once."""
         self.press()
         self.plan(claude=["hang"])
-        ended = self.supervisor(timeout=1.5).run()
+        # A git call slower than the timeout, as on a loaded machine: the short timeout starts at
+        # Building, so the run times out there and not in Worktree.
+        self.tools = dataclasses.replace(self.tools, git=["sh", "-c", 'sleep 2; exec git "$@"', "git"])
+        supervisor = self.supervisor()
+        building = supervisor.building
+
+        def hung() -> str | dict:
+            supervisor.timeout = 1.5
+            return building()
+
+        supervisor.building = hung
+        ended = supervisor.run()
         old = build.run(self.db, self.bundle["id"])
         self.assertEqual(ended["outcome"], "timed_out")
         self.assertTrue(group_gone(old["builder_pgid"]))
@@ -932,13 +944,14 @@ class Tick(Case):
                                   root=self.root / "worktrees",
                                   **{"load": 1.0, "load_cap": 40.0, "interactive": [], **inputs})
 
-    def enqueued(self):
-        self.items = [create_item(self.db, kind="task", title="Built", repo=str(self.repo), status="ready")]
+    def enqueued(self, count=1, skip_lead=False):
+        self.items = [create_item(self.db, kind="task", title="Built", repo=str(self.repo), status="ready")
+                      for _ in range(count)]
         build.queue(self.db, self.items, who="operator")
         self.tick()
         run = next(row for row in build.open_runs(self.db) if row["step"] != "enqueued")  # this item's, not an older
         build.write(self.db, run["id"], step="enqueuing")
-        self.assertTrue(build.enqueued(self.db, run["id"]))
+        self.assertTrue(build.enqueued(self.db, run["id"], self.items[1:] if skip_lead else None))
         self.spawned.clear()
         return run
 
@@ -990,6 +1003,65 @@ class Tick(Case):
         self.assertEqual((row["outcome"], row["released_at"] is not None), ("lane_failed", True))
         self.assertIn("gate red", row["detail"])
         self.assertEqual(self.spawned, [])
+        self.assertEqual(self.statuses(), ["in_progress"], "only a catch-up conflict goes back to a builder")
+
+    CONFLICT = ("merging origin/main into build/sd-1 conflicts; the branch is unchanged; "
+                "sd-ship lane retry --item 1 queues it again")
+
+    def test_a_catch_up_conflict_goes_back_to_its_builder(self):
+        """pack sd:6940: a conflict with main alone queues the bundle again under its lead, with a finding."""
+        run = self.enqueued()
+        self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+        result = self.tick()
+        self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+        self.assertEqual(self.statuses(), ["in_progress"], "the same tick claims it again")
+        again = build.run(self.db, result["claimed"][0])
+        self.assertEqual((again["assignment"], again["branch"]), (run["assignment"], run["branch"]))
+        notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", self.items)]
+        self.assertTrue(any(body.startswith(build.REBUILD) for body in notes), notes)
+
+    def test_a_conflict_waits_until_its_supervisor_is_gone(self):
+        """Review: a requeue while the old supervisor still ran let a new builder share its worktree."""
+        run = self.enqueued()
+        build.register(self.db, run["id"], pid=os.getpid(), pgid=os.getpgrp(),
+                       start=build.Probe.started(os.getpid()))
+        self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+        self.assertEqual(self.tick()["claimed"], [], "a live supervisor holds the worktree")
+        self.assertIsNone(build.run(self.db, run["id"])["outcome"])
+        gone = build.Probe()
+        gone.alive = lambda pid: False  # type: ignore[method-assign]
+        gone.group = lambda pgid: False  # type: ignore[method-assign]
+        self.assertNotEqual(self.tick(probe=gone)["claimed"], [], "once gone, the bundle goes back to a builder")
+        self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+
+    def test_a_conflict_without_its_lead_is_left_to_the_operator(self):
+        """Review: a rebuild that lost its lead would claim under a child's branch, so none is queued."""
+        for case in ("moved", "skipped"):
+            with self.subTest(case=case):
+                run = self.enqueued(2, skip_lead=case == "skipped")  # a skipped lead ends blocked
+                lead, child = self.items
+                if case == "moved":
+                    writes.transition(self.db, lead, "planning", who="operator", reason="moved on")
+                self.entries = {child: {"id": "e1", "status": "failed", "reason": self.CONFLICT}}
+                self.assertEqual(self.tick()["claimed"], [])
+                self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+                self.assertEqual(item_state(self.db, child)["item"]["status"], "in_progress")
+                self.assertEqual(self.db.execute("SELECT status FROM assignment WHERE item = ?",
+                                                 (child,)).fetchone()[0], "done")
+
+    def test_conflict_rebuilds_stop_at_their_cap(self):
+        """pack sd:6940: past `CONFLICT_REBUILDS` the bundle stays lane_failed for the operator."""
+        run = self.enqueued()
+        for _ in range(build.CONFLICT_REBUILDS):
+            self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+            claimed = self.tick()["claimed"][0]
+            build.write(self.db, claimed, step="enqueuing")
+            self.assertTrue(build.enqueued(self.db, claimed))
+        self.tick()
+        self.assertEqual(self.tick()["claimed"], [])
+        self.assertEqual(self.statuses(), ["in_progress"])
+        self.assertEqual(self.db.execute("SELECT status FROM assignment WHERE id = ?",
+                                         (run["assignment"],)).fetchone()[0], "done")
 
     def test_every_lane_end_short_of_a_merge_ends_the_run(self):
         """Review round 1: the lane's own list of ends short of a merge, and a cancel, each end the run."""
@@ -1006,6 +1078,115 @@ class Tick(Case):
         self.tick()
         row = build.run(self.db, run["id"])
         self.assertEqual((row["step"], row["outcome"], row["released_at"]), ("enqueued", None, None))
+
+
+class Sweep(Case):
+    """pack sd:6909: a blocked or cancelled build's worktree goes once every item it names is done."""
+
+    def blocked(self):
+        self.press()
+        self.plan(claude=["deny"])
+        ended = self.supervisor().run()
+        self.assertEqual(ended["outcome"], "denied")  # pack sd:6723: the first denial requeues once
+        self.plan(claude=["deny"])
+        self.assertEqual(self.supervisor(ended["retry"]).run()["outcome"], "blocked")
+        self.db.execute("UPDATE runner_run SET released_at = ?", (build_run.now(),))
+        self.db.commit()
+        return Path(self.bundle["work_path"])
+
+    def done(self):
+        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (self.items[0],))
+        self.db.commit()
+
+    def branches(self):
+        return support.git(self.repo, "branch", "--list", self.bundle["branch"])
+
+    def test_a_blocked_build_whose_items_are_done_is_removed(self):
+        work = self.blocked()
+        self.done()
+        head = support.git(self.repo, "rev-parse", self.bundle["branch"])
+        self.assertEqual(build_run.sweep(self.db), [str(work)])
+        self.assertFalse(work.exists())
+        self.assertEqual(self.branches(), "")
+        self.assertEqual(build_run.sweep(self.db), [], "a removed worktree is not swept again")
+        # Review round 1: item status is no proof the commits landed, so the head stays reachable.
+        kept = f"refs/sd-swept/{self.bundle['branch']}"
+        self.assertEqual(support.git(self.repo, "rev-parse", kept), head)
+        note = self.db.execute("SELECT body FROM note WHERE item = ? ORDER BY id DESC", (self.items[0],)).fetchone()
+        self.assertIn(kept, note["body"])
+
+    def test_a_head_off_its_branch_is_not_removed(self):
+        """A worktree whose HEAD left its branch holds commits the branch's ref would not keep."""
+        work = self.blocked()
+        self.done()
+        support.git(work, "checkout", "-q", "--detach")
+        support.git(work, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "fix: stray")
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertTrue(work.is_dir())
+
+    def test_a_branch_that_cannot_be_kept_is_not_removed(self):
+        work = self.blocked()
+        self.done()
+        support.git(self.repo, "update-ref", f"refs/sd-swept/{self.bundle['branch']}/x", "HEAD")
+        self.assertEqual(build_run.sweep(self.db), [], "a ref in the way: nothing is removed")
+        self.assertTrue(work.is_dir())
+        self.assertNotEqual(self.branches(), "")
+
+    def test_the_tick_sweeps(self):
+        work = self.blocked()
+        self.done()
+        result = build_run.dispatch(self.db, owner="fixture", spawn=lambda ident: None, lane=lambda row, items: None,
+                                    load=1.0, load_cap=40.0, interactive=[], root=self.root / "worktrees")
+        self.assertEqual(result["swept"], [str(work)])
+
+    def test_an_open_item_keeps_the_worktree(self):
+        work = self.blocked()
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertTrue(work.is_dir())
+        self.assertNotEqual(self.branches(), "")
+
+    def test_a_dirty_or_held_or_open_worktree_is_kept(self):
+        work = self.blocked()
+        self.done()
+        (work / "stray.txt").write_text("x")
+        self.assertEqual(build_run.sweep(self.db), [])
+        (work / "stray.txt").unlink()
+        sessions.beat(self.db, "session-other", machine=this_host(), cwd=None,
+                      found=sessions.worktrees([str(work)]))
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.db.execute("DELETE FROM state WHERE kind = 'heartbeat'")
+        self.db.execute("UPDATE runner_run SET released_at = NULL")
+        self.db.commit()
+        self.assertEqual(build_run.sweep(self.db), [], "an unreleased run still owns it")
+        self.assertTrue(work.is_dir())
+
+    def test_an_ignored_file_keeps_the_worktree(self):
+        """Lane review: `git worktree remove` deletes ignored files, and plain `status --porcelain` omits them."""
+        work = self.blocked()
+        self.done()
+        common = Path(support.git(work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        (common / "info").mkdir(exist_ok=True)
+        (common / "info" / "exclude").write_text(".env\n")
+        (work / ".env").write_text("TOKEN=change-me\n")
+        self.assertEqual(support.git(work, "status", "--porcelain"), "", "the plain read sees a clean tree")
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertEqual((work / ".env").read_text(), "TOKEN=change-me\n")
+        self.assertNotEqual(self.branches(), "")
+
+    def test_an_untracked_file_hidden_by_config_keeps_the_worktree(self):
+        work = self.blocked()
+        self.done()
+        support.git(self.repo, "config", "status.showUntrackedFiles", "no")
+        (work / "notes.txt").write_text("x")
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertTrue((work / "notes.txt").exists())
+
+    def test_a_locked_worktree_is_kept(self):
+        work = self.blocked()
+        self.done()
+        support.git(self.repo, "worktree", "lock", str(work))
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertTrue(work.is_dir())
 
 
 class Drafts(Case):

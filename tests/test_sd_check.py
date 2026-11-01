@@ -19,6 +19,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -617,9 +618,12 @@ class ProcessGroupTests(CheckFixture):
 
     def test_a_timed_out_check_leaves_nothing_running(self) -> None:
         root = self.orphan_repo()
-        result = self.run_json(root, "--timeout", "1")
+        # No gate slot, as `stopped` (sd:5792): `--timeout` also bounds the wait for one. 5 s, not 1:
+        # at load 38 a 1 s bound ended the check before its shell wrote the pids.
+        with unittest.mock.patch.dict(os.environ, {"SD_GATE_SLOTS": "0"}):
+            result = self.run_json(root, "--timeout", "5")
+        self.assertIn("timed out after", result["checks"][0]["reason"])
         pids = self.started(root / "pids")
-        self.assertEqual(result["checks"][0]["reason"], "timed out after 1s")
         self.assertEqual(self.survivors(pids), [], f"left running after the timeout: {pids}")
 
     def test_a_terminated_run_takes_its_check_with_it(self) -> None:

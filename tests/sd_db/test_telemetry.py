@@ -130,6 +130,51 @@ class Spans(Case):
         self.assertEqual(telemetry.ended_runs(self.db), [])
 
 
+class Report(Case):
+    """The monthly lane report draft for the writing pipeline (pack sd:6947)."""
+
+    def failed(self, detail, end="2026-10-31T09:02:06+00:00"):
+        self.db.execute("UPDATE runner_lease SET released_at = ? WHERE released_at IS NULL", (end,))
+        return self.run_row(["Fail me"], outcome="blocked", detail=detail, end=end, notes=[])[0]
+
+    def test_a_month_reports_prs_failures_reviews_and_trace_links(self):
+        ident, items = self.merged(review_round=2)
+        record_cost(self.db, source="run", role="author", repo=REPO, pass_=ident, usd=1.25)
+        denied = self.failed("ended at step building: permission denied: Bash")
+        self.failed("3 review rounds left blockers: a.py:1")
+        self.failed("sd-ship lane enqueue refused: database is locked")
+        self.failed("permission denied: Bash", end="2026-09-30T09:00:00+00:00")
+        self.failed("permission denied: Bash", end="2026-09-29T09:00:00+00:00")
+        text = telemetry.month_report(self.db, "2026-10")
+        self.assertIn("# Lane report, 2026-10", text)
+        self.assertIn(f"| repo | #1722 | sd:{items[0]}, sd:{items[1]} | 1.25 | 1.6 | 2 |", text)
+        self.assertIn("| denied_tool | 1 | 2 | -1 |", text)
+        self.assertIn("| review_blockers | 1 | 0 | +1 |", text)
+        self.assertIn("Denied tool calls: 1 run", text)
+        self.assertIn("Database-lock refusals: 1 run", text)
+        self.assertIn("Repeat-blocker rate: 1 of 2 reviewed runs (50%)", text)
+        self.assertIn(f"{telemetry.PHOENIX_UI}/redirects/traces/{ident}", text)
+        self.assertIn(f"{telemetry.PHOENIX_UI}/redirects/traces/{denied}", text)
+
+    def test_the_report_carries_no_title_detail_or_note_body(self):
+        self.merged(review_round=1)
+        self.failed("ended at /Users/x/secret: permission denied: Bash")
+        text = telemetry.month_report(self.db, "2026-10")
+        for secret in ("/Users/x", "Fixed round 1", "Built.", "Build me", "Fail me", "secret"):
+            self.assertNotIn(secret, text)
+
+    def test_the_cli_writes_the_draft_and_defaults_to_last_month(self):
+        self.merged()
+        out = self.root / "draft" / "lane-report.md"
+        with mock.patch.object(cli, "_open_for_read", return_value=connect(self.root / "sd.db", write=False)), \
+                redirect_stdout(io.StringIO()) as said:
+            code = cli.main(["telemetry", "report", "--month", "2026-10", "--out", str(out)])
+        self.assertEqual(code, 0)
+        self.assertIn("#1722", out.read_text())
+        self.assertIn(str(out), said.getvalue())
+        self.assertEqual(telemetry.last_month(telemetry.date(2026, 1, 15)), "2025-12")
+
+
 class Export(Case):
     def test_a_missing_collector_is_a_skip(self):
         self.merged()

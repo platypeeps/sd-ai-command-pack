@@ -335,7 +335,7 @@ def dispatch_builds(args: argparse.Namespace) -> int:
         result["spawned"] = [ident for ident in result["spawned"] if ident not in unstarted]
         result["why"] = "; ".join(filter(None, [result["why"], *unstarted.values()]))
     print(json.dumps(result, ensure_ascii=False) if args.json else
-          f"reaped {len(result['reaped'])}, moved {len(result['moved'])}, claimed {len(result['claimed'])}, "
+          f"reaped {len(result['reaped'])}, moved {len(result['moved'])}, swept {len(result['swept'])}, claimed {len(result['claimed'])}, "
           f"drafted {len(result['drafted'])}, spawned {len(result['spawned'])}" + (f"; no claim: {result['why']}" if result["why"] else ""))
     return 0
 

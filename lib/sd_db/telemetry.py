@@ -15,6 +15,10 @@ prose. A missing collector is a skip, never a failure.
 
 The lane's prepare and gate steps live in the lane's own files, not here:
 the `lane` span runs from the enqueue to the merge or the run's end.
+
+`month_report` reads the same spans into a monthly Markdown draft for the
+writing pipeline (pack sd:6947), under the same rule: item ids, PR numbers,
+counts, cost and trace links, never a title, note body or detail.
 """
 
 from __future__ import annotations
@@ -24,7 +28,8 @@ import json
 import re
 import urllib.error
 import urllib.request
-from datetime import datetime
+from collections import Counter
+from datetime import date, datetime, timedelta
 
 from . import build
 
@@ -32,6 +37,10 @@ PROJECT = "sd-workflow"
 #: `genai-traces.sh`'s OTLP/HTTP port; `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` overrides it.
 ENDPOINT = "http://127.0.0.1:4338/v1/traces"
 BATCH = 50
+#: `genai-traces.sh`'s Phoenix UI; a report links each notable run's trace there.
+PHOENIX_UI = "http://127.0.0.1:6016"
+#: A report links the first run of each failure class, then this many costliest merged runs.
+COSTLIEST = 3
 
 #: The failure classes, first match wins, read from a run's outcome and detail.
 CLASSES = (
@@ -175,3 +184,86 @@ def export(connection, endpoint: str = ENDPOINT, *, timeout: float = 10.0) -> di
             return {"runs": len(runs), "spans": sent, "skipped": f"no collector at {endpoint}: {failure}"}
         sent += len(batch)
     return {"runs": len(runs), "spans": sent, "skipped": None}
+
+
+def last_month(today: date | None = None) -> str:
+    """The month before `today`'s, `YYYY-MM`: a job on the 1st reports the month just ended."""
+    return ((today or date.today()).replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+
+
+def _attributes_of(span: dict) -> dict:
+    return {row["key"]: next(iter(row["value"].values())) for row in span["attributes"]}
+
+
+def _runs(count: int) -> str:
+    return f"{count} run" if count == 1 else f"{count} runs"
+
+
+def month_report(connection, month: str, *, ui: str = PHOENIX_UI) -> str:
+    """The Markdown draft for the build runs that ended in `month` (`YYYY-MM`, UTC), against the month before.
+
+    Merged PRs with their cost and lead time (the bundle's first run to the
+    merge), failure classes with their trend, review rounds and the
+    repeat-blocker rate (reviewed runs whose blockers outlived every round),
+    denied tool calls, database-lock refusals, and a trace link for the
+    first run of each failure class and the costliest merges. Metadata
+    only, as the export.
+    """
+    first = date.fromisoformat(month + "-01")
+    before = last_month(first)
+    runs = ended_runs(connection)
+    this = [row for row in runs if row["released_at"].startswith(month)]
+    classes = Counter(failure_class(row["outcome"], row["detail"]) for row in this)
+    prior = Counter(failure_class(row["outcome"], row["detail"]) for row in runs
+                    if row["released_at"].startswith(before))
+    lines = [f"# Lane report, {month}", "",
+             "Draft from sd-workflow telemetry (`sd-db telemetry report`): metadata only, times in UTC. "
+             "Not for publication as is.", "",
+             f"Build runs ended: {len(this)} ({sum(prior.values())} in {before}).", "",
+             "## Merged pull requests", "", "| Repo | PR | Items | Cost (USD) | Lead time (h) | Review rounds |",
+             "| --- | --- | --- | --- | --- | --- |"]
+    notable: list[tuple[str, str]] = []
+    merged: list[tuple[float, str, str]] = []
+    for row in this:
+        spans = run_spans(connection, row) if row["outcome"] == "done" else []
+        merge = next((span for span in spans if span["name"] == "merge"), None)
+        if merge is None:
+            continue
+        pr = _attributes_of(merge).get("sd.pr")
+        items = _attributes_of(spans[0])["sd.items"].split(",")
+        bundle = [ident for (ident,) in connection.execute(
+            "SELECT id FROM runner_run WHERE assignment = ?", (row["assignment"],))]
+        marks = ", ".join("?" for _ in bundle)
+        cost = connection.execute(f"SELECT COALESCE(SUM(usd), 0) FROM cost WHERE pass IN ({marks})",
+                                  bundle).fetchone()[0]
+        start = connection.execute("SELECT MIN(created_at) FROM runner_run WHERE assignment = ?",
+                                   (row["assignment"],)).fetchone()[0]
+        hours = (int(merge["startTimeUnixNano"]) - _nanos(start)) / 3.6e12
+        repo, label = row["repo"].rstrip("/").rsplit("/", 1)[-1], f"#{pr}" if pr else "unrecorded"
+        lines.append(f"| {repo} | {label} | {', '.join(f'sd:{item}' for item in items)} | {cost:.2f} "
+                     f"| {hours:.1f} | {row['review_round'] or '-'} |")
+        merged.append((cost, f"{repo} PR {label}, {cost:.2f} USD", row["id"]))
+    lines += ["", f"## Failure classes, against {before}", "", f"| Class | {month} | {before} | Change |",
+              "| --- | --- | --- | --- |"]
+    names = sorted((name for name in set(classes) | set(prior) if name), key=lambda name: (-classes[name], name))
+    for name in names:
+        change = classes[name] - prior[name]
+        lines.append(f"| {name} | {classes[name]} | {prior[name]} | {f'{change:+d}' if change else '0'} |")
+        failed = next((row for row in this if failure_class(row["outcome"], row["detail"]) == name), None)
+        if failed:
+            notable.append((name, failed["id"]))
+    reviewed = [row for row in this if row["review_round"] is not None
+                or failure_class(row["outcome"], row["detail"]) == "review_blockers"]
+    rounds = [row["review_round"] for row in reviewed if row["review_round"] is not None]
+    rate = f" ({100 * classes['review_blockers'] // len(reviewed)}%)" if reviewed else ""
+    lines += ["", "## Reviews and tools", "",
+              f"- Review rounds: {sum(rounds) / len(rounds):.1f} on average over {_runs(len(rounds))}."
+              if rounds else "- Review rounds: none recorded.",
+              f"- Repeat-blocker rate: {classes['review_blockers']} of {len(reviewed)} reviewed runs{rate} "
+              "ended with blockers left after every round.",
+              f"- Denied tool calls: {_runs(classes['denied_tool'])} ended on one.",
+              f"- Database-lock refusals: {_runs(classes['db_locked'])} ended on one.",
+              "", "## Notable runs", ""]
+    notable += [(what, ident) for _, what, ident in sorted(merged, key=lambda run: -run[0])[:COSTLIEST]]
+    lines += [f"- {what}: {ui}/redirects/traces/{ident}" for what, ident in notable] or ["- None."]
+    return "\n".join(lines) + "\n"

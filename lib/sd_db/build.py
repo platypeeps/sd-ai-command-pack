@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 import time
@@ -74,6 +75,11 @@ STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", 
 DRAFT_STEPS = ("claimed", "drafting")
 #: A note that sends the operator's finding to a bundle's next builder: Send to builder (pack sd:6020).
 FINDING = "Send to builder: "
+#: A lane entry that failed only because prepare's merge of origin/<base> conflicted goes back to its builder on
+#: its own, under its lead, with this finding (pack sd:6940); `CONFLICT_REBUILDS` times, then the operator decides.
+CONFLICT = re.compile(r"\bmerging origin/\S+ into \S+ conflicts\b")
+REBUILD = FINDING + "the lane's merge of origin/main conflicted. "
+CONFLICT_REBUILDS = 2
 #: The model a bundle runs on (Q60): Sonnet only when every member's `fields.work_kind` is `mechanical`.
 OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
@@ -644,6 +650,7 @@ def lane_failed(connection, read: dict, reason: str) -> bool:
     """The tick ends an `enqueued` run whose lane entry failed or was skipped: `lane_failed`, released, in one write.
 
     The worktree stays for Retry; the lane's own note names the step.
+    A failure that is only prepare's merge of origin/main conflicting queues the bundle again (`_rebuild`).
     """
     with transaction(connection):
         stamp = clock()
@@ -654,7 +661,37 @@ def lane_failed(connection, read: dict, reason: str) -> bool:
             return False
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
                            (stamp, read["id"]))
+        if CONFLICT.search(reason):
+            _rebuild(connection, read, reason, stamp)
         return True
+
+
+def _rebuild(connection, read: dict, reason: str, stamp: str) -> None:
+    """Queue a bundle whose lane entry conflicted with main again under its lead, as Send to builder does, so the
+    next builder merges main into the same branch (pack sd:6940). Each member still `in_progress` goes back to
+    `ready`; one the operator moved stays out. A lead moved or left out of delivery, or past `CONFLICT_REBUILDS`
+    on the lead's item, queues nothing: the run stays `lane_failed` for the operator."""
+    lead = read["assignment"]
+    members = [member for member in _members(connection, lead, "done")
+               if connection.execute("SELECT status FROM item WHERE id = ?",
+                                     (member["item"],)).fetchone()["status"] == "in_progress"]
+    if not members or members[0]["id"] != lead:
+        return  # without its lead the claim would pick a child's branch and worktree: the operator's call
+    done = connection.execute("SELECT COUNT(*) FROM note WHERE item = ? AND body LIKE ?",
+                              (members[0]["item"], REBUILD + "%")).fetchone()[0]
+    if done >= CONFLICT_REBUILDS:
+        return
+    finding = (f"{REBUILD}Merge origin/main into {read['branch']}, resolve each conflict, run the tests the "
+               f"conflict touched, and commit the merge; the lane said: {reason}"[:2000])
+    for member in members:
+        transition(connection, member["item"], "ready", who="build",
+                   reason=f"build run {read['id']}: the lane's merge of origin/main conflicted")
+        add_note(connection, member["item"], "comment", finding)
+        connection.execute("UPDATE assignment SET status = 'queued', queued_at = ?, started = NULL, ended = NULL, "
+                           "result = ? WHERE id = ?", (stamp, f"requeued by build: {reason}"[:600], member["id"]))
+        add_note(connection, member["item"], "comment",
+                 f"Build assignment {member['id']} queued again by build: rebuild {done + 1} of "
+                 f"{CONFLICT_REBUILDS} after the lane's merge of origin/main conflicted")
 
 
 class Probe:

@@ -315,6 +315,39 @@ def register_briefs(verbs: Any) -> None:
         parser.set_defaults(handler=run_brief)
 
 
+def run_health(args: argparse.Namespace) -> int:
+    """`sd reports health`: the weekly KISS audit's lane and build numbers, as the Metrics page reads the lane."""
+    import importlib
+    sd_db = sd_handoff_rows.library()
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "dashboard"))
+    # By name, as `sd_operations` loads the dashboard: it is not on bin/'s lint path.
+    metrics = importlib.import_module("sd_dashboard.metrics_screen")
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    connection = sd_handoff_rows.connect(sd_db, write=False)
+    try:
+        result = metrics.health(connection, now=now)
+    except (sd_db.SdDbError, ValueError) as error:
+        raise WorkRefusal(str(error)) from error
+    finally:
+        connection.close()
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    for name in ("now", "last_week"):
+        window, lead = result[name], result[name]["lead_minutes"]
+        print(f"{name}: {window['since']} to {window['until']}")
+        for row in window["lane"]:
+            print(f"  lane {row['repository']}: {row['entries']} entries, {row['failed_percent']}% failed "
+                  f"(review {row['review']}, gate {row['gate']}, other {row['other']})")
+        for row in window["gate_suites"]:
+            print(f"  gate {row['repository']} {row['suite']}: {row['failures']}")
+        print(f"  builds {window['builds']['done']}/{window['builds']['total']} done")
+        for row in window["builds"]["reasons"]:
+            print(f"    {row['runs']} {row['reason']}")
+        print(f"  lead time over {lead['merged']} merged: median {lead['median']} min, p90 {lead['p90']} min")
+    return 0
+
+
 def register(groups: Any) -> None:
     for name in ("providers", "reports"):
         group = groups.add_parser(name, help=f"inspect and control {name} through the workflow database")
@@ -355,3 +388,8 @@ def register(groups: Any) -> None:
                 command.add_argument("--offset", type=int, default=0)
         if name == "reports":
             register_briefs(verbs)
+            health = verbs.add_parser("health", help="the weekly KISS audit's numbers: lane failures by class, "
+                                                     "gate failures by suite, build runs done, lead time; 14 days, "
+                                                     "and the 14 days that ended a week ago")
+            health.add_argument("--json", action="store_true")
+            health.set_defaults(handler=run_health)

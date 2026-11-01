@@ -48,7 +48,7 @@
   // an area's lamp or an ?area= value opens. health_screen.VIEWS is the same list.
   window.PAGE_VIEWS = [
     { id: 'checkouts', label: 'Checkouts', api: '/api/health/checkouts', areas: ['wt', 'br'] },
-    { id: 'machine', label: 'Machine', api: '/api/health/machine', areas: ['disk', 'svc', 'ports', 'ctr', 'doc'] },
+    { id: 'machine', label: 'Machine', api: '/api/health/machine', areas: ['disk', 'svc', 'ports', 'ctr', 'doc', 'aws'] },
     { id: 'github', label: 'GitHub', api: '/api/health/github', areas: ['prot', 'dep', 'sec'] },
     { id: 'jobs', label: 'Jobs', api: '/api/health/jobs', areas: ['cred', 'mir'] },
   ];
@@ -74,7 +74,7 @@
   const lampValue = l => l.value.map((v, i) => html`${i ? ' · ' : ''}<span class="ph">${v.b ? html`<b>${v.b}</b> ` : ''}${v.t}</span>`);
 
   // The box says "repo, path, branch": a path can sit only in a row's facts (a checkout) or its list (registered worktrees).
-  const text = r => [r.what, r.detail, r.kind, ...Object.values(r.facts || {}), ...(r.list || [])].join(' ').toLowerCase();
+  const text = r => [r.what, r.detail, r.kind, ...Object.values(r.facts || {}), ...(r.list || []).map(x => x.text ?? x)].join(' ').toLowerCase();
   const passes = r => drawn(r) && (!F.state.size || F.state.has(r.state)) && (!F.area.size || F.area.has(r.area))
     && (!query || text(r).includes(query));
   const filtering = () => !!(F.state.size || F.area.size || query);
@@ -201,7 +201,7 @@
       ${r.type === 'branch protection' ? (r.status === 'unknown' ? html`<h3>Checks</h3><p class="why">No cell is shown: ${r.reason}.</p>`
         : html`<h3>Checks</h3>${r.sentence ? html`<p class="why">${r.sentence}</p>` : ''}<dl class="checks">${r.cells.map(c => html`<dt>${c[0]}</dt><dd class="c-${c[1]}">${cellText(c)}</dd>`)}</dl>`) : ''}
       ${r.slug ? html`<p><a class="ext" href="https://github.com/${r.slug}/settings/branches" target="_blank" rel="noopener noreferrer">${r.slug} · settings/branches${I('arrow-up-right')}</a></p>` : ''}
-      ${r.list?.length ? html`<h3>${r.list_head || 'Rows behind it'}</h3><ul class="list">${r.list.map(x => html`<li>${x}</li>`)}</ul>` : ''}
+      ${r.list?.length ? html`<h3>${r.list_head || 'Rows behind it'}</h3><ul class="list">${r.list.map(x => html`<li>${x.href ? html`<a class="ext" href="${x.href}" target="_blank" rel="noopener noreferrer">${x.text}${I('arrow-up-right')}</a>` : x.text ?? x}</li>`)}</ul>` : ''}
       <h3>Fix</h3>${shell.commands.bar(r.id)}
       ${r.note ? html`<p class="why">${r.note}</p>` : ''}`);
     shell.commands.select(r.id);
@@ -449,8 +449,9 @@
       // sd:6722: one row's probe family only, so a Google check does not wait on claude mcp list.
       { id: 'credential.probe', on: 'credential', label: 'Probe again', does: 'Probes this credential again and shows the result in Details.', key: 'r', icon: 'rotate-ccw', risk: 'safe', primary: () => true, executes: true,
         cli: o => o.cli, sends: o => `POST /api/actions/run {action: check.run, row: ${o.id}}`, run: o => run(o, 'check.run', { row: o.id }) },
-      // sd:6722: Sign in starts the login in a herdr pane, where the browser consent opens; Re-check reads the row again after.
-      { id: 'credential.signin', on: 'credential', label: 'Sign in', does: 'Starts this login in a herdr pane; finish the consent in the browser.', key: 'i', icon: 'log-in', risk: 'safe', executes: true,
+      // sd:6722, sd:6957: Sign in shows a Google or SSO login's URL in Details to copy into that account's browser profile; the
+      // page opens none. Any other login starts in a herdr pane. Probe again reads the row after.
+      { id: 'credential.signin', on: 'credential', label: 'Sign in', does: 'Shows this login\'s URL to copy into the right browser profile.', key: 'i', icon: 'log-in', risk: 'safe', executes: true,
         primary: o => o.state !== 'ok', when: o => !!o.signin || 'this credential has no sign-in', cli: o => o.signin || o.cli,
         sends: o => `POST /api/actions/run {action: credentials.signin, probe: ${o.id.replace(/^cred:/, '')}}`, run: o => run(o, 'credentials.signin', { probe: o.id.replace(/^cred:/, '') }) },
     );
