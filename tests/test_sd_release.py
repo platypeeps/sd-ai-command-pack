@@ -142,6 +142,58 @@ class Version(unittest.TestCase):
         self.assertEqual(sd_release.set_value("image:\n  tag: old\n  pull: x\n", "image.tag", "1")[1],
                          "image:\n  tag: 1\n  pull: x\n")
 
+    def test_a_key_path_through_text_that_is_no_block_mapping_entry_is_refused(self):
+        """Review round 1: `image: |` let `image.tag` rewrite a line of the block scalar. Each way a key path
+        can meet text that is not a block-mapping entry refuses, so the bump stops with the file kept."""
+        for text, key, why in (
+                ("image: |\n  tag: old\n", "image.tag", "image is not a block mapping"),
+                ("image: |-\n  tag: old\n", "image.tag", "image is not a block mapping"),
+                ("image: >+\n  tag: old\n", "image.tag", "image is not a block mapping"),
+                ("image: |2\n  tag: old\n", "image.tag", "image is not a block mapping"),
+                ("a:\n  b: >\n    c:\n      tag: old\n", "a.b.c.tag", "a.b is not a block mapping"),
+                ("image: plain\n  tag: old\n", "image.tag", "image is not a block mapping"),
+                ("image: \"multi\n  tag: old\"\n", "image.tag", "image is not a block mapping"),
+                ("image: {tag: old}\n", "image.tag", "image is not a block mapping"),
+                ("image: [tag]\n", "image.tag", "image is not a block mapping"),
+                ("image: &a\n  tag: old\n", "image.tag", "image is not a block mapping"),
+                ("base: &a\n  tag: old\nimage: *a\n", "image.tag", "image is not a block mapping"),
+                ("image: !!map\n  tag: old\n", "image.tag", "image is not a block mapping"),
+                ("image:\n  tag: !!str old\n", "image.tag", "not a scalar"),
+                ("image:\n  tag: *a\n", "image.tag", "not a scalar"),
+                ("image:\n  tag: # set later\n", "image.tag", "not a scalar"),
+                ("image:\n  tag: \"old\n    still old\"\n", "image.tag", "not a scalar"),
+                ("image:\n  tag: old\n    still old\n", "image.tag", "not a scalar"),
+                ("image:\n  tag: a\n  tag: b\n", "image.tag", "image.tag appears twice"),
+                ("image:\n  tag: a\nimage:\n  pull: b\n", "image.tag", "image appears twice"),
+                ("image:\n  tag: a\n---\nimage:\n  tag: b\n", "image.tag", "this reader takes one YAML document"),
+                ("image:\n  tag: a\n...\n", "image.tag", "this reader takes one YAML document"),
+                ("note: \"open\ntag: x\n", "tag", "ends inside a quoted scalar or flow collection")):
+            with self.subTest(text=text), self.assertRaisesRegex(sd_release.ReleaseError, why):
+                sd_release.set_value(text, key, "1.0.1")
+        for text in ("- image:\n    tag: old\n", "image:\n  - tag: old\n", "image:\n- tag: old\n",
+                     "other:\n  image:\n    tag: old\n"):
+            with self.subTest(text=text):  # no entry at the path: `_bump` stops with `has no image.tag`
+                self.assertEqual(sd_release.set_value(text, "image.tag", "1.0.1"), (None, text))
+
+    def test_a_key_path_reads_only_block_mapping_entries_and_rewrites_the_one_it_names(self):
+        """Review round 1: comments, quotes, quoted keys and text that only looks like the key read right."""
+        for text, key, old, new in (
+                ("image: # the image\n  # tag: commented\n  tag: old  # set\n", "image.tag", "old",
+                 "image: # the image\n  # tag: commented\n  tag: 1.0.1  # set\n"),
+                ("image:\n  tag: \"a # b\"\n", "image.tag", "a # b", "image:\n  tag: \"1.0.1\"\n"),
+                ("image:\n  tag: 'a # b'  # c\n", "image.tag", "a # b", "image:\n  tag: '1.0.1'  # c\n"),
+                ("image:\n  tag: a#b\n", "image.tag", "a#b", "image:\n  tag: 1.0.1\n"),
+                ("image:\n  \"tag\": old\n", "image.tag", "old", "image:\n  \"tag\": 1.0.1\n"),
+                ("'image':\n  'tag': 'old'\n", "image.tag", "old", "'image':\n  'tag': '1.0.1'\n"),
+                ("---\nimage:\n  tag: old\n", "image.tag", "old", "---\nimage:\n  tag: 1.0.1\n"),
+                ("note: |\n  tag: x\ntag: old\n", "tag", "old", "note: |\n  tag: x\ntag: 1.0.1\n"),
+                ("note: \"a\ntag: x\"\ntag: old\n", "tag", "old", "note: \"a\ntag: x\"\ntag: 1.0.1\n"),
+                ("args: [a,\ntag: x]\ntag: old\n", "tag", "old", "args: [a,\ntag: x]\ntag: 1.0.1\n"),
+                ("list:\n- tag: x\ntag: old\n", "tag", "old", "list:\n- tag: x\ntag: 1.0.1\n"),
+                ("image:\n  tag: old  \r\n", "image.tag", "old", "image:\n  tag: 1.0.1  \r\n")):
+            with self.subTest(text=text):
+                self.assertEqual(sd_release.set_value(text, key, "1.0.1"), (old, new))
+
     def test_the_policy_reader_checks_the_release_keys(self):
         self.assertEqual(sd_lib.declaration_problems("policy", {"release": RELEASE}), [])
         self.assertEqual(sd_lib.declaration_problems("policy", {"release": {"tag": "v1"}}),
@@ -222,6 +274,14 @@ class Chain(unittest.TestCase):
         self.assertEqual(world.acts, ["push_tag v0.18.0 abc123", "verify check-rollout 0.18.0"],
                          "review: a version already deployed is still verified")
         self.assertEqual(world.verified_at, ("dep000", True), "on the deploy commit that holds it")
+
+    def test_a_key_under_a_block_scalar_stops_the_bump_and_opens_nothing(self):
+        """Review round 1: `image: |` let the chain commit and merge an edit to the block scalar."""
+        world = World(values="image: |\n  tag: 0.17.2\n")
+        state = run(world)
+        self.assertEqual((state["step"], state["failed"]), ("bump", True))
+        self.assertIn("bump failed: image.tag: image is not a block mapping", state["reason"])
+        self.assertEqual(world.acts, ["push_tag v0.18.0 abc123"])
 
     def test_freeze_window_stops_the_chain_before_merge(self):
         world = World(frozen={"deploy": "demo until 15:00"})

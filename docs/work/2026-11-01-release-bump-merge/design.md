@@ -55,6 +55,12 @@ saved before its external act, so a kill resumes at that step.
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
 | bump: read the deployed file | none | `key` is missing, or not a one-line scalar | stop failed at bump; file untouched | `test_a_key_that_holds_no_scalar_is_refused_and_the_file_kept` |
+| bump: read the deployed file | none | a key on the path holds a block, flow or multi-line scalar, a flow collection, an anchor, alias or tag, so a line inside it reads as the key | stop failed at bump; file untouched | `test_a_key_path_through_text_that_is_no_block_mapping_entry_is_refused`, `test_a_key_under_a_block_scalar_stops_the_bump_and_opens_nothing` |
+| bump: read the deployed file | none | the key or a key on its path appears twice | stop failed at bump; file untouched | `test_a_key_path_through_text_that_is_no_block_mapping_entry_is_refused` |
+| bump: read the deployed file | none | the file holds a second document (`---` or `...` after content) | stop failed at bump; a leading `---` reads | `test_a_key_path_through_text_that_is_no_block_mapping_entry_is_refused`, `test_a_key_path_reads_only_block_mapping_entries_and_rewrites_the_one_it_names` |
+| bump: read the deployed file | none | the path runs through a sequence item (`- key:`) | no entry at the key: stop failed at bump, `has no <key>` | `test_a_key_path_through_text_that_is_no_block_mapping_entry_is_refused` |
+| bump: read the deployed file | none | text elsewhere looks like the key: inside a block scalar, a quoted scalar or flow collection over several lines, or one that never closes | only block-mapping entries match; a value open at the end of the file stops failed at bump | `test_a_key_path_reads_only_block_mapping_entries_and_rewrites_the_one_it_names`, `test_a_key_path_through_text_that_is_no_block_mapping_entry_is_refused` |
+| bump: read the deployed file | none | `#` inside a quoted value, a comment as the value, a comment line, a quoted key | the quoted value reads whole; a comment-only value stops failed at bump; comment lines are skipped; a quoted key matches | `test_a_key_path_reads_only_block_mapping_entries_and_rewrites_the_one_it_names`, `test_a_key_path_through_text_that_is_no_block_mapping_entry_is_refused` |
 | bump: read the deployed file | none | a read strips edge whitespace, so the rewrite loses content | read raw (`strip=False`) | `test_file_reads_keep_leading_and_trailing_whitespace` |
 | bump: compare versions | none | the deployed value already equals the version | skip to verify, reason `no bump` | `test_release_skips_a_bump_already_deployed` |
 | bump: compare versions | none | the deployed value drops or adds the `v` the tag has | keep the deployed value's form | `test_the_bump_keeps_the_deployed_values_v_prefix_and_form` |
@@ -78,7 +84,7 @@ saved before its external act, so a kill resumes at that step.
 | any | none | a chain PR 1 stored at verify, then the policy named a deploy | go back to bump | `test_a_chain_tagged_before_the_policy_named_a_deploy_bumps_before_its_verify` |
 | any | none | a chain stored at bump or merge, then the policy dropped the deploy | stop failed; act on nothing | `test_a_deploy_step_whose_policy_dropped_the_deploy_fails_rather_than_acts` |
 
-Each row once marked "to write", and each row added in the build, has a test that failed first.
+Each row once marked "to write", each row added in the build, and each row of the review round 1 class pass ("a key path matches text that is not a block-mapping entry") has a test that failed first.
 
 ## Acceptance criteria
 

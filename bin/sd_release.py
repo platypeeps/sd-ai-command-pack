@@ -26,7 +26,7 @@ import pathlib
 import re
 import subprocess
 import tempfile
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import sd_lib
 import sd_repo_policy
@@ -82,37 +82,111 @@ def _semver(tag: str) -> tuple[int, int, int]:
 
 
 
+#: A block-mapping entry: its key, plain or quoted, then `:` and the rest of its line.
+ENTRY = re.compile(r"""(?P<name>[^\s:#"']+|"[^"]*"|'[^']*'):(?P<rest>(?:\s.*)?)\Z""")
+#: An entry's rest: nothing or a comment, so a block opens under it, or a one-line scalar and its comment.
+SCALAR = re.compile(r"""(?P<gap>\s*)(?:(?P<value>"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|(?![-?:](?:\s|\Z))"""
+                    r"""[^\s"'|>\[\]{}&*!%@`#](?:.*?\S)?)(?P<tail>\s+#.*?)?|#.*?)?(?P<end>\s*)\Z""")
+#: A quoted scalar, closed or not, a comment, or a bracket that opens or closes a flow collection.
+FLOW = re.compile(r"""(?<![^\s\[{,:])(?:"(?:[^"\\]|\\.)*(?P<double>")?|'(?:[^']|'')*(?P<single>')?|#.*)"""
+                  r"""|(?P<open>[\[{])|[\]}]""")
+DOCUMENT = re.compile(r"(?:---|\.\.\.)(?:\s|\Z)")
+
+
 def set_value(text: str, key: str, value: str) -> tuple[str | None, str]:
     """The old scalar at the dotted `key` of a YAML block mapping, and `text` with `value` in its place.
 
-    Its quotes and a trailing comment stay. None and `text` unchanged when the key is not there; a
-    ReleaseError when it holds a mapping, a sequence, a block, flow or multi-line scalar, or an anchor.
+    Its quotes and a trailing comment stay. None and `text` unchanged when no block-mapping entry sits at the
+    key. A ReleaseError, the file left as it was, when a key on the path holds anything but a block mapping
+    (a block, flow or multi-line scalar, a flow collection, an anchor, alias or tag), the key holds anything
+    but a one-line scalar, a key on the path appears twice, or the file holds a second document.
     """
-    path, depth, lines = key.split("."), 0, text.splitlines(keepends=True)
-    parent, child = -1, None  # the matched parent's indent; its children's, once the first one shows it
+    path, lines = tuple(key.split(".")), text.splitlines(keepends=True)
+
+    def refused(why: str) -> ReleaseError:
+        return ReleaseError(f"{key}: {why}; the file is left as it was")
+
+    seen: set[tuple[str, ...]] = set()
+    found = None
+    for number, indent, here, written, scalar in _entries(lines, refused):
+        if here != path[:len(here)]:
+            continue
+        if here in seen:
+            raise refused(f"{'.'.join(here)} appears twice")
+        seen.add(here)
+        opens = scalar is not None and scalar["value"] is None
+        if len(here) < len(path) and not opens:
+            raise refused(f"{'.'.join(here)} is not a block mapping")
+        if len(here) == len(path):
+            if scalar is None or opens or _continues(lines[number + 1:], indent):
+                raise refused("the value is not a scalar on one line")
+            found = number, indent, written, scalar
+    if found is None:
+        return None, text
+    number, indent, written, scalar = found
+    old, eol = scalar["value"], lines[number][len(lines[number].rstrip("\r\n")):]
+    quote = old[0] if old[0] in "\"'" else ""
+    lines[number] = (f"{' ' * indent}{written}:{scalar['gap'] or ' '}{quote}{value}{quote}"
+                     f"{scalar['tail'] or ''}{scalar['end']}{eol}")
+    return (old[1:-1] if quote else old), "".join(lines)
+
+
+def _entries(lines: list[str], refused: Callable[[str], ReleaseError]) -> Iterator[tuple[int, int, tuple[str, ...], str, Any]]:
+    """Each block-mapping entry in `lines`: its line number, indent, key path, key as written, and its rest
+    as `SCALAR` reads it, or None. Lines under a value, inside a quoted scalar or flow collection that runs
+    over lines, and in a sequence item are no entry.
+    """
+    above: list[tuple[int, str]] = []  # the block-mapping keys open over this line, and their indents
+    deeper: int | None = None  # lines indented past this run on the value of the entry before them
+    flow, started = "", False  # `flow`: a quoted scalar or flow collection not closed yet
     for number, line in enumerate(lines):
         body = line.rstrip("\r\n")
         stripped = body.lstrip(" ")
-        if not stripped or stripped.startswith("#"):
-            continue
         indent = len(body) - len(stripped)
-        if indent <= parent:
-            break
-        child = indent if child is None else child
-        found = re.match(r"""(?P<name>[^\s:#"']+|"[^"]*"|'[^']*'):(?P<gap>\s*)(?P<value>.*?)(?P<tail>\s+#.*)?\Z""",
-                         stripped)
-        if indent != child or found is None or found["name"].strip("\"'") != path[depth]:
+        if flow:  # it runs on whatever the indent, until it closes
+            flow = "" if _closed(flow + "\n" + body) else flow + "\n" + body
             continue
-        if depth < len(path) - 1:
-            depth, parent, child = depth + 1, indent, None
+        if not stripped or stripped.startswith("#") or deeper is not None and indent > deeper:
             continue
-        old, quote = found["value"], found["value"][:1] if found["value"][:1] in "\"'" else ""
-        if not old or old[0] in "|>[{&*!" or _continues(lines[number + 1:], indent):
-            raise ReleaseError(f"{key} is not a scalar on one line; the file is left as it was")
-        lines[number] = (f"{' ' * indent}{found['name']}:{found['gap'] or ' '}{quote}{value}{quote}"
-                         f"{found['tail'] or ''}{line[len(body):]}")
-        return old.strip("\"'"), "".join(lines)
-    return None, text
+        deeper = None
+        if indent == 0 and _document(stripped, started, number, refused):
+            continue
+        started = True
+        while above and above[-1][0] >= indent:
+            above.pop()
+        entry = ENTRY.match(stripped)
+        if entry is None:
+            rest, scalar = stripped, None
+        else:
+            rest, scalar = entry["rest"], SCALAR.match(entry["rest"])
+            name = entry["name"][1:-1] if entry["name"][:1] in "\"'" else entry["name"]
+            yield number, indent, tuple(held for _, held in above) + (name,), entry["name"], scalar
+        if scalar is not None and scalar["value"] is None:
+            above.append((indent, name))
+        else:  # a sequence item, or a value: what is deeper belongs to it, not to a mapping
+            deeper = indent
+            flow = "" if _closed(rest) else rest
+    if flow:
+        raise refused("the file ends inside a quoted scalar or flow collection")
+
+
+def _document(stripped: str, started: bool, number: int, refused: Callable[[str], ReleaseError]) -> bool:
+    """Whether a line at indent 0 marks a document: a ReleaseError unless it is the one `---` that opens it."""
+    if not DOCUMENT.match(stripped):
+        return False
+    if started or stripped[:3] == "..." or stripped[3:].strip()[:1] not in ("", "#"):
+        raise refused(f"line {number + 1} marks a document; this reader takes one YAML document")
+    return True
+
+
+def _closed(text: str) -> bool:
+    """Whether each quoted scalar and flow collection `text` opens also closes in it."""
+    depth = 0
+    for token in FLOW.finditer(text):
+        if token[0][0] == '"' and token["double"] is None or token[0][0] == "'" and token["single"] is None:
+            return False
+        depth += 1 if token["open"] else -1 if token[0] in "]}" else 0
+    return depth <= 0
 
 
 def _continues(rest: list[str], indent: int) -> bool:
