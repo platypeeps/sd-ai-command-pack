@@ -17,7 +17,6 @@ and `stopped` end a chain. An ask files one question on the item; a ruling on it
 
 from __future__ import annotations
 
-import os
 import pathlib
 import re
 import subprocess
@@ -154,12 +153,14 @@ def advance_release(state: dict, release: dict, acts: dict, world: Any,
 class Repositories:
     """What the chain reads and does, on disk: `git` in the lane's main checkout, `verify` in a worktree of it.
 
-    `frozen` and `ruling` read the hub; the lane passes them in (`sd_lane.release_chain`).
+    `environ` is the whole environment git and `verify` run in; the lane passes its own. `frozen` and
+    `ruling` read the hub; the lane passes them in (`sd_lane.release_chain`).
     """
 
     def __init__(self, main: pathlib.Path, environ: dict[str, str], frozen: Callable[[], str | None],
                  ruling: Callable[[str, str, str], str | None]) -> None:
-        self.main, self.env, self.frozen, self.ruling = main, {**os.environ, **environ}, frozen, ruling
+        # `environ` whole, never over `os.environ`: that put back what a caller dropped, such as GIT_DIR
+        self.main, self.env, self.frozen, self.ruling = main, dict(environ), frozen, ruling
         self._tip: str | None = None
         self._tags: dict[str, str] = {}  # origin's tags as `last_tag` read them, for `messages_since`
 

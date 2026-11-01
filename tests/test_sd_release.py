@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "bin"))
 import sd_release  # noqa: E402
@@ -240,6 +242,22 @@ class OnOrigin(unittest.TestCase):
         self.assertEqual(self.next(), ("v0.2.0", None))
         with self.assertRaisesRegex(sd_release.ReleaseError, "origin already has v0.2.0 on"):
             self.world.push_tag("v0.2.0", self.first)
+
+    def test_an_ambient_git_dir_the_given_environment_omits_never_reaches_git(self):
+        """Lane review: `{**os.environ, **environ}` put back the GIT_DIR `clean_environment` dropped, so git ran
+        in that repository, and a test's `push_tag` could tag and push the operator's real checkout."""
+        decoy = self.main.parent / "decoy"
+        self.git(self.main.parent, "init", "-q", "-b", "main", str(decoy))
+        self.git(decoy, "commit", "-q", "--allow-empty", "-m", "decoy")
+        sha = self.commit("feat: two")
+        self.git(self.main, "push", "-q", "origin", "HEAD:main")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(decoy / ".git")}):
+            world = sd_release.Repositories(self.main, clean_environment(**IDENTITY), lambda: None,
+                                            lambda *args: None)
+            self.assertEqual(world.tip(), sha)
+            world.push_tag("v0.2.0", sha)
+        self.assertEqual(self.git(self.origin, "rev-parse", "refs/tags/v0.2.0^{commit}"), sha)
+        self.assertEqual(self.git(decoy, "tag", "--list"), "", "the decoy repository is never tagged")
 
     def test_a_local_tag_on_another_commit_is_refused_not_published(self):
         sha = self.commit("feat: two")
