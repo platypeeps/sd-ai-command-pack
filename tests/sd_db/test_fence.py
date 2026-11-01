@@ -19,6 +19,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -417,12 +418,14 @@ class TheLiveServer(StubCase):
         self.rename(HUB_NAME + ".")
         self.assertIsNone(self.server.fence(), "a refusal outlived its window")
 
-    def test_a_commit_asks_afresh_inside_the_window(self):
-        """codex pass: a frame passed on a cached answer, then the hub was renamed; the commit asks again."""
+    def test_a_commit_past_the_window_asks_again(self):
+        """codex pass: a frame passed on a cached answer, then the hub was renamed; the commit asks again
+        once that answer is `FENCE_SECONDS` old (operator ruling on pack sd:7042, note #39256)."""
         rid = remote.new_request_id()
 
         def demote():
             self.rename("old-hub.example.test.")
+            self.server.fenced = hub.Held()
         answers = self.session(
             remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
             remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None),
@@ -435,10 +438,71 @@ class TheLiveServer(StubCase):
         self.assertEqual(answers[4:], [None])
         self.assertEqual(self.rows(), 0, "a demoted hub committed a row")
 
-    def test_a_write_outside_a_transaction_asks_afresh_inside_the_window(self):
-        """codex pass: a lone write with an id is its own transaction, whose COMMIT asks afresh."""
+    def test_a_commit_inside_the_window_asks_tailscale_nothing(self):
+        """pack sd:7042, note #39256: the commit trusts the answer its frames trust, so it spawns no
+        Tailscale call."""
+        rid = remote.new_request_id()
+        answers = self.session(
+            remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
+            remote.request("execute", sql="INSERT INTO probe (name) VALUES ('one')", params=None),
+            remote.request("execute", sql="COMMIT", params=None, rid=rid))
+        self.assertTrue(all(a and a["ok"] for a in answers), answers)
+        self.assertEqual(self.rows(), 1)
+        self.assertEqual(self.asked().count(["status", "--json"]), 1, "one ask for the session, none for its commit")
+
+    def test_a_write_begin_that_asks_again_and_finds_the_rename_refuses_before_it_opens(self):
+        """pack sd:7042: the write BEGIN's own ask refuses as a frame's does, before BEGIN runs."""
+        ask = self.server.fence
+
+        def fence(**kwargs):
+            if kwargs.get("within") is not None:
+                self.rename("old-hub.example.test.")
+                self.server.fenced = hub.Held()
+            return ask(**kwargs)
+
+        self.enterContext(mock.patch.object(self.server, "fence", fence))
+        rid = remote.new_request_id()
+        answers = self.session(
+            remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
+            remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None))
+        self.assertTrue(answers[0]["ok"], answers)
+        self.assertFalse(answers[1]["ok"], answers)
+        self.assertIn("this machine is not the hub", answers[1]["error"]["text"])
+        self.assertEqual(answers[2:], [None], "a fenced server answered a second frame")
+        self.assertEqual(self.rows(), 0)
+
+    def test_a_commit_on_a_slow_tailscale_holds_no_other_frame(self):
+        """pack sd:7042: a frame with a held answer never waits on the fence lock while a commit runs."""
+        self.assertIsNone(self.server.fence())
+        self.rename(HUB_NAME + ".", status_delay=3)
+        rid = remote.new_request_id()
+        answers: list = []
+
+        def write():
+            answers.extend(self.session(
+                remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
+                remote.request("execute", sql="INSERT INTO probe (name) VALUES ('one')", params=None),
+                remote.request("execute", sql="COMMIT", params=None, rid=rid)))
+
+        writer = threading.Thread(target=write)
+        writer.start()
+        time.sleep(0.5)
+        started = time.monotonic()
+        try:
+            self.assertIsNone(self.server.fence())
+            waited = time.monotonic() - started
+        finally:
+            writer.join(30)
+        self.assertLess(waited, 1.0, "a frame waited on the commit's Tailscale call")
+        self.assertTrue(all(a and a["ok"] for a in answers), answers)
+        self.assertEqual(self.rows(), 1)
+
+    def test_a_write_outside_a_transaction_asks_again_past_the_window(self):
+        """codex pass: a lone write with an id is its own transaction, whose COMMIT asks once the
+        held answer is `FENCE_SECONDS` old (note #39256)."""
         def demote():
             self.rename("old-hub.example.test.")
+            self.server.fenced = hub.Held()
         answers = self.session(remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None,
                                               rid=remote.new_request_id()),
                                remote.request("close"), between=demote)
@@ -454,8 +518,7 @@ class TheLiveServer(StubCase):
 
         def fence(**kwargs):
             refusal = ask(**kwargs)
-            if kwargs.get("fresh"):
-                self.rename("old-hub.example.test.")  # demoted right after a fresh answer
+            self.rename("old-hub.example.test.")  # demoted right after each answer
             return refusal
 
         self.enterContext(mock.patch.object(self.server, "fence", fence))
@@ -466,7 +529,7 @@ class TheLiveServer(StubCase):
                                                           "INSERT INTO probe (name) VALUES ('b');")):
             with self.subTest(op=frame["op"]):
                 self.rename(HUB_NAME + ".")
-                self.server.fenced = None
+                self.server.fenced = hub.Held()
                 answers = self.session(frame, remote.request("close"))
                 self.assertFalse(answers[1]["ok"], answers)
                 self.assertIn("only with a request id", answers[1]["error"]["text"])
@@ -475,7 +538,7 @@ class TheLiveServer(StubCase):
         self.assertTrue(self.session(remote.request("executescript", sql="SELECT 1;"))[1]["ok"], "a read-only script")
         # The remedy: one write transaction, one COMMIT, one fresh answer.
         self.rename(HUB_NAME + ".")
-        self.server.fenced = None
+        self.server.fenced = hub.Held()
         rid = remote.new_request_id()
         answers = self.session(remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
                                remote.request("executemany", sql="INSERT INTO probe (name) VALUES (?)", params=two),
