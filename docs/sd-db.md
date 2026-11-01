@@ -322,7 +322,7 @@ Each key is a kind; each value is the object the old `.github/` file held, or fo
 | `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
 | `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
 | `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids, and optional `url` and `title` (sd:5302) | none |
-| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: it merges by `merge_method` (sd:6790; under rebase, prepare folds `fixup!` commits, writes the trailers on the tip and force-pushes it with a lease), and `review.human` holds the merge until that many humans approve the head; `ci` `{provider: jenkins, url, job}` makes the merge wait for a green Jenkins build of the head (`{pr}` in `job` is the PR number), and an unreachable Jenkins holds it as `ci_unreachable`; `test` `{setup, env, teardown}` is the recipe `sd-check` runs around the checks: unset `env` names or a failed `setup` fail them unrun, and `teardown` runs after them | none |
+| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: it merges by `merge_method` (sd:6790; under rebase, prepare folds `fixup!` commits, writes the trailers on the tip and force-pushes it with a lease), and `review.human` holds the merge until that many humans approve the head; `ci` `{provider: jenkins, url, job}` makes the merge wait for a green Jenkins build of the head (`{pr}` in `job` is the PR number), and an unreachable Jenkins holds it as `ci_unreachable`; `test` `{setup, env, teardown}` is the recipe `sd-check` runs around the checks: unset `env` names or a failed `setup` fail them unrun, and `teardown` runs after them; `release` `{verify}` is the chain the lane runs after a merge (`bin/sd_release.py`, sd:6881): it pushes the next semver tag from `commit_convention.release_types` (default `feat`, `fix`) on origin's main, then runs `verify` in a detached worktree at the tagged commit with `SD_RELEASE_TAG` and `SD_RELEASE_VERSION`; a policy that holds `push` at ask files one question on the item and waits for a ruling that starts with `go`, a freeze window holds the tag, and a failed `verify` reports and rolls nothing back; `deploy_repo`, `file` and `key` are refused until the deploy bump lands (sd:7014) | none |
 
     bin/sd-db repo declare PATH                     # every kind, as JSON
     bin/sd-db repo declare PATH review              # one kind
@@ -341,7 +341,7 @@ The `.github/` files are no longer read.
     bin/sd-db repo freeze PATH off                  # lift it
 
 A freeze window is a `freeze` state row keyed by the repository's GitHub `owner/name`, not a declaration: it is short-lived (sd:6879).
-Inside a window the lane claims no entry, so every entry stays pending in order, and `sd-ship merge` refuses with `freeze_window`.
+Inside a window the lane claims no entry, so every entry stays pending in order, `sd-ship merge` refuses with `freeze_window`, and the release chain holds its tag.
 
 ## `judgments`: what the judgment models cost, by stage
 

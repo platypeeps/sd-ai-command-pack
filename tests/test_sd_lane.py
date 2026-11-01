@@ -1504,6 +1504,13 @@ class Landing(Lane):
     def setUp(self) -> None:
         super().setUp()
         git(self.repo, "push", "-q", "-u", "origin", "main")
+        if str(REPO_ROOT / "dashboard") not in sys.path:  # as sd_lane.local_data adds it
+            sys.path.insert(0, str(REPO_ROOT / "dashboard"))
+        from sd_dashboard import health_collectors
+        # No process works in a test tree; the real lsof gave no answer under load (sd:7025).
+        self.cwds = mock.patch.object(health_collectors, "_cwds", return_value=[])
+        self.cwds.start()
+        self.addCleanup(self.cwds.stop)
 
     def topic(self, name: str = "topic") -> tuple[pathlib.Path, str]:
         """A pushed worktree whose commit tracks a file, a nested file and a symlink, as a real one does."""
@@ -1663,6 +1670,7 @@ class Landing(Lane):
 
     def test_a_process_working_in_a_merged_worktree_keeps_it(self) -> None:
         """Review of sd:6727: a build or server no registry names still runs there; an unread list keeps it too."""
+        self.cwds.stop()  # this test reads the real lsof
         tree, head = self.topic()
         self.merge_lands(tree, 1, head)
         self.drain()
@@ -1983,6 +1991,108 @@ class Landing(Lane):
         answer = self.drain()
         self.assertTrue(answer["post_merge"].startswith("make post-merge unknown: git fetch failed"), answer)
         self.assertEqual(self.note_kinds[-1], "followup")
+
+    def released(self, policy: dict, ruled: dict | None = None) -> dict:
+        """One run with `policy` as the repository's declaration; `ruled` answers the chain's questions by step."""
+        def declared(root, kind, environ=None):
+            return policy if kind == "policy" else None
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(sd_lane.sd_lib, "repo_declaration", declared))
+            if ruled is not None:
+                stack.enter_context(mock.patch.object(
+                    sd_lane, "release_ruling", lambda queue, item, main: lambda tag, step, question: ruled.get(step)))
+            return self.drain()
+
+    def feat_on_origin_main(self) -> str:
+        upstream = self.tmp / "feat"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(upstream)], check=True, env=clean_environment())
+        git(upstream, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty",
+            "-m", "feat: a thing")
+        git(upstream, "push", "-q", "origin", "main")
+        return git(upstream, "rev-parse", "HEAD")
+
+    def tag_on_origin(self, tag: str) -> str:
+        return subprocess.run(["git", "-C", str(self.origin), "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}"],
+                              capture_output=True, text=True, check=False, env=clean_environment()).stdout.strip()
+
+    def test_a_merge_in_a_repository_whose_policy_declares_release_tags_main(self) -> None:
+        """sd:6881: the lane runs the release chain after it lands a PR; version from the commit types."""
+        tree, head = self.topic()
+        sha = self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        answer = self.released({"release": {}})
+        self.assertEqual(answer["release"], "released v0.1.0")
+        self.assertEqual(self.tag_on_origin("v0.1.0"), sha)
+        self.assertEqual(self.entries()[0]["release"]["step"], "done")
+        self.assertEqual((self.notes[-1][:2], self.note_kinds[-1]), ((1, "Release: released v0.1.0"), "comment"))
+        self.assertNotIn("release", self.released({"release": {}}))  # a run with no owed chain adds nothing
+
+    def test_a_merge_whose_run_could_not_read_the_policy_is_released_by_a_later_run(self) -> None:
+        """Review: the obligation was marked from this run's merges only, so a run that stopped, or failed to
+        read the policy, after recording a merge left it with no release for good."""
+        tree, head = self.topic()
+        sha = self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+
+        def unread(root, kind, environ=None):
+            raise sd_lane.sd_lib.DatabaseUnreadable("the hub did not answer")
+        with mock.patch.object(sd_lane.sd_lib, "repo_declaration", unread):
+            answer = self.drain()
+        self.assertTrue(answer["release"].startswith("not run: the policy was not read"), answer)
+        self.assertEqual(self.entries()[0]["release"], "owed")
+        answer = self.released({"release": {}})
+        self.assertEqual((answer["release"], self.tag_on_origin("v0.1.0")), ("released v0.1.0", sha))
+
+    def test_a_release_killed_after_the_tag_push_resumes_at_the_verify(self) -> None:
+        """Review: the step was stored only once the chain returned, so a kill after the tag push left it at
+        version, and the restart read the pushed tag as the last one and released nothing."""
+        tree, head = self.topic()
+        sha = self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        policy = {"release": {"verify": 'test "$SD_RELEASE_VERSION" = 0.1.0'}}
+
+        def killed(world, command, tag, version, sha):
+            raise Killed
+        with mock.patch.object(sd_lane.ReleaseWorld, "verify", killed), self.assertRaises(Killed):
+            self.released(policy)
+        chain = self.entries()[0]["release"]
+        self.assertEqual((chain["step"], chain["tag"], self.tag_on_origin("v0.1.0")), ("verify", "v0.1.0", sha))
+        self.assertEqual(self.released(policy)["release"], "released v0.1.0")
+
+    def test_a_tag_the_policy_holds_at_ask_waits_and_a_later_run_resumes_it(self) -> None:
+        tree, head = self.topic()
+        sha = self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        answer = self.released({"mode": "org", "release": {}}, ruled={})
+        self.assertTrue(answer["release"].startswith("waiting for the operator's ruling on: push the tag v0.1.0"),
+                        answer)
+        self.assertEqual((self.tag_on_origin("v0.1.0"), self.entries()[0]["release"]["step"]), ("", "tag"))
+        notes = len(self.notes)
+        self.released({"mode": "org", "release": {}}, ruled={})
+        self.assertEqual(len(self.notes), notes)  # the same wait notes once
+        answer = self.released({"mode": "org", "release": {}}, ruled={"tag": "go"})
+        self.assertEqual((answer["release"], self.tag_on_origin("v0.1.0")), ("released v0.1.0", sha))
+
+    def test_a_repository_without_a_release_policy_owes_no_chain(self) -> None:
+        tree, head = self.topic()
+        self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        answer = self.released({"mode": "managed"})
+        self.assertNotIn("release", answer)
+        self.assertEqual(self.entries()[0]["release"], "owed")  # the mark waits; no chain runs
+        self.assertEqual(self.tag_on_origin("v0.1.0"), "")
+
+    def test_a_release_declared_before_the_deploy_refusal_runs_nothing(self) -> None:
+        """Older state: the reader accepted any `release` object, so a stored one may name a deploy repository;
+        a tag-only chain would skip the deploy it names."""
+        tree, head = self.topic()
+        self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        answer = self.released({"release": {"deploy_repo": "~/repos/org/deploy", "file": "v.yaml", "key": "image.tag"}})
+        self.assertTrue(answer["release"].startswith("not run: the policy declaration: release: deploy_repo"), answer)
+        self.assertIn("pack sd:7014", answer["release"])
+        self.assertEqual((self.entries()[0]["release"], self.tag_on_origin("v0.1.0")), ("owed", ""))
+
 
 class Killed(BaseException):
     """A process killed between two steps: nothing after the raise runs, and no `except Exception` catches it."""

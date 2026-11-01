@@ -127,6 +127,28 @@ def build(result, sha=HEAD, building=False):
             "actions": [{}, {"lastBuiltRevision": {"SHA1": sha}}]}
 
 
+class Release(unittest.TestCase):
+    """sd:6881. `release` takes the tag and its `verify`; the deploy bump and merge land with sd:7014."""
+
+    def test_the_release_key_takes_a_verify_command(self):
+        self.assertEqual(sd_repo_policy.problems({"release": {}}), [])
+        self.assertEqual(sd_repo_policy.problems({"release": {"verify": "make smoke"}}), [])
+        for release, problem in (([], "release is a JSON object"), ({"verify": ""}, "release: verify is a non-empty string"),
+                                 ({"verify": 1}, "release: verify is a non-empty string"),
+                                 ({"tag": "v1"}, "release: unknown key(s) tag")):
+            with self.subTest(release=release):
+                self.assertEqual(sd_repo_policy.problems({"release": release}), [f"the policy declaration: {problem}"])
+
+    def test_a_release_that_names_a_deploy_repository_is_refused_until_sd_7014(self):
+        """The operator's ruling on sd:6881: the first slice tags and verifies; a deploy key waits for sd:7014."""
+        for release in ({"deploy_repo": "~/repos/org/deploy", "file": "values.yaml", "key": "image.tag"},
+                        {"deploy_repo": "~/repos/org/deploy"}, {"file": "values.yaml"}, {"key": "image.tag"}):
+            with self.subTest(release=release):
+                self.assertEqual(sd_lib.declaration_problems("policy", {"release": release}),
+                                 [f"the policy declaration: release: {', '.join(sorted(release))} not supported yet: "
+                                  "the deploy bump and merge land with pack sd:7014; declare verify only"])
+
+
 class JenkinsWait(unittest.TestCase):
     """sd:6880. `sd-ship merge` waits on the Jenkins job the policy names, bound to the head SHA."""
 
