@@ -1176,6 +1176,8 @@ R.got = await cmd('repo.standard').run(C.get('repo:{path}'));""", doc=doc, searc
 R.label = c.label; R.does = c.does; R.got = await c.run(C.get('repos:git')); await flush();""", answer=answer)
         self.assertIn('data-cmd="repos.refresh" data-obj="repos:git"', out["R"]["html"])
         self.assertIn("<span>Refresh git state</span>", out["R"]["html"])
+        # pack sd:7084: the action sits in the section head's tools, not inside a tally line.
+        self.assertRegex(out["R"]["html"], r'<div class="tools"><button class="btn quiet sm" type="button" data-cmd="repos.refresh"')
         self.assertEqual(out["R"]["label"], "Refresh git state")
         self.assertIn("writes nothing", out["R"]["does"])
         self.assertEqual(out["R"]["got"], "Git state refreshed")

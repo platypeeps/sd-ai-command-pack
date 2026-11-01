@@ -620,14 +620,15 @@ shellRun(cmd('item.email'), OBJ.get('{self.late}')); await flush();""", doc)
         kind = "ELS['ob-kinds'].listeners.click[0]({ target: { closest: s => s === 'button[data-kind]' ? { dataset: { kind: 'K' } } : null } }); "
         rows = "re = () => [...ELS['ob-body'].html.matchAll(/data-id=\"(\\d+)\"/g)].map(m => +m[1]); "
         out = self.run_page(rows + "R.all = re(); R.chips = ELS['ob-kinds'].html; " + kind.replace("K", "task") + "R.task = re(); "
-                            + kind.replace("K", "followup") + "R.followup = re(); " + kind.replace("K", "all") + "R.again = re(); R.tally = ELS['tasks-tally'];")
+                            + kind.replace("K", "followup") + "R.followup = re(); " + kind.replace("K", "followup") + "R.again = re(); R.tally = ELS['tasks-tally'];")
         everything = [self.late, self.soon, self.later, self.task, self.blocked]
         self.assertEqual(out["R"]["all"], everything)
         self.assertEqual(out["R"]["task"], [self.task, self.blocked])
         self.assertEqual(out["R"]["followup"], [self.late, self.soon, self.later])
         self.assertEqual(out["R"]["again"], everything)
+        # pack sd:7084: no All chip; none pressed shows every kind, and a second press on the pressed one clears it.
         self.assertEqual(re.findall(r'data-kind="(\w+)" aria-pressed="(\w+)"', out["R"]["chips"]),
-                         [("all", "true"), ("followup", "false"), ("task", "false")])
+                         [("followup", "false"), ("task", "false")])
         # sd:5524: the Tasks tab carries the count (shell.view.auto); the page draws no tally.
         self.assertIsNone(out["R"].get("tally"))
 
@@ -999,12 +1000,14 @@ await flush();""")
         self.assertIs(out["R"]["bulk"], True)
         self.assertEqual(sorted(p[1]["key"] for p in out["posts"]), ["hoa-alarm/2026-09-01 10:00:00 A2 VSD Alarm", TANK_LOW])
 
-    def test_acknowledge_all_is_a_button_in_the_toolbar_naming_the_open_count(self):
+    def test_acknowledge_all_is_a_button_in_the_section_head_naming_the_open_count(self):
         out = self.run_page("R.tools = ELS['al-tools'].html;", self.acked_doc())
         self.assertRegex(out["R"]["tools"], r'<button[^>]*id="al-ack-all"[^>]*>.*Acknowledge all <span class="n">3</span>')
         self.assertNotIn('aria-disabled="true"', out["R"]["tools"])
         page = (V2 / "hoa.html").read_text(encoding="utf-8")
-        self.assertRegex(page, r'<div class="toolbar" id="al-toolbar">.*?<div class="tools" id="al-tools"></div></div>')
+        # pack sd:7084: the action sits in the section head's tools; the filter row holds Open | Acknowledged | All.
+        self.assertRegex(page, r'<h2 id="al-h">Alarm events</h2>.*?</div><div class="tools" id="al-tools"></div></div>')
+        self.assertIn('<div class="filters toolbar-2" id="al-toolbar"><div class="vseg" id="al-show"', page)
 
     def test_acknowledge_all_is_off_with_its_reason_when_nothing_is_unacknowledged(self):
         doc = self.doc()
