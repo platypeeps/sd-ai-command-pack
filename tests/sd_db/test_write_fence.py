@@ -33,9 +33,10 @@ from sd_db.schema import SCHEMA_VERSION
 from sd_db.testing.store import make_store
 
 from . import support
-from .test_fence import HUB_NAME, StubCase
+from .test_fence import HUB_NAME, StubCase, set_during
 
 OLD_HUB = "old-hub.example.test."
+
 
 
 class FenceCase(StubCase):
@@ -897,6 +898,17 @@ class TheLockHold(FenceCase):
         self.assertEqual(calls, ["free"], "a Tailscale call ran under the write lock")
         self.assertEqual(self.items(), 1)
 
+    def test_a_slow_failing_tailscale_is_called_once_before_the_lock(self):
+        """A failure ages from the setting read before the call, so writes ask again, from `_name_failed` alone."""
+        self.name_hub(HUB_NAME)
+        self.node(backend="Stopped")
+        calls = self.slow_tailscale(self.frozen())
+        before = len(self.asked())
+        create_item(self.open(), kind="work", title="outage")
+        self.assertEqual(calls[0], "free")
+        self.assertEqual(len(self.asked()) - before, 1, "Tailscale was called again under the write lock")
+        self.assertEqual(self.items(), 1)
+
     def held_after_a_slow_ask(self, slept: float) -> list[str]:
         """The asks `Held` makes for a call slower than `FENCE_SECONDS`, then a read inside the window."""
         clock = self.frozen()
@@ -918,6 +930,41 @@ class TheLockHold(FenceCase):
     def test_a_sleep_during_the_ask_asks_again(self):
         """The wall clock counts from the call's start, so a sleep inside it is still a jump."""
         self.assertEqual(self.held_after_a_slow_ask(hub.CLOCK_SLACK + 1), ["slow", "again"])
+
+    def set_during_the_call(self, value: str | None) -> None:
+        """`hub._this_name`, with `sd.hub_name` set to `value` while Tailscale answers."""
+        set_during(self, self.path, value)
+
+    def test_the_hub_name_is_read_again_after_tailscale_answers(self):
+        """The answer ages from its oldest input; a name read before the call was older (pack sd:7120)."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        self.set_during_the_call(OLD_HUB)
+        self.assertEqual(hub.write_role(self.path).state, "elsewhere")
+
+    def test_a_hub_name_cleared_during_the_call_is_off(self):
+        self.name_hub(HUB_NAME)
+        self.node()
+        self.set_during_the_call(None)
+        self.assertEqual(hub.write_role(self.path).state, "off")
+
+    def test_a_held_failure_ages_from_when_it_was_seen(self):
+        """A Tailscale failure `_this_name` holds was seen when it was cached, not when it is read again."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        clock = self.frozen()
+        hub._name_failed = (clock["monotonic"] - hub.FENCE_SECONDS - 1, hub.tailnet.TailnetError("down"))
+        asked = []
+        role = hub.role
+
+        def counted(*args, **kwargs):
+            asked.append(1)
+            return role(*args, **kwargs)
+
+        self.enterContext(mock.patch.object(hub, "role", counted))
+        self.assertEqual(hub.write_role(self.path).state, "unknown")
+        self.assertEqual(hub.write_role(self.path).state, "unknown")
+        self.assertEqual(len(asked), 2, "an answer from a failure older than the window was trusted")
 
     def test_a_held_answer_is_read_while_another_caller_asks(self):
         """One slow ask stalls only the callers that need a new answer."""

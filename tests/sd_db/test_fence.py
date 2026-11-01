@@ -16,6 +16,7 @@ import io
 import ipaddress
 import os
 import socket
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -41,6 +42,23 @@ from . import support
 HUB_NAME = "hub.example.test"
 REPOSITORY = "example/one"
 REMOTE = "git@github.com:example/one.git"
+
+
+def set_during(case, path, value: str | None) -> None:
+    """Patch `hub._this_name` to set `sd.hub_name` to `value` in `path` while Tailscale answers."""
+    name = hub._this_name
+
+    def setting() -> str:
+        raw = sqlite3.connect(path)
+        try:
+            raw.execute("INSERT INTO state (kind, key, body, timestamp) "
+                        "VALUES ('setting', ?, json_object('value', ?), '2026')", (hub.HUB_NAME, value))
+            raw.commit()
+        finally:
+            raw.close()
+        return name()
+
+    case.enterContext(mock.patch.object(hub, "_this_name", setting))
 
 
 class StubCase(unittest.TestCase):
@@ -416,6 +434,11 @@ class TheLiveServer(StubCase):
         clock["time"] += serve.FENCE_SECONDS + 1
         self.rename(HUB_NAME + ".")
         self.assertIsNone(self.server.fence(), "a refusal outlived its window")
+
+    def test_a_frame_reads_the_hub_name_after_tailscale_answers(self):
+        """pack sd:7120: the serve fence's answer ages from its oldest input, so the name is read after the call."""
+        set_during(self, self.path, "old-hub.example.test")
+        self.assertIn("sd.hub_name names old-hub.example.test", self.server.fence() or "")
 
     def test_a_commit_past_the_window_asks_again(self):
         """codex pass: a frame passed on a cached answer, then the hub was renamed; the commit asks again
