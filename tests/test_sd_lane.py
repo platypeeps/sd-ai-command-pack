@@ -1504,6 +1504,13 @@ class Landing(Lane):
     def setUp(self) -> None:
         super().setUp()
         git(self.repo, "push", "-q", "-u", "origin", "main")
+        if str(REPO_ROOT / "dashboard") not in sys.path:  # as sd_lane.local_data adds it
+            sys.path.insert(0, str(REPO_ROOT / "dashboard"))
+        from sd_dashboard import health_collectors
+        # No process works in a test tree; the real lsof gave no answer under load (sd:7025).
+        self.cwds = mock.patch.object(health_collectors, "_cwds", return_value=[])
+        self.cwds.start()
+        self.addCleanup(self.cwds.stop)
 
     def topic(self, name: str = "topic") -> tuple[pathlib.Path, str]:
         """A pushed worktree whose commit tracks a file, a nested file and a symlink, as a real one does."""
@@ -1663,6 +1670,7 @@ class Landing(Lane):
 
     def test_a_process_working_in_a_merged_worktree_keeps_it(self) -> None:
         """Review of sd:6727: a build or server no registry names still runs there; an unread list keeps it too."""
+        self.cwds.stop()  # this test reads the real lsof
         tree, head = self.topic()
         self.merge_lands(tree, 1, head)
         self.drain()
