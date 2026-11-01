@@ -7,7 +7,7 @@ folders deep that skips dot folders and build output. The page names no reposito
 shows an empty list. A repository's key is its folder name; two registered repositories with one name share no key,
 so neither is served and the document names the contest, as Documents does.
 
-**What a project says.** `kind` (`shirt`, `song`, `episode`), `title`, `brief`, `item` (`sd:<n>`) and `roots`, a map
+**What a project says.** `kind` (`shirt`, `song`, `episode`; a file with no `kind` is another tool's), `title`, `brief`, `item` (`sd:<n>`) and `roots`, a map
 from a role (`reference`, `candidates`, ...) to a folder relative to the project's. A file that does not parse lists
 with its error; a root that leaves the project folder, or names an unknown role, is dropped with its reason.
 
@@ -133,8 +133,13 @@ def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
     return out, cut
 
 
-def _project(key: str, checkout: Path, manifest: Path) -> dict:
-    """One project as the page reads it: its facts, its roots with their files, and what was wrong with it."""
+def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) -> dict | None:
+    """One project as the page reads it: its facts, its roots with their files, and what was wrong with it.
+
+    None for a `project.json` that parses to an object with no `kind`: another tool's file of that name (a test
+    fixture, a build config) is not a Studio project, and listing it as a problem would be noise. `listing` false
+    leaves each root's files out, for `located`, which needs only the roots.
+    """
     folder = manifest.parent
     relative = folder.relative_to(checkout).as_posix()
     entry = {"id": key if relative == "." else f"{key}/{relative}", "repo": key, "folder": relative, "kind": "", "title": folder.name, "brief": "", "item": None,
@@ -147,6 +152,8 @@ def _project(key: str, checkout: Path, manifest: Path) -> dict:
     if not isinstance(data, dict):
         entry["error"] = f"{PROJECT} is not an object"
         return entry
+    if "kind" not in data:
+        return None
     kind = data.get("kind")
     if kind not in KINDS:
         entry["problems"].append(f"kind {kind!r} is not one of {', '.join(KINDS)}")
@@ -185,7 +192,7 @@ def _project(key: str, checkout: Path, manifest: Path) -> dict:
         if not target.is_relative_to(base) or not target.is_dir():
             entry["problems"].append(f"root {role} {value} leaves the project folder")
             continue
-        files, cut = _files(checkout, target)
+        files, cut = _files(checkout, target) if listing else ([], False)
         entry["roots"].append({"role": role, "path": value, "files": files, "cut": cut})
     entry["roots"].sort(key=lambda r: ROLES.index(r["role"]))
     return entry
@@ -201,7 +208,7 @@ def projects(connection, repo_root: Path | None = None) -> tuple[list[dict], lis
         except OSError as problem:
             problems.append(f"{key} could not be read: {problem}")
             continue
-        found.extend(_project(key, checkout, manifest) for manifest in manifests)
+        found.extend(entry for entry in (_project(key, checkout, manifest) for manifest in manifests) if entry is not None)
     return found, problems
 
 
@@ -230,7 +237,8 @@ def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path,
         return None
     target = found[0]
     for manifest in _project_files(checkout):
-        for root in _project(key, checkout, manifest)["roots"]:
+        entry = _project(key, checkout, manifest, listing=False)
+        for root in entry["roots"] if entry else ():
             base = (manifest.parent / root["path"]).resolve()
             if target.is_relative_to(base):
                 return found

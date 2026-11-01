@@ -7,6 +7,7 @@ folders deep. `GET /api/studio` (`studio.document`) lists each project's
 kind (`shirt`, `song`, `episode`), title, brief, item (`sd:<n>`) and its
 artifact roots, a map from a role (`reference`, `candidates`, `selected`,
 `print`, `stickers`, `previews`, `media`) to a folder inside the project.
+A file that parses with no `kind` is another tool's and is not listed.
 A file that does not parse lists with its error; an unknown kind or role,
 or a root that leaves the project folder, lists as a problem and the root
 is left out. A machine with no `project.json` shows an empty list.

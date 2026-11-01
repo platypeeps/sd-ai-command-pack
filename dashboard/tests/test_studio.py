@@ -73,6 +73,12 @@ class TheProjects(ScreenCase):
         cat = doc["projects"][0]
         self.assertEqual((cat["kind"], cat["title"], cat["brief"], cat["item"]), ("shirt", "Cat shirt", "A cat on a shirt.", 42))
 
+    def test_a_project_json_with_no_kind_is_another_tools_and_is_not_listed(self):
+        other = self.root / "example" / "art" / "tests" / "fixtures"
+        other.mkdir(parents=True)
+        (other / "project.json").write_text('{"name": "a fixture of another tool"}', encoding="utf-8")
+        self.assertEqual([p["id"] for p in self.read()["projects"]], ["art/shirts/cat", "art/songs/broken"])
+
     def test_a_file_that_does_not_parse_lists_with_its_error(self):
         broken = self.read()["projects"][1]
         self.assertIn("project.json does not parse", broken["error"])
