@@ -53,7 +53,7 @@ snapshot and refuses any change in a table's row count (`backup.py`,
 `_upgrade_restore_candidate`), so a note per moved row would refuse every
 restore of a snapshot that holds one.
 
-Slice 2, its own item: retire `work`. Stop both producers
+Slice 2, pack sd:7064: retire `work`. Stop both producers
 (`workflow.register_work_item` and `sources/register.py`), delete the
 delivery subsystem and its tests, convert the open hoa sd:1276 to a task that
 its folder names with `item: sd:1276`, migrate the 105 done rows to `task`,
@@ -82,7 +82,7 @@ the largest review.
 | Restore an older snapshot that holds `personal` rows | the replay moves them to `task` | a changed row count refuses the restore | the migration moves kinds only and adds no row | `test_a_restore_of_an_older_snapshot_keeps_every_count` |
 | An older client writes a retired kind after the migration | nothing | a local build at 45 opens the store | `connect` refuses a store newer than its build (`SchemaTooNew`); a raw insert fails the CHECK | `test_a_retired_kind_is_refused_after_the_migration`, `TheVersionRefusals.test_a_newer_database_is_refused_on_open_naming_both` |
 | A satellite on the older build writes over the tailnet | nothing | its `sd task add --kind personal` reaches the hub | the hub refuses a build that differs before it opens the file (`remote.BuildMismatch`); `repo-sync.sh follow` moves the satellite | `test_wire.test_a_newer_hub_refuses_this_satellite_and_names_it_to_upgrade` |
-| The current build files a retired kind | nothing | `sd task add --kind personal`, an edit to `personal`, a catalogue review | `HAND_KINDS` refuses both kinds; the catalogue files a `task` | `test_the_hand_kinds_are_four`, `test_a_review_is_filed_as_a_task` |
+| The current build files a retired kind | nothing | `sd task add --kind personal`, an edit to `personal`, a catalogue review | `HAND_KINDS` refuses both kinds; the catalogue files a `task` | `KindEditing.test_every_kind_list_names_only_kinds_the_schema_allows`, `test_review_files_one_item_and_the_dashboard_writes_the_same_row` |
 | Roll the hub back to the previous commit | nothing | the older build meets a store at 46 | it refuses (`SchemaTooNew`); the reverse in 046's header widens the CHECK and sets 45; moved rows stay `task` | `test_the_reverse_widens_the_list_back` |
 
 ## Slices
@@ -90,7 +90,7 @@ the largest review.
 1. Migration 046 and the library for `personal` and `skill-review` (this PR).
    Every machine keeps working: the hub migrates; a satellite refuses until
    `repo-sync.sh follow` moves it, as for every migration.
-2. Retire `work` (its own pack item): stop the producers, delete the delivery
+2. Retire `work` (pack sd:7064): stop the producers, delete the delivery
    subsystem, convert hoa sd:1276, migrate the done rows, narrow to six kinds.
 
 ## Acceptance criteria
