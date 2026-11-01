@@ -1201,6 +1201,13 @@ R.said = ELS['intake-said'].html; R.left = urls.value;""", answer=answer)
         self.assertIn("once the lane merges it", out["R"]["said"])
         self.assertEqual(out["R"]["left"], "")
 
+    def test_picking_a_project_in_the_sources_head_makes_it_the_add_source_target(self):
+        """Operator 2026-11-01: the Sources picker is the viewer's choice, so To follows it, as opening a project does."""
+        out = self.run_page("""PAGE_LIST.select('research/alpha'); await flush(); R.auto = ELS['intake-to'].value;
+ELS['reader-pick'].value = 'research/beta'; ELS['reader-pick'].listeners.change.forEach(f => f({ target: ELS['reader-pick'] })); await flush();
+R.to = ELS['intake-to'].value;""")
+        self.assertEqual((out["R"]["auto"], out["R"]["to"]), ("research/reading", "research/beta"))
+
     def test_a_file_dropped_on_the_sources_panel_is_listed_with_where_it_goes(self):
         # sd:5112: the board's own first-row select leaves the target on reading; the viewer picks beta in the box.
         out = self.run_page("""PAGE_LIST.select('research/beta'); await flush(); R.auto = ELS['intake-to'].value;
