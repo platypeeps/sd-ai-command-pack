@@ -654,6 +654,34 @@ def _print_today(connection: Any, repos: list[str | None] | None) -> None:
     found = today.sections(connection, repos=repos, now=now.strftime("%Y-%m-%dT%H:%M:%SZ"), gate=_today_gate())
     width = shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns
     print(sd_views.render_sections(found, now=now, width=width), end="")
+    line = _session_age_line(os.environ)
+    if line:
+        print(line)
+
+
+def _session_age_line(env: Any, *, started: Any = None, today: datetime.date | None = None) -> str | None:
+    """The nudge to end a Claude Code session begun before today (sd:6955); None when it is today's or unread.
+
+    The start is `ps -o lstart=` of `$CLAUDE_PID`, local time: the rule "a lead session ends after its day's merges".
+    """
+    pid = env.get("CLAUDE_PID", "")
+    if not pid.isdigit():
+        return None
+    if started is None:
+        sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+        from sd_db.build import Probe
+
+        started = Probe.started
+    stamp = started(int(pid))
+    try:
+        begun = datetime.datetime.strptime(stamp or "", "%a %b %d %H:%M:%S %Y")
+    except ValueError:
+        return None
+    if begun.date() >= (today or datetime.date.today()):
+        return None
+    zone = begun.astimezone().strftime("%Z")
+    return (f"This session started {begun:%Y-%m-%d %H:%M} {zone}; "
+            "end it after today's merges and start a fresh one from sd today.")
 
 
 def _occurrence_line(value: dict[str, Any], following: Any) -> None:

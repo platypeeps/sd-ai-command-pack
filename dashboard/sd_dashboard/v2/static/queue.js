@@ -38,6 +38,9 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
   const TREND = { rising: '↑ rising', falling: '↓ falling', steady: '→ steady' };
   const ACTIVE = ['merging', 'next', 'building', 'blocked'];
   let DOC = null, busy = false, show = 'active', open = null; // open: the lane path Details shows
+  // sd:6973: tab is Queue (the lanes and builds) or Last 7 days (times); ?tab=times keeps the second, ?show=all keeps All.
+  let tab = 'queue';
+  const query = () => ({ ...(show === 'all' ? { show } : {}), ...(tab === 'times' ? { tab } : {}) });
   const drawn = l => show === 'all' ? l.rows : l.rows.filter(r => ACTIVE.includes(r.state));
   const inView = (l, v = window.shell.view.current() || 'all') => v === 'all' || l.realm == null || l.realm === v;
   const said = {}; // lane path -> { ok, text }: the last write's result, shown in its lane until the next one
@@ -140,7 +143,7 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
   // assignment cancel route; Log copies a `tail -f` of the run's log. The panel's Show is the page's Show (pack sd:6834):
   // All reads /api/queue/builds?show=all and adds every ended run, however old, with its outcome, Show assignment (a copy
   // of `sd assignments get`), and Retry and Send to builder on a blocked or cancelled bundle (below): a parked item's
-  // note points to that Retry.
+  // note points to that Retry. The ended runs sit after the lanes in a <details> closed by default (sd:6973).
   const BSTATE = { working: [G.live, 'WORKING'], waiting: [G.warning, 'WAITING ON ME'], stalled: [G.caution, 'STALLED'], lost: [G.unknown, 'LOST'] };
   const usd = n => `$${Number(n || 0).toFixed(2)}`;
   const names = r => r.items.length ? html`${r.items.map((m, i) => html`${i ? '; ' : ''}<code>sd:${String(m.item)}</code> ${m.title}`)}` : 'no items recorded';
@@ -167,10 +170,13 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
     const read = BUILT && !BUILT.error, runs = read ? BUILT.runs.length : null;
     const head = html`<h2 id="builds-h" class="times-h">Builds</h2><div class="vseg" role="group" aria-label="Build runs shown">${chip('active', runs)}${chip('all', read && show === 'all' ? runs + BUILT.recent.length : null)}</div>`;
     const note = builtSaid ? (builtSaid.ok ? html`<p class="done" role="status">${builtSaid.text}</p>` : html`<p class="fail" role="alert">${builtSaid.text}</p>`) : '';
+    if (!BUILT || BUILT.error) put($('ended'), html``);
     if (!BUILT) { put($('builds'), html`${head}${note}<p class="fail" role="alert">▨ The builds were not read: ${BUILT_ERR || 'no answer yet'}.</p>`); return; }
     if (BUILT.error) { put($('builds'), html`${head}${note}<p class="fail" role="alert">▨ The builds were not read: ${BUILT.error}.</p>`); return; }
-    put($('builds'), html`${head}${note}${BUILT.runs.length ? html`<ul class="qrows builds">${BUILT.runs.map(buildRow)}</ul>` : html`<p class="idle">No build runs now. Build on Tasks queues one.</p>`}
-      ${show !== 'all' ? '' : BUILT.recent.length ? html`<h3 class="times-h">Ended <span class="n">${String(BUILT.recent.length)}</span></h3><ul class="qrows ended">${BUILT.recent.map(endedRow)}</ul>` : html`<p class="idle">No build run has ended.</p>`}`);
+    put($('builds'), html`${head}${note}${BUILT.runs.length ? html`<ul class="qrows builds">${BUILT.runs.map(buildRow)}</ul>` : html`<p class="idle">No build runs now. Build on Tasks queues one.</p>`}`);
+    // A redraw keeps the operator's open or closed choice; a fresh page starts closed.
+    const kept = $('ended').querySelector('details.ended[open]') ? html` open` : '';
+    put($('ended'), show !== 'all' ? html`` : BUILT.recent.length ? html`<details class="ended"${kept}><summary>Ended <span class="n">${String(BUILT.recent.length)}</span></summary><ul class="qrows ended">${BUILT.recent.map(endedRow)}</ul></details>` : html`<p class="idle">No build run has ended.</p>`);
   }
   async function loadBuilds() {
     try { BUILT = await window.shell.getJSON(`/api/queue/builds${show === 'all' ? '?show=all' : ''}`); BUILT_ERR = ''; }
@@ -213,6 +219,10 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
     put($('details'), l ? lane(l) : html`<p class="why">${DOC ? 'No lane is open: no lane has a row to show.' : 'No lane is open: the lanes were not read.'}</p>`);
   }
   function draw() {
+    const times = tab === 'times';
+    put($('tab'), html`${[['queue', 'Queue'], ['times', 'Last 7 days']].map(([v, label]) => html`<button type="button" data-tab="${v}" aria-pressed="${String(tab === v)}">${label}</button>`)}`);
+    ['builds', 'lanes', 'idle', 'ended', 'show'].forEach(id => { $(id).hidden = times; });
+    $('times').hidden = !times;
     if (!DOC) { put($('readings'), html``); put($('show'), html``); put($('lanes'), html``); put($('idle'), html``); put($('times'), html``); details(); return; }
     putEntries();
     const L = DOC.load, gates = DOC.gates;
@@ -233,7 +243,7 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
       : !lanes.length ? html`<p class="done">No lane in this realm. All shows ${plural(DOC.lanes.length, 'lane')}.</p>`
       : html`<p class="done">No lane has a row to show.</p>`}`);
     put($('idle'), html`${idleLine(idle)}`);
-    put($('times'), timesTable(lanes));
+    put($('times'), times ? timesTable(lanes) : html``);
     window.PAGE_VIEWS.forEach(v => window.shell.view.count(v.id, DOC.lanes.filter(l => inView(l, v.id)).flatMap(l => l.rows).filter(r => ACTIVE.includes(r.state)).length));
     details();
   }
@@ -325,9 +335,14 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
     // The lanes' Show and the Builds panel's are one control (pack sd:6834): either redraws both.
     const pick = e => {
       const b = e.target.closest('button[data-show]'); if (!b || b.dataset.show === show) return;
-      show = b.dataset.show; window.shell.url(show === 'all' ? { show } : {}); draw(); loadBuilds();
+      show = b.dataset.show; window.shell.url(query()); draw(); loadBuilds();
     };
     $('show').addEventListener('click', pick); $('builds').addEventListener('click', pick);
+    tab = new URLSearchParams(location.search).get('tab') === 'times' ? 'times' : 'queue';
+    $('tab').addEventListener('click', e => {
+      const b = e.target.closest('button[data-tab]'); if (!b || b.dataset.tab === tab) return;
+      tab = b.dataset.tab; window.shell.url(query()); draw();
+    });
     // A write runs from the ledger's primary action or from Details; a lane name, Entries or the rest of its row opens the lane in Details.
     const press = e => {
       const b = e.target.closest('button[data-act]'); if (b) { if (!b.disabled) { open = b.dataset.repo; act(b); } return; }
@@ -336,7 +351,8 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
       const r = !e.target.closest('button, a') && e.target.closest('tr[data-lane]'); if (r) { open = r.dataset.lane; draw(); window.shell.openPane('tab-details'); }
     };
     $('lanes').addEventListener('click', press); $('details').addEventListener('click', press);
-    $('builds').addEventListener('click', e => { const b = e.target.closest('button[data-build]'); if (b && !b.disabled) buildAct(b); });
+    const build = e => { const b = e.target.closest('button[data-build]'); if (b && !b.disabled) buildAct(b); };
+    $('builds').addEventListener('click', build); $('ended').addEventListener('click', build);
     if (typeof setInterval === 'function') setInterval(() => { if (!document.hidden && !busy) load(); }, 30000);
     load();
   });

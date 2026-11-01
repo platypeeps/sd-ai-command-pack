@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -300,10 +301,77 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
     return moved
 
 
+def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
+    """Remove each build worktree, and its branch, that no run owns any more once every item it names is done.
+
+    A blocked or cancelled run keeps its worktree for Retry, and a later build
+    may land the same items; the lane squash-merges, so the branch reads
+    unpushed forever (pack sd:6909). Kept: an unreleased run on the path, an
+    item of any run on it not done, a dirty or unread worktree, one holding an
+    ignored or untracked file, a locked one, a live session other than a
+    builder's. The paths removed.
+
+    An item marked done is no proof its commits landed: a squash merge leaves
+    no ancestry to check, and an item can be closed by hand. So the branch
+    head is first kept at `refs/sd-swept/<branch>`, outside `refs/heads`, and
+    a note on the lead item names it; a head that cannot be kept removes
+    nothing. `git branch <name> refs/sd-swept/<name>` brings it back.
+    """
+    rows = connection.execute(
+        "SELECT runner_run.work_path, runner_run.repo, runner_run.branch, runner_run.session_id, "
+        "runner_run.released_at, item.status, item.id AS item, "
+        "assignment.id = runner_run.assignment AS lead FROM runner_run "
+        "JOIN assignment ON assignment.id = runner_run.assignment OR assignment.parent = runner_run.assignment "
+        "JOIN item ON item.id = assignment.item WHERE assignment.scope = ? AND runner_run.work_path IS NOT NULL",
+        (build.SCOPE,)).fetchall()
+    paths_: dict[str, dict] = {}
+    for row in rows:
+        entry = paths_.setdefault(row["work_path"], {"repo": row["repo"], "branch": row["branch"], "keep": False,
+                                                     "sessions": set(), "lead": row["item"]})
+        entry["keep"] |= row["released_at"] is None or row["status"] != "done"
+        entry["sessions"].add(row["session_id"])
+        if row["lead"]:
+            entry["lead"] = row["item"]
+    removed = []
+    for work, entry in paths_.items():
+        if entry["keep"] or not Path(work).is_dir():
+            continue
+        try:
+            # `git worktree remove` deletes ignored files, and untracked ones that config hides from
+            # status: a tree that holds any keeps them, build output too, since no list names it disposable.
+            if _read([*git, "-C", work, "status", "--porcelain", "--ignored", "--untracked-files=all"]).strip():
+                continue
+        except Unread:
+            continue
+        if sessions.holders(connection, work, machine=this_host(), exclude=tuple(filter(None, entry["sessions"]))):
+            continue
+        repo = str(paths.expand(entry["repo"]))
+        kept = f"refs/sd-swept/{entry['branch']}"
+        try:
+            head = _read([*git, "-C", work, "rev-parse", "--verify", "HEAD"]).strip()
+            if head != _read([*git, "-C", repo, "rev-parse", "--verify", f"refs/heads/{entry['branch']}"]).strip():
+                continue  # a detached HEAD off its branch: two heads to keep, so the sweep keeps both
+            _read([*git, "-C", repo, "update-ref", kept, head])
+        except Unread:
+            continue
+        try:
+            _read([*git, "-C", repo, "worktree", "remove", work])
+        except Unread:
+            continue
+        removed.append(work)
+        add_note(connection, entry["lead"], "comment",
+                 f"Build worktree {work} swept: every item is done; its head {head[:12]} is kept at {kept}")
+        try:
+            _read([*git, "-C", repo, "branch", "-D", entry["branch"]])
+        except Unread:
+            pass  # the worktree is gone and the head kept; a branch left over costs nothing
+    return removed
+
+
 def dispatch(connection, *, owner: str, load: float | None, load_cap: float | None, interactive: list[dict] | None,
              spawn: Callable[[str], Any], lane: Callable[[dict, list[int]], dict | None], why: str = "",
              root: Path | None = None, probe=Probe, kill=build.kill_group) -> dict:
-    """One tick: heartbeat, reap, watch the lane, claim, spawn; what each did.
+    """One tick: heartbeat, reap, watch the lane, sweep, claim, spawn; what each did.
 
     `load`, `load_cap` and `interactive` are read before the claim, outside
     the database; any unread (None) means no claim this tick, as does `why`,
@@ -312,6 +380,7 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     record_state(connection, "heartbeat", key=HEARTBEAT, body={"pid": os.getpid(), "owner": owner})
     reaped = build.reap(connection, probe=probe, kill=kill) + draft.reap(connection, probe=probe, kill=kill)
     moved = watch(connection, lane=lane, probe=probe)
+    swept = sweep(connection)
     claimed: list[str] = []
     while not why and len(claimed) < build.MACHINE_CAP:
         try:
@@ -334,7 +403,7 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
         if row["outcome"] is None and row["supervisor_pid"] is None and row["step"] != "enqueued":
             spawn(row["id"])
             spawned.append(row["id"])
-    return {"reaped": reaped, "moved": moved, "claimed": claimed, "drafted": drafted, "spawned": spawned, "why": why}
+    return {"reaped": reaped, "moved": moved, "swept": swept, "claimed": claimed, "drafted": drafted, "spawned": spawned, "why": why}
 
 
 def spawn(argv: list[str], *, log: Path) -> int:
@@ -850,7 +919,15 @@ class Supervisor:
         if time.monotonic() - self.last_beat < self.beat_seconds:
             return
         self.last_beat = time.monotonic()
-        if not build.beat(self.db, self.ident):
+        try:
+            beaten = build.beat(self.db, self.ident)
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error) and "busy" not in str(error):
+                raise
+            # A lock past every retry skips this beat: the next comes in `beat_seconds`, the reap waits
+            # `build.STALE_SECONDS`. Raised, it killed the supervisor beside a live child (pack sd:6741).
+            return
+        if not beaten:
             raise Lost
         row = self.fresh()
         if row["cancel_requested"] and row["step"] in build.CANCELLABLE:
