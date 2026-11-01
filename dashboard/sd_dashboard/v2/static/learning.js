@@ -2,7 +2,7 @@
 // The view reads its document when it first shows (shell.read with its api, its own state slot and active only while it
 // shows), and draws the Documents list grammar: a filter bar, a sorted and paged ledger, and the one Details pane, which
 // the Documents list leaves alone while another view shows. Nothing here writes: a row's stage and kind stay as the
-// store holds them, and Open item opens the row in Tasks, where its stage moves.
+// store holds them, and Open item opens the row in Tasks, where its stage moves. Add book and Add video file a new row.
 (() => {
   const { html, put } = window.markup;
   const $ = id => document.getElementById(id);
@@ -17,14 +17,14 @@
   const minutes = d => /^\d+$/.test(d || '') ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}` : d;
   // Each type: its view, read, object type, nouns, the stages in its words, and the facts its Details list.
   const TYPES = {
-    books: { api: '/api/documents/books', what: 'the books and articles', type: 'book', noun: 'book or article', nouns: 'books and articles', counted: 'title',
+    books: { api: '/api/documents/books', title: 'Books', added: 'to read', what: 'the books and articles', type: 'book', noun: 'book or article', nouns: 'books and articles', counted: 'title',
       states: [['queued', 'to read'], ['in-progress', 'reading'], ['done', 'done'], ['dropped', 'dropped']], stateName: 'Read state',
       by: ['by', 'Author or source'], sort: 'title', dir: 1,
       none: 'No book or article in the vault\'s Learning base: its content-type book or article rows show here.',
       facts: r => [['Author or source', r.by || '— none recorded'], ['Kind', r.kind], ['Subtitle', r.subtitle], ['Published', r.published],
         ['Pages', r.pages], ['ISBN', r.isbn]] },
     // sd:6261: a video's date is the newest first.
-    videos: { api: '/api/documents/videos', what: 'the videos', type: 'video', noun: 'video', nouns: 'videos', counted: 'video',
+    videos: { api: '/api/documents/videos', title: 'Videos', added: 'to watch', what: 'the videos', type: 'video', noun: 'video', nouns: 'videos', counted: 'video',
       states: [['queued', 'to watch'], ['in-progress', 'watching'], ['done', 'watched'], ['dropped', 'dropped']], stateName: 'Watched state',
       by: ['channel', 'Channel'], when: ['date', 'Date'], sort: 'date', dir: -1,
       none: 'No video in the vault\'s Learning base: its content-type youtube rows and its "YYYY-MM-DD - YouTube - …" notes show here.',
@@ -103,7 +103,7 @@
       adopt: doc => {
         v.doc = doc;
         v.rows = (doc.rows || []).map(r => ({ ...r, id: `${t.type}:${r.id}`, item: r.id, type: t.type, label: r.title }));
-        return { objects: v.rows, state: v.rows.length ? null : { kind: 'empty', text: t.none, source: t.api } };
+        return { objects: [...v.rows, { id, type: `${t.type} list`, label: t.title }], state: v.rows.length ? null : { kind: 'empty', text: t.none, source: t.api } };
       },
       clear: () => { v.doc = null; v.rows = []; },
       draw: () => draw(id),
@@ -157,6 +157,16 @@
       run: o => { window.open(o.url, '_blank', 'noopener'); return `Opened in a new tab · ${o.title}`; } },
     { id: `${t.type}.item`, on: t.type, label: 'Open item', does: 'Opens the row\'s item in Tasks, where its stage moves.', key: 'i', risk: 'safe',
       cli: o => `sd task show ${o.item}`, run: o => window.shell.openItem(o.item) })));
+  // Add book and Add video (pack sd:7081): a URL becomes a row at the view's first stage, through learning.add.
+  document.addEventListener('DOMContentLoaded', () => Object.entries(TYPES).forEach(([id, t]) => window.shell.commands.register(
+    { id: `${t.type}.add`, on: `${t.type} list`, label: `Add ${t.type}`, does: `Files a ${t.added} learning row for a URL.`, key: 'a', icon: 'plus', risk: 'safe', executes: true, primary: () => true,
+      fields: () => [{ name: 'url', label: 'URL', required: true, placeholder: 'https://', help: 'An http or https link.' },
+        { name: 'title', label: 'Title', placeholder: 'optional', help: 'Empty: the page\'s own title.' }],
+      consequence: () => `This files a ${t.added} row in the vault's Learning base with sd store add. It shows here and in Tasks.`,
+      cli: (o, v) => `sd store add sdw.learning ${shq(v?.title || 'TITLE')} --field content-type=${t.type === 'book' ? 'book' : 'video'} --field url=${shq(v?.url || 'URL')}`,
+      sends: () => `POST /api/actions/run {action: learning.add, view: ${id}, url, title}`,
+      run: (o, v) => window.commands.runAction(o, 'learning.add', { view: id, url: v?.url || '', title: v?.title || '' })
+        .then(said => (V[id].reader ? V[id].reader.reread() : Promise.resolve()).then(() => said)) })));
   // j / k walk the shown view's rows: the Documents list's, or this view's.
   const docs = window.PAGE_LIST, mine = () => TYPES[current()] ? current() : null;
   window.PAGE_LIST = {

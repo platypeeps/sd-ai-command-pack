@@ -79,9 +79,10 @@
     <section id="view-books" aria-labelledby="books-h">
       <div id="state-books" hidden></div>
       <div class="sec-head">
-        <h2 id="books-h">Books and articles <button class="help" type="button" aria-label="Help: Books and articles" data-help="<b>The vault's Learning base.</b> Each row is a learning note whose content-type is book or article. Its read state is the row's stage: to read, reading, done or dropped. Open item moves it in Tasks; nothing here writes.">
+        <h2 id="books-h">Books and articles <button class="help" type="button" aria-label="Help: Books and articles" data-help="<b>The vault's Learning base.</b> Each row is a learning note whose content-type is book or article. Its read state is the row's stage: to read, reading, done or dropped. Open item moves it in Tasks; Add files a new row.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="books-tally"></p>
+        <div class="tools"><button class="btn quiet" type="button" data-cmd="book.add" data-obj="books">Add book…</button></div>
       </div>
       <div class="filters toolbar-2" id="books-filters"></div>
       <table class="ledger" aria-labelledby="books-h" data-tfilter="page" data-toolbar="toolbar">
@@ -95,9 +96,10 @@
     <section id="view-videos" aria-labelledby="videos-h">
       <div id="state-videos" hidden></div>
       <div class="sec-head">
-        <h2 id="videos-h">Videos <button class="help" type="button" aria-label="Help: Videos" data-help="<b>The vault's Learning base.</b> Each row is a learning note whose content-type is youtube or video, or whose title reads YYYY-MM-DD - YouTube - channel - title. Its watched state is the row's stage: to watch, watching, watched or dropped. Open item moves it in Tasks; nothing here writes.">
+        <h2 id="videos-h">Videos <button class="help" type="button" aria-label="Help: Videos" data-help="<b>The vault's Learning base.</b> Each row is a learning note whose content-type is youtube or video, or whose title reads YYYY-MM-DD - YouTube - channel - title. Its watched state is the row's stage: to watch, watching, watched or dropped. Open item moves it in Tasks; Add files a new row.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="videos-tally"></p>
+        <div class="tools"><button class="btn quiet" type="button" data-cmd="video.add" data-obj="videos">Add video…</button></div>
       </div>
       <div class="filters toolbar-2" id="videos-filters"></div>
       <table class="ledger" aria-labelledby="videos-h" data-tfilter="page" data-toolbar="toolbar">
