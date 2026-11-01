@@ -48,7 +48,7 @@
   // an area's lamp or an ?area= value opens. health_screen.VIEWS is the same list.
   window.PAGE_VIEWS = [
     { id: 'checkouts', label: 'Checkouts', api: '/api/health/checkouts', areas: ['wt', 'br'] },
-    { id: 'machine', label: 'Machine', api: '/api/health/machine', areas: ['disk', 'svc', 'ports', 'ctr', 'doc'] },
+    { id: 'machine', label: 'Machine', api: '/api/health/machine', areas: ['disk', 'svc', 'ports', 'ctr', 'doc', 'aws'] },
     { id: 'github', label: 'GitHub', api: '/api/health/github', areas: ['prot', 'dep', 'sec'] },
     { id: 'jobs', label: 'Jobs', api: '/api/health/jobs', areas: ['cred', 'mir'] },
   ];
@@ -74,7 +74,7 @@
   const lampValue = l => l.value.map((v, i) => html`${i ? ' · ' : ''}<span class="ph">${v.b ? html`<b>${v.b}</b> ` : ''}${v.t}</span>`);
 
   // The box says "repo, path, branch": a path can sit only in a row's facts (a checkout) or its list (registered worktrees).
-  const text = r => [r.what, r.detail, r.kind, ...Object.values(r.facts || {}), ...(r.list || [])].join(' ').toLowerCase();
+  const text = r => [r.what, r.detail, r.kind, ...Object.values(r.facts || {}), ...(r.list || []).map(x => x.text ?? x)].join(' ').toLowerCase();
   const passes = r => drawn(r) && (!F.state.size || F.state.has(r.state)) && (!F.area.size || F.area.has(r.area))
     && (!query || text(r).includes(query));
   const filtering = () => !!(F.state.size || F.area.size || query);
@@ -201,7 +201,7 @@
       ${r.type === 'branch protection' ? (r.status === 'unknown' ? html`<h3>Checks</h3><p class="why">No cell is shown: ${r.reason}.</p>`
         : html`<h3>Checks</h3>${r.sentence ? html`<p class="why">${r.sentence}</p>` : ''}<dl class="checks">${r.cells.map(c => html`<dt>${c[0]}</dt><dd class="c-${c[1]}">${cellText(c)}</dd>`)}</dl>`) : ''}
       ${r.slug ? html`<p><a class="ext" href="https://github.com/${r.slug}/settings/branches" target="_blank" rel="noopener noreferrer">${r.slug} · settings/branches${I('arrow-up-right')}</a></p>` : ''}
-      ${r.list?.length ? html`<h3>${r.list_head || 'Rows behind it'}</h3><ul class="list">${r.list.map(x => html`<li>${x}</li>`)}</ul>` : ''}
+      ${r.list?.length ? html`<h3>${r.list_head || 'Rows behind it'}</h3><ul class="list">${r.list.map(x => html`<li>${x.href ? html`<a class="ext" href="${x.href}" target="_blank" rel="noopener noreferrer">${x.text}${I('arrow-up-right')}</a>` : x.text ?? x}</li>`)}</ul>` : ''}
       <h3>Fix</h3>${shell.commands.bar(r.id)}
       ${r.note ? html`<p class="why">${r.note}</p>` : ''}`);
     shell.commands.select(r.id);

@@ -225,6 +225,8 @@ addEventListener('DOMContentLoaded', () => {
   // each other's inverse, so each undoes the other with the revision its own write returned.
   let target = null, reading = null;
   const P_ = o => byId(o.id);
+  // pack sd:6977: the report's digest stamp says whether it answers this draft; file times do not.
+  const reviewed = p => { const a = p.adversarial; return a?.state === 'current' || `adversarial.md is ${a ? `${a.state}: ${a.detail}` : 'not readable'}; run Refresh review first`; };
   const nextOf = p => target && p.next.includes(target) ? target : p.next[0];
   const write = (p, suffix, body) => window.shell.post(`/api/items/${p.id}/${suffix}`, { ...body, revision: p.revision })
     .then(out => { reading?.reread(); return out; }, e => { reading?.load(); throw e; });
@@ -233,7 +235,7 @@ addEventListener('DOMContentLoaded', () => {
   const parkUndo = parked => (o, v) => window.shell.post(`/api/items/${o.id}/${parked ? 'revive' : 'park'}`, { revision: v.revision })
     .then(() => reading?.reread(), e => { reading?.load(); throw e; });
   const asked = p => { const n = p.grill?.open.length; return n ? `${markup.plural(n, 'grill question')} open; answer them first` : ''; };
-  const grillPost = (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision }).then(out => { reading?.reread(); return out; });
+  const fixPost = (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision }).then(out => { reading?.reread(); return out; });
   // An answer is Decide's: /api/decisions/answer writes the ruling and resolves the question under the piece's revision.
   document.getElementById('details').addEventListener('click', e => {
     const b = e.target.closest?.('[data-grill-answer]'), p = byId(selected), q = p?.grill?.open[0];
@@ -278,11 +280,22 @@ addEventListener('DOMContentLoaded', () => {
       consequence: () => 'Publishes to the destinations in sd-plugin.json; the canonical destination comes first. The publication claim records the URL. It posts outside, so the dashboard sends nothing: copy the two lines.',
       run: o => `Copy the two lines to publish #${P_(o).id}; publishing posts outside, so the dashboard does not run them` },
     // pack sd:6700: Grill writes the piece's questions as notes; Details walks them; Apply answers edits the draft to follow them.
-    window.commands.grill('piece', 'ask', { item: o => P_(o).id, post: grillPost,
+    window.commands.grill('piece', 'ask', { item: o => P_(o).id, post: fixPost,
       ready: o => { const p = P_(o); return !p ? 'not listed' : !p.words ? 'no draft to grill yet' : asked(p) || true; } }),
-    window.commands.grill('piece', 'apply', { item: o => P_(o).id, post: grillPost,
+    window.commands.grill('piece', 'apply', { item: o => P_(o).id, post: fixPost,
       ready: o => { const p = P_(o); return !p ? 'not listed' : asked(p) || (p.grill?.answered ? true : 'no grill question answered yet; press Grill first'); } }),
+    // pack sd:6699: Refresh review is the shared adversarial review with kind piece; it rewrites the piece's adversarial.md.
+    window.commands.adversarialReview('piece', { id: 'piece.review', label: 'Refresh review',
+      does: 'Starts a codex review of the draft in the background; it rewrites adversarial.md.',
+      payload: o => ({ kind: 'piece', target: String(o.id) }),
+      when: o => { const p = P_(o); return !p ? 'not listed' : p.words ? true : 'no draft to review yet'; } }),
+    // Apply review is the shared Fix with apply: adversarial; the page reads again once the session starts.
+    window.commands.applyReview('piece', { item: o => P_(o).id,
+      ready: o => { const p = P_(o); return !p ? 'not listed' : reviewed(p); },
+      post: fixPost }),
   ];
+  // A piece's review that lands rewrites adversarial.md, so the page reads again for its time.
+  document.addEventListener('adversarial:run', e => { if (e.detail.run.kind === 'piece' && e.detail.run.filed) reading?.reread(); });
   C.register(...CMDS);
   const cmd = id => CMDS.find(c => c.id === id);
   function move(id, to) {

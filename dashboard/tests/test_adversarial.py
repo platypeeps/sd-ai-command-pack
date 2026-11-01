@@ -1055,3 +1055,66 @@ class TheSourceReview(AdversarialCase):
         self.assertEqual(found["reviews"][self.spec], [{"item": done["brief_item"], "stem": done["brief"],
                                                        "filed": found["reviews"][self.spec][0]["filed"],
                                                        "verdict": "Does the central conclusion survive hostile reading? NO."}])
+
+
+class ThePieceReview(AdversarialCase):
+    """pack sd:6699: Refresh review on a writing piece runs `sd writing adversarial`'s steps and writes its adversarial.md."""
+
+    def setUp(self):
+        super().setUp()
+        from sd_db import upsert_repo
+        from sd_db import writing as writing_rows
+
+        self.folder = self.work / "content" / "2026" / "fixture"
+        self.folder.mkdir(parents=True)
+        words = " ".join(["The argument holds because the evidence says so."] * 20)
+        (self.folder / "index.md").write_text(f"---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\n{words}\n")
+        upsert_repo(self.connection, str(self.work), pieces_source="file")
+        self.piece = writing_rows.import_piece(self.connection, str(self.work), "2026/fixture", who="operator")["item"]["id"]
+        upsert_repo(self.connection, str(self.work), pieces_source="row")
+        self.connection.commit()
+        bin_dir = str(Path(adversarial.__file__).resolve().parents[2] / "bin")
+        with patch.object(sys, "path", [bin_dir, *sys.path]):
+            import sd_writing
+        self.sd_writing = sd_writing
+
+    def started(self):
+        with patch.object(adversarial.subprocess, "Popen") as popen:
+            status, run = adversarial.request({"kind": "piece", "target": str(self.piece)})(self.connection)
+        self.assertEqual(status, 202, run)
+        self.assertEqual(popen.call_args.args[0][2:4], ["run", str(self.runs / f"{run['id']}.json")])
+        return run
+
+    def test_a_piece_names_its_adversarial_md_as_the_output(self):
+        run = self.started()
+        self.assertEqual((run["kind"], run["item"], run["result"]),
+                         ("piece", self.piece, str(self.folder / "adversarial.md")))
+        self.assertIsNone(run["input"])
+
+    def test_the_runner_writes_adversarial_md_and_notes_the_piece(self):
+        run = self.started()
+        with patch.object(self.sd_writing, "_render", return_value="Review the draft hostilely."):
+            code = adversarial.run(self.runs / f"{run['id']}.json")
+        document = json.loads((self.runs / f"{run['id']}.json").read_text())
+        self.assertEqual((code, document["state"], document["filed"]), (0, "done", "written"), document)
+        self.assertIn("The done condition cannot fail", (self.folder / "adversarial.md").read_text())
+        self.assertIn("-s\nread-only", self.argv.read_text())
+        self.assertIn("adversarial.md for 2026/fixture", self.comments(self.piece)[-1])
+        self.assertEqual(self.batches(), [], "a piece's review files no review batch")
+
+    def test_the_runner_sends_the_recorded_model_and_effort_to_codex(self):
+        """pack sd:6978: the effort the run records is the one codex runs at, not codex's default."""
+        writes.set_setting(self.connection, "adversarial.model", "gpt-fixture")
+        writes.set_setting(self.connection, "adversarial.effort", "low")
+        run = self.started()
+        with patch.object(self.sd_writing, "_render", return_value="Review the draft hostilely."):
+            adversarial.run(self.runs / f"{run['id']}.json")
+        document = json.loads((self.runs / f"{run['id']}.json").read_text())
+        self.assertEqual((document["model"], document["effort"]), ("gpt-fixture", "low"))
+        self.assertEqual(self.codex_argv()[:5], ["exec", "-m", "gpt-fixture", "-c", "model_reasoning_effort=low"])
+
+    def test_a_draft_too_short_to_review_is_refused_and_starts_nothing(self):
+        (self.folder / "index.md").write_text("---\ntitle: Fixture piece\n---\n\n## Draft\n\nToo short.\n")
+        with patch.object(adversarial.subprocess, "Popen") as popen, self.assertRaisesRegex(Exception, "only 2 words"):
+            adversarial.request({"kind": "piece", "target": str(self.piece)})(self.connection)
+        popen.assert_not_called()
