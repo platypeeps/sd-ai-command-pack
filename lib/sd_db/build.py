@@ -43,6 +43,7 @@ from .errors import SdDbError
 from .runner import RUNNABLE_KINDS, queue_state, restoration_pending
 from .writes import (
     add_note,
+    cancel_done_blocked,
     create_assignment,
     create_item,
     set_item_fields,
@@ -76,8 +77,9 @@ DRAFT_STEPS = ("claimed", "drafting")
 FINDING = "Send to builder: "
 #: A lane entry that failed only because prepare's merge of origin/<base> conflicted goes back to its builder on
 #: its own, under its lead, with this finding (pack sd:6940); `CONFLICT_REBUILDS` times, then the operator decides.
-CONFLICT = re.compile(r"\bmerging origin/\S+ into \S+ conflicts\b")
-REBUILD = FINDING + "the lane's merge of origin/main conflicted. "
+#: `REBUILD` is the note's stable prefix the rebuild count matches; the base it names follows it (pack sd:7008).
+CONFLICT = re.compile(r"\bmerging (origin/\S+) into \S+ conflicts\b")
+REBUILD = FINDING + "the lane's merge of "
 CONFLICT_REBUILDS = 2
 #: The model a bundle runs on (Q60): Sonnet only when every member's `fields.work_kind` is `mechanical`.
 OPUS, SONNET = "opus", "sonnet"
@@ -660,12 +662,12 @@ def lane_failed(connection, read: dict, reason: str) -> bool:
             return False
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
                            (stamp, read["id"]))
-        if CONFLICT.search(reason):
-            _rebuild(connection, read, reason, stamp)
+        if conflict := CONFLICT.search(reason):
+            _rebuild(connection, read, reason, stamp, conflict.group(1))
         return True
 
 
-def _rebuild(connection, read: dict, reason: str, stamp: str) -> None:
+def _rebuild(connection, read: dict, reason: str, stamp: str, base: str) -> None:
     """Queue a bundle whose lane entry conflicted with main again under its lead, as Send to builder does, so the
     next builder merges main into the same branch (pack sd:6940). Each member still `in_progress` goes back to
     `ready`; one the operator moved stays out. A lead moved or left out of delivery, or past `CONFLICT_REBUILDS`
@@ -680,17 +682,17 @@ def _rebuild(connection, read: dict, reason: str, stamp: str) -> None:
                               (members[0]["item"], REBUILD + "%")).fetchone()[0]
     if done >= CONFLICT_REBUILDS:
         return
-    finding = (f"{REBUILD}Merge origin/main into {read['branch']}, resolve each conflict, run the tests the "
+    finding = (f"{REBUILD}{base} conflicted. Merge {base} into {read['branch']}, resolve each conflict, run the tests the "
                f"conflict touched, and commit the merge; the lane said: {reason}"[:2000])
     for member in members:
         transition(connection, member["item"], "ready", who="build",
-                   reason=f"build run {read['id']}: the lane's merge of origin/main conflicted")
+                   reason=f"build run {read['id']}: the lane's merge of {base} conflicted")
         add_note(connection, member["item"], "comment", finding)
         connection.execute("UPDATE assignment SET status = 'queued', queued_at = ?, started = NULL, ended = NULL, "
                            "result = ? WHERE id = ?", (stamp, f"requeued by build: {reason}"[:600], member["id"]))
         add_note(connection, member["item"], "comment",
                  f"Build assignment {member['id']} queued again by build: rebuild {done + 1} of "
-                 f"{CONFLICT_REBUILDS} after the lane's merge of origin/main conflicted")
+                 f"{CONFLICT_REBUILDS} after the lane's merge of {base} conflicted")
 
 
 class Probe:
@@ -929,6 +931,8 @@ def _release(connection, read: dict, *, probe=Probe) -> bool:
             return False
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
                            (stamp, read["id"]))
+        for member in _members(connection, read["assignment"], "blocked"):
+            cancel_done_blocked(connection, member["item"], stamp, f"build run {read['id']} released; item is done")
         if read["outcome"] == "blocked":
             _park(connection, read["id"], read["assignment"], stamp)
         return True
