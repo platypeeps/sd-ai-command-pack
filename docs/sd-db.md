@@ -56,10 +56,11 @@ The setting is read first, so `off` asks Tailscale nothing. Each check reads the
 Scripts that write off the machine (the NAS copy, the `hub-pin` push) run `bin/sd-db fence` first.
 
 Every library write to this machine's own database asks the fence too (system sd:5986): each write statement, and its commit.
-A transaction open when the console renames the node rolls back at its commit.
+A commit more than 5 seconds after the console renames the node, or after a sleep, rolls back.
 Only `elsewhere` refuses: a Tailscale outage must not stop a healthy hub, and nothing it writes then leaves the machine.
 Reads stay allowed, so the old hub's dashboard still shows its stale records.
-A write inside a transaction uses an answer held 5 seconds per process (`FENCE_SECONDS`); every boundary that makes a write persist asks afresh: COMMIT and the outer savepoint's RELEASE.
+A write and every boundary that makes it persist (COMMIT, the outer savepoint's RELEASE) use an answer held 5 seconds per process (`FENCE_SECONDS`).
+The transaction's opening asks again once that answer is older than half of it, before SQLite's write lock, so a commit holds no other writer for a Tailscale call (sd:7042).
 A write outside a transaction (`execute`, `executemany`, a cursor's) runs in its own `BEGIN IMMEDIATE` ... `COMMIT`, so its commit is one that asks; a batch commits whole or not at all.
 A script's write outside a transaction refuses (sqlite3 commits before a script, so nothing can hold it): put `BEGIN IMMEDIATE` ... `COMMIT` inside the script. A writable `blobopen` needs a transaction.
 Another file, such as a test fixture or a backup target, is not the record and is not fenced.
