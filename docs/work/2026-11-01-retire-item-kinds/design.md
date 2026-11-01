@@ -85,6 +85,11 @@ the largest review.
 | The current build files a retired kind | nothing | `sd task add --kind personal`, an edit to `personal`, a catalogue review | `HAND_KINDS` refuses both kinds; the catalogue files a `task` | `KindEditing.test_every_kind_list_names_only_kinds_the_schema_allows`, `test_review_files_one_item_and_the_dashboard_writes_the_same_row` |
 | Roll the hub back to the previous commit | nothing | the older build meets a store at 46 | it refuses (`SchemaTooNew`); the reverse in 046's header widens the CHECK and sets 45; moved rows stay `task` | `test_the_reverse_widens_the_list_back` |
 
+The `work` rows belong to pack sd:7064 and stay out of this table and
+this PR's tests: the migration of its done rows, the conversion of hoa
+sd:1276, a producer that writes `work` after the narrow, and the
+delivery subsystem's removal. sd:7064's own design adds them.
+
 ## Slices
 
 1. Migration 046 and the library for `personal` and `skill-review` (this PR).
