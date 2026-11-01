@@ -687,6 +687,29 @@ class Supervise(Case):
         row = build.run(self.db, self.bundle["id"])
         self.assertEqual((row["step"], row["outcome"]), ("reviewing", None))
 
+    def test_a_beat_the_lock_refuses_skips_the_beat(self):
+        """pack sd:6741: a beat whose lock outlasts every retry is skipped, not raised. Before, the
+        `database is locked` escaped `child` and the supervisor died at reviewing (6 of 9 losses)."""
+        self.press()
+        build.write(self.db, self.bundle["id"], step="reviewing")
+        self.plan(claude=["slow"])
+        supervisor = self.supervisor()
+        supervisor.logs.mkdir(parents=True, exist_ok=True)
+        real = build.beat
+        refused: list[str] = []
+
+        def beat(connection, ident):
+            if not refused:
+                refused.append(ident)
+                raise sqlite3.OperationalError("database is locked")
+            return real(connection, ident)
+
+        with mock.patch.object(build, "beat", beat):
+            code = supervisor.child([*self.tools.claude, "-p", "x"], cwd=self.root, name="locked")
+        self.assertEqual((refused, code), ([self.bundle["id"]], 0))
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["step"], row["outcome"]), ("reviewing", None))
+
     def test_a_second_supervisor_registers_nothing(self):
         self.press()
         self.assertTrue(build.register(self.db, self.bundle["id"], pid=4242, pgid=4242, start="x"))

@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -918,7 +919,15 @@ class Supervisor:
         if time.monotonic() - self.last_beat < self.beat_seconds:
             return
         self.last_beat = time.monotonic()
-        if not build.beat(self.db, self.ident):
+        try:
+            beaten = build.beat(self.db, self.ident)
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error) and "busy" not in str(error):
+                raise
+            # A lock past every retry skips this beat: the next comes in `beat_seconds`, the reap waits
+            # `build.STALE_SECONDS`. Raised, it killed the supervisor beside a live child (pack sd:6741).
+            return
+        if not beaten:
             raise Lost
         row = self.fresh()
         if row["cancel_requested"] and row["step"] in build.CANCELLABLE:

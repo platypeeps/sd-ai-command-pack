@@ -1583,7 +1583,7 @@ window.shell.state = (s, at) => { OUT.states.push(s); (OUT.slots = OUT.slots || 
 """
 
 
-SNOOZED_TYPES = ("check", "storage folder", "build output", "volume", "worktree registrations", "unread registrations",
+SNOOZED_TYPES = ("check", "doctor check", "storage folder", "build output", "volume", "worktree registrations", "unread registrations",
                  "merged branches", "merged worktrees", "port", "branch protection", "dependabot alerts", "secret scanning", "credential", "service",
                  "dashboard service", "launch agent", "vault mirror")
 
@@ -1661,6 +1661,8 @@ class TheScript(Collectors, ScreenCase):
         out = self.run_page("""R.reg = REG.map(c => [c.id, c.on, c.risk, c.key || null, typeof c.executes === 'boolean' ? c.executes : null, !!c.bulk]);""")
         self.assertEqual(out["R"]["reg"], [
             ["check.recheck", "check", "safe", "e", True, False],
+            ["doctor check.run", "doctor check", "safe", "e", True, False],
+            ["doctor check.fix", "doctor check", "safe", "f", True, False],
             ["storage folder.du", "storage folder", "safe", "b", True, False],
             ["build output.rm", "build output", "confirm", "r", True, False],
             ["volume.df", "volume", "safe", "b", True, False],
@@ -1683,6 +1685,28 @@ class TheScript(Collectors, ScreenCase):
           + [[f"{t}.ignore", t, "undo", "h", None, True] for t in SNOOZED_TYPES]
           + [["snoozed row.unsnooze", "snoozed row", "undo", "s", None, True],
              ["ignored row.unignore", "ignored row", "undo", "s", None, True]])
+
+    def test_a_doctor_row_lists_run_doctor_and_fix_and_fix_posts_the_fix_route_for_the_filed_item(self):
+        """pack sd:6684: a WARN doctor row runs the doctor, and Fix files its finding (or reuses the open item) and starts a
+        session on it; the passing row runs the doctor but has nothing to fix."""
+        doc = health_screen.document(self.connection, now=NOW, fleet=fleet_of(TREES), ports=ports_snapshot,
+                                     protection=protection_of(PROTECTION), doctor=lambda: DOCTOR)
+        rows = next(area for area in doc["areas"] if area["id"] == "doc")["rows"]
+        warn = next(row for row in rows if row["state"] == "caution")
+        out = self.run_page(
+            "ANSWER = (path, body) => HEALTH_READ(path) ? HEALTH(path) : path === '/api/items' ? [201, { item: { id: 42 }, revision: 'r42' }]"
+            " : path === '/api/items/42/fix' ? [200, { fix: { session: 'builder', pane: 'p1' } }] : [404, { error: 'no answer' }];\n"
+            f"var o = C.get({json.dumps(warn['id'])}), k = C.get('doc:ok');\n"
+            "const on = x => REG.filter(c => c.on === x.type).filter(c => !c.id.endsWith('.snooze') && !c.id.endsWith('.ignore'))"
+            ".map(c => [c.label, c.when ? c.when(x) : true]);\n"
+            "R.warn = on(o); R.ok = on(k);\n"
+            "shellRun(REG.find(c => c.on === o.type && c.label === 'Fix'), o); await flush();", doc=doc, view="machine")
+        self.assertEqual(out["R"]["warn"], [["Run doctor", True], ["Fix", True]])
+        self.assertEqual(out["R"]["ok"], [["Run doctor", True], ["Fix", "a passing doctor line has nothing to fix"]])
+        self.assertEqual([post[:2] for post in out["posts"]], [
+            ["/api/items", {"title": warn["what"], "body": f"Doctor: {warn['detail']}", "ref": "doctor:" + warn["id"][4:]}],
+            ["/api/items/42/fix", {"revision": "r42"}]])
+        self.assertEqual(out["toasts"][-1][0], "Fix started · #42 · builder session in herdr pane p1")
 
     def test_review_on_github_opens_the_repos_alert_page_in_a_new_tab(self):
         """sd:5628. Review on GitHub opens the alerts page, as Open branch settings does; the gh line stays for copying."""

@@ -297,6 +297,8 @@
   const run = (o, action, ids) => window.commands.runAction(o, action, ids);
   const pathOf = o => o.id.slice(o.id.indexOf(':') + 1), RECHECK = /^(doc|cred):/;
   const openAlerts = (o, page) => { window.open(`https://github.com/${o.slug}/security/${page}`, '_blank', 'noopener'); return 'Opened on GitHub in a new tab'; };
+  const DOCTOR_FIX = window.commands.fix('doctor check', { item: o => o.filed.item.id, report: () => false,
+    when: o => o.state === 'ok' ? 'a passing doctor line has nothing to fix' : true, post: (o, path) => shell.post(path, { revision: o.filed.revision }) });
   const names = xs => xs.length > 6 ? `${xs.slice(0, 6).join(', ')} and ${xs.length - 6} more` : xs.join(', ');
   // A 4xx wrote nothing (health_cleanup); a 502 or no answer may follow a step that landed, so the page reads again either way.
   const cleanup = o => shell.post('/api/health/cleanup', { row: o.id, revision: o.revision }).then(out => {
@@ -368,6 +370,13 @@
       { id: 'check.recheck', on: 'check', label: 'Re-check', does: o => RECHECK.test(o.id) ? 'Runs this check again and shows its output in Details.' : 'Reads Health again.', key: 'e', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: () => true,
         cli: o => o.cli, sends: o => RECHECK.test(o.id) ? `POST /api/actions/run {action: check.run, row: ${o.id}}` : 'GET /api/health/summary',
         run: o => RECHECK.test(o.id) ? run(o, 'check.run', { row: o.id }) : (load(), 'Reading Health again') },
+      // pack sd:6684: a doctor row runs the doctor again, and Fix files its finding in the system repo, or reuses the open item
+      // with its ref, then starts a builder on it through the item's Fix (commands.js).
+      { id: 'doctor check.run', on: 'doctor check', label: 'Run doctor', does: 'Runs machine-setup.sh doctor and shows its output in Details.', key: 'e', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: () => true,
+        cli: o => o.cli, sends: o => `POST /api/actions/run {action: check.run, row: ${o.id}}`, run: o => run(o, 'check.run', { row: o.id }) },
+      { ...DOCTOR_FIX, sends: o => `POST /api/items {title, body, ref: doctor:${pathOf(o)}}, then POST /api/items/<id>/fix {revision}`,
+        consequence: o => `Files "${o.what}" in the system repo, or reuses the open item that has it, then opens a herdr workspace and starts claude as a builder on it.`,
+        run: o => shell.post('/api/items', { title: o.what, body: `Doctor: ${o.detail}`, ref: `doctor:${pathOf(o)}` }).then(filed => DOCTOR_FIX.run({ ...o, filed })) },
       { id: 'storage folder.du', on: 'storage folder', label: 'Show biggest', does: 'Lists this folder\'s biggest entries in Details.', key: 'b', icon: 'chart-no-axes-column', risk: 'safe', executes: true, primary: () => true,
         cli: o => o.cli, sends: o => `POST /api/actions/run {action: storage.du, path: ${pathOf(o)}}`, run: o => run(o, 'storage.du', { path: pathOf(o) }) },
       { id: 'build output.rm', on: 'build output', label: 'Remove build output', does: 'Deletes build output in merged, clean worktrees; this cannot be undone.', key: 'r', icon: 'folder-x', risk: 'confirm', executes: true, primary: () => true,
@@ -447,7 +456,7 @@
     );
     // Snooze (sd:1896) and Ignore (sd:5470) on every row type; an ok row wants nothing, so it has nothing to snooze.
     window.snooze.register(C, { page: 'health', ignore: true, reread: () => load(), off: o => o.state === 'ok' && 'an ok row has nothing to snooze',
-      types: ['check', 'storage folder', 'build output', 'volume', 'worktree registrations', 'unread registrations', 'merged branches', 'merged worktrees', 'port',
+      types: ['check', 'doctor check', 'storage folder', 'build output', 'volume', 'worktree registrations', 'unread registrations', 'merged branches', 'merged worktrees', 'port',
         'branch protection', 'dependabot alerts', 'secret scanning', 'credential', 'service', 'dashboard service', 'launch agent', 'vault mirror'] });
 
     const u = new URLSearchParams(location.search);
