@@ -34,6 +34,10 @@ CI_FIELDS = ("provider", "url", "job")
 CI_PROVIDERS = ("jenkins",)
 #: `test`: run `setup` before the checks and `teardown` after them; each name in `env` must be set.
 TEST_FIELDS = ("setup", "env", "teardown")
+#: `release`: the chain after a merge (sd:6881, `sd_release`): the tag, then `verify`.
+RELEASE_FIELDS = ("verify",)
+#: The deploy bump and merge: refused, by name, until they land with pack sd:7014.
+RELEASE_DEPLOY = ("deploy_repo", "file", "key")
 ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 #: Slice 2's keys (design § Slices): accepted as objects now, so a preset written for both slices declares once.
 LATER = ("ci", "release", "test", "links")
@@ -138,6 +142,20 @@ def _test_problems(test: Any, where: str) -> list[str]:
     return found
 
 
+def _release_problems(release: Any, where: str) -> list[str]:
+    """`release`: the chain `sd_release` runs after a merge (sd:6881)."""
+    if not isinstance(release, dict):
+        return [f"{where} is a JSON object"]
+    deploy = sorted(set(release) & set(RELEASE_DEPLOY))
+    extra = sorted(set(release) - set(RELEASE_FIELDS) - set(RELEASE_DEPLOY))
+    found = [f"{where}: {', '.join(deploy)} not supported yet: the deploy bump and merge land with pack sd:7014; "
+             "declare verify only"] if deploy else []
+    found += [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
+    found += [f"{where}: {key} is a non-empty string" for key in RELEASE_FIELDS
+              if key in release and not (isinstance(release[key], str) and release[key].strip())]
+    return found
+
+
 def recipe_digest(policy: dict | None, env: Any) -> str:
     """The `test` recipe of `policy` and which of its `env` names `env` sets, as one digest (sd:6882).
 
@@ -176,8 +194,8 @@ def problems(value: Any) -> list[str]:
         found += _ci_problems(value["ci"], f"{where}: ci")
     if "test" in value:
         found += _test_problems(value["test"], f"{where}: test")
-    found += [f"{where}: {key} is a JSON object" for key in LATER if key in value and key not in ("links", "ci", "test")
-              and not isinstance(value[key], dict)]
+    if "release" in value:
+        found += _release_problems(value["release"], f"{where}: release")
     if "links" in value and not _words(value["links"]):
         found.append(f"{where}: links is a list of registered paths")
     return found
