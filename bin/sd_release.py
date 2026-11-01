@@ -52,8 +52,10 @@ def next_tag(last: str | None, messages: list[str], types: list[str] | tuple[str
     """The tag after `last` the commit `messages` call for, keeping its `v` or not; None when none releases.
 
     A breaking change (`type!:` or a `BREAKING CHANGE:` footer) bumps the major, `feat` the minor, any other
-    type in `types` the patch. No last tag counts from `v0.0.0`.
+    type in `types` the patch. No last tag counts from `v0.0.0`. No `types` releases nothing (sd:7016).
     """
+    if not types:
+        return None
     held = TAG.match(last or "v0.0.0")
     if held is None:
         raise ReleaseError(f"the last tag {last!r} is not a semver tag")
@@ -148,7 +150,8 @@ def _version(state: dict, release: dict, acts: dict, world: Any, types: list[str
     tag = next_tag(last, world.messages_since(last, sha), types)
     if tag is None:
         state["step"] = "done"
-        raise Wait(f"nothing to release: no {' or '.join(types)} commit since {last or 'the first commit'}")
+        raise Wait("nothing to release: release_types names no type" if not types else
+                   f"nothing to release: no {' or '.join(types)} commit since {last or 'the first commit'}")
     state.update(tag=tag, sha=sha, last=last)
     return "tag"
 

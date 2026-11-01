@@ -2609,7 +2609,8 @@ def run_release(root: pathlib.Path, queue: Queue, environ: dict[str, str], acts:
                          deploy=deploy, file=str(release.get("file") or ""),
                          merge_method=(deploy_acts or {}).get("merge_method", "squash"))
     before = dict(chain["release"])
-    types = acts["commit_convention"].get("release_types") or sd_release.DEFAULT_TYPES
+    convention = acts["commit_convention"]  # an empty list releases nothing; only an absent key takes the default
+    types = convention["release_types"] if "release_types" in convention else sd_release.DEFAULT_TYPES
 
     def save_release(state: dict[str, Any]) -> None:
         """Store `state` on the chain's entry; the chain calls it at each step, before the next external act."""

@@ -2082,6 +2082,15 @@ class Landing(Lane):
         self.assertEqual(self.entries()[0]["release"], "owed")  # the mark waits; no chain runs
         self.assertEqual(self.tag_on_origin("v0.1.0"), "")
 
+    def test_an_explicitly_empty_release_types_releases_nothing(self) -> None:
+        """sd:7016: `release_types: []` fell back to the default types, so a `feat` still tagged."""
+        tree, head = self.topic()
+        self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        answer = self.released({"commit_convention": {"release_types": []}, "release": {}})
+        self.assertEqual(answer["release"], "nothing to release: release_types names no type")
+        self.assertEqual((self.entries()[0]["release"]["step"], self.tag_on_origin("v0.1.0")), ("done", ""))
+
     def test_a_stored_release_the_reader_refuses_runs_nothing(self) -> None:
         """Older state: the reader accepted any `release` object, so a stored one may name a deploy repository
         with no file or key; a tag-only chain would skip the deploy it names."""

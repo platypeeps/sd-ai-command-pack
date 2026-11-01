@@ -118,6 +118,12 @@ class Version(unittest.TestCase):
         self.assertEqual(sd_release.next_tag(None, ["feat: first"], types), "v0.1.0")
         self.assertEqual(sd_release.next_tag("v1.0.0", ["perf: faster"], ["perf"]), "v1.0.1")
 
+    def test_no_release_types_release_nothing_not_even_a_breaking_change(self):
+        """sd:7016: an explicitly empty `release_types` releases nothing."""
+        self.assertIsNone(sd_release.next_tag("v0.17.2", ["feat!: a", "fix: b\n\nBREAKING CHANGE: c"], []))
+        state = sd_release.advance_release({"step": "version"}, TAG_ONLY, MANAGED, World(), [])
+        self.assertEqual((state["step"], state["reason"]), ("done", "nothing to release: release_types names no type"))
+
     def test_a_dotted_key_is_rewritten_in_place_and_keeps_its_quotes_and_comment(self):
         old, text = sd_release.set_value(VALUES, "image.tag", "0.18.0")
         self.assertEqual(old, "0.17.2")
