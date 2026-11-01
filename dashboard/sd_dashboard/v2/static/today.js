@@ -1,5 +1,6 @@
 // Today v2 (sd:2110): the page script. It loads before shell.js, which reads what it declares.
-// One page, no tabs (sd:5921): the annunciator, Needs you and In motion, all from /api/now (now_screen.document).
+// pack sd:7084: the annunciator heads the page; the rail switches Needs you, Since yesterday, Timeline, In motion and
+// Queues, each a view-<id> panel, all from /api/now (now_screen.document). A lamp that filters Needs you shows that view.
 // Needs you is the document's `needs`: every fact that asks for an act, ranked in the bands, a kind of many rows folded into
 // one group row. A group opens in place to its first rows, then "N more". A lamp or an intent shows only its rows; the
 // Shapeshift bar's text filters the same list. The badge is the read's own (now_screen._attention), the tally's count.
@@ -16,6 +17,8 @@
 }
 // moved:end
 window.PAGE_FILTER = { '': 'Needs you' };
+window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'digest', label: 'Since yesterday', key: 'y' },
+  { id: 'timeline', label: 'Timeline', key: 't' }, { id: 'motion', label: 'In motion', key: 'm' }, { id: 'queues', label: 'Queues', key: 'q' }];
 (() => {
   // The rail's map (built sections, and the old screen each unported one opens) is /ui/sections.js, loaded before this.
   // Capture (n) and the field's task mode file through the shell's default capture (sd:3520): POST /api/items.
@@ -245,7 +248,8 @@ window.PAGE_FILTER = { '': 'Needs you' };
     mark(row());
   }
   function intents() {
-    put($('intents'), html`<button class="chip" type="button" data-intent="" aria-pressed="${String(!intent)}">All <b>${NEEDS.length}</b></button>${INTENTS.map(([id, label, test]) => {
+    // pack sd:7084: no All chip; a second press on the picked intent clears it.
+    put($('intents'), html`${INTENTS.map(([id, label, test]) => {
       const n = NEEDS.filter(r => test(r) || (r.members || []).some(test)).length;
       return html`<button class="chip" type="button" data-intent="${id}" aria-pressed="${String(intent === id)}"${n ? '' : html` disabled`}>${label} <b>${n}</b></button>`; })}`);
   }
@@ -321,7 +325,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     const Q = DOC.queues || { rows: [], error: 'the document carried no queues' };
     const repos = [...new Set(Q.rows.map(r => r.repo || 'fleet'))].sort();
     if (!repos.includes(qRepo)) qRepo = null;
-    put($('queues-repos'), repos.length > 1 ? html`<button class="chip" type="button" data-qrepo="" aria-pressed="${String(!qRepo)}">All <b>${Q.rows.length}</b></button>${repos.map(r => html`<button class="chip" type="button" data-qrepo="${r}" aria-pressed="${String(qRepo === r)}">${r.split('/').pop()} <b>${Q.rows.filter(x => (x.repo || 'fleet') === r).length}</b></button>`)}` : html``);
+    put($('queues-repos'), repos.length > 1 ? html`${repos.map(r => html`<button class="chip" type="button" data-qrepo="${r}" aria-pressed="${String(qRepo === r)}">${r.split('/').pop()} <b>${Q.rows.filter(x => (x.repo || 'fleet') === r).length}</b></button>`)}` : html``);
     const rows = Q.rows.filter(r => !qRepo || (r.repo || 'fleet') === qRepo), n = q => rows.filter(r => r.queue === q).length;
     put($('queues-tally'), html`<span>${n('ready')} ready</span><span>${plural(n('build'), 'build')}</span><span>${n('lane')} in the lane</span><a href="/queue">Queue</a>`);
     put($('queues'), Q.error ? html`<tr class="empty"><td colspan="4">The queues could not be read: ${Q.error}. Read again tries again.</td></tr>`
@@ -591,6 +595,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     $('annunciator').addEventListener('click', e => {
       const c = e.target.closest('button.cell'); if (!c) return;
       srcFilter = srcFilter === c.dataset.src ? null : c.dataset.src;
+      if (srcFilter) window.shell.view.show('needs');
       document.querySelectorAll('.cell[data-src]').forEach(x => x.setAttribute('aria-pressed', x.dataset.src === srcFilter));
       if (DOC) applyFilter();
     });

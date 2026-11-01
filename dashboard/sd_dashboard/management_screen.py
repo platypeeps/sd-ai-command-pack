@@ -18,9 +18,6 @@ source guarded on its own so one that fails is a reason and not an empty list
 - `git`: `fleet.collect("repos")`, v1 Operations > Repos, each row with
   `repos_screen.primary`'s state, headline, detail and remedy. Nothing fetches
   or pulls.
-- `lane`: queued and running assignments and the items waiting at
-  `ready_to_send`. The idle author runner's finished assignments and merge
-  assignments are not listed (sd:5472).
 - `sessions`: `fleet.collect("sessions")`, v1 Operations > Sessions:
   worktree counts and the sd-* processes it lists.
 - `claude`: `claude_sessions.document`, each Claude session on this Mac: its
@@ -77,7 +74,6 @@ from sd_db import (
     operations,
     progress,
     protection,
-    reads,
     repos,
     workflow,
 )
@@ -378,17 +374,6 @@ def _git(read, now: str) -> dict:
     return {"root": document.get("root"), "counts": document.get("counts") or {}, "repos": out} | _seen(document)
 
 
-def _assignment(connection, row) -> dict:
-    return {"id": row["id"], "item": row["item"], "title": row["title"], "repo": row["repo"], "role": row["role"],
-            "provider": row["provider"], "status": row["status"], "lane": row["lane"], "queued_at": row["queued_at"],
-            "started": row["started"], "ended": row["ended"]}
-
-
-def _lane(connection) -> dict:
-    live = [_assignment(connection, row) for row in reads.assignment_ledger(connection, live=True)]
-    ready = [dict(row) for row in reads.ready_to_send(connection)]
-    return {"live": live, "ready": ready}
-
 
 def _sessions(read) -> dict:
     document = read("sessions")
@@ -551,7 +536,6 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
                             ("pulls", lambda: _pulls(connection)),
                             ("deep", lambda: adversarial.deep_settings(connection)),
                             ("git", lambda: _git(read, now)),
-                            ("lane", lambda: _lane(connection)),
                             ("sessions", lambda: _sessions(read)),
                             ("claude", lambda: _claude(read, connection, now, claude)),
                             ("services", lambda: _services(connection, services)),

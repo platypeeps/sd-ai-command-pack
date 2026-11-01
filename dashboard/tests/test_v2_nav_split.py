@@ -91,9 +91,16 @@ class TheGitHubRegistration(Registers, unittest.TestCase):
 
 
 class TheTabs(unittest.TestCase):
-    def test_today_has_no_tabs(self):
-        # sd:5921 folded Now, Inbox, Status and Work into one page.
-        self.assertEqual((views(js("today.js")), panels("today.html")), ([], []))
+    def test_today_is_one_page_whose_sections_are_rail_views(self):
+        # sd:5921 folded Now, Inbox, Status and Work into one page; pack sd:7090 made its sections the rail's views, each
+        # a <section id="view-<id>"> panel, so the page still draws no tab row of its own.
+        self.assertEqual(views(js("today.js")), [("needs", "Needs you"), ("digest", "Since yesterday"), ("timeline", "Timeline"),
+                                                 ("motion", "In motion"), ("queues", "Queues")])
+        self.assertEqual(panels("today.html"), [])
+        page = (V2 / "today.html").read_text(encoding="utf-8")
+        for id_ in ("needs", "digest", "timeline", "motion", "queues"):
+            with self.subTest(view=id_):
+                self.assertRegex(page, rf'<section [^>]*id="view-{id_}"')
         page = (V2 / "today.html").read_text(encoding="utf-8")
         for gone in ("/ui/decisions.js", "/ui/today-github.js", "/ui/issues.js", "/ui/decisions.css"):
             with self.subTest(gone=gone):

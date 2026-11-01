@@ -56,14 +56,14 @@ class OneDeclaration(unittest.TestCase):
 
     def test_a_page_that_registers_a_shared_command_loads_the_module_before_its_script(self):
         users = sorted(name for name, body in SCRIPTS.items() if re.search(r"window\.commands\b", body) and name != SHARED)
-        self.assertEqual(users, ["activity.js", "brief-details.js", "briefs.js", "contributions.js", "documents.js", "github.js", "health.js", "hoa.js", "home.js", "management.js", "notes.js", "queue.js", "report-details.js", "research.js", "skills.js",
+        self.assertEqual(users, ["activity.js", "brief-details.js", "briefs.js", "contributions.js", "documents.js", "github.js", "health.js", "hoa.js", "home.js", "learning.js", "management.js", "notes.js", "queue.js", "report-details.js", "research.js", "skills.js",
                                  "task-details.js", "today-github.js", "today.js", "watches.js", "writing.js"])
         # brief-details.js (sd:5620), report-details.js (sd:5636) and task-details.js (sd:5635, on HOA sd:5671) are modules, not pages: every
         # page that loads one loads the shared module first. today-github.js is GitHub's Pull requests view (sd:5633,
-        # sd:5781), loaded by github.html.
+        # sd:5781), loaded by github.html. learning.js is Documents' Books and Videos (pack sd:7081), loaded by documents.html.
         modules = {"brief-details.js": ["briefs.html", "hoa.html", "home.html", "place.html"], "report-details.js": ["hoa.html", "home.html", "reports.html"],
                    "task-details.js": ["hoa.html", "home.html", "place.html", "tasks.html"],
-                   "today-github.js": ["github.html"]}
+                   "today-github.js": ["github.html"], "learning.js": ["documents.html"]}
         def scripts(page):
             return re.findall(r'<script src="/ui/([^"]+)"', page.read_text(encoding="utf-8"))
         for name in users:

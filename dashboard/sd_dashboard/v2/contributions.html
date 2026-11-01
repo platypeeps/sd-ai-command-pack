@@ -45,9 +45,12 @@
 
   <h2 class="sr">Lanes</h2>
   <annunciator-strip><ul class="annunciator" id="annunciator"></ul></annunciator-strip>
-  <!-- The toolbar standard (sd:5281): row 1, the views then the shell's Shapeshift bar (sd:5539); the count sits on the view's tab. -->
-  <div class="toolbar" id="toolbar" data-shift>
-    <div class="vseg" id="scope" role="group" aria-label="Repositories"></div>
+  <!-- The toolbar standard (sd:5281): the shell's Shapeshift bar (sd:5539); the count sits on the view's rail entry. pack sd:7084:
+       the filter row sits above the section heads: Open | Hidden | All (the Open view's), then Internal and External. -->
+  <div class="toolbar" id="toolbar" data-shift></div>
+  <div class="filters toolbar-2" id="open-filters" role="group" aria-label="Filters">
+    <div id="hidden-seg"></div>
+    <div id="scope"></div>
   </div>
   <p class="source" id="source"></p>
 
@@ -57,7 +60,6 @@
         <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
       <p class="tally" id="tally"></p>
     </div>
-    <div class="filters toolbar-2" id="open-filters"></div>
     <table class="ledger" aria-labelledby="open-h" data-tfilter="page" data-toolbar="toolbar">
       <thead id="rows-head"></thead>
       <tbody id="rows"></tbody>
