@@ -140,6 +140,13 @@ class TheRole(StubCase):
         self.assertEqual(found.state, "unknown", found.reason)
         self.assertIn("not connected to the Tailscale control plane", found.reason)
 
+    def test_a_database_that_does_not_open_is_unknown_as_of_now(self):
+        """No input was read, so the answer ages from its arrival (`observed` is `None`, pack sd:7120)."""
+        found = hub.role_at(self.root / "missing.db")
+        self.assertEqual(found.state, "unknown")
+        self.assertIn("did not open", found.reason)
+        self.assertIsNone(found.observed)
+
     def test_an_unreadable_setting_row_is_unknown(self):
         connection = database.connect(self.path)
         connection.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('setting', ?, 'nope', '2026')",
