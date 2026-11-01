@@ -1,0 +1,220 @@
+"""Studio, slice 2 (sd:6920): the projects it lists, the files it serves, and the ranges it answers.
+
+The data comes later (fun-ai-stuff sd:6923), so every case builds its own `REPO_ROOT` with a registered repository and
+its `project.json` files. The cases are the design's failure table rows for slice 2 (docs/work/2026-10-31-studio):
+a bad file and an escaping root each list as a problem, the resolve cases run against a studio root, and each Range
+header shape answers its status and bytes.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import unittest
+import urllib.error
+import urllib.request
+from pathlib import Path
+from unittest import mock
+
+from sd_dashboard import studio
+from support import ScreenCase
+from test_v2_registry import Registers
+from test_workflow_actions import BrowserSession
+
+#: 1000 bytes of ASCII, so a slice of it says which bytes came back.
+MEDIA = bytes(48 + i % 10 for i in range(1000))
+
+
+def register(connection, path: Path) -> None:
+    connection.execute("INSERT INTO repo (path, managed, created_at, updated_at) VALUES (?, 1, ?, ?)",
+                       (str(path), "2026-11-01T00:00:00Z", "2026-11-01T00:00:00Z"))
+    connection.commit()
+
+
+def fixture(base: Path) -> tuple[Path, Path]:
+    """`REPO_ROOT` with one registered-to-be repository of projects, and a folder outside it; (repo root, outside)."""
+    root, outside = base / "repos", base / "outside"
+    art = root / "example" / "art"
+    cat = art / "shirts" / "cat"
+    (cat / "candidates").mkdir(parents=True)
+    (cat / "media").mkdir()
+    (cat / "candidates" / "one.png").write_bytes(b"\x89PNG one")
+    (cat / "candidates" / "notes.md").write_text("not media", encoding="utf-8")
+    (cat / "candidates" / ".hidden.png").write_bytes(b"hidden")
+    (cat / "media" / "clip.mp4").write_bytes(MEDIA)
+    (cat / "media" / "take.wav").write_bytes(MEDIA)
+    (cat / "stray.png").write_bytes(b"in the folder, in no root")
+    outside.mkdir(parents=True)
+    (outside / "secret.png").write_bytes(b"outside")
+    (cat / "previews").symlink_to(outside, target_is_directory=True)
+    (cat / "project.json").write_text(json.dumps({
+        "kind": "shirt", "title": "Cat shirt", "brief": "A cat on a shirt.", "item": "sd:42",
+        "roots": {"candidates": "candidates", "media": "media", "previews": "previews", "print": "../escape", "poster": "candidates"},
+    }), encoding="utf-8")
+    (art / "songs" / "broken").mkdir(parents=True)
+    (art / "songs" / "broken" / "project.json").write_text("{not json", encoding="utf-8")
+    (art / "node_modules" / "dep").mkdir(parents=True)
+    (art / "node_modules" / "dep" / "project.json").write_text("{}", encoding="utf-8")
+    return root, outside
+
+
+class TheProjects(ScreenCase):
+    def setUp(self):
+        super().setUp()
+        self.root, self.outside = fixture(Path(self.tmp.name))
+        register(self.connection, self.root / "example" / "art")
+
+    def read(self):
+        return studio.document(self.connection, now="2026-11-01T07:00:00Z", repo_root=self.root)
+
+    def test_each_project_json_in_a_registered_repository_lists_and_build_output_is_skipped(self):
+        doc = self.read()
+        self.assertEqual([p["id"] for p in doc["projects"]], ["art/shirts/cat", "art/songs/broken"])
+        cat = doc["projects"][0]
+        self.assertEqual((cat["kind"], cat["title"], cat["brief"], cat["item"]), ("shirt", "Cat shirt", "A cat on a shirt.", 42))
+
+    def test_a_file_that_does_not_parse_lists_with_its_error(self):
+        broken = self.read()["projects"][1]
+        self.assertIn("project.json does not parse", broken["error"])
+        self.assertEqual(broken["roots"], [])
+        self.assertEqual(self.read()["attention"], {"state": "caution", "n": 2, "what": "projects whose project.json lists a problem"})
+
+    def test_a_root_outside_its_folder_or_with_an_unknown_role_is_dropped_with_its_reason(self):
+        cat = self.read()["projects"][0]
+        self.assertEqual([r["role"] for r in cat["roots"]], ["candidates", "media"])
+        problems = " | ".join(cat["problems"])
+        self.assertIn("root previews previews leaves the project folder", problems)
+        self.assertIn("root print '../escape' is not a folder name inside the project", problems)
+        self.assertIn("root 'poster' is not a role", problems)
+
+    def test_a_root_lists_its_media_from_disk_and_nothing_else(self):
+        roots = {r["role"]: r for r in self.read()["projects"][0]["roots"]}
+        self.assertEqual([f["path"] for f in roots["candidates"]["files"]], ["shirts/cat/candidates/one.png"])
+        self.assertEqual([(f["name"], f["type"], f["ranged"], f["bytes"]) for f in roots["media"]["files"]],
+                         [("clip.mp4", "video", True, 1000), ("take.wav", "audio", True, 1000)])
+
+    def test_a_repository_outside_repo_root_or_unregistered_lists_nothing(self):
+        other = Path(self.tmp.name) / "elsewhere"
+        (other / "p").mkdir(parents=True)
+        (other / "p" / "project.json").write_text('{"kind": "song"}', encoding="utf-8")
+        register(self.connection, other)
+        unregistered = self.root / "example" / "loose" / "p"
+        unregistered.mkdir(parents=True)
+        (unregistered / "project.json").write_text('{"kind": "song"}', encoding="utf-8")
+        self.assertEqual([p["repo"] for p in self.read()["projects"]], ["art", "art"])
+
+    def test_a_machine_with_no_project_json_shows_an_empty_list(self):
+        empty = Path(self.tmp.name) / "bare"
+        (empty / "example" / "repo").mkdir(parents=True)
+        doc = studio.document(self.connection, now="2026-11-01T07:00:00Z", repo_root=empty)
+        self.assertEqual((doc["projects"], doc["problems"], doc["attention"]["state"]), ([], [], "ok"))
+
+    def test_two_registered_repositories_with_one_name_are_neither_served(self):
+        twin = self.root / "other" / "art"
+        (twin / "p").mkdir(parents=True)
+        (twin / "p" / "project.json").write_text('{"kind": "song"}', encoding="utf-8")
+        register(self.connection, twin)
+        doc = self.read()
+        self.assertEqual(doc["projects"], [])
+        self.assertEqual(doc["problems"], ["Two registered repositories are named art: neither is served."])
+        self.assertIsNone(studio.located(self.connection, "art/shirts/cat/candidates/one.png", self.root))
+
+
+class TheRange(unittest.TestCase):
+    def test_each_header_shape_answers_its_status_and_bytes(self):
+        cases = {
+            None: (200, 0, 1000), "": (200, 0, 1000),
+            "bytes=0-99": (206, 0, 100), "bytes=900-": (206, 900, 100), "bytes=-10": (206, 990, 10),
+            "bytes=990-5000": (206, 990, 10), "bytes=-5000": (206, 0, 1000),
+            "bytes=1000-": (416, 0, 0), "bytes=5000-6000": (416, 0, 0), "bytes=-0": (416, 0, 0),
+            "bytes=0-1,5-9": (200, 0, 1000), "bytes=9-1": (200, 0, 1000), "lines=0-9": (200, 0, 1000),
+            "bytes=-": (200, 0, 1000), "bytes=a-b": (200, 0, 1000),
+        }
+        for header, expected in cases.items():
+            with self.subTest(header=header):
+                self.assertEqual(studio.byte_range(header, 1000), expected)
+
+    def test_an_empty_file_answers_any_range_with_416(self):
+        self.assertEqual(studio.byte_range("bytes=0-", 0), (416, 0, 0))
+        self.assertEqual(studio.byte_range(None, 0), (200, 0, 0))
+
+    def test_an_open_range_is_cut_at_one_chunk(self):
+        size = studio.CHUNK * 3
+        self.assertEqual(studio.byte_range("bytes=0-", size), (206, 0, studio.CHUNK))
+
+
+class TheStudioRegistration(Registers, unittest.TestCase):
+    page, section, route = "studio", "Studio", "/studio"
+    api = ("/api/studio",)
+
+
+class TheServer(BrowserSession):
+    def setUp(self):
+        super().setUp()
+        self.root, self.outside = fixture(Path(self.tmp.name))
+        register(self.connection, self.root / "example" / "art")
+        environment = mock.patch.dict(os.environ, {"REPO_ROOT": str(self.root)})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def fetch(self, path, **headers):
+        """(status, headers, bytes) for a GET with the session's cookie and `headers`."""
+        request = urllib.request.Request(self.base + path, headers={"Cookie": self.cookie, **headers})
+        try:
+            answer = urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as error:
+            answer = error
+        with answer:
+            return answer.status, answer.headers, answer.read()
+
+    def test_the_page_serves_and_the_api_lists_the_projects(self):
+        status, _, body = self.fetch("/studio")
+        self.assertEqual(status, 200)
+        self.assertIn(b'<script src="/ui/studio.js?v=', body)
+        status, _, body = self.fetch("/api/studio")
+        self.assertEqual(status, 200)
+        self.assertEqual([p["id"] for p in json.loads(body)["projects"]], ["art/shirts/cat", "art/songs/broken"])
+
+    def test_every_gallery_file_the_api_lists_answers_200_under_a_sandbox(self):
+        doc = json.loads(self.fetch("/api/studio")[2])
+        paths = [f["path"] for p in doc["projects"] for r in p["roots"] for f in r["files"]]
+        self.assertEqual(len(paths), 3)
+        for path in paths:
+            with self.subTest(path=path):
+                status, headers, _ = self.fetch(f"/studio/files/art/{path}")
+                self.assertEqual(status, 200)
+                self.assertEqual(headers["Content-Security-Policy"], studio.POLICY)
+        self.assertEqual(self.fetch("/studio/files/art/shirts/cat/candidates/one.png")[1]["Content-Type"], "image/png")
+
+    def test_a_range_on_an_mp4_answers_206_with_its_bytes(self):
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=0-99")
+        self.assertEqual((status, headers["Content-Range"], headers["Accept-Ranges"], body), (206, "bytes 0-99/1000", "bytes", MEDIA[:100]))
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/take.wav", Range="bytes=-10")
+        self.assertEqual((status, headers["Content-Range"], body), (206, "bytes 990-999/1000", MEDIA[990:]))
+
+    def test_a_range_past_the_end_is_416_and_one_that_does_not_parse_gets_the_whole_file(self):
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=1000-")
+        self.assertEqual((status, headers["Content-Range"], body), (416, "bytes */1000", b""))
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=0-1,5-9")
+        self.assertEqual((status, headers["Content-Length"], body), (200, "1000", MEDIA))
+
+    def test_an_image_ignores_a_range(self):
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/candidates/one.png", Range="bytes=0-1")
+        self.assertEqual((status, body, headers.get("Accept-Ranges")), (200, b"\x89PNG one", None))
+
+    def test_a_path_outside_its_roots_answers_404(self):
+        for tail in ("art/shirts/cat/stray.png", "art/shirts/cat/previews/secret.png", "art/shirts/cat/candidates/.hidden.png",
+                     "art/shirts/cat/candidates/notes.md", "art/shirts/cat/candidates/../stray.png",
+                     "art/shirts/cat/candidates/%2e%2e/stray.png", "art/shirts/cat/project.json", "missing/a.png", "art"):
+            with self.subTest(tail=tail):
+                self.assertEqual(self.fetch(f"/studio/files/{tail}")[0], 404)
+
+    def test_a_file_without_a_session_is_refused(self):
+        request = urllib.request.Request(self.base + "/studio/files/art/shirts/cat/candidates/one.png")
+        with self.assertRaises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(refused.exception.code, 403)
+
+
+if __name__ == "__main__":
+    unittest.main()

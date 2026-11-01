@@ -100,17 +100,18 @@ ASSET_HEADERS = {"Cross-Origin-Resource-Policy": "cross-origin"}
 FONT_HEADERS = {**ASSET_HEADERS, "Access-Control-Allow-Origin": "*"}
 
 
-def resolve(tail: str, root: Path | None = None) -> tuple[Path, str] | None:
+def resolve(tail: str, root: Path | None = None, types: dict[str, str] | None = None) -> tuple[Path, str] | None:
     """The file and content type this address names, or None.
 
     The listing and the server both call it, so a link the listing offers is
     a link the server answers. None for every way of missing, so a 404 says
-    nothing about which check refused.
+    nothing about which check refused. `types` replaces `TYPES` for a caller
+    that serves other files under the same rules (Studio's media, sd:6920).
     """
     segments = unquote(tail or "").split("/")
     if not all(SEGMENT.fullmatch(segment) for segment in segments):
         return None
-    kind = TYPES.get(Path(segments[-1]).suffix.lower())
+    kind = (TYPES if types is None else types).get(Path(segments[-1]).suffix.lower())
     if kind is None:
         return None
     try:
