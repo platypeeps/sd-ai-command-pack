@@ -241,15 +241,15 @@ class TheWriteFence(FenceCase):
         create_item(connection, kind="work", title="not the record")
         self.assertEqual(self.asked(), [])
 
-    def test_writes_inside_a_transaction_share_one_probe_and_its_commit_asks_again(self):
-        """The cost bound: statements inside one transaction share the held answer; the commit asks afresh."""
+    def test_writes_inside_a_transaction_share_one_probe_with_their_commit(self):
+        """The cost bound: the opening asks; the writes and the commit share its answer (pack sd:7042)."""
         self.name_hub(HUB_NAME)
         self.node()
         connection = self.open()
         with database.transaction(connection):
             for title in ("one", "two", "three"):
                 create_item(connection, kind="work", title=title)
-        self.assertEqual(len(self.asked()), 2, "one for the writes, one for the commit")
+        self.assertEqual(len(self.asked()), 1, "one for the opening, none for the writes or the commit")
         self.assertEqual(hub.FENCE_SECONDS, 5.0)
 
     def test_hub_json_beside_the_database_still_refuses_an_open_writer(self):
@@ -267,10 +267,14 @@ class TheWriteFence(FenceCase):
 
 
 class TheCommitBoundaries(FenceCase):
-    """Lead review of 59dbc8cf0: a boundary that makes a write persist never trusts a held answer.
+    """Every boundary that makes a write persist asks the fence.
 
-    Each test renames the node inside the `FENCE_SECONDS` window and keeps the held
-    `holder` answer; the boundary must ask Tailscale again and refuse.
+    Lead review of 59dbc8cf0 had each ask afresh; the operator's ruling on
+    pack sd:7042 (note #39256) lets one trust an answer up to
+    `FENCE_SECONDS` old, as a tailnet frame does, since a fresh ask held
+    SQLite's write lock for a Tailscale call. Each
+    test renames the node and lets that window pass (`later`); the boundary
+    must ask Tailscale again and refuse.
     """
 
     def begun(self, opening: str) -> sqlite3.Connection:
@@ -280,6 +284,7 @@ class TheCommitBoundaries(FenceCase):
         connection.execute(opening)
         connection.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'held', '{}', '2026')")
         self.node(OLD_HUB)
+        self.later()
         return connection
 
     def rows(self) -> int:
@@ -289,7 +294,7 @@ class TheCommitBoundaries(FenceCase):
         finally:
             connection.close()
 
-    def test_a_commit_inside_the_window_asks_again(self):
+    def test_a_commit_past_the_window_asks_again(self):
         endings = {
             "COMMIT": ("BEGIN IMMEDIATE", lambda connection: connection.execute("COMMIT")),
             "END": ("BEGIN", lambda connection: connection.execute("END")),
@@ -307,7 +312,7 @@ class TheCommitBoundaries(FenceCase):
                 self.assertFalse(connection.in_transaction)
                 self.assertEqual(self.rows(), 0)
 
-    def test_a_library_transaction_inside_the_window_rolls_back(self):
+    def test_a_library_transaction_past_the_window_rolls_back(self):
         self.name_hub(HUB_NAME)
         self.node()
         connection = self.open()
@@ -315,9 +320,10 @@ class TheCommitBoundaries(FenceCase):
             with database.transaction(connection):
                 create_item(connection, kind="work", title="held across the rename")
                 self.node(OLD_HUB)
+                self.later()
         self.assertEqual(self.items(), 0)
 
-    def test_an_autocommit_write_inside_the_window_asks_again(self):
+    def test_an_autocommit_write_past_the_window_asks_again(self):
         """A write outside a transaction commits when it ends, so it is a boundary too."""
         self.name_hub(HUB_NAME)
         self.node()
@@ -325,6 +331,7 @@ class TheCommitBoundaries(FenceCase):
         insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
         connection.execute(insert, ("live",))
         self.node(OLD_HUB)
+        self.later()
         writes_ = {
             "execute": lambda: connection.execute(insert, ("a",)),
             "executemany": lambda: connection.executemany(insert, [("b",)]),
@@ -344,6 +351,7 @@ class TheCommitBoundaries(FenceCase):
         def sets():
             yield ("a",)
             self.node(OLD_HUB)
+            self.later()
             yield ("b",)
 
         batches = {
@@ -413,6 +421,7 @@ class TheCommitBoundaries(FenceCase):
 
         def flip() -> str:
             self.node(OLD_HUB)
+            self.later()
             return "flipped"
 
         for name, write in writes_.items():
@@ -439,7 +448,7 @@ class TheCommitBoundaries(FenceCase):
         with connection.blobopen("state", "body", row, readonly=True) as blob:
             self.assertEqual(blob.read(), b"abcd")
 
-    def test_a_blob_write_commits_only_after_a_fresh_ask(self):
+    def test_a_blob_write_commits_only_after_an_ask(self):
         self.node()
         self.name_hub(HUB_NAME)
         connection = self.open()
@@ -449,6 +458,7 @@ class TheCommitBoundaries(FenceCase):
         with connection.blobopen("state", "body", row) as blob:
             blob.write(b"wxyz")
         self.node(OLD_HUB)
+        self.later()
         with self.assertRaises(hub.Fenced):
             connection.execute("COMMIT")
         reader = database.connect(write=False)
@@ -473,8 +483,9 @@ class TheCommitBoundaries(FenceCase):
                 self.assertFalse(connection.in_transaction)
                 self.assertEqual(self.rows(), 0)
 
-    def test_a_read_only_transaction_on_a_fenced_node_commits_with_no_probe(self):
-        """Lead ruling on f716079a9: reads on an old hub keep working, and cost no probe."""
+    def test_a_read_only_transaction_on_a_fenced_node_commits_and_costs_one_probe_per_window(self):
+        """Lead ruling on f716079a9: reads on an old hub keep working. Their commit costs no probe;
+        the opening asks once per half window, before the write lock (pack sd:7042, note #39256)."""
         self.node()
         self.name_hub(HUB_NAME)
         self.node(OLD_HUB)
@@ -492,7 +503,7 @@ class TheCommitBoundaries(FenceCase):
                 self.assertFalse(connection.in_transaction)
         with database.transaction(connection):
             connection.execute("SELECT count(*) FROM state").fetchone()
-        self.assertEqual(len(self.asked()), before)
+        self.assertEqual(len(self.asked()), before + 1)
 
     def test_an_inner_release_does_not_probe(self):
         """A nested savepoint's RELEASE commits nothing, so it costs no probe."""
@@ -503,6 +514,7 @@ class TheCommitBoundaries(FenceCase):
         for title in ("one", "two"):
             create_item(connection, kind="work", title=title)
         self.assertEqual(len(self.asked()), 1)
+        self.later()
         connection.execute("COMMIT")
         self.assertEqual(len(self.asked()), 2)
         self.assertEqual(self.items(), 2)
@@ -817,10 +829,69 @@ class ThePragmaWrites(FenceCase):
                           connection.execute("PRAGMA auto_vacuum").fetchone()[0]), (4096, 0))
         self.assertEqual(connection.execute("PRAGMA temp.page_size = 8192").fetchall(), [])
 
-class TheHeldAnswer(FenceCase):
-    """pack sd:7042: a caller with a held answer never waits on another caller's ask."""
+class TheLockHold(FenceCase):
+    """pack sd:7042: no write waits on another writer's Tailscale call.
+
+    A commit asked `tailscale status --json` afresh while it held SQLite's
+    write lock, so under load cron writers saw "database is locked". The
+    opening statement now asks, before the lock, when the held answer is
+    older than half of `FENCE_SECONDS`; writes and the commit trust an answer
+    up to `FENCE_SECONDS` old, never across a clock jump (operator
+    ruling, note #39256).
+    """
+
+    def frozen(self) -> dict:
+        clock = {"monotonic": 1000.0, "time": 2_000_000_000.0}
+        self.enterContext(mock.patch.object(hub.time, "monotonic", lambda: clock["monotonic"]))
+        self.enterContext(mock.patch.object(hub.time, "time", lambda: clock["time"]))
+        return clock
+
+    def test_commits_inside_the_window_share_one_tailscale_call(self):
+        self.name_hub(HUB_NAME)
+        self.node()
+        self.frozen()
+        connection = self.open()
+        before = len(self.asked())
+        for title in ("one", "two", "three", "four", "five"):
+            create_item(connection, kind="work", title=title)
+        self.assertEqual(self.items(), 5)
+        self.assertLessEqual(len(self.asked()) - before, 1, "a commit asked Tailscale again inside the window")
+
+    def test_a_slow_tailscale_does_not_hold_the_write_lock(self):
+        """A second writer commits within its busy timeout while the first waits on a 3 s Tailscale."""
+        self.name_hub(HUB_NAME)
+        self.node(status_delay=3)
+        failures: list[BaseException] = []
+
+        def first():
+            try:
+                connection = database.connect()
+                try:
+                    create_item(connection, kind="work", title="slow")
+                finally:
+                    connection.close()
+            except BaseException as error:  # noqa: BLE001 -- reported below
+                failures.append(error)
+
+        writer = threading.Thread(target=first)
+        writer.start()
+        time.sleep(0.5)
+        second = sqlite3.connect(self.path, timeout=1.0, isolation_level=None)
+        self.addCleanup(second.close)
+        started = time.monotonic()
+        try:
+            second.execute("BEGIN IMMEDIATE")
+            second.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'b', '{}', '2026')")
+            second.execute("COMMIT")
+            waited = time.monotonic() - started
+        finally:
+            writer.join(30)
+        self.assertLess(waited, 1.0)
+        self.assertEqual(failures, [])
+        self.assertEqual(self.items(), 1)
 
     def test_a_held_answer_is_read_while_another_caller_asks(self):
+        """One slow ask stalls only the callers that need a new answer."""
         held = hub.Held()
         self.assertEqual(held.get(lambda: "first", hub.FENCE_SECONDS), "first")
         asking, release = threading.Event(), threading.Event()
@@ -841,21 +912,62 @@ class TheHeldAnswer(FenceCase):
         self.assertEqual(held.get(lambda: "asked again", hub.FENCE_SECONDS), "second")
 
     def test_a_write_with_a_held_answer_does_not_wait_on_a_slow_fresh_ask(self):
-        """Another thread's commit asks a 3 s Tailscale afresh; a write inside the window does not wait."""
+        """Another thread asks a 3 s Tailscale afresh; a write inside the window does not wait."""
         self.name_hub(HUB_NAME)
         self.node()
         self.assertEqual(hub.write_role(self.path).state, "holder")
         self.node(status_delay=3)
-        committing = threading.Thread(target=hub.write_role, args=(self.path,), kwargs={"fresh": True})
-        committing.start()
+        asking = threading.Thread(target=hub.write_role, args=(self.path,), kwargs={"within": 0})
+        asking.start()
         time.sleep(0.5)
         started = time.monotonic()
         try:
             self.assertEqual(hub.write_role(self.path).state, "holder")
             waited = time.monotonic() - started
         finally:
-            committing.join(30)
+            asking.join(30)
         self.assertLess(waited, 1.0, "a held answer waited on another thread's ask")
+
+    def test_a_role_loss_refuses_the_first_commit_past_the_window(self):
+        self.name_hub(HUB_NAME)
+        self.node()
+        clock = self.frozen()
+        connection = self.open()
+        create_item(connection, kind="work", title="live")
+        self.node(OLD_HUB)
+        clock["monotonic"] += hub.FENCE_SECONDS
+        clock["time"] += hub.FENCE_SECONDS
+        with self.assertRaises(hub.Fenced):
+            create_item(connection, kind="work", title="past the window")
+        self.assertEqual(self.items(), 1)
+
+    def test_a_role_loss_inside_a_transaction_refuses_its_commit_past_the_window(self):
+        """The opening asked; the rename lands; the commit runs on an answer `FENCE_SECONDS` old."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        clock = self.frozen()
+        connection = self.open()
+        with self.assertRaises(hub.Fenced):
+            with database.transaction(connection):
+                create_item(connection, kind="work", title="open across the rename")
+                self.node(OLD_HUB)
+                clock["monotonic"] += hub.FENCE_SECONDS
+                clock["time"] += hub.FENCE_SECONDS
+        self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.items(), 0)
+
+    def test_a_sleep_inside_the_window_refuses_the_next_commit(self):
+        """The wall clock moved an hour and the monotonic one did not: the held answer is not trusted."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        clock = self.frozen()
+        connection = self.open()
+        create_item(connection, kind="work", title="live")
+        self.node(OLD_HUB)
+        clock["time"] += 3600
+        with self.assertRaises(hub.Fenced):
+            create_item(connection, kind="work", title="after the sleep")
+        self.assertEqual(self.items(), 1)
 
 
 class TheRestore(FenceCase):

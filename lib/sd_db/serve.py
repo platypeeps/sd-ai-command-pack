@@ -171,7 +171,10 @@ IDLE_TIMEOUT = 4.0
 #: old hub that slept or lost its network keeps its process while the console
 #: renames it, so the check at start is not enough: every frame asks again
 #: past this, or past a wall clock that moved `CLOCK_SLACK` more than the
-#: monotonic one, which does not count a sleep.
+#: monotonic one, which does not count a sleep. A commit trusts it too, and
+#: a write transaction's BEGIN asks again past half of it, before the write
+#: lock: a fresh ask at the commit held the lock, and every frame, for a
+#: Tailscale call (pack sd:7042).
 #: One value with the write fence on the hub's own database (`hub.write_role`).
 FENCE_SECONDS = hub.FENCE_SECONDS
 CLOCK_SLACK = hub.CLOCK_SLACK
@@ -350,7 +353,7 @@ class Session(socketserver.BaseRequestHandler):
                 and action not in READS and action != sqlite3.SQLITE_PRAGMA):
             # A write outside the hub's write transaction commits when it ends, after
             # any fence answer taken before it, and a batch commits each write; only
-            # `_commit` asks afresh at the commit itself (sd:4044). The client sends a
+            # `_commit` asks at the commit itself (sd:4044). The client sends a
             # lone write with a request id, which `_autocommit` wraps. No allowed
             # PRAGMA with an argument writes the file.
             return self._deny("a write outside a write transaction is served on the tailnet only with a "
@@ -439,6 +442,12 @@ class Session(socketserver.BaseRequestHandler):
                 f"request id; this client sent none"
             )
         rid = _request_id(rid)
+        if self.server.node is not None:  # type: ignore[attr-defined]
+            # Before BEGIN takes the write lock, so a short transaction's commit
+            # trusts this answer and asks Tailscale nothing under it (sd:7042).
+            fenced = self.server.fence(within=FENCE_SECONDS / 2)  # type: ignore[attr-defined]
+            if fenced is not None:
+                raise Fenced(f"refused: this machine is not the hub: {fenced}")
         owners = self.server.owners  # type: ignore[attr-defined]
         with owners.lock(rid):
             if not owners.admit(rid, self.number):
@@ -511,8 +520,9 @@ class Session(socketserver.BaseRequestHandler):
                 if _fault is not None:
                     _fault("before-commit", self)
                 if self.server.node is not None:  # type: ignore[attr-defined]
-                    # Afresh, not cached: the frame's own check may predate a stall (sd:4044).
-                    fenced = self.server.fence(fresh=True)  # type: ignore[attr-defined]
+                    # At most `FENCE_SECONDS` old and never across a sleep (sd:4044), as
+                    # the frame's own check; asked afresh it held the write lock (sd:7042).
+                    fenced = self.server.fence()  # type: ignore[attr-defined]
                     if fenced is not None:
                         raise Fenced(f"refused: this machine is not the hub: {fenced}")
                 # A transaction that changed nothing gets no row: committed
@@ -835,16 +845,15 @@ class Server(socketserver.ThreadingTCPServer):
         self.fenced = hub.Held()
         super().__init__((LOOPBACK if node is None else str(node.address), port), Session)
 
-    def fence(self, *, fresh: bool = False) -> str | None:
+    def fence(self, *, within: float | None = None) -> str | None:
         """Why this machine no longer holds the hub role, or `None`: asked again past
-        `FENCE_SECONDS`, once the wall clock jumped (a sleep), or `fresh`, as a commit
-        asks. Unknown refuses. A frame with a held answer waits on no ask, a
-        commit's included (pack sd:7042)."""
+        `within` seconds, `FENCE_SECONDS` by default, or once the wall clock jumped (a
+        sleep). Unknown refuses. A frame with a held answer waits on no ask (sd:7042)."""
         def ask() -> str | None:
             found = hub.role_at(self.database)
             return found.reason if found.refuses else None
 
-        return self.fenced.get(ask, 0 if fresh else FENCE_SECONDS)
+        return self.fenced.get(ask, FENCE_SECONDS if within is None else within)
 
     def admit(self, peer, frame: dict, session: int = 0) -> None:
         """Refuse a session before anything opens, and before any SQL runs."""
