@@ -932,13 +932,14 @@ class Tick(Case):
                                   root=self.root / "worktrees",
                                   **{"load": 1.0, "load_cap": 40.0, "interactive": [], **inputs})
 
-    def enqueued(self):
-        self.items = [create_item(self.db, kind="task", title="Built", repo=str(self.repo), status="ready")]
+    def enqueued(self, count=1, skip_lead=False):
+        self.items = [create_item(self.db, kind="task", title="Built", repo=str(self.repo), status="ready")
+                      for _ in range(count)]
         build.queue(self.db, self.items, who="operator")
         self.tick()
         run = next(row for row in build.open_runs(self.db) if row["step"] != "enqueued")  # this item's, not an older
         build.write(self.db, run["id"], step="enqueuing")
-        self.assertTrue(build.enqueued(self.db, run["id"]))
+        self.assertTrue(build.enqueued(self.db, run["id"], self.items[1:] if skip_lead else None))
         self.spawned.clear()
         return run
 
@@ -990,6 +991,65 @@ class Tick(Case):
         self.assertEqual((row["outcome"], row["released_at"] is not None), ("lane_failed", True))
         self.assertIn("gate red", row["detail"])
         self.assertEqual(self.spawned, [])
+        self.assertEqual(self.statuses(), ["in_progress"], "only a catch-up conflict goes back to a builder")
+
+    CONFLICT = ("merging origin/main into build/sd-1 conflicts; the branch is unchanged; "
+                "sd-ship lane retry --item 1 queues it again")
+
+    def test_a_catch_up_conflict_goes_back_to_its_builder(self):
+        """pack sd:6940: a conflict with main alone queues the bundle again under its lead, with a finding."""
+        run = self.enqueued()
+        self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+        result = self.tick()
+        self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+        self.assertEqual(self.statuses(), ["in_progress"], "the same tick claims it again")
+        again = build.run(self.db, result["claimed"][0])
+        self.assertEqual((again["assignment"], again["branch"]), (run["assignment"], run["branch"]))
+        notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", self.items)]
+        self.assertTrue(any(body.startswith(build.REBUILD) for body in notes), notes)
+
+    def test_a_conflict_waits_until_its_supervisor_is_gone(self):
+        """Review: a requeue while the old supervisor still ran let a new builder share its worktree."""
+        run = self.enqueued()
+        build.register(self.db, run["id"], pid=os.getpid(), pgid=os.getpgrp(),
+                       start=build.Probe.started(os.getpid()))
+        self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+        self.assertEqual(self.tick()["claimed"], [], "a live supervisor holds the worktree")
+        self.assertIsNone(build.run(self.db, run["id"])["outcome"])
+        gone = build.Probe()
+        gone.alive = lambda pid: False  # type: ignore[method-assign]
+        gone.group = lambda pgid: False  # type: ignore[method-assign]
+        self.assertNotEqual(self.tick(probe=gone)["claimed"], [], "once gone, the bundle goes back to a builder")
+        self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+
+    def test_a_conflict_without_its_lead_is_left_to_the_operator(self):
+        """Review: a rebuild that lost its lead would claim under a child's branch, so none is queued."""
+        for case in ("moved", "skipped"):
+            with self.subTest(case=case):
+                run = self.enqueued(2, skip_lead=case == "skipped")  # a skipped lead ends blocked
+                lead, child = self.items
+                if case == "moved":
+                    writes.transition(self.db, lead, "planning", who="operator", reason="moved on")
+                self.entries = {child: {"id": "e1", "status": "failed", "reason": self.CONFLICT}}
+                self.assertEqual(self.tick()["claimed"], [])
+                self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+                self.assertEqual(item_state(self.db, child)["item"]["status"], "in_progress")
+                self.assertEqual(self.db.execute("SELECT status FROM assignment WHERE item = ?",
+                                                 (child,)).fetchone()[0], "done")
+
+    def test_conflict_rebuilds_stop_at_their_cap(self):
+        """pack sd:6940: past `CONFLICT_REBUILDS` the bundle stays lane_failed for the operator."""
+        run = self.enqueued()
+        for _ in range(build.CONFLICT_REBUILDS):
+            self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+            claimed = self.tick()["claimed"][0]
+            build.write(self.db, claimed, step="enqueuing")
+            self.assertTrue(build.enqueued(self.db, claimed))
+        self.tick()
+        self.assertEqual(self.tick()["claimed"], [])
+        self.assertEqual(self.statuses(), ["in_progress"])
+        self.assertEqual(self.db.execute("SELECT status FROM assignment WHERE id = ?",
+                                         (run["assignment"],)).fetchone()[0], "done")
 
     def test_every_lane_end_short_of_a_merge_ends_the_run(self):
         """Review round 1: the lane's own list of ends short of a merge, and a cancel, each end the run."""
