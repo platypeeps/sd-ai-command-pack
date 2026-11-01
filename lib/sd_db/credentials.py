@@ -19,6 +19,12 @@ put in one request header, and dropped. Nothing here writes, prints, logs or
 hashes it: the row holds presence, what a status code means, an expiry date,
 MCP server names and states, and reasons written here -- never a response
 body, a tool's output, or an error's own words.
+
+The same run reads the operator's running AWS resources for Health >
+Machine (sd:6713): `SD_AWS_READ`, `profile:region,region ...` in env.sh,
+names what to read, so no account id is in the repo. Each read is one
+bounded `aws` call; a read that fails is named in `errors`, never an empty
+list. Unset, the body has no `aws` key.
 """
 
 from __future__ import annotations
@@ -44,6 +50,16 @@ GITHUB_USER = "https://api.github.com/user"
 #: `claude mcp list`: `<name>: <command or url> - ✓ Connected`. The target is dropped.
 _MCP_LINE = re.compile(r"^(?P<name>\S.*?): .* - (?P<mark>[✓✗!⚠])\s*(?P<text>.*)$")
 _MCP_STATES = {"✓": "connected", "✗": "failed"}
+AWS_SETTING = "SD_AWS_READ"
+AWS_TIMEOUT = 60
+_AWS_BOUND = ("--cli-connect-timeout", "10", "--cli-read-timeout", "20", "--output", "json")
+#: What runs, and what each read keeps: id, name and since. describe-stacks leaves out deleted stacks.
+AWS_READS = (
+    ("EC2 instance", ("ec2", "describe-instances", "--filters", "Name=instance-state-name,Values=running", "--query",
+                      "Reservations[].Instances[].{id: InstanceId, name: Tags[?Key=='Name']|[0].Value, since: LaunchTime}")),
+    ("CloudFormation stack", ("cloudformation", "describe-stacks", "--query",
+                              "Stacks[].{id: StackId, name: StackName, since: CreationTime}")),
+)
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -285,6 +301,33 @@ def _families(env, get, run, post) -> dict[str, Any]:
             "sdm": lambda: sdm(run), "claude": lambda: claude(run)}
 
 
+def aws_resources(env, run) -> dict[str, Any] | None:
+    """Every running resource `AWS_READS` finds per `SD_AWS_READ` profile and region, and each read that failed."""
+    resources: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for entry in (env.get(AWS_SETTING) or "").split():
+        profile, _, regions = entry.partition(":")
+        if not profile or not regions.strip(","):
+            errors.append(f"{AWS_SETTING} entry {entry!r}: want profile:region,region")
+            continue
+        for region in filter(None, regions.split(",")):
+            for kind, args in AWS_READS:
+                where = f"{profile} {region} {kind}"
+                try:
+                    code, out = run(["aws", "--profile", profile, "--region", region, *_AWS_BOUND, *args], AWS_TIMEOUT)
+                    found = json.loads(out) if code == 0 else None
+                except (OSError, subprocess.SubprocessError, ValueError) as error:
+                    errors.append(f"{where}: {type(error).__name__}")
+                    continue
+                if not isinstance(found, list):
+                    errors.append(f"{where}: aws exited {code}" if code else f"{where}: not a list")
+                    continue
+                resources += [{"type": kind, "profile": profile, "region": region, "id": one.get("id"),
+                               "name": one.get("name") or one.get("id"), "since": one.get("since")}
+                              for one in found if isinstance(one, dict)]
+    return {"resources": resources, "errors": errors} if env.get(AWS_SETTING, "").split() else None
+
+
 def check(connection, *, env, get=None, run=None, post=None, now: str | None = None,
           only: str | None = None) -> dict[str, Any]:
     """Run every probe, or `only` the family of one probe id, and record the heartbeat; the body it wrote.
@@ -294,7 +337,7 @@ def check(connection, *, env, get=None, run=None, post=None, now: str | None = N
     get, run, post = get or _get, run or _run, post or _post
     families = _families(env, get, run, post)
     if only is None:
-        body = {"probes": [probe for make in families.values() for probe in make()]}
+        body: dict[str, Any] = {"probes": [probe for make in families.values() for probe in make()]}
     else:
         family = only.split(":")[0]
         if family not in families:
@@ -305,6 +348,10 @@ def check(connection, *, env, get=None, run=None, post=None, now: str | None = N
         at = next((index for index, probe in enumerate(kept) if mine(probe)), len(kept))
         others = [probe for probe in kept if not mine(probe)]
         body = {"probes": others[:at] + families[family]() + others[at:]}
+        if found and "aws" in found[1]:
+            body["aws"] = found[1]["aws"]
+    if only is None and (aws_read := aws_resources(env, run)) is not None:
+        body["aws"] = aws_read
     stamp = now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if only is not None and found:
         stamp = found[0]  # the full run's time: a one-family re-probe must not hide an overdue nightly run
