@@ -29,8 +29,6 @@ import tempfile
 from typing import Any, Callable, Iterator
 
 import sd_lib
-import sd_repo_policy
-import sd_ship_jenkins
 
 FINAL = ("done", "stopped")
 #: The types that release when the convention names none: semantic-release's defaults.
@@ -253,6 +251,7 @@ def _deploy_message(message: str, convention: dict | None, released: list[str]) 
         found = dict.fromkeys(line.strip() for text in released for line in text.splitlines()
                               if re.search(footer, line.strip()))
         message = message.rstrip("\n") + ("\n\n" + "\n".join(found) if found else "") + "\n"
+    import sd_repo_policy  # noqa: PLC0415 -- lazy, as in _policy_gates
     try:
         return sd_repo_policy.check_message(message, convention)
     except sd_repo_policy.ConventionRefused as refused:
@@ -588,6 +587,10 @@ class Repositories:
     def _policy_gates(self, number: int, head: str, policy: dict) -> str | None:
         """What the deploy policy still holds the merge of `head` for, as `sd-ship merge`'s `policy_hold` and
         Jenkins wait read it; None when nothing does."""
+        # Lazy: the dashboard imports this module through sd_lane, and its PACK_MODULES name what that loads.
+        import sd_repo_policy  # noqa: PLC0415
+        import sd_ship_jenkins  # noqa: PLC0415
+
         need = (policy.get("review") or {}).get("human") or 0
         if need:
             lines = self._run("gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews",
