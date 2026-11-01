@@ -278,7 +278,7 @@ def _bump(state: dict, release: dict, acts: dict, world: Any, types: list[str]) 
                               convention, released)
     state["version"] = version
     # A kill after `gh pr create` and before the save reruns this step; `open_bump` finds the PR by its branch.
-    state["pr"] = world.open_bump(f"release/{tag}", set_value(text, release["key"], version)[1], message)
+    state["pr"] = world.open_bump(f"release/{tag}", release["key"], set_value(text, release["key"], version)[1], message)
     return "merge"
 
 
@@ -500,7 +500,7 @@ class Repositories:
         sha = self._origin_tip(deploy)
         return self._run("git", "show", f"{sha}:{self.file}", cwd=deploy, strip=False), sha
 
-    def open_bump(self, branch: str, text: str, message: str) -> str:
+    def open_bump(self, branch: str, key: str, text: str, message: str) -> str:
         """The open PR from `branch`, opened from origin's tip with `text` as the file when there is none yet.
 
         The branch carries the source checkout's name, so two repositories that share a deploy repository never
@@ -509,22 +509,28 @@ class Repositories:
         deploy, branch = self._deploy(), branch.replace("release/", f"release/{self.main.name}-", 1)
         listed = json.loads(self._run("gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
                                       cwd=deploy) or "[]")
-        if listed:  # bound to this bump: the branch must hold `text`, not another release's file
-            self._pushed(deploy, branch, text)
+        if listed:  # bound to this bump: the branch must set `key` as `text` does, not to another release
+            self._pushed(deploy, branch, key, text)
             return listed[0]["url"]
         if self._run("git", "ls-remote", "origin", f"refs/heads/{branch}", cwd=deploy):
-            self._pushed(deploy, branch, text)  # a push that landed before a failed `gh pr create`
+            self._pushed(deploy, branch, key, text)  # a push that landed before a failed `gh pr create`
         else:
             self._push_bump(deploy, branch, text, message)
         subject, _, body = message.partition("\n\n")
         return self._run("gh", "pr", "create", "--head", branch, "--title", subject, "--body", body, cwd=deploy)
 
-    def _pushed(self, deploy: pathlib.Path, branch: str, text: str) -> None:
-        """Reuse the release branch an earlier try pushed, or its open PR, only when it holds `text`."""
+    def _pushed(self, deploy: pathlib.Path, branch: str, key: str, text: str) -> None:
+        """Reuse the release branch an earlier try pushed, or its open PR, only when it sets `key` as `text` does.
+
+        Only `key` binds it to this bump: a retry builds `text` from main's tip, which may have moved since the
+        push, and an unrelated change there must not leave the release at bump for good (sd:7078).
+        """
         self._run("git", "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch}", cwd=deploy)
         held = self._run("git", "show", f"FETCH_HEAD:{self.file}", cwd=deploy, strip=False)
-        if held != text:
-            raise ReleaseError(f"origin's {branch} holds another {self.file}; delete the branch or open its PR")
+        want, has = set_value(text, key, "")[0], set_value(held, key, "")[0]
+        if want is None or has != want:
+            raise ReleaseError(f"origin's {branch} holds another {self.file}: {key} is {has}, not {want}; "
+                               "delete the branch or open its PR")
 
     def _push_bump(self, deploy: pathlib.Path, branch: str, text: str, message: str) -> None:
         """One commit on origin's tip in a detached worktree, pushed as `branch`; a failed push leaves nothing."""

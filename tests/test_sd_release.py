@@ -78,7 +78,7 @@ class World:
     def deployed(self):
         return self.values, "dep000"
 
-    def open_bump(self, branch, text, message):
+    def open_bump(self, branch, key, text, message):
         self._act(f"open_bump {branch}")
         self.values_written, self.message = text, message
         return PR
@@ -668,12 +668,12 @@ class OnDisk(unittest.TestCase):
         world = Gh(self.deploy, {"list": ["[]", "[]"], "create": [URL]})
         text, message = VALUES.replace("0.17.2", "0.18.0"), "chore: release 0.18.0\n\nSet image.tag.\n"
         with self.assertRaisesRegex(sd_release.ReleaseError, "git push -q exited"):
-            world.open_bump("release/v0.18.0", text, message)
+            world.open_bump("release/v0.18.0", "image.tag", text, message)
         self.assertEqual(self.branch_tip(), "", "nothing on origin")
         self.assertEqual(len(git(self.deploy, "worktree", "list").splitlines()), 1, "no worktree left behind")
         self.assertNotIn("create", [argv[2] for argv in world.gh])
         hook.unlink()
-        self.assertEqual(world.open_bump("release/v0.18.0", text, message), URL)
+        self.assertEqual(world.open_bump("release/v0.18.0", "image.tag", text, message), URL)
         self.assertEqual(git(self.origin, "show", "refs/heads/release/app-v0.18.0:values.yaml"), text.rstrip("\n"))
 
     def test_a_branch_pushed_before_a_failed_pr_create_is_reused(self):
@@ -681,18 +681,37 @@ class OnDisk(unittest.TestCase):
         world = Gh(self.deploy, {"list": ["[]", "[]"], "create": [sd_release.ReleaseError("gh: HTTP 502"), URL]})
         text, message = VALUES.replace("0.17.2", "0.18.0"), "chore: release 0.18.0\n\nSet image.tag.\n"
         with self.assertRaises(sd_release.ReleaseError):
-            world.open_bump("release/v0.18.0", text, message)
+            world.open_bump("release/v0.18.0", "image.tag", text, message)
         pushed = self.branch_tip()
         world.env.update(GIT_AUTHOR_DATE="2026-01-01T00:00:00Z", GIT_COMMITTER_DATE="2026-01-01T00:00:00Z")
-        self.assertEqual(world.open_bump("release/v0.18.0", text, message), URL)
+        self.assertEqual(world.open_bump("release/v0.18.0", "image.tag", text, message), URL)
         self.assertEqual(self.branch_tip(), pushed)
+
+    def test_a_pushed_bump_is_reused_after_deploy_main_moves(self):
+        """sd:7078: a retry rebuilt the whole file from main's new tip, so an unrelated change on main, such as
+        replicas, made the pushed branch unequal forever and the release stuck at bump."""
+        world = Gh(self.deploy, {"list": ["[]"], "create": [sd_release.ReleaseError("gh: HTTP 502")]})
+        message = "chore: release 0.18.0\n\nSet image.tag.\n"
+        with self.assertRaises(sd_release.ReleaseError):
+            world.open_bump("release/v0.18.0", "image.tag", VALUES.replace("0.17.2", "0.18.0"), message)
+        pushed = self.branch_tip()
+        (self.deploy / "values.yaml").write_text(VALUES.replace("replicas: 2", "replicas: 3"), encoding="utf-8")
+        git(self.deploy, "commit", "-q", "-am", "scale")
+        git(self.deploy, "push", "-q", "origin", "HEAD:main")
+        retry = Gh(self.deploy, {"list": ["[]", json.dumps([{"url": URL}])], "create": [URL]})  # the next run
+        moved, _ = retry.deployed()
+        text = sd_release.set_value(moved, "image.tag", "0.18.0")[1]
+        self.assertIn("replicas: 3", text)
+        self.assertEqual(retry.open_bump("release/v0.18.0", "image.tag", text, message), URL, "the pushed branch, its PR opened")
+        self.assertEqual(retry.open_bump("release/v0.18.0", "image.tag", text, message), URL, "and the PR a rerun finds")
+        self.assertEqual(self.branch_tip(), pushed, "no second push")
 
     def test_a_pushed_branch_with_other_content_is_not_reused(self):
         world = Gh(self.deploy, {"list": ["[]", "[]"], "create": [sd_release.ReleaseError("gh: HTTP 502")]})
         with self.assertRaises(sd_release.ReleaseError):
-            world.open_bump("release/v0.18.0", VALUES.replace("0.17.2", "0.18.0"), "chore: release\n\nb\n")
+            world.open_bump("release/v0.18.0", "image.tag", VALUES.replace("0.17.2", "0.18.0"), "chore: release\n\nb\n")
         with self.assertRaisesRegex(sd_release.ReleaseError, "holds another values.yaml"):
-            world.open_bump("release/v0.18.0", VALUES.replace("0.17.2", "0.19.0"), "chore: release\n\nb\n")
+            world.open_bump("release/v0.18.0", "image.tag", VALUES.replace("0.17.2", "0.19.0"), "chore: release\n\nb\n")
 
     def test_a_kill_after_the_pr_is_opened_finds_it_by_its_head_branch(self):
         state = {"step": "bump", "tag": "v0.18.0", "sha": "abc123", "last": "v0.17.2"}
@@ -716,10 +735,10 @@ class OnDisk(unittest.TestCase):
     def test_an_open_pr_on_the_branch_with_other_content_is_not_reused(self):
         """Evidence: the PR a rerun finds by its branch name must hold this bump, not another one."""
         world = Gh(self.deploy, {"list": ["[]"], "create": [URL]})
-        world.open_bump("release/v0.18.0", VALUES.replace("0.17.2", "0.18.0"), "chore: release\n\nb\n")
+        world.open_bump("release/v0.18.0", "image.tag", VALUES.replace("0.17.2", "0.18.0"), "chore: release\n\nb\n")
         rerun = Gh(self.deploy, {"list": [json.dumps([{"url": URL}])]})
         with self.assertRaisesRegex(sd_release.ReleaseError, "holds another values.yaml"):
-            rerun.open_bump("release/v0.18.0", VALUES.replace("0.17.2", "0.19.0"), "chore: release\n\nb\n")
+            rerun.open_bump("release/v0.18.0", "image.tag", VALUES.replace("0.17.2", "0.19.0"), "chore: release\n\nb\n")
 
     def test_file_reads_keep_leading_and_trailing_whitespace(self):
         """Review: `_run` stripped `git show` output, so a bump dropped a first-line indent and a `|+` block's
@@ -732,8 +751,8 @@ class OnDisk(unittest.TestCase):
         self.assertEqual(world.deployed(), (kept, git(self.deploy, "rev-parse", "HEAD")))
         text = kept.replace("0.17.2", "0.18.0")
         with self.assertRaises(sd_release.ReleaseError):
-            world.open_bump("release/v0.18.0", text, "chore: release 0.18.0\n\nb\n")
-        self.assertEqual(world.open_bump("release/v0.18.0", text, "chore: release 0.18.0\n\nb\n"), URL)
+            world.open_bump("release/v0.18.0", "image.tag", text, "chore: release 0.18.0\n\nb\n")
+        self.assertEqual(world.open_bump("release/v0.18.0", "image.tag", text, "chore: release 0.18.0\n\nb\n"), URL)
 
     def test_verify_runs_in_a_detached_deploy_worktree_at_the_merged_commit(self):
         """The deploy checkout never fetched the merge, so a verify there read the old values."""
