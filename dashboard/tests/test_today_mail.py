@@ -17,6 +17,7 @@ from unittest import mock
 from sd_dashboard import now_screen, today_mail, v2
 from sd_db import repos
 from sd_db.channels import ChannelRefusal
+from sd_db.config import system_checkout
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
 
@@ -45,7 +46,9 @@ class MailCase(ScreenCase):
         self.state.mkdir()
         self.conf.write_text(CONF, encoding="utf-8")
         self.environ = {"MAIL_INTAKE_STATE": str(self.state), "MAIL_INTAKE_CONFIG": str(self.conf),
-                        "SYSTEM_TOOLS_CONFIG": str(root / "config"), "HOME": str(root)}
+                        "SYSTEM_TOOLS_CONFIG": str(root / "config"), "HOME": str(root),
+                        # mail_intake.py loads from the real checkout, not the temp HOME (sd:7019).
+                        "SYSTEM_TOOLS_ROOT": str(system_checkout())}
         self.fetched("2026-09-06T05:00:00-06:00")
         for path in (ANVIL, KILN):
             self.repo(path)
