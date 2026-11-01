@@ -57,6 +57,8 @@ MAX_TURNS = 300
 TITLE_MAX = 63
 #: A read (`git status`, `lane list`) that takes longer is unread.
 READ_SECONDS = 120
+# Ignored folders that `git worktree remove` may delete: tools rebuild them (pack sd:6979).
+DISPOSABLE = frozenset({"__pycache__", ".ruff_cache", ".mypy_cache", ".pytest_cache"})
 #: The `heartbeat` state row the tick writes first.
 HEARTBEAT = "build-dispatch"
 #: The lane entry states that end an `enqueued` run without a merge: the lane's `BLOCKED` ends, which
@@ -252,6 +254,14 @@ def _read(argv: list[str], *, env: dict | None = None) -> str:
     return done.stdout
 
 
+def kept_files(git: Collection[str], work: str, *, env: dict | None = None) -> str:
+    """The status lines of `work` that `git worktree remove` would lose: changes, untracked and ignored
+    files, those config hides too, less the ignored ones under a `DISPOSABLE` folder; "" when it may go."""
+    lines = _read([*git, "-C", work, "status", "--porcelain", "--ignored", "--untracked-files=all"], env=env)
+    return "\n".join(line for line in lines.splitlines() if line.strip() and not (
+        line.startswith("!! ") and DISPOSABLE.intersection(line[3:].strip('"').split("/"))))
+
+
 def lane_entry(ship: list[str], cwd: Path | str, items: Collection[int], *, env: dict | None = None) -> dict | None:
     """The newest lane entry of any of `items` by enqueue order, from `sd-ship lane list`; None when there is none.
 
@@ -310,8 +320,8 @@ def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
     may land the same items; the lane squash-merges, so the branch reads
     unpushed forever (pack sd:6909). Kept: an unreleased run on the path, an
     item of any run on it not done, a dirty or unread worktree, one holding an
-    ignored or untracked file, a locked one, a live session other than a
-    builder's. The paths removed.
+    ignored or untracked file outside a `DISPOSABLE` cache, a locked one, a
+    live session other than a builder's. The paths removed.
 
     An item marked done is no proof its commits landed: a squash merge leaves
     no ancestry to check, and an item can be closed by hand. So the branch
@@ -339,9 +349,7 @@ def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
         if entry["keep"] or not Path(work).is_dir():
             continue
         try:
-            # `git worktree remove` deletes ignored files, and untracked ones that config hides from
-            # status: a tree that holds any keeps them, build output too, since no list names it disposable.
-            if _read([*git, "-C", work, "status", "--porcelain", "--ignored", "--untracked-files=all"]).strip():
+            if kept_files(git, work):
                 continue
         except Unread:
             continue
@@ -674,7 +682,7 @@ class Supervisor:
         if not self.work.is_dir():
             return self.finish("done", f"worktree {self.work} was already removed")
         try:
-            dirty = _read([*self.tools.git, "-C", str(self.work), "status", "--porcelain"], env=self.env).strip()
+            dirty = kept_files(self.tools.git, str(self.work), env=self.env)
         except Unread as unread:
             dirty = f"unread: {unread}"
         if dirty:
