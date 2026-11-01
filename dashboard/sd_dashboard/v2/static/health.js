@@ -451,7 +451,7 @@
         cli: o => o.cli, sends: o => `POST /api/actions/run {action: check.run, row: ${o.id}}`, run: o => run(o, 'check.run', { row: o.id }) },
       // sd:6722, sd:6957: Sign in shows a Google or SSO login's URL in Details to copy into that account's browser profile; the
       // page opens none. Any other login starts in a herdr pane. Probe again reads the row after.
-      { id: 'credential.signin', on: 'credential', label: 'Sign in', does: 'Shows this login\'s URL in Details to copy into the right browser profile, or starts it in a herdr pane.', key: 'i', icon: 'log-in', risk: 'safe', executes: true,
+      { id: 'credential.signin', on: 'credential', label: 'Sign in', does: 'Shows this login\'s URL to copy into the right browser profile.', key: 'i', icon: 'log-in', risk: 'safe', executes: true,
         primary: o => o.state !== 'ok', when: o => !!o.signin || 'this credential has no sign-in', cli: o => o.signin || o.cli,
         sends: o => `POST /api/actions/run {action: credentials.signin, probe: ${o.id.replace(/^cred:/, '')}}`, run: o => run(o, 'credentials.signin', { probe: o.id.replace(/^cred:/, '') }) },
     );
