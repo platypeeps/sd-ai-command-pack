@@ -225,8 +225,13 @@ def month_report(connection, month: str, *, ui: str = PHOENIX_UI) -> str:
     notable: list[tuple[str, str]] = []
     merged: list[tuple[float, str, str]] = []
     for row in this:
-        spans = run_spans(connection, row) if row["outcome"] == "done" else []
-        merge = next((span for span in spans if span["name"] == "merge"), None)
+        if row["outcome"] != "done":
+            continue
+        spans = run_spans(connection, row)
+        # The merge may be noted on an earlier run of the bundle, one interrupted after it enqueued (pack sd:7008).
+        merge = next((span for run in runs if run["assignment"] == row["assignment"]
+                      for span in (spans if run["id"] == row["id"] else run_spans(connection, run))
+                      if span["name"] == "merge"), None)
         if merge is None:
             continue
         pr = _attributes_of(merge).get("sd.pr")

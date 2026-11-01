@@ -1557,12 +1557,12 @@ def lane_entries(connection: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def build_runs(connection: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Every build run's `outcome`, `detail` and `created_at`, ended or not, in no set order (pack sd:6744).
+    """Every build run's `outcome`, `detail`, `created_at` and `updated_at`, ended or not, in no set order (pack sd:6744).
 
     A build run is a `runner_run` whose assignment has the `build` scope; behind `sd reports health`.
     """
     return connection.execute(
-        "SELECT runner_run.outcome, runner_run.detail, runner_run.created_at FROM runner_run"
+        "SELECT runner_run.outcome, runner_run.detail, runner_run.created_at, runner_run.updated_at FROM runner_run"
         " JOIN assignment ON assignment.id = runner_run.assignment WHERE assignment.scope = 'build'").fetchall()
 
 
