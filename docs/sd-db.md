@@ -545,18 +545,16 @@ A list the library validates gets no CHECK: SQLite cannot alter one, so each new
 
 ## The item kinds, and the two words called `followup`
 
-`item.kind` is a closed list, guarded by a CHECK. Nine values:
+`item.kind` is a closed list, guarded by a CHECK. Seven values:
 
 | Kind | What it is |
 |---|---|
 | `work` | a change to a repository, planned under `docs/work/` |
 | `task` | a scoped piece of work in a repository |
 | `report` | a run report a scheduled job wrote |
-| `skill-review` | a review of a skill, filed by the catalogue |
 | `idea` | **a writing piece on the article ladder, and nothing else** |
 | `work-idea` | an idea about a repository or product, not yet planned work |
 | `personal-idea` | an idea about life, which does not enter the writing pipeline |
-| `personal` | a to-do, an errand, a chore; it belongs to no repository |
 | `followup` | something to come back to, filed as an item of its own |
 
 `idea` looks like the generic word and is not.
@@ -565,24 +563,26 @@ So a personal or a work idea has its own kind, not a stage on `idea`.
 
 `note.kind` is its own closed list of seven: `followup`, `decision`, `proposal`, `question`, `comment`, `exec` and `status_change`.
 Only `followup` is in both lists. Migration 032 (sd:3510) dropped the `proposal` and `dep` item kinds: neither had a producer or a row.
+Migration 046 (sd:7004) moved every `personal` and `skill-review` row to `task` and dropped both kinds.
+A to-do is a task in a repository; the catalogue files a skill review as a `task` whose `fields.skill_review.action` is `review` (`skills_catalog.is_review`).
 
 - A `followup` note hangs off an item and is resolved against it (`sd task note <item> --kind followup`).
   A `followup` item stands on its own (`sd task add --kind followup`).
   If it makes no sense with the parent deleted, it is a note.
 - A `proposal` is a note: `sd task note <item> --kind proposal` records one, and `reads.brief_notes` carries it into a brief.
 
-`task`, `personal` and `followup` items (`workflow.TASK_STATUS_KINDS`) share the five `TASK_STATUSES`:
+`task` and `followup` items (`workflow.TASK_STATUS_KINDS`) share the five `TASK_STATUSES`:
 `planning`, `ready`, `in_progress`, `blocked` and `done`.
 `work` keeps its delivery rules; `idea`, `work-idea`, `personal-idea` and `report` keep their own workflows.
 
 `workflow.edit_item` is the verb a person uses to change a row's kind.
-The target must be in the store's CHECK (`workflow.schema_kinds`) and in `workflow.HAND_KINDS`, the five `sd task add --kind` files.
-A `work`, `report` or `skill-review` row keeps its kind, because its producer owns it.
+The target must be in the store's CHECK (`workflow.schema_kinds`) and in `workflow.HAND_KINDS`, the four `sd task add --kind` files.
+A `work` or `report` row keeps its kind, because its producer owns it.
 So does an `idea` with a `piece`, and a row whose `fields` carry `contribution` or `skill_review` (`workflow.PRODUCED_FIELDS`).
 The edit writes a `comment` note, `Changed kind <old> -> <new> by <who>`, in the same transaction.
 A vault base row's kind is refused: `records` lists it by item kind `idea`.
 
-`work-idea`, `personal-idea` and `personal` (`workflow.REPO_LESS_KINDS`) are filed with no repository.
+`work-idea` and `personal-idea` (`workflow.REPO_LESS_KINDS`) are filed with no repository.
 Read them as a group with `reads.backlog_items(connection, repo=reads.NO_REPO)` or the dashboard's `/tasks?repo=no%20repo`.
 That is filing behaviour, not a constraint: `item.repo` has no per-kind CHECK, and `writes.create_item` takes a `repo` for any kind.
 

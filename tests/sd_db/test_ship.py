@@ -250,7 +250,7 @@ class ManualMergeGuard(unittest.TestCase):
                 self.connection.execute("UPDATE assignment SET status='done' WHERE id=?", (assignment,))
 
     def test_repositoryless_assignments_keep_the_existing_scope(self):
-        item = create_item(self.connection, kind="personal", title="No repository", status="in_progress")
+        item = create_item(self.connection, kind="work-idea", title="No repository", status="in_progress")
         create_assignment(self.connection, item=item, role="author", status="running")
         create_assignment(self.connection, role="reviewer", status="running")
         ship.manual_merge_guard(self.connection, self.repo)

@@ -601,10 +601,10 @@ def delivery_candidates(connection) -> list[dict]:
     """The items a push is owed, by kind and not by exception.
 
     An allow-list, and it used to be `kind != 'skill-review'`. That read as "a
-    personal to-do is not agent work because it has no repository", which the
-    schema does not enforce: `create_item` accepts a repository for any kind and
-    the item screen can set one, so a `personal` row with a repository and a
-    branch was a delivery candidate and would have been observed by the runner.
+    to-do of another kind is not agent work because it has no repository",
+    which the schema does not enforce: `create_item` accepts a repository for
+    any kind, so a row of another kind with a repository and a branch was a
+    delivery candidate and would have been observed by the runner.
     The kinds are `RUNNABLE_KINDS`, the ones the dashboard's run panel offers,
     so the two gates agree instead of drifting apart as kinds are added. A
     skill review is left out: the panel offers it and delivery does not, and
