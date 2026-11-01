@@ -182,5 +182,73 @@ class Saved(unittest.TestCase):
         self.assertEqual((saved[-1]["tag"], saved[-1]["sha"], saved[-1]["version"]), ("v0.18.0", "abc123", "0.18.0"))
 
 
+class OnOrigin(unittest.TestCase):
+    """Review: the chain read release history from local tags, which `git fetch --tags` does not prove are on
+    origin. Each test puts a local ref at odds with origin's; the chain must read origin's."""
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        tmp = pathlib.Path(scratch.name).resolve()
+        self.origin, self.main = tmp / "origin.git", tmp / "main"
+        self.git(tmp, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        self.git(tmp, "clone", "-q", str(self.origin), str(self.main))
+        self.first = self.commit("feat: one")
+        self.git(self.main, "tag", "v0.1.0")
+        self.git(self.main, "push", "-q", "origin", "HEAD:main", "refs/tags/v0.1.0")
+        self.world = sd_release.Repositories(self.main, clean_environment(**IDENTITY), lambda: None,
+                                             lambda *args: None)
+
+    def git(self, cwd, *argv):
+        return subprocess.run(["git", "-C", str(cwd), *argv], env=clean_environment(**IDENTITY), check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def commit(self, message):
+        self.git(self.main, "commit", "-q", "--allow-empty", "-m", message)
+        return self.git(self.main, "rev-parse", "HEAD")
+
+    def next(self):
+        world = sd_release.Repositories(self.main, clean_environment(**IDENTITY), lambda: None, lambda *args: None)
+        last = world.last_tag()
+        return last, sd_release.next_tag(last, world.messages_since(last, world.tip()), ["feat", "fix"])
+
+    def test_an_unpublished_local_tag_on_a_merged_commit_sets_no_version(self):
+        self.commit("fix: two")
+        self.git(self.main, "tag", "v9.0.0")  # never pushed
+        self.git(self.main, "push", "-q", "origin", "HEAD:main")
+        self.assertEqual(self.next(), ("v0.1.0", "v0.1.1"))
+
+    def test_a_local_tag_moved_off_origins_commit_does_not_shorten_the_span(self):
+        self.commit("fix: two")
+        self.git(self.main, "tag", "-f", "v0.1.0")  # the local v0.1.0 now names the fix, origin's the feat
+        self.git(self.main, "push", "-q", "origin", "HEAD:main")
+        self.assertEqual(self.next(), ("v0.1.0", "v0.1.1"))
+
+    def test_a_rerun_after_a_failed_push_computes_and_pushes_the_same_tag(self):
+        sha = self.commit("feat: two")
+        self.git(self.main, "push", "-q", "origin", "HEAD:main")
+        self.git(self.main, "tag", "v0.2.0", sha)  # `push_tag` tagged here, then its push failed
+        self.assertEqual(self.next(), ("v0.1.0", "v0.2.0"))
+        self.world.push_tag("v0.2.0", sha)
+        self.assertEqual(self.git(self.origin, "rev-parse", "refs/tags/v0.2.0^{commit}"), sha)
+
+    def test_an_annotated_tag_origin_holds_on_the_commit_counts_as_pushed(self):
+        sha = self.commit("feat: two")
+        self.git(self.main, "tag", "-a", "-m", "release", "v0.2.0", sha)
+        self.git(self.main, "push", "-q", "origin", "HEAD:main", "refs/tags/v0.2.0")
+        self.world.push_tag("v0.2.0", sha)  # its ref names the tag object; its peeled line the commit
+        self.assertEqual(self.next(), ("v0.2.0", None))
+        with self.assertRaisesRegex(sd_release.ReleaseError, "origin already has v0.2.0 on"):
+            self.world.push_tag("v0.2.0", self.first)
+
+    def test_a_local_tag_on_another_commit_is_refused_not_published(self):
+        sha = self.commit("feat: two")
+        self.git(self.main, "push", "-q", "origin", "HEAD:main")
+        self.git(self.main, "tag", "v0.2.0", self.first)
+        with self.assertRaisesRegex(sd_release.ReleaseError, "the local tag v0.2.0 is on"):
+            self.world.push_tag("v0.2.0", sha)
+        self.assertEqual(self.git(self.origin, "tag", "--list", "v0.2.0"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

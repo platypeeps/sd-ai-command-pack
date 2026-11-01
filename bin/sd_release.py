@@ -65,6 +65,12 @@ def next_tag(last: str | None, messages: list[str], types: list[str] | tuple[str
     return f"{held['prefix']}{major}.{minor}.{patch}"
 
 
+def _semver(tag: str) -> tuple[int, int, int]:
+    held = TAG.match(tag)
+    assert held is not None  # noqa: S101 -- callers pass only tags `TAG` matched
+    return int(held["major"]), int(held["minor"]), int(held["patch"])
+
+
 class Wait(Exception):
     """The chain stops here this run; `failed` says whether the reason is a failure or a wait."""
 
@@ -155,6 +161,7 @@ class Repositories:
                  ruling: Callable[[str, str, str], str | None]) -> None:
         self.main, self.env, self.frozen, self.ruling = main, {**os.environ, **environ}, frozen, ruling
         self._tip: str | None = None
+        self._tags: dict[str, str] = {}  # origin's tags as `last_tag` read them, for `messages_since`
 
     def _run(self, *argv: str, ok: tuple[int, ...] = (0,), timeout: float = 120) -> str:
         try:
@@ -168,9 +175,13 @@ class Repositories:
         return done.stdout.strip()
 
     def tip(self) -> str:
-        """origin's default branch tip, fetched once per chain run, tags included."""
+        """origin's default branch tip, fetched once per chain run.
+
+        No tags: release history is origin's (`_origin_tags`), and `--tags` failed on a local tag at odds with
+        origin's, as a would-clobber.
+        """
         if self._tip is None:
-            self._run("git", "fetch", "-q", "--tags", "origin")
+            self._run("git", "fetch", "-q", "--no-tags", "origin")
             for ref in ("origin/HEAD", "origin/main", "origin/master"):
                 self._tip = self._run("git", "rev-parse", "-q", "--verify", f"{ref}^{{commit}}", ok=(0, 1)) or None
                 if self._tip:
@@ -179,20 +190,42 @@ class Repositories:
                 raise ReleaseError(f"{self.main} has no origin/HEAD, origin/main or origin/master")
         return self._tip
 
+    def _origin_tags(self, *patterns: str) -> dict[str, str]:
+        """Each tag origin holds, as the commit it names: an annotated tag's peeled `^{}` line wins.
+
+        Never a local tag: one that was never pushed, or was moved, is not release history.
+        """
+        found: dict[str, str] = {}
+        for line in self._run("git", "ls-remote", "--tags", "origin", *patterns).splitlines():
+            sha, _, ref = line.partition("\t")
+            name = ref.removeprefix("refs/tags/")
+            if name.endswith("^{}") or name not in found:
+                found[name.removesuffix("^{}")] = sha
+        return found
+
     def last_tag(self) -> str | None:
-        tags = self._run("git", "tag", "--merged", self.tip(), "--sort=-v:refname").splitlines()
-        return next((tag for tag in tags if TAG.match(tag)), None)
+        """The highest semver tag on origin whose commit is in origin's main."""
+        tip, self._tags = self.tip(), self._origin_tags()
+        for name, sha in sorted(((name, sha) for name, sha in self._tags.items() if TAG.match(name)),
+                                key=lambda tag: _semver(tag[0]), reverse=True):
+            present = self._run("git", "rev-parse", "-q", "--verify", f"{sha}^{{commit}}", ok=(0, 1))
+            if present and self._run("git", "merge-base", sha, tip, ok=(0, 1)) == sha:
+                return name
+        return None
 
     def messages_since(self, tag: str | None, sha: str) -> list[str]:
-        span = f"{tag}..{sha}" if tag else sha
+        """The commit messages after origin's `tag`, by the commit origin's tag names, not a local one."""
+        if tag is not None and tag not in self._tags:
+            raise ReleaseError(f"origin holds no tag {tag}")
+        span = f"{self._tags[tag]}..{sha}" if tag else sha
         return [message.strip() for message in self._run("git", "log", "--format=%B%x00", span).split("\0")
                 if message.strip()]
 
     def push_tag(self, tag: str, sha: str) -> None:
         """The tag on `sha`, here and on origin; a rerun after a failed push pushes the same tag."""
-        remote = self._run("git", "ls-remote", "origin", f"refs/tags/{tag}").split()
-        if remote and remote[0] != sha:
-            raise ReleaseError(f"origin already has {tag} on {remote[0][:12]}, not {sha[:12]}")
+        remote = self._origin_tags(f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}").get(tag)  # a pattern omits the peel
+        if remote and remote != sha:
+            raise ReleaseError(f"origin already has {tag} on {remote[:12]}, not {sha[:12]}")
         if remote:
             return
         local = self._run("git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}", ok=(0, 1))
