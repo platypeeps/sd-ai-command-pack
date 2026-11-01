@@ -813,7 +813,7 @@ def _age(since, now: datetime) -> str:
 
 
 def _aws_rows(found: tuple[str, dict] | None, *, now: str) -> tuple[list[dict], dict]:
-    """One row: my running AWS resources by region, each a console link; a failed read is unknown, never clean."""
+    """One row per running AWS resource, with its console link; a failed read is an unknown row, never clean."""
     row = {"id": "aws", "type": "check", "kind": "AWS", "cli": CREDENTIALS_CLI, "facts": {"Setting": "SD_AWS_READ"}}
     if found is None:
         return [{**row, "state": "unknown", "what": "AWS resources not yet observed",
@@ -826,20 +826,22 @@ def _aws_rows(found: tuple[str, dict] | None, *, now: str) -> tuple[list[dict], 
     moment = _when(now)
     found_rows = sorted((one for one in aws.get("resources") or [] if isinstance(one, dict)),
                         key=lambda one: (str(one.get("region")), str(one.get("since"))))
-    regions: dict[str, int] = {}
-    for one in found_rows:
-        regions[str(one.get("region"))] = regions.get(str(one.get("region")), 0) + 1
-    listed = [{"text": f"{one.get('region')} · {one.get('type')} {one.get('name')} · {_age(one.get('since'), moment)}",
-               "href": _console(one)} for one in found_rows]
+    facts = {**row["facts"], "Observed": stamp}
+    rows = [{**row, "id": f"aws:{one.get('region')}:{one.get('id')}", "state": "ok",
+             "what": f"{one.get('type')} {one.get('name')}",
+             "detail": f"{one.get('region')} · running {_age(one.get('since'), moment)}", "kind": "AWS · running",
+             "facts": {"Region": str(one.get("region")), "Type": str(one.get("type")), "Profile": str(one.get("profile")),
+                       "Since": str(one.get("since")), **facts},
+             "list_head": "Console", "list": [{"text": "AWS console", "href": _console(one)}] if _console(one) else []}
+            for one in found_rows]
     errors = [str(error) for error in aws.get("errors") or []]
-    what = f"{len(found_rows)} running AWS {_plural(len(found_rows), 'resource', 'resources')}"
-    row = {**row, "what": what, "detail": " · ".join(f"{region} {count}" for region, count in regions.items())
-           or "none running", "facts": {**row["facts"], "Observed": stamp}, "list_head": "Resources",
-           "list": listed + errors}
     if errors:
-        return [{**row, "state": "unknown", "what": f"{what}; {len(errors)} {_plural(len(errors), 'read', 'reads')} "
-                 "failed", "problem": errors}], {"at": stamp}
-    return [{**row, "state": "ok"}], {"at": stamp}
+        rows.append({**row, "id": "aws:failed", "state": "unknown",
+                     "what": f"{len(errors)} AWS {_plural(len(errors), 'read', 'reads')} failed",
+                     "detail": "the resources it would list are not shown", "facts": facts, "list_head": "Failed reads",
+                     "list": errors, "problem": errors})
+    return rows or [{**row, "state": "ok", "what": "No running AWS resources", "detail": "none running",
+                     "facts": facts}], {"at": stamp}
 
 
 MIRROR_CLI = "sd-db records render"
