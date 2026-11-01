@@ -108,3 +108,7 @@
 .facets[hidden] { display: none; }
 /* sd:6261: an author or a channel is free text; it wraps, so a long one cannot push the ledger under Details. */
 #view-books .ledger .repo, #view-videos .ledger .repo { white-space: normal; overflow-wrap: anywhere; }
+/* Open | Hidden | All in the Show facet takes a chip's height, so the facet reads as one row. */
+.facets .vseg { gap: 2px; padding: 2px; }
+.facets .vseg > button { min-height: 1.75rem; padding: 0 var(--space-xs); font: 400 var(--text-xs)/1 var(--font-data); }
+@media (pointer: coarse) { .facets .vseg > button { min-height: var(--row-touch); } }

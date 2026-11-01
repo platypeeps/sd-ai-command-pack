@@ -698,11 +698,12 @@ FIELD_VALUES.tag = 'Board Q1'; shellRun(tag, other); await flush();""", answer=s
         self.assertEqual([t[0] for t in out["toasts"]], ["Tagged q4 · The plan", "Tagged q4 · Overview", "Tagged board-q1 · Overview"])
 
     def test_hidden_shows_the_hidden_documents_alone_and_all_shows_every_one(self):
+        """Open | Hidden | All sits in the filter area, beside Pinned only (operator 2026-11-01)."""
         self.rows_of(**{"civic/brief.html": {"hidden": True}, "lab/plan.html": {"pinned": True}})
         def click(v):
-            return ("ELS['hidden-seg'].listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"hidden\"]'"
+            return ("ELS.facets.listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"hidden\"]'"
                     f" ? {{ dataset: {{ v: '{v}' }} }} : null }} }});")
-        out = self.run_page(f"""R.rows = ELS.rows.html; R.seg = ELS['hidden-seg'].html; {click('aside')}
+        out = self.run_page(f"""R.rows = ELS.rows.html; R.seg = ELS.facets.html; {click('aside')}
 R.hidden = ELS.rows.html; R.url = {self.URL}; {click('all')} R.all = ELS.rows.html; R.urlAll = {self.URL};
 {click('open')} R.back = ELS.rows.html;""")
         def ids(rows):
