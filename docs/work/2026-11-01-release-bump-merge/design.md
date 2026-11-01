@@ -77,6 +77,10 @@ saved before its external act, so a kill resumes at that step.
 | merge: gates | none | fewer `review.human` approvals of the head than the policy needs | wait with the count | `test_the_deploy_policy_gates_the_merge_as_sd_ship_does` |
 | merge: ask | a question note | `push` is `ask` on the deploy policy | wait for `go` | `test_each_act_the_policy_holds_at_ask_waits_for_a_go_ruling` |
 | merge: merge | the deploy main | head moved after the gates read it | `--match-head-commit` refuses; next run reads the gates again | `test_the_deploy_policy_gates_the_merge_as_sd_ship_does` (passes the gated head) |
+| merge: gates | none | a push to the release branch set another value at the key while the checks ran | stop failed at merge; nothing merged | `test_the_merge_lands_only_the_bump_the_chain_opened` |
+| merge: gates | none | the PR was moved to another base than origin's default branch | stop failed at merge; nothing merged | `test_the_merge_lands_only_the_bump_the_chain_opened` |
+| merge: gates | none | the PR head moved between `gh pr view` and the branch read | wait; the next run reads the PR and its gates again | `test_a_head_that_moved_as_it_was_read_waits_and_an_ungated_merge_refuses` |
+| merge: merge | none | a resumed run merges a head an earlier run gated | `merge_bump` refuses a PR not gated in this run | `test_a_head_that_moved_as_it_was_read_waits_and_an_ungated_merge_refuses` |
 | merge: merge | a merge-queue entry | `gh pr merge` only adds the PR to a merge queue | stay at merge until `gh pr view` reads `MERGED`; no verify before | `test_a_merge_that_only_queues_the_pull_request_stays_at_merge_until_merged`, `test_a_merge_queue_add_reads_as_not_merged` |
 | merge: merge | the deploy main | kill after the merge, before the save | next run reads `MERGED` first, merges nothing again, and goes to verify | `test_a_kill_after_the_merge_before_its_save_resumes_at_verify` |
 | verify | none | `verify` exits non-zero or runs past its bound | stop failed: reason names the tag and merged version; nothing rolled back | `test_failed_verify_reports_and_rolls_nothing_back` |

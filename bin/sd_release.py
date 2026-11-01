@@ -290,7 +290,7 @@ def _merge(state: dict, release: dict, acts: dict, world: Any, types: list[str])
         frozen = world.frozen(deploy)
         if frozen:
             raise Wait(f"{where} freeze window holds the merge of {state['pr']}: {frozen}")
-    checks = world.pr_state(state["pr"], acts)
+    checks = world.pr_state(state["pr"], acts, release["key"], state["version"])
     if checks != "green":
         raise Wait(f"{state['pr']} stays open: {checks}", failed=checks.startswith("red"))
     _ask(state, "merge", acts.get("push", "auto"), f"merge {state['pr']}, its checks green?", world)
@@ -391,6 +391,7 @@ class Repositories:
         self.main, self.env, self.frozen, self.ruling = main, dict(environ), frozen, ruling
         self.deploy, self.file, self.merge_method = deploy, file, merge_method
         self._tips: dict[pathlib.Path, str] = {}
+        self._defaults: dict[pathlib.Path, str] = {}  # origin's default branch name, read with its tip
         self._tags: dict[str, str] | None = None  # origin's tags as `last_tag` read them, for `messages_since`
         self._gated: dict[str, str] = {}  # each PR's head the merge gates passed, which the merge is bound to
 
@@ -430,7 +431,7 @@ class Repositories:
             self._run("git", "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch}", cwd=tree)
             if not self._has(tree, sha):
                 raise ReleaseError(f"origin's {branch} moved off {sha[:12]} during the fetch; the next run reads it again")
-            self._tips[tree] = sha
+            self._tips[tree], self._defaults[tree] = sha, branch
         return self._tips[tree]
 
     def _has(self, tree: pathlib.Path, sha: str) -> bool:
@@ -524,12 +525,16 @@ class Repositories:
         Only `key` binds it to this bump: a retry builds `text` from main's tip, which may have moved since the
         push, and an unrelated change there must not leave the release at bump for good (sd:7078).
         """
-        self._run("git", "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch}", cwd=deploy)
-        held = self._run("git", "show", f"FETCH_HEAD:{self.file}", cwd=deploy, strip=False)
-        want, has = set_value(text, key, "")[0], set_value(held, key, "")[0]
+        want, (_, has) = set_value(text, key, "")[0], self._branch_value(deploy, branch, key)
         if want is None or has != want:
             raise ReleaseError(f"origin's {branch} holds another {self.file}: {key} is {has}, not {want}; "
                                "delete the branch or open its PR")
+
+    def _branch_value(self, deploy: pathlib.Path, branch: str, key: str) -> tuple[str, str | None]:
+        """The commit origin's `branch` names now, and the value its file holds at `key`."""
+        self._run("git", "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch}", cwd=deploy)
+        sha = self._run("git", "rev-parse", "FETCH_HEAD", cwd=deploy)
+        return sha, set_value(self._run("git", "show", f"{sha}:{self.file}", cwd=deploy, strip=False), key, "")[0]
 
     def _push_bump(self, deploy: pathlib.Path, branch: str, text: str, message: str) -> None:
         """One commit on origin's tip in a detached worktree, pushed as `branch`; a failed push leaves nothing."""
@@ -553,14 +558,17 @@ class Repositories:
             raise ReleaseError(f"{url} reads MERGED with no merge commit, so the commit to verify is unknown")
         return str(sha)
 
-    def pr_state(self, url: str, policy: dict) -> str:
+    def pr_state(self, url: str, policy: dict, key: str, version: str) -> str:
         """`green`, `pending: ...` or `red: ...`; no check at all is pending, never green, unless the policy's `ci`
         is Jenkins, whose build of the head then stands in for the GitHub checks.
 
         Green also needs what `sd-ship merge` holds a merge for under the deploy repository's `policy`: its
-        `review.human` approvals of the head, and a green build of the head on its Jenkins `ci` (sd:6880).
+        `review.human` approvals of the head, and a green build of the head on its Jenkins `ci` (sd:6880). And it
+        needs the bump itself at the head it gates: `version` at `key`, into origin's default branch, since a push
+        to the branch or a new base while the checks ran changes what the merge lands.
         """
-        held = json.loads(self._run("gh", "pr", "view", url, "--json", "state,number,headRefOid,statusCheckRollup",
+        held = json.loads(self._run("gh", "pr", "view", url, "--json",
+                                    "state,number,headRefOid,headRefName,baseRefName,statusCheckRollup",
                                     cwd=self._deploy()))
         if held.get("state") == "MERGED":  # `merged` read it open a moment ago; the next run verifies it
             return "pending: it merged as this run read it"
@@ -578,11 +586,30 @@ class Repositories:
         if waiting:
             return f"pending: {waiting} of {len(checks)} checks running"
         head = str(held.get("headRefOid") or "")
-        held_back = self._policy_gates(int(held.get("number") or 0), head, policy)
+        held_back = self._bound(held, policy, key, version)
         if held_back:
             return held_back
         self._gated[url] = head
         return "green"
+
+    def _bound(self, held: dict, policy: dict, key: str, version: str) -> str | None:
+        """What keeps the PR `held` from landing this bump at its head: the deploy `policy`'s gates, another base
+        than origin's default branch, or another value at `key`; None when it lands `version`."""
+        head = str(held.get("headRefOid") or "")
+        gated = self._policy_gates(int(held.get("number") or 0), head, policy)
+        if gated:
+            return gated
+        deploy = self._deploy()
+        self._origin_tip(deploy)
+        base = self._defaults[deploy]
+        if held.get("baseRefName") != base:
+            return f"red: the PR merges into {held.get('baseRefName')}, not {base}"
+        sha, value = self._branch_value(deploy, str(held.get("headRefName") or ""), key)
+        if sha != head:  # the next run reads the PR and its gates again
+            return f"pending: the PR head moved from {head[:12]} to {sha[:12]} as this run read it"
+        if value != version:
+            return f"red: the PR head {head[:12]} sets {key} to {value}, not {version}"
+        return None
 
     def _policy_gates(self, number: int, head: str, policy: dict) -> str | None:
         """What the deploy policy still holds the merge of `head` for, as `sd-ship merge`'s `policy_hold` and

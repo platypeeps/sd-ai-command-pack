@@ -86,7 +86,7 @@ class World:
     def merged(self, url):
         return self.merged_at
 
-    def pr_state(self, url, policy):
+    def pr_state(self, url, policy, key, version):
         return self.checks
 
     def merge_bump(self, url):
@@ -740,6 +740,51 @@ class OnDisk(unittest.TestCase):
         with self.assertRaisesRegex(sd_release.ReleaseError, "holds another values.yaml"):
             rerun.open_bump("release/v0.18.0", "image.tag", VALUES.replace("0.17.2", "0.19.0"), "chore: release\n\nb\n")
 
+    def test_the_merge_lands_only_the_bump_the_chain_opened(self):
+        """Review: the bump checked the branch's value only when it opened or reused the PR, so a push to the
+        branch, or a PR moved to another base, while the merge waited for checks merged another value."""
+        unbound = {
+            "a push sets another value": ({}, lambda: self.push_to_branch(VALUES.replace("0.17.2", "0.19.0")),
+                                          "red: the PR head .* sets image.tag to 0.19.0, not 0.18.0"),
+            "the PR moved to another base": ({"base": "next"}, lambda: None,
+                                             "red: the PR merges into next, not main"),
+        }
+        for case, (github, push, reason) in unbound.items():
+            with self.subTest(case):
+                github = {"origin": self.origin, **github}
+                self.reset_branch()
+
+                def save(saved, push=push):
+                    if saved["step"] == "merge":
+                        push()  # while the merge waits for checks
+                state = {"step": "bump", "tag": "v0.18.0", "sha": "abc123", "last": "v0.17.2"}
+                state = sd_release.advance_release(state, {**RELEASE, "verify": ""}, MANAGED,
+                                                   GitHubOnDisk(self.deploy, self.tmp / "app", github), save=save,
+                                                   deploy_acts=MANAGED)
+                self.assertEqual((state["step"], state["failed"], github.get("merged")), ("merge", True, None))
+                self.assertRegex(state["reason"], reason)
+
+    def test_a_head_that_moved_as_it_was_read_waits_and_an_ungated_merge_refuses(self):
+        self.bumped()
+        world = Gh(self.deploy, {"view": [self.view(HEAD)]})
+        self.assertEqual(world.pr_state(URL, {}, "image.tag", "0.18.0"),
+                         f"pending: the PR head moved from {HEAD[:12]} to {self.branch_tip()[:12]} as this run read it")
+        with self.assertRaisesRegex(sd_release.ReleaseError, "was not gated in this run"):
+            world.merge_bump(URL)
+
+    def push_to_branch(self, text):
+        other = self.tmp / "other"
+        if not other.exists():
+            git(self.tmp, "clone", "-q", str(self.origin), str(other))
+        git(other, "fetch", "-q", "origin", "release/app-v0.18.0")
+        git(other, "switch", "-q", "--detach", "FETCH_HEAD")
+        (other / "values.yaml").write_text(text, encoding="utf-8")
+        git(other, "commit", "-q", "-am", "a teammate's change")
+        git(other, "push", "-q", "origin", "HEAD:refs/heads/release/app-v0.18.0")
+
+    def reset_branch(self):
+        git(self.origin, "update-ref", "-d", "refs/heads/release/app-v0.18.0")
+
     def test_file_reads_keep_leading_and_trailing_whitespace(self):
         """Review: `_run` stripped `git show` output, so a bump dropped a first-line indent and a `|+` block's
         kept newlines, and a re-pushed branch with the same file compared unequal."""
@@ -773,42 +818,51 @@ class OnDisk(unittest.TestCase):
         with self.assertRaisesRegex(sd_release.ReleaseError, "is not on origin's default branch"):
             world.verify("true", "v0.18.0", "0.18.0", "5" * 40, deploy=True)
 
-    def view(self):
-        return json.dumps({"state": "OPEN", "number": 8, "headRefOid": HEAD,
+    def view(self, head):
+        return json.dumps({"state": "OPEN", "number": 8, "headRefOid": head, "baseRefName": "main",
+                           "headRefName": "release/app-v0.18.0",
                            "statusCheckRollup": [{"name": "lint", "conclusion": "SUCCESS"}]})
+
+    def bumped(self):
+        """The release branch `open_bump` pushed for 0.18.0, and its tip."""
+        Gh(self.deploy, {"list": ["[]"], "create": [URL]}).open_bump(
+            "release/v0.18.0", "image.tag", VALUES.replace("0.17.2", "0.18.0"), "chore: r\n\nb\n")
+        return self.branch_tip()
 
     def test_the_deploy_policy_gates_the_merge_as_sd_ship_does(self):
         """Review: one green GitHub check merged the deploy PR while the policy's approval or Jenkins build was
         missing; and the merge is bound to the head the gates read."""
-        approved = json.dumps({"user": {"login": "pat", "type": "User"}, "state": "APPROVED", "commit_id": HEAD})
-        world = Gh(self.deploy, {"view": [self.view()] * 4, "api": ["", approved], "merge": [""]})
+        head = self.bumped()
+        approved = json.dumps({"user": {"login": "pat", "type": "User"}, "state": "APPROVED", "commit_id": head})
+        world = Gh(self.deploy, {"view": [self.view(head)] * 4, "api": ["", approved], "merge": [""]})
         policy = {"review": {"human": 1}}
-        self.assertEqual(world.pr_state(URL, policy),
-                         f"pending: the deploy policy requires 1 human approval of {HEAD[:12]}; 0 approve it")
-        self.assertEqual(world.pr_state(URL, policy), "green")
+        self.assertEqual(world.pr_state(URL, policy, "image.tag", "0.18.0"),
+                         f"pending: the deploy policy requires 1 human approval of {head[:12]}; 0 approve it")
+        self.assertEqual(world.pr_state(URL, policy, "image.tag", "0.18.0"), "green")
         world.merge_bump(URL)
-        self.assertEqual(world.gh[-1], ("gh", "pr", "merge", URL, "--squash", "--match-head-commit", HEAD))
+        self.assertEqual(world.gh[-1], ("gh", "pr", "merge", URL, "--squash", "--match-head-commit", head))
         ci = {"provider": "jenkins", "url": "https://jenkins.example", "job": "deploy/PR-{pr}"}
         red = {"result": "FAILURE", "building": False, "url": "https://jenkins.example/job/deploy/1"}
         with mock.patch.object(sd_ship_jenkins, "head_build", return_value=red):
-            self.assertEqual(world.pr_state(URL, {"ci": ci}),
-                             f"red: Jenkins build https://jenkins.example/job/deploy/1 of {HEAD[:12]} is FAILURE")
+            self.assertEqual(world.pr_state(URL, {"ci": ci}, "image.tag", "0.18.0"),
+                             f"red: Jenkins build https://jenkins.example/job/deploy/1 of {head[:12]} is FAILURE")
         with mock.patch.object(sd_ship_jenkins, "head_build", side_effect=sd_ship_jenkins.jenkins_unreachable(ci, "x")):
-            self.assertTrue(world.pr_state(URL, {"ci": ci}).startswith("pending: Jenkins at https://jenkins.example"))
+            self.assertTrue(world.pr_state(URL, {"ci": ci}, "image.tag", "0.18.0")
+                            .startswith("pending: Jenkins at https://jenkins.example"))
 
     def test_a_jenkins_only_deploy_repo_merges_on_its_green_build_with_no_github_check(self):
         """Review: an empty statusCheckRollup returned pending before the Jenkins gate ran, so it never merged."""
-        bare = json.dumps({"state": "OPEN", "number": 8, "headRefOid": HEAD, "statusCheckRollup": []})
+        bare = json.dumps({**json.loads(self.view(self.bumped())), "statusCheckRollup": []})
         world = Gh(self.deploy, {"view": [bare] * 3})
         ci = {"provider": "jenkins", "url": "https://jenkins.example", "job": "deploy/PR-{pr}"}
         green = {"result": "SUCCESS", "building": False, "url": "https://jenkins.example/job/deploy/2"}
         with mock.patch.object(sd_ship_jenkins, "head_build", return_value=green) as read:
-            self.assertEqual(world.pr_state(URL, {"ci": ci}), "green")
+            self.assertEqual(world.pr_state(URL, {"ci": ci}, "image.tag", "0.18.0"), "green")
         read.assert_called()
         red = {**green, "result": "FAILURE"}
         with mock.patch.object(sd_ship_jenkins, "head_build", return_value=red):
-            self.assertTrue(world.pr_state(URL, {"ci": ci}).startswith("red: Jenkins build"))
-        self.assertEqual(world.pr_state(URL, {}), "pending: no check has reported yet")
+            self.assertTrue(world.pr_state(URL, {"ci": ci}, "image.tag", "0.18.0").startswith("red: Jenkins build"))
+        self.assertEqual(world.pr_state(URL, {}, "image.tag", "0.18.0"), "pending: no check has reported yet")
 
     def test_a_merge_queue_add_reads_as_not_merged(self):
         """`gh pr merge` exits 0 when it only queues the PR; merged is what `gh pr view` reads."""
@@ -840,7 +894,8 @@ class GitHubOnDisk(Gh):
             return json.dumps({"state": "MERGED" if pr.get("merged") else "OPEN",
                                "mergeCommit": {"oid": pr["merged"]} if pr.get("merged") else None})
         if verb == "view":
-            return json.dumps({"state": "OPEN", "number": 8, "headRefOid": tip,
+            return json.dumps({"state": "OPEN", "number": 8, "headRefOid": tip, "baseRefName": pr.get("base", "main"),
+                               "headRefName": pr["head"],
                                "statusCheckRollup": [{"name": "lint", "conclusion": "SUCCESS"}]})
         if verb == "merge":
             if argv[argv.index("--match-head-commit") + 1] != tip:
