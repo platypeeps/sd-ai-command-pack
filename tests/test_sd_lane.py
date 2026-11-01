@@ -2270,9 +2270,9 @@ class Publishing(SharedQueue):
         """Failure table, enqueue: a hub fault after the write landed; the verb says hub_unavailable."""
         real = sd_lane.on_hub
 
-        def landed_then_lost(queue: sd_lane.Queue, work: Any) -> Any:
+        def landed_then_lost(queue: sd_lane.Queue, work: Any, **options: Any) -> Any:
             before = self.rows()
-            answer = real(queue, work)
+            answer = real(queue, work, **options)
             if self.rows() == before:  # a read, such as enqueue's check before it publishes (sd:3283)
                 return answer
             raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
@@ -2282,6 +2282,25 @@ class Publishing(SharedQueue):
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
             sd_lane.enqueue_entry(self.feature, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual(len(self.entries()), 1)
+
+
+class HubReads(SharedQueue):
+    """pack sd:7042: a read of the queue takes no write lock, so it waits on no writer."""
+
+    def test_a_queue_read_does_not_wait_on_a_writer(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        import sd_db
+        writer = sd_db.connect(home=self.tmp)
+        self.addCleanup(writer.close)
+        writer.execute("BEGIN IMMEDIATE")
+        started = time.monotonic()
+        try:
+            entries = sd_lane.read_queue(self.store())
+            waited = time.monotonic() - started
+        finally:
+            writer.execute("ROLLBACK")
+        self.assertLess(waited, 1.0, "a queue read waited on the write lock")
+        self.assertEqual(len(entries), 1)
 
 
 class EnqueuePrechecks(SharedQueue):
@@ -2849,8 +2868,8 @@ class ClaimAndLease(SharedQueue):
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         real = sd_lane.on_hub
 
-        def claim_lands_then_hub_goes(queue: sd_lane.Queue, work: Any) -> Any:
-            answer = real(queue, work)
+        def claim_lands_then_hub_goes(queue: sd_lane.Queue, work: Any, **options: Any) -> Any:
+            answer = real(queue, work, **options)
             if any(body["status"] == "running" for _, body in self.rows()):
                 raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
             return answer
@@ -3337,8 +3356,8 @@ class HubSkew(RefusingHub):
         real_hub, real_read = sd_lane.on_hub, sd_lane.sd_lib.lane_elsewhere
         lost, drops = [True], [True]
 
-        def claim_lands_answer_lost(queue: sd_lane.Queue, work: Any) -> Any:
-            answer = real_hub(queue, work)
+        def claim_lands_answer_lost(queue: sd_lane.Queue, work: Any, **options: Any) -> Any:
+            answer = real_hub(queue, work, **options)
             if lost and any(body["status"] == "running" for _, body in self.rows()):
                 lost.clear()
                 raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
@@ -5016,10 +5035,10 @@ class Watch(Lane):
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         on_hub, faults = sd_lane.on_hub, [sd_lane.LaneError("down", code=sd_lane.HUB_UNAVAILABLE)]
 
-        def flaky(queue: sd_lane.Queue, work: Any) -> Any:
+        def flaky(queue: sd_lane.Queue, work: Any, **options: Any) -> Any:
             if faults:
                 raise faults.pop()
-            return on_hub(queue, work)
+            return on_hub(queue, work, **options)
         with mock.patch.object(sd_lane, "on_hub", flaky), mock.patch.object(
                 sd_lane, "watch_pause", lambda: sd_lane.run_lane(self.repo, self.environ, self.ship)):
             code, lines = self.watch_items(self.repo, 1)
