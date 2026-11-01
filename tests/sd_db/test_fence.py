@@ -19,7 +19,6 @@ import socket
 import subprocess
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -471,29 +470,50 @@ class TheLiveServer(StubCase):
         self.assertEqual(answers[2:], [None], "a fenced server answered a second frame")
         self.assertEqual(self.rows(), 0)
 
-    def test_a_commit_on_a_slow_tailscale_holds_no_other_frame(self):
-        """pack sd:7042: a frame with a held answer never waits on the fence lock while a commit runs."""
+    def test_a_write_begin_on_a_slow_tailscale_holds_no_other_frame(self):
+        """pack sd:7042: a frame with a held answer never waits while another session's ask stalls.
+
+        The write BEGIN asks past half the window and stalls in Tailscale;
+        a frame inside the window reads the held answer meanwhile. Events and
+        a frozen clock, not a 0.5 s sleep and a wall-clock bound: the commit
+        that test timed asked nothing (pack sd:7123).
+        """
+        clock = {"monotonic": 1000.0, "time": 2_000_000_000.0}
+        self.enterContext(mock.patch.object(serve.time, "monotonic", lambda: clock["monotonic"]))
+        self.enterContext(mock.patch.object(serve.time, "time", lambda: clock["time"]))
         self.assertIsNone(self.server.fence())
-        self.rename(HUB_NAME + ".", status_delay=3)
+        clock["monotonic"] += serve.FENCE_SECONDS * 3 / 4
+        clock["time"] += serve.FENCE_SECONDS * 3 / 4
+        asking, release = threading.Event(), threading.Event()
+        name = hub._this_name
+
+        def stalled() -> str:
+            asking.set()
+            release.wait(30)
+            return name()
+
+        self.enterContext(mock.patch.object(hub, "_this_name", stalled))
         rid = remote.new_request_id()
         answers: list = []
-
-        def write():
-            answers.extend(self.session(
-                remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
-                remote.request("execute", sql="INSERT INTO probe (name) VALUES ('one')", params=None),
-                remote.request("execute", sql="COMMIT", params=None, rid=rid)))
-
-        writer = threading.Thread(target=write)
+        writer = threading.Thread(target=lambda: answers.extend(self.session(
+            remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
+            remote.request("execute", sql="INSERT INTO probe (name) VALUES ('one')", params=None),
+            remote.request("execute", sql="COMMIT", params=None, rid=rid))))
+        fenced: list = []
+        reader = threading.Thread(target=lambda: fenced.append(self.server.fence()))
         writer.start()
-        time.sleep(0.5)
-        started = time.monotonic()
         try:
-            self.assertIsNone(self.server.fence())
-            waited = time.monotonic() - started
+            self.assertTrue(asking.wait(30), "the write BEGIN did not ask Tailscale")
+            reader.start()
+            # A frame that waits on the ask never ends while the ask stalls.
+            reader.join(10)
+            self.assertFalse(reader.is_alive(), "a frame waited on another session's Tailscale call")
         finally:
+            release.set()
             writer.join(30)
-        self.assertLess(waited, 1.0, "a frame waited on the commit's Tailscale call")
+            if reader.ident is not None:
+                reader.join(30)
+        self.assertEqual(fenced, [None])
         self.assertTrue(all(a and a["ok"] for a in answers), answers)
         self.assertEqual(self.rows(), 1)
 
