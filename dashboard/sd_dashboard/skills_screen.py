@@ -22,7 +22,7 @@ from .markup import join, tag
 
 
 def review_controls(connection, row, revision):
-    if row["kind"] != "skill-review":
+    if not skills_catalog.is_review(row):
         return ""
     state = workflow.item_state(connection, row["id"])
     proposals = [note for note in state["notes"] if note["kind"] == "proposal" and not note["resolved_at"]]

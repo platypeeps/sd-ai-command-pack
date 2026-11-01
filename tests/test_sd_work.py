@@ -1115,7 +1115,8 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("to defer the item, set a later date, or park it with --park", said("task", "edit"))
         self.assertIn("`report`, a scheduled job's run, closes with `sd reports acknowledge N`",
                       said("store", "items"))
-        self.assertIn("`skill-review`, a skill catalogue review the runner works", said("store", "items"))
+        # sd:7004: a skill review is a task now, so the kind names no review.
+        self.assertNotIn("skill-review", said("store", "items"))
         self.assertIn("a report closes with `sd reports acknowledge N`", said("task", "status"))
         note = said("task", "note")
         for kind in NOTE_KINDS:

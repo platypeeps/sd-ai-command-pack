@@ -1722,8 +1722,7 @@ def register(groups: Any, store: Any) -> None:
     items.add_argument("--here", action="store_true",
                        help="only this checkout's items; refuse unless it is registered in the sd database")
     items.add_argument("--kind", help="filter by item kind, such as task or followup; `report`, a scheduled "
-                                      "job's run, closes with `sd reports acknowledge N`; `skill-review`, "
-                                      "a skill catalogue review the runner works, closes when the run ends")
+                                      "job's run, closes with `sd reports acknowledge N`")
     items.add_argument("--status", help="filter by workflow status")
     items.add_argument("--since", type=since, metavar="DATE|DURATION",
                        help="only items created or updated since then: YYYY-MM-DD (00:00 UTC) "
