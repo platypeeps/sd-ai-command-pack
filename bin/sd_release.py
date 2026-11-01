@@ -88,6 +88,8 @@ SCALAR = re.compile(r"""(?P<gap>\s*)(?:(?P<value>"(?:[^"\\]|\\.)*"|'(?:[^']|'')*
 #: A quoted scalar, closed or not, a comment, or a bracket that opens or closes a flow collection.
 FLOW = re.compile(r"""(?<![^\s\[{,:])(?:"(?:[^"\\]|\\.)*(?P<double>")?|'(?:[^']|'')*(?P<single>')?|#.*)"""
                   r"""|(?P<open>[\[{])|[\]}]""")
+#: What comes before a node's value on its line: sequence indicators, a sequence item's key, an anchor or tag.
+LEAD = re.compile(r"""(?:-(?:\s+|\Z)|[&!]\S*(?:\s+|\Z)|(?:[^\s:#"']+|"[^"]*"|'[^']*'):(?:\s+|\Z))*""")
 DOCUMENT = re.compile(r"(?:---|\.\.\.)(?:\s|\Z)")
 
 
@@ -163,7 +165,7 @@ def _entries(lines: list[str], refused: Callable[[str], ReleaseError]) -> Iterat
             above.append((indent, name))
         else:  # a sequence item, or a value: what is deeper belongs to it, not to a mapping
             deeper = indent
-            flow = "" if _closed(rest) else rest
+            flow = _opened(rest)
     if flow:
         raise refused("the file ends inside a quoted scalar or flow collection")
 
@@ -175,6 +177,13 @@ def _document(stripped: str, started: bool, number: int, refused: Callable[[str]
     if started or stripped[:3] == "..." or stripped[3:].strip()[:1] not in ("", "#"):
         raise refused(f"line {number + 1} marks a document; this reader takes one YAML document")
     return True
+
+
+def _opened(rest: str) -> str:
+    """The quoted scalar or flow collection that the value in `rest` starts and leaves open, or "": a `[` or a
+    quote inside a plain scalar starts nothing (sd:7131)."""
+    value = LEAD.sub("", rest.lstrip(), count=1)  # `LEAD` matches at the start, if only the empty string
+    return value if value[:1] in ("[", "{", '"', "'") and not _closed(value) else ""
 
 
 def _closed(text: str) -> bool:

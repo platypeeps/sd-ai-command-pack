@@ -194,6 +194,21 @@ class Version(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(sd_release.set_value(text, key, "1.0.1"), (old, new))
 
+    def test_a_bracket_or_quote_inside_a_plain_scalar_opens_nothing(self):
+        """sd:7131: `[` or `'` inside a plain scalar read as an opener, so the file seemed to end inside a flow
+        collection or quoted scalar and the bump stopped after the tag was pushed."""
+        for before in ("description: the [latest build\n", "description: the '90s\n", "note: a {b\n",
+                       'note: say "hi\n', "list:\n- the [latest build\n", "list:\n- name: the '90s\n",
+                       "list:\n  - - the [x\n"):
+            text = before + "image:\n  tag: old\n"
+            with self.subTest(text=text):
+                self.assertEqual(sd_release.set_value(text, "image.tag", "1.0.1"),
+                                 ("old", before + "image:\n  tag: 1.0.1\n"))
+        for text in ("list:\n- [a,\ntag: x]\ntag: old\n", "list:\n- name: 'a\ntag: x'\ntag: old\n",
+                     "args: &a [a,\ntag: x]\ntag: old\n"):
+            with self.subTest(text=text):  # one that starts the value still runs on until it closes
+                self.assertEqual(sd_release.set_value(text, "tag", "1.0.1")[0], "old")
+
     def test_the_policy_reader_checks_the_release_keys(self):
         self.assertEqual(sd_lib.declaration_problems("policy", {"release": RELEASE}), [])
         self.assertEqual(sd_lib.declaration_problems("policy", {"release": {"tag": "v1"}}),
