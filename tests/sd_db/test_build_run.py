@@ -1223,6 +1223,13 @@ class Sweep(Case):
         self.assertEqual(build_run.sweep(self.db), [str(work)])
         self.assertFalse(work.exists())
 
+    def test_an_ignored_file_named_like_a_cache_still_keeps_the_tree(self):
+        """Lane review of pack sd:6979: only a folder of that name is disposable, not a file."""
+        work = self.blocked()
+        exclude(work, ".pytest_cache\n")
+        (work / ".pytest_cache").write_text("notes\n")
+        self.assertEqual(build_run.kept_files(("git",), str(work)), "!! .pytest_cache")
+
     def test_an_untracked_file_hidden_by_config_keeps_the_worktree(self):
         work = self.blocked()
         self.done()

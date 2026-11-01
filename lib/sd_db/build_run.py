@@ -259,7 +259,8 @@ def kept_files(git: Collection[str], work: str, *, env: dict | None = None) -> s
     files, those config hides too, less the ignored ones under a `DISPOSABLE` folder; "" when it may go."""
     lines = _read([*git, "-C", work, "status", "--porcelain", "--ignored", "--untracked-files=all"], env=env)
     return "\n".join(line for line in lines.splitlines() if line.strip() and not (
-        line.startswith("!! ") and DISPOSABLE.intersection(line[3:].strip('"').split("/"))))
+        # Folder parts only: git ends an ignored folder with "/", so a file of that name is no cache.
+        line.startswith("!! ") and DISPOSABLE.intersection(line[3:].strip('"').split("/")[:-1])))
 
 
 def lane_entry(ship: list[str], cwd: Path | str, items: Collection[int], *, env: dict | None = None) -> dict | None:
