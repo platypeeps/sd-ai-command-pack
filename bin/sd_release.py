@@ -176,19 +176,27 @@ class Repositories:
         return done.stdout.strip()
 
     def tip(self) -> str:
-        """origin's default branch tip, fetched once per chain run.
+        """The commit origin's default branch names, as origin advertises it, read and fetched once per chain run.
 
-        No tags: release history is origin's (`_origin_tags`), and `--tags` failed on a local tag at odds with
-        origin's, as a would-clobber.
+        Origin's `HEAD` symref and its commit come from one `ls-remote`, as `sd_lane.publish_head` reads them:
+        `git fetch` never moves a local `origin/HEAD`, which kept naming master after origin moved to main.
+        No tags are fetched: release history is origin's (`_origin_tags`), and `--tags` failed on a local tag
+        at odds with origin's, as a would-clobber.
         """
         if self._tip is None:
-            self._run("git", "fetch", "-q", "--no-tags", "origin")
-            for ref in ("origin/HEAD", "origin/main", "origin/master"):
-                self._tip = self._run("git", "rev-parse", "-q", "--verify", f"{ref}^{{commit}}", ok=(0, 1)) or None
-                if self._tip:
-                    break
-            else:
-                raise ReleaseError(f"{self.main} has no origin/HEAD, origin/main or origin/master")
+            branch = sha = ""
+            for line in self._run("git", "ls-remote", "--symref", "origin", "HEAD").splitlines():
+                left, _, name = line.partition("\t")
+                if name == "HEAD" and left.startswith("ref: refs/heads/"):
+                    branch = left.removeprefix("ref: refs/heads/")
+                elif name == "HEAD":
+                    sha = left
+            if not branch or not sha:
+                raise ReleaseError("origin advertises no default branch, so its release commit is unknown")
+            self._run("git", "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch}")
+            if not self._run("git", "rev-parse", "-q", "--verify", f"{sha}^{{commit}}", ok=(0, 1)):
+                raise ReleaseError(f"origin's {branch} moved off {sha[:12]} during the fetch; the next run reads it again")
+            self._tip = sha
         return self._tip
 
     def _origin_tags(self, *patterns: str) -> dict[str, str]:

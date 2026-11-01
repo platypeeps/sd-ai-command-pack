@@ -259,6 +259,24 @@ class OnOrigin(unittest.TestCase):
         self.assertEqual(self.git(self.origin, "rev-parse", "refs/tags/v0.2.0^{commit}"), sha)
         self.assertEqual(self.git(decoy, "tag", "--list"), "", "the decoy repository is never tagged")
 
+    def test_the_tip_is_origins_advertised_default_branch_not_a_stale_origin_head(self):
+        """Re-review: `git fetch` does not move the local `origin/HEAD`, so after origin's default moved from
+        master to main, keeping master, the chain released master's tip."""
+        self.git(self.main, "push", "-q", "origin", "HEAD:master")
+        self.git(self.origin, "symbolic-ref", "HEAD", "refs/heads/master")
+        self.git(self.main, "remote", "set-head", "origin", "master")  # what a clone made before the move
+        sha = self.commit("feat: two")
+        self.git(self.main, "push", "-q", "origin", "HEAD:main")
+        self.git(self.origin, "symbolic-ref", "HEAD", "refs/heads/main")
+        self.assertEqual(self.world.tip(), sha)
+        self.assertEqual(self.next(), ("v0.1.0", "v0.2.0"))
+
+    def test_an_origin_that_advertises_no_default_branch_is_unknown(self):
+        self.git(self.main, "remote", "set-head", "origin", "main")
+        self.git(self.origin, "symbolic-ref", "HEAD", "refs/heads/gone")
+        with self.assertRaisesRegex(sd_release.ReleaseError, "origin advertises no default branch"):
+            self.world.tip()
+
     def test_a_local_tag_on_another_commit_is_refused_not_published(self):
         sha = self.commit("feat: two")
         self.git(self.main, "push", "-q", "origin", "HEAD:main")
