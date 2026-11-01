@@ -2,6 +2,7 @@
 title: Release chain PR 2, the deploy bump and its merge
 created: 2026-11-01
 item: sd:7014
+branch: docs/sd-7014-design
 ---
 
 # Design — release-bump-merge
