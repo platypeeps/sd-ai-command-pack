@@ -54,7 +54,7 @@ button is off, with its reason, when no event is unacknowledged or the store did
 not read.
 
 Data sources (sd:4965) shows one age lamp per source the checkout's
-`python3 tools/source-ages.py --json` lists (Mission export, CORE, Vantaca,
+`python3 tools/source-ages.py --json` lists (Mission export, CORE,
 TMT), run with a 10-second bound (`SOURCE_SECONDS`). A script that is missing,
 times out, exits past 1 or prints no source list makes the panel unknown with
 that reason. A row hides after its `ends` date. Refresh now starts the source's
@@ -66,16 +66,16 @@ inventory gives the job's state, its off reason (not installed, running, or a
 start launchd refuses) and the last line of its log; while it runs, the page
 reads again every 15 seconds (`SRC_POLL`).
 
-Download from Vantaca and Download from Mission (sd:5626), the panel head's buttons and palette entries, post
+Download from Mission (sd:5626), the panel head's button and palette entry, posts
 `/api/hoa/download {"source"}`. That starts `sd_dashboard/hoa_download.py` detached through the sweep's
 `spawn`, holding `<state>/system/hoa-download/<source>/lock`: a second post while it runs is a 409. The run opens
 the portal in a Claude Chrome session (`claude -p --chrome`, Chrome tools only, no form tool). On a login page the
 source row shows "waiting for you to log in" while the session reads the page every 30 seconds, up to 15 minutes; it
-never types. Once signed in, it runs the checkout's own download, `tools/vantaca-pull.py` or
-`tools/mission/mission.sh export`; their prompts name the portal address (section 2). `/api/hoa`'s `downloads`
+never types. Once signed in, it runs the checkout's own download,
+`tools/mission/mission.sh export`; its prompt names the portal address (section 2). `/api/hoa`'s `downloads`
 part reads each source's `last.json`: running and its phase, or done, unavailable or failed with the reason. A
 checkout without the script or prompt turns that button off, naming the file. A button shows only while its source
-row does, so Vantaca's leaves with its row after its end date.
+row does.
 On a row with a Download, Run now runs that Download (sd:5678), and Show log puts the end of its `start.log` in
 the row's Details, or why there is none (sd:5680); a row without one keeps its job's Run now and Show log.
 
