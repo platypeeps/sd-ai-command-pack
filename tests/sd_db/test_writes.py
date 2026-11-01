@@ -105,6 +105,33 @@ class TheStatusRule(WriteCase):
             transition(self.connection, item, "shipped", who="me")
         self.assertIn("ready_to_send", str(raised.exception))
 
+    def test_done_cancels_the_items_blocked_assignments_only(self):
+        """sd:6996. A done item's blocked assignment has nothing left to do."""
+        item = create_item(self.connection, kind="task", title="A thing")
+        other = create_item(self.connection, kind="task", title="Another")
+        blocked = create_assignment(self.connection, role="author", status="blocked", item=item)
+        finished = create_assignment(self.connection, role="author", status="done", item=item)
+        elsewhere = create_assignment(self.connection, role="author", status="blocked", item=other)
+        transition(self.connection, item, "done", who="me")
+        status = {row["id"]: row for row in self.connection.execute("SELECT id, status, ended, result FROM assignment")}
+        self.assertEqual(status[blocked]["status"], "cancelled")
+        self.assertIsNotNone(status[blocked]["ended"])
+        self.assertIn("done", status[blocked]["result"])
+        self.assertEqual(status[finished]["status"], "done")
+        self.assertEqual(status[elsewhere]["status"], "blocked")
+
+    def test_done_leaves_a_blocked_assignment_a_run_still_holds(self):
+        """sd:6996. The lease keeps the row the runner's; `build._release` cancels it later."""
+        item = create_item(self.connection, kind="task", title="A thing")
+        held = create_assignment(self.connection, role="author", status="blocked", item=item)
+        upsert_repo(self.connection, "/fixture/repo")
+        self.connection.execute(
+            "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, created_at, "
+            "updated_at) VALUES ('r1', ?, 1, '/fixture/repo', 'b', 'o', '/w', '/r', 'now', 'now')", (held,))
+        transition(self.connection, item, "done", who="me")
+        self.assertEqual(
+            self.connection.execute("SELECT status FROM assignment WHERE id = ?", (held,)).fetchone()[0], "blocked")
+
     def test_a_failed_transition_leaves_no_note_behind(self):
         """The note and the row are one transaction, in both directions."""
         with self.assertRaises(TransitionRefused):

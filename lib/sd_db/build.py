@@ -43,6 +43,7 @@ from .errors import SdDbError
 from .runner import RUNNABLE_KINDS, queue_state, restoration_pending
 from .writes import (
     add_note,
+    cancel_done_blocked,
     create_assignment,
     create_item,
     set_item_fields,
@@ -930,6 +931,8 @@ def _release(connection, read: dict, *, probe=Probe) -> bool:
             return False
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
                            (stamp, read["id"]))
+        for member in _members(connection, read["assignment"], "blocked"):
+            cancel_done_blocked(connection, member["item"], stamp, f"build run {read['id']} released; item is done")
         if read["outcome"] == "blocked":
             _park(connection, read["id"], read["assignment"], stamp)
         return True

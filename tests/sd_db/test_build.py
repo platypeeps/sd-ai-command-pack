@@ -889,6 +889,19 @@ class Park(Case):
         self.assertIsNotNone(build.run(self.db, self.bundle["id"])["released_at"])
         self.assertEqual(self.parked(), [True, False])
 
+    def test_a_held_blocked_run_cancels_a_done_items_assignment_when_its_lease_is_released(self):
+        """sd:6996. An item merged by hand while its blocked run still held the lease keeps the row blocked until the
+        reap releases it; the release then cancels it, and the open item's row stays blocked."""
+        build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_pgid=4242, supervisor_start=START,
+                    builder_pgid=777, builder_start=START)
+        build.end(self.db, self.bundle["id"], "blocked", "a permission denial")
+        transition(self.db, self.items[0], "done", who="operator")
+        rows = "SELECT status FROM assignment WHERE item = ? AND scope = 'build'"
+        self.assertEqual(self.db.execute(rows, (self.items[0],)).fetchone()[0], "blocked")
+        build.reap(self.db, probe=Probe(alive=False, group=False), kill=Kill(self.db))
+        self.assertEqual(self.db.execute(rows, (self.items[0],)).fetchone()[0], "cancelled")
+        self.assertEqual(self.db.execute(rows, (self.items[1],)).fetchone()[0], "blocked")
+
     def test_a_run_that_ends_done_parks_nothing(self):
         build.end(self.db, self.bundle["id"], "done", "the lane merged it")
         self.assertEqual(self.parked(), [False, False])

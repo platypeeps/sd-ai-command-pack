@@ -141,7 +141,8 @@ class FirstInFirstOut(QueueFixture):
             self.processes.append(gate)
             gates.append(gate)
             # The gate read its check before it queued; the next one may now rewrite the file.
-            wait_for(lambda: len(self.tickets()) == len(gates), timeout=5)
+            # A start slower than the wait would run the next gate's check (sd:6988), so it must hold.
+            self.assertTrue(wait_for(lambda: len(self.tickets()) == len(gates)), f"gate {name} never queued")
             time.sleep(0.3)
         holder.kill()
         holder.wait()
