@@ -111,6 +111,13 @@ class TheBuilders(TodayCase):
         self.assertEqual((row["eta"], row["eta_why"]), ("2026-09-06T12:20:00Z", "median of the last 3 done runs"))
         self.assertEqual(row["usd"], 0.42)
 
+    def test_each_item_names_its_assignment_for_show_assignment(self):
+        # sd:6714: In motion's Details shows an item's builder; Show assignment names the member's assignment.
+        self.run_row("live", titles=("Port the page", "Fix the link"), created=ago(minutes=5), beat=ago(seconds=5))
+        [row] = self.today()["builders"]["rows"]
+        members = self.connection.execute("SELECT id, item FROM assignment WHERE scope = 'build' ORDER BY id").fetchall()
+        self.assertEqual([(it["item"], it["assignment"]) for it in row["items"]], [(m["item"], m["id"]) for m in members])
+
     def test_with_fewer_than_three_past_runs_the_eta_says_why_it_is_not_known(self):
         self.done("past0", 40)
         self.run_row("live", created=ago(minutes=5), beat=ago(seconds=5))
@@ -207,7 +214,87 @@ class TheQueueRows(ReaderCase):
         self.assertIn("The queues could not be read: database is locked", out["R"]["rows"])
 
 
+class RowDetails(ReaderCase):
+    """sd:6714: a plain click on an In motion row, a builder row or a day-track mark draws its Details, as a Needs you
+    row's does; the item link still opens a new tab on a modifier click."""
+
+    SESSION = {"item": 7, "title": "Port the page", "status": "in_progress", "kind": "lane", "session": "Lane queue",
+               "started": "2026-09-06T11:30:00Z", "elapsed": "30m", "seconds": 1800, "via": "lane entry", "verified": True,
+               "revision": "rev7", "item_kind": "task", "lane": "pack: next, position 2"}
+
+    def setUp(self):
+        super().setUp()
+        self.doc["active"] = {"rows": [self.SESSION], "sources": {}, "error": ""}
+        self.doc["builders"] = {"rows": [{**BUILDER, "items": [{"item": 7, "title": "Port the page", "assignment": 41}]}], "error": ""}
+        self.doc["track"] = {"since": "2026-09-05T12:00:00Z", "until": NOW, "landed": [{"at": "2026-09-06T10:00:00Z", "id": "item:5", "item": 5, "what": "sd:5 Ship it"}],
+                             "jobs": [{"at": "2026-09-06T09:00:00Z", "id": "job:gone:3", "what": "gone failed"}], "briefs": [],
+                             "live": [{"at": "2026-09-06T11:30:00Z", "id": "session:7:0", "item": 7, "what": "sd:7 Lane queue"}],
+                             "key": {"landed": 1, "landing": 0, "due_week": 0, "blocked": 0}}
+
+    CLICK = ("ELS['%s'].listeners.click[0]({ prevented: false, preventDefault() { this.prevented = true; R.prevented = true; },"
+             " target: { closest: s => s === '%s' ? { dataset: { id: '%s' } } : s === 'a' ? %s : null } });")
+
+    def click(self, table, sel, ident, link="null"):
+        return self.CLICK % (table, sel, ident, link)
+
+    def test_an_in_motion_row_shows_the_item_its_sessions_lane_and_builder(self):
+        out = self.run_page(self.click("active", "tr[data-id]", "live:7", "{ href: '/tasks?row=7' }")
+                            + " R.details = ELS.details.html; R.row = location.search; R.active = ELS.active.html;"
+                            " R.cmds = REG.filter(c => c.on === 'live item').map(c => [c.id, C.offWhy(c, C.get('live:7'))]);")
+        details = out["R"]["details"]
+        self.assertTrue(out["R"]["prevented"], "a plain click on the item link selects instead of leaving the page")
+        self.assertEqual(out["R"]["row"], "?row=live%3A7")
+        for text in ("Port the page", "Lane queue", "lane entry", "30m", "pack: next, position 2", "<b>review</b>", "#41"):
+            self.assertIn(text, details)
+        self.assertEqual(dict(out["R"]["cmds"]), {"today.live.open": "", "today.live.assignment": "", "live item.fix": ""})
+        self.assertIn('data-id="live:7"', out["R"]["active"])
+
+    def test_a_modifier_click_on_the_item_link_leaves_it_to_the_browser(self):
+        click = self.click("active", "tr[data-id]", "live:7", "{ href: '/tasks?row=7' }").replace("prevented: false,", "metaKey: true,")
+        out = self.run_page("R.before = ELS.details.html;" + click + " R.after = ELS.details.html;")
+        self.assertNotIn("prevented", out["R"])
+        self.assertEqual(out["R"]["before"], out["R"]["after"])
+
+    def test_a_builder_row_and_each_day_track_mark_show_their_details(self):
+        out = self.run_page(self.click("builds", "tr[data-id]", "run:live") + " R.builder = ELS.details.html;"
+                            + self.click("track-rows", "tr[data-id]", "landed:5") + " R.landed = ELS.details.html;"
+                            + self.click("track-plot", "[data-id]", "job:gone:3") + " R.gone = ELS.details.html;"
+                            + self.click("track-plot", "[data-id]", "live:7") + " R.live = ELS.details.html;"
+                            + self.click("track-rows", "tr[data-id]", "job:nightly-sync:7") + " R.job = ELS.details.html; R.sel = selected();")
+        self.assertIn("Port the page", out["R"]["builder"])
+        self.assertIn("median of the last 3 done runs", out["R"]["builder"])
+        self.assertIn("sd:5 Ship it", out["R"]["landed"])
+        self.assertIn("no longer on Needs you", out["R"]["gone"])
+        self.assertIn("pack: next, position 2", out["R"]["live"])
+        self.assertIn("nightly-sync failed with exit 7", out["R"]["job"])
+        self.assertEqual(out["R"]["sel"], ["job:nightly-sync:7"])
+
+    def test_the_address_keeps_an_in_motion_selection(self):
+        out = self.run_page("R.details = ELS.details.html; R.row = location.search;", search="?row=live%3A7")
+        self.assertIn("pack: next, position 2", out["R"]["details"])
+        self.assertEqual(out["R"]["row"], "?row=live%3A7")
+
+
 SHA = "a" * 40
+
+
+class InMotionFacts(TodayCase):
+    """sd:6714: each In motion session row carries what its Details and Fix need: the item's revision and kind, and its
+    place in a lane."""
+
+    def test_a_session_row_carries_its_items_revision_kind_and_lane_place(self):
+        moving, idle = self.item("Port the page", kind="task"), self.item("Read the docs")
+        rows = [{"item": moving, "title": "Port the page", "status": "in_progress", "kind": "lane", "session": "Lane queue",
+                 "started": NOW, "elapsed": "5m", "seconds": 300, "via": "lane entry", "verified": True},
+                {"item": idle, "title": "Read the docs", "status": "in_progress", "kind": "worktree", "session": "wt",
+                 "started": NOW, "elapsed": "5m", "seconds": 300, "via": "-C /wt", "verified": True}]
+        nxt = {"item": moving, "title": "Port the page", "state": "next", "position": 2, "held": False}
+        with mock.patch("sd_dashboard.active_sessions.document", return_value={"rows": rows, "sources": {}, "error": ""}):
+            found = self.today(lanes=queue(lane("pack", rows=[nxt])))["active"]["rows"]
+        self.assertEqual([(r["item"], r["item_kind"], r["lane"]) for r in found],
+                         [(moving, "task", "pack: next, position 2"), (idle, "work", "")])
+        self.assertEqual([r["revision"] for r in found], [reads.revisions(self.connection, [moving])[moving],
+                                                         reads.revisions(self.connection, [idle])[idle]])
 
 
 class TheDigest(TodayCase):

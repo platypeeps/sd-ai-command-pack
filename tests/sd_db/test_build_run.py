@@ -1044,6 +1044,17 @@ class Tick(Case):
         notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", self.items)]
         self.assertTrue(any(body.startswith(build.REBUILD) for body in notes), notes)
 
+    def test_a_rebuild_names_the_base_that_conflicted(self):
+        """pack sd:7008: the finding said origin/main whatever base the lane merged."""
+        self.enqueued()
+        self.entries[self.items[0]] = {"id": "e1", "status": "failed",
+                                       "reason": self.CONFLICT.replace("origin/main", "origin/release")}
+        self.tick()
+        notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", self.items)]
+        finding = next(body for body in notes if body.startswith(build.REBUILD))
+        self.assertIn("Merge origin/release into build/sd-1", finding)
+        self.assertNotIn("origin/main", finding.split("the lane said:")[0])
+
     def test_a_conflict_waits_until_its_supervisor_is_gone(self):
         """Review: a requeue while the old supervisor still ran let a new builder share its worktree."""
         run = self.enqueued()
