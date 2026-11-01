@@ -448,22 +448,31 @@ def queue_for(root: pathlib.Path, environ: dict[str, str]) -> Queue:
     return Queue(repository, lane_dir(root, environ), environ)
 
 
-def on_hub(queue: Queue, work: Callable[[Any], Any]) -> Any:
+def on_hub(queue: Queue, work: Callable[[Any], Any], *, write: bool = True) -> Any:
     """`work(connection)` in one hub database transaction, `BEGIN IMMEDIATE`; it replaces the queue file's lock.
 
     Local on the hub, over the tailnet session on a satellite. The read, the
     check and the write sit in one transaction, so a revision or head check
     keeps its meaning. A fault of the database or its session refuses with
     `HUB_UNAVAILABLE`: an unknown answer, since a write may have landed.
+    `write=False` reads in a plain `BEGIN` on a read-only connection: one
+    snapshot, and no write lock to wait on or hold (pack sd:7042).
     """
     require_sd_db()
     from sd_db.database import connect, transaction  # noqa: PLC0415
     from sd_db.errors import SdDbError  # noqa: PLC0415
     try:
-        connection = connect(hub_database(queue.environ), write=True)
+        connection = connect(hub_database(queue.environ), write=write)
         try:
-            with transaction(connection):
+            if write:
+                with transaction(connection):
+                    return work(connection)
+            connection.execute("BEGIN")
+            try:
                 return work(connection)
+            finally:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
         finally:
             connection.close()
     except (SdDbError, sqlite3.Error, OSError, EOFError) as error:
@@ -509,7 +518,7 @@ def update(queue: Queue, change: Callable[[list[dict[str, Any]]], Any],
 
 
 def read_queue(queue: Queue) -> list[dict[str, Any]]:
-    return on_hub(queue, lambda connection: stored(connection, queue.repository))
+    return on_hub(queue, lambda connection: stored(connection, queue.repository), write=False)
 
 
 def runner_write(queue: Queue, change: Callable[[list[dict[str, Any]]], Any],
@@ -4277,7 +4286,8 @@ def lane_main(args: Any) -> int:
         elif args.lane_command == "list":  # `enqueue_seq` orders an item's entries, as `newest_entry` does (sd:3419)
             queue = queue_for(root, environ)
             entries, order = on_hub(queue, lambda connection: (stored(connection, queue.repository),
-                                                               enqueue_order(connection, queue.repository)))
+                                                               enqueue_order(connection, queue.repository)),
+                                    write=False)
             rounds = item_rounds(entries, order)
             result = {"queue": str(queue_path(root, environ)), "revision": queue_revision(entries),
                       "entries": [{**shown(row), "enqueue_seq": order[row["id"]], "round": rounds[row["id"]]}
@@ -4305,7 +4315,7 @@ def lane_prune(root: pathlib.Path, environ: dict[str, str], *, dry_run: bool, as
     """`lane prune`: `prune_landed` against every merged lane head of the repository; a hub that does not answer
     refuses, so nothing goes on a partial list."""
     queue = queue_for(root, environ)
-    entries = on_hub(queue, lambda connection: stored(connection, queue.repository))
+    entries = on_hub(queue, lambda connection: stored(connection, queue.repository), write=False)
     heads = [str(row.get("head") or row.get("expected_head") or "") for row in entries if row.get("status") == "merged"]
     main = sd_lib.main_worktree_root(root).resolve()
     worktrees = [] if dry_run else [said for row in entries if (said := reap(queue, row))]  # sd:6727, first
