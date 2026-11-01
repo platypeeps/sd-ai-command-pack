@@ -205,6 +205,13 @@ def group_gone(pgid):
     return False
 
 
+def exclude(work: Path, patterns: str) -> None:
+    """Ignore `patterns` in every worktree of `work`'s repository, through its common `info/exclude`."""
+    common = Path(support.git(work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    (common / "info").mkdir(exist_ok=True)
+    (common / "info" / "exclude").write_text(patterns)
+
+
 class Case(unittest.TestCase):
     bundle: dict
     items: list[int]
@@ -877,6 +884,23 @@ class Supervise(Case):
         note = self.db.execute("SELECT body FROM note WHERE item = ? ORDER BY id DESC", (self.items[0],)).fetchone()
         self.assertIn("kept worktree", note["body"])
 
+    def test_cleaning_keeps_an_ignored_file(self):
+        """pack sd:6979: `git worktree remove` deletes ignored files, which plain `status --porcelain` omits."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor().run()
+        work = Path(self.bundle["work_path"])
+        exclude(work, "__pycache__/\n.env\n")
+        (work / "__pycache__").mkdir()
+        (work / "__pycache__" / "x.pyc").write_bytes(b"x")
+        (work / ".env").write_text("TOKEN=change-me\n")
+        self.merge_to_cleaning()
+        self.assertEqual(self.supervisor().run()["outcome"], "done")
+        self.assertEqual((work / ".env").read_text(), "TOKEN=change-me\n")
+        note = self.db.execute("SELECT body FROM note WHERE item = ? ORDER BY id DESC", (self.items[0],)).fetchone()
+        self.assertIn("!! .env", note["body"])
+
     def test_cleaning_removes_a_clean_worktree(self):
         self.press()
         self.write_pr()
@@ -1183,6 +1207,28 @@ class Sweep(Case):
         self.assertEqual(build_run.sweep(self.db), [])
         self.assertEqual((work / ".env").read_text(), "TOKEN=change-me\n")
         self.assertNotEqual(self.branches(), "")
+
+    def test_a_tree_with_only_caches_is_swept(self):
+        """pack sd:6979: a disposable cache is no reason to keep a tree; another ignored file still is."""
+        work = self.blocked()
+        self.done()
+        exclude(work, "__pycache__/\n.ruff_cache/\n.env\n")
+        (work / "lib" / "__pycache__").mkdir(parents=True)
+        (work / "lib" / "__pycache__" / "x.pyc").write_bytes(b"x")
+        (work / ".ruff_cache").mkdir()
+        (work / ".ruff_cache" / "CACHEDIR.TAG").write_text("x")
+        (work / ".env").write_text("TOKEN=change-me\n")
+        self.assertEqual(build_run.sweep(self.db), [], "the .env keeps it")
+        (work / ".env").unlink()
+        self.assertEqual(build_run.sweep(self.db), [str(work)])
+        self.assertFalse(work.exists())
+
+    def test_an_ignored_file_named_like_a_cache_still_keeps_the_tree(self):
+        """Lane review of pack sd:6979: only a folder of that name is disposable, not a file."""
+        work = self.blocked()
+        exclude(work, ".pytest_cache\n")
+        (work / ".pytest_cache").write_text("notes\n")
+        self.assertEqual(build_run.kept_files(("git",), str(work)), "!! .pytest_cache")
 
     def test_an_untracked_file_hidden_by_config_keeps_the_worktree(self):
         work = self.blocked()
