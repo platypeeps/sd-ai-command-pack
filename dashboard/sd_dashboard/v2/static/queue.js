@@ -16,17 +16,16 @@
 // the new entry back. Approve asks first: it grants the runner the merge to the default branch, which nothing takes back.
 // Show draws the active rows by default: merging, next (a held one keeps its place), building and blocked, each still
 // waiting on the runner, a builder or the operator. All adds the ended ones, cancelled and landed; ?show=all keeps it.
-// Each lane's counts read every row, whatever Show draws (Queue has no rail badge since sd:5921).
-// pack sd:6016: Tasks' realm tabs (sd:6263) narrow the lanes too: Personal, the dashboard.realms realms (SHELL_REALMS),
-// then All. A lane's realm is its checkout's (places.realm_of). A lane whose realm is unknown (no readable realm list) or
-// that was not read shows on every tab: a tab never hides what the page cannot place. Each tab counts its active rows.
-window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
-  ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'all'].includes(r.id)).map(r => ({ id: r.id, label: r.label })),
-  { id: 'all', label: 'All', key: 'a' }];
-{
-  const used = new Set(['a']);
-  window.PAGE_VIEWS.forEach(v => { if (!v.key) { v.key = [...v.id].find(c => /[a-z]/.test(c) && !used.has(c)); used.add(v.key); } });
-}
+// Each lane's counts read every row, whatever Show draws; the Overview rail entry counts the active rows.
+// pack sd:7084: the rail holds the views, Overview (builds and lanes), Ended builds and Last 7 days. The realms are filter
+// chips, as pack sd:6016's tabs were: Personal, then the dashboard.realms realms (SHELL_REALMS). None picked shows every
+// realm; ?realm=work,personal keeps a pick. A lane's realm is its checkout's (places.realm_of). A lane whose realm is
+// unknown (no readable realm list) or that was not read shows under every pick: a chip never hides what the page cannot
+// place. Each chip counts its active rows.
+window.PAGE_VIEWS = [{ id: 'overview', label: 'Overview', key: 'o' }, { id: 'ended', label: 'Ended builds', key: 'e' },
+  { id: 'times', label: 'Last 7 days', key: 'l' }];
+const QUEUE_REALMS = [{ id: 'personal', label: 'Personal' },
+  ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'all'].includes(r.id)).map(r => ({ id: r.id, label: r.label }))];
 (() => {
   const { html, put, plural } = window.markup;
   const $ = id => document.getElementById(id);
@@ -38,11 +37,11 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
   const TREND = { rising: '↑ rising', falling: '↓ falling', steady: '→ steady' };
   const ACTIVE = ['merging', 'next', 'building', 'blocked'];
   let DOC = null, busy = false, show = 'active', open = null; // open: the lane path Details shows
-  // sd:6973: tab is Queue (the lanes and builds) or Last 7 days (times); ?tab=times keeps the second, ?show=all keeps All.
-  let tab = 'queue';
-  const query = () => ({ ...(show === 'all' ? { show } : {}), ...(tab === 'times' ? { tab } : {}) });
+  // ?show=all keeps All; ?realm= keeps the picked realms (pack sd:7084).
+  let realms = new Set();
+  const query = () => ({ ...(show === 'all' ? { show } : {}), ...(realms.size ? { realm: [...realms].join(',') } : {}) });
   const drawn = l => show === 'all' ? l.rows : l.rows.filter(r => ACTIVE.includes(r.state));
-  const inView = (l, v = window.shell.view.current() || 'all') => v === 'all' || l.realm == null || l.realm === v;
+  const inView = (l, picked = realms) => !picked.size || l.realm == null || picked.has(l.realm);
   const said = {}; // lane path -> { ok, text }: the last write's result, shown in its lane until the next one
   // Builds (pack sd:6095): /api/queue/builds, read beside the lanes; BUILT is its document, BUILT_ERR why it was not read.
   let BUILT = null, BUILT_ERR = '', builtSaid = null;
@@ -166,20 +165,18 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
     return html`<li class="qrow" data-state="ended"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${(r.retry.bundle === 'blocked' ? 'BLOCKED' : r.outcome || 'ended').toUpperCase()}</span><span class="s"><span>${names(r)}</span><small><b>${r.name}</b> · ${r.outcome} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd)}${r.detail ? ` · ${r.detail}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${AGAIN.includes(r.retry.bundle) ? html`${bbtn('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, off)}${bbtn('send', r, 'Send to builder…', `Send a finding to the builder of run ${r.run}`, off)}` : ''}${asgBtn(r)}${prLink(r)}${logBtn(r)}</div></span></li>`;
   }
   function drawBuilds() {
-    const chip = (v, n) => html`<button type="button" data-show="${v}" aria-pressed="${String(show === v)}">${v[0].toUpperCase() + v.slice(1)}${n == null ? '' : html` <span class="n">${String(n)}</span>`}</button>`;
-    const read = BUILT && !BUILT.error, runs = read ? BUILT.runs.length : null;
-    const head = html`<h2 id="builds-h" class="times-h">Builds</h2><div class="vseg" role="group" aria-label="Build runs shown">${chip('active', runs)}${chip('all', read && show === 'all' ? runs + BUILT.recent.length : null)}</div>`;
+    const head = html`<h2 id="builds-h" class="times-h">Builds</h2>`;
+    window.shell.view.count('ended', BUILT && !BUILT.error ? BUILT.recent.length : null);
     const note = builtSaid ? (builtSaid.ok ? html`<p class="done" role="status">${builtSaid.text}</p>` : html`<p class="fail" role="alert">${builtSaid.text}</p>`) : '';
-    if (!BUILT || BUILT.error) put($('ended'), html``);
+    const why = BUILT ? BUILT.error : BUILT_ERR || 'no answer yet';
+    if (!BUILT || BUILT.error) put($('ended'), html`<p class="fail" role="alert">▨ The ended build runs were not read: ${why}.</p>`);
     if (!BUILT) { put($('builds'), html`${head}${note}<p class="fail" role="alert">▨ The builds were not read: ${BUILT_ERR || 'no answer yet'}.</p>`); return; }
     if (BUILT.error) { put($('builds'), html`${head}${note}<p class="fail" role="alert">▨ The builds were not read: ${BUILT.error}.</p>`); return; }
     put($('builds'), html`${head}${note}${BUILT.runs.length ? html`<ul class="qrows builds">${BUILT.runs.map(buildRow)}</ul>` : html`<p class="idle">No build runs now. Build on Tasks queues one.</p>`}`);
-    // A redraw keeps the operator's open or closed choice; a fresh page starts closed.
-    const kept = $('ended').querySelector('details.ended[open]') ? html` open` : '';
-    put($('ended'), show !== 'all' ? html`` : BUILT.recent.length ? html`<details class="ended"${kept}><summary>Ended <span class="n">${String(BUILT.recent.length)}</span></summary><ul class="qrows ended">${BUILT.recent.map(endedRow)}</ul></details>` : html`<p class="idle">No build run has ended.</p>`);
+    put($('ended'), BUILT.recent.length ? html`<ul class="qrows ended">${BUILT.recent.map(endedRow)}</ul>` : html`<p class="idle">No build run has ended.</p>`);
   }
   async function loadBuilds() {
-    try { BUILT = await window.shell.getJSON(`/api/queue/builds${show === 'all' ? '?show=all' : ''}`); BUILT_ERR = ''; }
+    try { BUILT = await window.shell.getJSON('/api/queue/builds?show=all'); BUILT_ERR = ''; }
     catch (err) { BUILT = null; BUILT_ERR = err.message; }
     drawBuilds();
   }
@@ -219,11 +216,7 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
     put($('details'), l ? lane(l) : html`<p class="why">${DOC ? 'No lane is open: no lane has a row to show.' : 'No lane is open: the lanes were not read.'}</p>`);
   }
   function draw() {
-    const times = tab === 'times';
-    put($('tab'), html`${[['queue', 'Queue'], ['times', 'Last 7 days']].map(([v, label]) => html`<button type="button" data-tab="${v}" aria-pressed="${String(tab === v)}">${label}</button>`)}`);
-    ['builds', 'lanes', 'idle', 'ended', 'show'].forEach(id => { $(id).hidden = times; });
-    $('times').hidden = !times;
-    if (!DOC) { put($('readings'), html``); put($('show'), html``); put($('lanes'), html``); put($('idle'), html``); put($('times'), html``); details(); return; }
+    if (!DOC) { put($('readings'), html``); put($('show'), html``); put($('realms'), html``); put($('lanes'), html``); put($('idle'), html``); put($('times'), html``); details(); return; }
     putEntries();
     const L = DOC.load, gates = DOC.gates;
     put($('readings'), html`<div><dt>load5</dt><dd>${L.load5.toFixed(1)}<small>1m ${L.load1.toFixed(1)} · 15m ${L.load15.toFixed(1)} · ${TREND[L.trend]}</small></dd></div>
@@ -232,6 +225,9 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
     $('edits').textContent = DOC.edits;
     const lanes = DOC.lanes.filter(l => inView(l)), every = lanes.flatMap(l => l.rows), chip = (v, n) => html`<button type="button" data-show="${v}" aria-pressed="${String(show === v)}">${v[0].toUpperCase() + v.slice(1)} <span class="n">${String(n)}</span></button>`;
     put($('show'), html`${chip('active', every.filter(r => ACTIVE.includes(r.state)).length)}${chip('all', every.length)}`);
+    const active = id => DOC.lanes.filter(l => inView(l, new Set([id]))).flatMap(l => l.rows).filter(r => ACTIVE.includes(r.state)).length;
+    put($('realms'), QUEUE_REALMS.length > 1 ? window.shell.list.fseg('realm', 'Realm', QUEUE_REALMS.map(r =>
+      ({ v: r.id, pressed: realms.has(r.id), label: html`${r.label} <span class="n">${String(active(r.id))}</span>` }))) : html``);
     // A lane with nothing to show (and no write result) folds into the Idle line (sd:5640, sd:5921).
     const busyLanes = lanes.filter(l => drawn(l).length || said[l.path]), idle = lanes.filter(l => !busyLanes.includes(l));
     busyLanes.sort((a, b) => (count(b, 'blocked') > 0) - (count(a, 'blocked') > 0) || (count(b, 'merging') > 0) - (count(a, 'merging') > 0));
@@ -240,11 +236,12 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
       ? html`<table class="ledger lanes" aria-label="Active lanes"><thead><tr><th scope="col"><span class="sr">State</span></th><th scope="col">Lane</th><th scope="col">Merging · Next · Blocked</th><th scope="col">Head of lane</th><th scope="col" class="num">Landed</th><th scope="col"><span class="sr">Act</span></th></tr></thead>
       <tbody>${busyLanes.map(laneRow)}</tbody></table>`
       : !DOC.lanes.length ? html`<p class="done">No managed repository's lane was read. sd-db repo managed PATH yes adds one.</p>`
-      : !lanes.length ? html`<p class="done">No lane in this realm. All shows ${plural(DOC.lanes.length, 'lane')}.</p>`
+      : !lanes.length ? html`<p class="done">No lane in the picked realms. Clearing the realm chips shows ${plural(DOC.lanes.length, 'lane')}.</p>`
       : html`<p class="done">No lane has a row to show.</p>`}`);
     put($('idle'), html`${idleLine(idle)}`);
-    put($('times'), times ? timesTable(lanes) : html``);
-    window.PAGE_VIEWS.forEach(v => window.shell.view.count(v.id, DOC.lanes.filter(l => inView(l, v.id)).flatMap(l => l.rows).filter(r => ACTIVE.includes(r.state)).length));
+    put($('times'), timesTable(lanes));
+    window.shell.view.count('overview', every.filter(r => ACTIVE.includes(r.state)).length);
+    window.shell.view.count('times', null);
     details();
   }
 
@@ -324,7 +321,8 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
   });
 
   window.PAGE_ATTENTION = { state: 'ok', n: 0, what: 'blocked' };
-  document.addEventListener('shell:view', () => { if (DOC) draw(); });
+  // Show narrows Overview's lanes alone, so it leaves the filter row on the other views; the realm chips stay.
+  document.addEventListener('shell:view', e => { $('show').hidden = e.detail.id !== 'overview'; });
   document.addEventListener('DOMContentLoaded', () => {
     window.shell.commands.register(window.commands.adversarialReview('entry', {
       payload: o => ({ kind: 'change', target: o.worktree, item: o.item }),
@@ -332,16 +330,17 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
     // Read again (sd:5638): the shell's head button reads the lanes again.
     window.PAGE_AGAIN = { title: 'Read the lanes again', run: load };
     show = new URLSearchParams(location.search).get('show') === 'all' ? 'all' : 'active';
-    // The lanes' Show and the Builds panel's are one control (pack sd:6834): either redraws both.
+    // Show (Active | All) narrows the lanes; the ended build runs are their own view (pack sd:7084).
     const pick = e => {
       const b = e.target.closest('button[data-show]'); if (!b || b.dataset.show === show) return;
-      show = b.dataset.show; window.shell.url(query()); draw(); loadBuilds();
+      show = b.dataset.show; window.shell.url(query()); draw();
     };
-    $('show').addEventListener('click', pick); $('builds').addEventListener('click', pick);
-    tab = new URLSearchParams(location.search).get('tab') === 'times' ? 'times' : 'queue';
-    $('tab').addEventListener('click', e => {
-      const b = e.target.closest('button[data-tab]'); if (!b || b.dataset.tab === tab) return;
-      tab = b.dataset.tab; window.shell.url(query()); draw();
+    $('show').addEventListener('click', pick);
+    realms = new Set((new URLSearchParams(location.search).get('realm') || '').split(',').filter(id => QUEUE_REALMS.some(r => r.id === id)));
+    $('realms').addEventListener('click', e => {
+      const b = e.target.closest('button[data-f="realm"]'); if (!b) return;
+      if (!realms.delete(b.dataset.v)) realms.add(b.dataset.v);
+      window.shell.url(query()); draw();
     });
     // A write runs from the ledger's primary action or from Details; a lane name, Entries or the rest of its row opens the lane in Details.
     const press = e => {
