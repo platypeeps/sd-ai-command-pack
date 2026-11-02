@@ -790,6 +790,19 @@ await go('#view=reports'); R.reports = ELS['reports-rows'].html; seg('reports', 
         self.assertIn(row(self.swept), out["R"]["tasks"])
         self.assertIn('data-f="tasks" data-v="all" aria-pressed="true"', out["R"]["tasks"])
 
+    def test_each_views_table_puts_its_column_filter_in_the_open_all_row(self):
+        # pack sd:7210: one filter row per view. The table names the Open | All row as its toolbar, so the shell's column
+        # filter joins that row (shell.js tapply), as HOA's Tasks; a .fbar there took the row's full width and pushed it under.
+        out = self.run_page(self.ACTS + """await go('#view=tasks'); R.tasks = ELS['tasks-rows'].html;
+await go('#view=briefs'); R.briefs = ELS['briefs-rows'].html; await go('#view=reports'); R.reports = ELS['reports-rows'].html;""",
+                            self.acked_docs(), place="home")
+        for view in ("tasks", "briefs", "reports"):
+            html = out["R"][view]
+            self.assertIn(f'<div class="filters toolbar-2" id="{view}-filters" role="group" aria-label="Filters">'
+                          f'<div class="fseg" role="group" aria-label="Shown"><button type="button" data-f="{view}" data-v="open"', html, view)
+            self.assertIn(f'<table class="ledger place-rows" data-toolbar="{view}-filters">', html, view)
+            self.assertNotIn('class="fbar"', html, view)
+
     def test_a_tasks_due_cell_and_a_reports_when_cell_are_date_cells(self):
         # sd:6185: shell.css's date-cell rule keeps them on one line; the Due cell carries its class too.
         out = self.run_page("await go('#view=tasks'); R.tasks = ELS['tasks-rows'].html; "
@@ -1020,6 +1033,9 @@ await flush(); R.all = ELS['tasks-rows'].html;""", docs, place="acme")
         self.assertIn("Crash &lt;b&gt;on&lt;/b&gt; start", rows)
         self.assertNotIn("ACME-8", rows, "a hidden issue showed by default")
         self.assertIn('data-aside="issues-hidden" data-v="aside" aria-pressed="false">Hidden <span class="n">1</span>', rows)
+        # pack sd:7210: the Issues table's column filter joins its Open | Hidden | All row, not a row of its own.
+        self.assertIn('<h3>Issues</h3><div class="filters toolbar-2" id="place-issues-filters">', rows)
+        self.assertIn('<table class="ledger place-issues" data-toolbar="place-issues-filters">', rows)
         self.assertIn('<td class="src">Jira</td>', every)
         self.assertIn("ACME-8", every)
         self.assertIn('data-v="all" aria-pressed="true"', every)

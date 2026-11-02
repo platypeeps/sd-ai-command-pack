@@ -583,7 +583,7 @@ class OneLayoutOnEveryPage(unittest.TestCase):
             with self.subTest(name):
                 self.assertFalse({"chips", "vseg", "fseg"} & set(heads.seen))
         places = (STATIC / "places.js").read_text(encoding="utf-8")
-        self.assertIn('<div class="filters toolbar-2">${window.shell.aside.seg(\'issues-hidden\'', places)
+        self.assertIn('<div class="filters toolbar-2" id="place-issues-filters">${window.shell.aside.seg(\'issues-hidden\'', places)
 
 
 class EveryFoldControlIsALink(unittest.TestCase):
