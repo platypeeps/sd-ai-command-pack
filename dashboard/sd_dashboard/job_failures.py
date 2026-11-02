@@ -92,8 +92,11 @@ LOG_RULES = [(score, why, re.compile(pattern, re.IGNORECASE), family) for score,
 )]
 
 #: The account a login line names: the Google address workspace-mcp quotes, or the profile an aws login line passes.
+#: A profile is the probe id's own spelling (sd:7153): its case kept, the whole quoted name, or an unquoted one up to
+#: a blank, quote or backtick, less a sentence's closing punctuation.
 ACCOUNTS = {"google": re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"),
-            "aws": re.compile(r"\baws (?:sso )?login\b[^\n]*?--profile[ =]['\"]?([\w.-]+)")}
+            "aws": re.compile(r"\baws (?:sso )?login\b[^\n]*?--profile[ =]"
+                              r"(?:'([^'\n]+)'|\"([^\"\n]+)\"|([^\s'\"`]+?)(?=[.,;:)]*(?:[\s'\"`]|$)))")}
 #: Health's text filter for a family's rows when the output names no account: each row's kind holds it.
 FAMILY_NAMES = {"google": "Google login", "aws": "AWS profile"}
 
@@ -156,7 +159,8 @@ def login(text: str) -> dict | None:
                 line = text[start:end if end >= 0 else len(text)]
                 named = ACCOUNTS[family].search(line, match.start() - start) or ACCOUNTS[family].search(line)
                 if named:
-                    account = (named.group(1) if named.groups() else named.group(0)).lower()
+                    # An address is one account in any case; a profile is case-sensitive in `~/.aws/config`.
+                    account = next(filter(None, named.groups())) if named.groups() else named.group(0).lower()
                     break
         row = f"cred:{family}" if family not in ACCOUNTS else f"cred:{family}:{account}" if account else None
         query = {"area": "cred", **({"row": row} if row else {"q": FAMILY_NAMES[family]})}

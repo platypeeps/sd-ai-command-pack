@@ -11,6 +11,7 @@ import os
 import stat
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlencode
 
 from sd_dashboard import job_failures, now_screen
 from support import NOW, ScreenCase
@@ -123,6 +124,23 @@ class Login(ScreenCase):
         # Not from a log: botocore's SSO message beside the line that signs the profile in, as a wrapper prints both.
         self.assertEqual(self.row("Error when retrieving token from sso: Token has expired and refresh failed; "
                                   "run aws sso login --profile dev-ro")[1], "cred:aws:dev-ro")
+
+    def test_an_aws_profile_keeps_its_case_and_its_whole_name(self):
+        """sd:7153: the row is `aws:<name>` as `~/.aws/config` spells it, so the name passes through untouched."""
+        lead = "Error when retrieving token from sso: Token has expired and refresh failed; run "
+        cases = {
+            "aws sso login --profile Example-Prod.Admin_RO": "Example-Prod.Admin_RO",
+            "aws login --profile=Org.Admin+ops@example.test": "Org.Admin+ops@example.test",
+            "aws sso login --profile 'Team/Dev:Read'": "Team/Dev:Read",
+            'aws sso login --profile "Sandbox Admin"': "Sandbox Admin",
+            "`aws sso login --profile Dev-RO`, then retry.": "Dev-RO",
+            "aws sso login --profile Dev-RO.": "Dev-RO",
+        }
+        for tail, profile in cases.items():
+            with self.subTest(tail=tail):
+                found = job_failures.login(lead + tail)
+                self.assertEqual((found["account"], found["row"]), (profile, f"cred:aws:{profile}"))
+                self.assertEqual(found["href"], "/health?" + urlencode({"area": "cred", "row": f"cred:aws:{profile}"}))
 
     def test_strongdm_signed_out_is_the_sdm_row(self):
         # The text sdm's own binary holds; no job log has caught it yet.
