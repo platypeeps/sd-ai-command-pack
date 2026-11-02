@@ -345,7 +345,7 @@ class Unparking(BrowserSession):
                          page, re.S)
 
     def test_a_parked_item_offers_unpark_with_its_revision(self):
-        for kind in ("task", "personal"):
+        for kind in ("task", "work-idea"):
             with self.subTest(kind=kind):
                 state = self.parked(kind=kind)
                 form = self.unpark_form(state["item"]["id"])

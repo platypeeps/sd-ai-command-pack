@@ -661,7 +661,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         import sd_db.workflow as workflow
 
         closes = hasattr(workflow, "TASK_STATUS_KINDS")
-        for kind in ("followup", "personal"):
+        for kind in ("followup",):
             with self.subTest(kind=kind, closes=closes):
                 case = self.host()
                 state = json.loads(case.call("task", "add", "--priority", "3", f"A {kind}", "--kind", kind,
@@ -723,7 +723,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         case = self.host()
         root = self.repository(case)
 
-        unscoped = json.loads(case.call("task", "add", "--priority", "3", "A personal note", "--kind", "personal",
+        unscoped = json.loads(case.call("task", "add", "--priority", "3", "A loose end", "--kind", "followup",
                                         "--json").stdout)["item"]["id"]
         scoped = json.loads(case.call("task", "add", "--priority", "3", "A review finding", "--kind", "followup",
                                       "--json", cwd=root).stdout)["item"]["id"]
@@ -733,7 +733,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         not_a_task = case.call("task", "status", scoped, "done", "--delivered-by", sha,
                                code=1, cwd=root).stderr
 
-        # "sd: personal item 1 belongs to no checkout, so --delivered-by has
+        # "sd: followup item 1 belongs to no checkout, so --delivered-by has
         # nothing to verify; ..." -> "belongs to no checkout"
         first = no_checkout.split(f"item {unscoped} ", 1)[1].split(", so ", 1)[0]
         # "sd: followup item 2 takes no --delivered-by; only a task's move to
@@ -749,7 +749,6 @@ class TaskDeliveryCLITests(unittest.TestCase):
                 self.assertIn(clause, paragraph,
                               f"the README does not state why item {item} was refused")
         self.assertIn("followup", paragraph)
-        self.assertIn("personal", paragraph)
 
     def test_the_close_hint_follows_the_library_that_would_close_it(self) -> None:
         """Both library shapes, on whichever build is installed. A stand-in
@@ -760,7 +759,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
 
         row = {"id": 5, "kind": "followup", "repo": None}
         args = argparse.Namespace(item=5, status="done", delivered_by="0" * 40, reason=None)
-        for kinds, hinted in (((), False), (("task", "personal", "followup"), True)):
+        for kinds, hinted in (((), False), (("task", "followup"), True)):
             with self.subTest(task_status_kinds=kinds):
                 workflow = types.SimpleNamespace(item_state=lambda _c, _i: {"item": row})
                 if kinds:

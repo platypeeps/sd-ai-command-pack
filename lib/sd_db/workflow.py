@@ -61,24 +61,25 @@ BRANCH_FIELDS = frozenset({"branch"})
 #: `sd writing park`, which also moves its file.
 PARK_FIELDS = frozenset({"parked_at"})
 
-#: The item kinds a person may set by hand: the five the pack's `sd task add`
+#: The item kinds a person may set by hand: the four the pack's `sd task add`
 #: files (`ADD_KINDS`, `bin/sd_work.py`), for the reason that list gives. Each
 #: other kind in `item.kind`'s CHECK has a producer -- `work` the work lane,
-#: `report` the job that ran, `skill-review` the catalogue -- or is `idea`,
+#: `report` the job that ran -- or is `idea`,
 #: which `writing.list_pieces` reads as a draft article only when it carries
 #: a `piece`. A hand edit that made one would be a second way to make that row,
 #: and a hand edit that unmade one would take a row away from its producer.
-HAND_KINDS = ("task", "personal", "followup", "work-idea", "personal-idea")
+HAND_KINDS = ("task", "followup", "work-idea", "personal-idea")
 
 #: The hand kinds filed with no repository, which the pack's `sd task add`
 #: reads to settle the repository question and `reads.backlog_items(repo=NO_REPO)`
-#: reads as a group: a personal to-do and the two ideas. `followup` left the
+#: reads as a group: the two ideas. `personal` left with its kind (sd:7004),
+#: so a to-do is a task in a repository. `followup` left the
 #: set on 2026-09-14 (sd:809): a followup from a code review is about one
 #: repository, and with no repo a checkout's brief (`reads.brief_items`) and
 #: `reads.backlog_items(repo=path)` never list it. A repository does not make
 #: a followup runnable: `runner._item` refuses every kind outside
 #: `runner.RUNNABLE_KINDS`, whatever repository and branch the row carries.
-REPO_LESS_KINDS = frozenset({"personal", "work-idea", "personal-idea"})
+REPO_LESS_KINDS = frozenset({"work-idea", "personal-idea"})
 
 #: The kinds whose user fields `edit_item` edits: title, priority, due,
 #: repository and body, and `kind` beside them. A `work` row is further held to
@@ -108,13 +109,14 @@ NOTE_KINDS = ("comment", "followup", "question", "decision", "proposal")
 TASK_STATUSES = ("planning", "ready", "in_progress", "blocked", "done")
 
 #: The kinds whose status a person moves with the task controls, through the
-#: same five `TASK_STATUSES`. `personal` and `followup` joined `task` on
-#: 2026-09-13 (sd:768): each is a hand-filed item worked in its own right, and
-#: before that the task controls offered them no status, so they could not
-#: close one. `work` has its own delivery rules; `idea`, `work-idea`,
+#: same five `TASK_STATUSES`. `followup` joined `task` on 2026-09-13 (sd:768):
+#: it is a hand-filed item worked in its own right, and before that the task
+#: controls offered it no status, so it could not be closed. `personal`
+#: joined then too and left with its kind (sd:7004). `work` has its own
+#: delivery rules; `idea`, `work-idea`,
 #: `personal-idea` and `report` keep their own workflows and get no status
 #: choices here.
-TASK_STATUS_KINDS = ("task", "personal", "followup")
+TASK_STATUS_KINDS = ("task", "followup")
 
 
 class WorkflowError(SdDbError):
@@ -638,9 +640,7 @@ def allowed_statuses(connection: sqlite3.Connection, item: int, *, state: dict |
     The dashboard item screen offers exactly these choices, but only on the
     panels it renders: `task` and `TASK_STATUS_KINDS` items always, a `work`
     item only while `progress.work_controls` gives no reason, and no other
-    kind. A `personal` item gets the status control without the details form
-    (sd:772), because `edit_item` refuses its details. `edit_item` accepts a
-    followup's since sd:809, and since sd:816 the screen renders the matching
+    kind. `edit_item` accepts a followup's details since sd:809, and since sd:816 the screen renders the matching
     form instead of a hint naming the CLI's `sd task edit`.
     """
     if state is not None and state["item"]["id"] != item:
@@ -699,7 +699,7 @@ def change_status(
     connection: sqlite3.Connection, item: int, target: str, *, who: str,
     reason: str | None = None, expected_revision: str | None = None, session: str | None = None,
 ) -> dict:
-    """Move a task, personal, followup or active work item without bypassing delivery authority.
+    """Move a task, followup or active work item without bypassing delivery authority.
 
     `session` is the status note's session, `who` when not given (pack sd:6046).
     """

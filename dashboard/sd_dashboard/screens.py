@@ -82,7 +82,7 @@ def artifact(row, *, document=None) -> Markup:
             document = _without_frontmatter(document)
         return (markdown(document) if document is not None else
                 tag("p", "The current draft could not be read. See the review checks above.", class_="artifact-missing"))
-    if row["kind"] in (*workflow.HAND_KINDS, "report", "skill-review"):
+    if row["kind"] in (*workflow.HAND_KINDS, "report"):
         # `followup` is here since sd:816. `workflow._fields` stores a followup's
         # body as `{"text": ...}` exactly as it stores a task's, and every
         # followup in the store carries that shape, but this decode named three
@@ -90,11 +90,11 @@ def artifact(row, *, document=None) -> Markup:
         # escaped quotes and all, where its text belongs.
         #
         # The other hand kinds are here for the same reason (PR #332 review).
-        # `personal`, `work-idea` and `personal-idea` are created through
+        # `work-idea` and `personal-idea` are created through
         # `capture_task` and reclassified from a task by the item screen's
         # kind select, and both leave the `{"text": ...}` body in place; a
         # task that became one of them showed its braces the moment it did.
-        # The set is `HAND_KINDS` rather than five names so a hand kind added
+        # The set is `HAND_KINDS` rather than four names so a hand kind added
         # later decodes here without a second edit.
         try:
             body = json.loads(row["body"] or "{}")

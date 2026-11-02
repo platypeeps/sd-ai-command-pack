@@ -579,7 +579,7 @@ class TaskCLI(unittest.TestCase):
         a row the publishing queue cannot see.
         """
         self.assertEqual(workflow.HAND_KINDS,
-                         ("task", "personal", "followup", "work-idea", "personal-idea"))
+                         ("task", "followup", "work-idea", "personal-idea"))
         default = json.loads(self.call("task", "add", "--priority", "3", "Standalone work", "--json").stdout)
         self.assertEqual(default["item"]["kind"], "task")
 
@@ -595,7 +595,8 @@ class TaskCLI(unittest.TestCase):
                 self.assertEqual(readback["revision"], state["revision"])
                 filed[kind] = state["item"]["id"]
 
-        for kind in ("work", "report", "dep", "skill-review", "proposal", "idea", "nonsense"):
+        # `personal` and `skill-review` left item.kind (sd:7004).
+        for kind in ("work", "report", "dep", "skill-review", "personal", "proposal", "idea", "nonsense"):
             with self.subTest(refused=kind):
                 refused = self.call("task", "add", "--priority", "3", f"Not a {kind}", "--kind", kind, code=2)
                 self.assertIn("invalid choice", refused.stderr)
@@ -605,10 +606,10 @@ class TaskCLI(unittest.TestCase):
                          sorted([default["item"]["id"], *filed.values()]))
 
     def test_a_repo_less_kind_is_filed_off_the_checkout_it_was_typed_in(self):
-        """`personal`, `work-idea` and `personal-idea` carry no repository.
+        """`work-idea` and `personal-idea` carry no repository.
 
         The group is read by asking for exactly that -- `backlog_items(repo=
-        NO_REPO)` -- so a `personal` row that took the checkout cwd happened
+        NO_REPO)` -- so an idea row that took the checkout cwd happened
         to be in would be absent from the one query written to list it.
         `--no-repo` is implied and not required; `--here` asks for the
         repository the kind cannot have and is refused rather than ignored.
@@ -631,17 +632,17 @@ class TaskCLI(unittest.TestCase):
                 self.assertIn(f"a {kind} item carries no repository", refused.stderr)
 
         redundant = json.loads(
-            self.call("task", "add", "--priority", "3", "Said twice", "--kind", "personal", "--no-repo",
+            self.call("task", "add", "--priority", "3", "Said twice", "--kind", "work-idea", "--no-repo",
                       "--json", cwd=root).stdout)
         self.assertIsNone(redundant["item"]["repo"])
 
         with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
             grouped = sorted(row["kind"] for row in
                              sd_db.reads.backlog_items(connection, repo=sd_db.reads.NO_REPO))
-        # sd:809: `followup` left the set, so the loop above files none.
+        # sd:809: `followup` left the set, so the loop above files none; sd:7004 took `personal`.
         self.assertEqual(sorted(workflow.REPO_LESS_KINDS),
-                         ["personal", "personal-idea", "work-idea"])
-        self.assertEqual(grouped, ["personal", "personal", "personal-idea", "work-idea"])
+                         ["personal-idea", "work-idea"])
+        self.assertEqual(grouped, ["personal-idea", "work-idea", "work-idea"])
         self.assertEqual(
             [row["kind"] for row in
              json.loads(self.call("store", "items", "--kind", "task", "--json").stdout)],
@@ -795,8 +796,8 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual(bodied["notes"][-1]["body"], f"Updated body by {getpass.getuser()}")
 
         # Leaving for a repository-less kind still needs the repository cleared.
-        refused = self.call("task", "edit", item, "--kind", "personal", code=1)
-        self.assertIn("a personal item carries no repository", refused.stderr)
+        refused = self.call("task", "edit", item, "--kind", "work-idea", code=1)
+        self.assertIn("a work-idea item carries no repository", refused.stderr)
         self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), bodied)
 
         cleared = json.loads(self.call("task", "edit", item, "--no-repo", "--json").stdout)
@@ -819,7 +820,7 @@ class TaskCLI(unittest.TestCase):
                 self.assertNotIn("four", text)
         add = " ".join(self.call("task", "add", "--priority", "3", "--help").stdout.split()).replace("- ", "-")
         self.assertIn("a followup takes a checkout as a task does", add)
-        self.assertIn("personal, work-idea and personal-idea carry no repository", add)
+        self.assertIn("and work-idea and personal-idea carry no repository", add)
 
     def _checkout(self, name):
         """A real checkout, because the repository is resolved by asking git."""
@@ -1094,8 +1095,8 @@ class TaskCLI(unittest.TestCase):
         before = json.loads(self.call("store", "items", "--json").stdout)
         refused = self.call("task", "add", "--priority", "3", "Nowhere", "--belongs-to", stranger, code=1)
         self.assertIn("not registered", refused.stderr)
-        personal = self.call("task", "add", "--priority", "3", "Mine", "--kind", "personal", "--belongs-to", first, code=1)
-        self.assertIn("--belongs-to: a personal item carries no repository", personal.stderr)
+        idea = self.call("task", "add", "--priority", "3", "Mine", "--kind", "work-idea", "--belongs-to", first, code=1)
+        self.assertIn("--belongs-to: a work-idea item carries no repository", idea.stderr)
         self.assertEqual(json.loads(self.call("store", "items", "--json").stdout), before)
         for other in ("--here", "--no-repo"):
             self.call("task", "add", "--priority", "3", "Both", "--belongs-to", first, other, code=2)
@@ -1115,7 +1116,8 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("to defer the item, set a later date, or park it with --park", said("task", "edit"))
         self.assertIn("`report`, a scheduled job's run, closes with `sd reports acknowledge N`",
                       said("store", "items"))
-        self.assertIn("`skill-review`, a skill catalogue review the runner works", said("store", "items"))
+        # sd:7004: a skill review is a task now, so the kind names no review.
+        self.assertNotIn("skill-review", said("store", "items"))
         self.assertIn("a report closes with `sd reports acknowledge N`", said("task", "status"))
         note = said("task", "note")
         for kind in NOTE_KINDS:
@@ -1166,7 +1168,7 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "[]")
 
     def test_edit_moves_a_task_with_a_repository_to_a_repo_less_kind_in_one_edit(self):
-        """sd:743. `--kind personal --no-repo` is one edit, attributed and noted."""
+        """sd:743. `--kind work-idea --no-repo` is one edit, attributed and noted."""
         root = self._checkout("reclassified")
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
@@ -1177,23 +1179,23 @@ class TaskCLI(unittest.TestCase):
         before = {note["id"] for note in state["notes"]}
 
         moved = json.loads(self.call(
-            "task", "edit", item, "--kind", "personal", "--no-repo",
+            "task", "edit", item, "--kind", "work-idea", "--no-repo",
             "--if-revision", state["revision"], "--json").stdout)
-        self.assertEqual((moved["item"]["kind"], moved["item"]["repo"]), ("personal", None))
+        self.assertEqual((moved["item"]["kind"], moved["item"]["repo"]), ("work-idea", None))
         added = [note for note in moved["notes"] if note["id"] not in before]
         self.assertEqual([note["kind"] for note in added], ["comment"])
         self.assertEqual(added[0]["body"].splitlines()[0],
-                         f"Changed kind task -> personal by {getpass.getuser()}")
+                         f"Changed kind task -> work-idea by {getpass.getuser()}")
 
         with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
             row = connection.execute("SELECT kind, repo FROM item WHERE id = ?", (item,)).fetchone()
-        self.assertEqual((row["kind"], row["repo"]), ("personal", None))
+        self.assertEqual((row["kind"], row["repo"]), ("work-idea", None))
         self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), moved)
 
     def test_edit_refuses_a_produced_kind_at_the_parser_without_touching_the_row(self):
         state = json.loads(self.call("task", "add", "--priority", "3", "Stays a task", "--json").stdout)
         item = state["item"]["id"]
-        for kind in ("report", "work", "dep", "skill-review", "proposal", "idea", "nonsense"):
+        for kind in ("report", "work", "dep", "skill-review", "personal", "proposal", "idea", "nonsense"):
             with self.subTest(kind=kind):
                 refused = self.call("task", "edit", item, "--kind", kind, code=2)
                 self.assertIn("invalid choice", refused.stderr)
@@ -1210,7 +1212,7 @@ class TaskCLI(unittest.TestCase):
             connection.commit()
         before = json.loads(self.call("store", "item", item, "--json").stdout)
 
-        refused = self.call("task", "edit", item, "--kind", "personal", code=1)
+        refused = self.call("task", "edit", item, "--kind", "work-idea", code=1)
         self.assertIn(f"item {item} carries contribution metadata", refused.stderr)
         self.assertTrue(refused.stderr.startswith("sd: "), refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
@@ -1286,7 +1288,7 @@ class TaskRef(unittest.TestCase):
         for arguments, reason in (
             (("--ref", "job"), "<source>:<id>"),
             (("--ref", ":42"), "<source>:<id>"),
-            (("--ref", "job:x", "--kind", "personal"), "task or a followup"),
+            (("--ref", "job:x", "--kind", "work-idea"), "task or a followup"),
             (("--ref", "job:x", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY"), "--recur"),
         ):
             with self.subTest(arguments=arguments):

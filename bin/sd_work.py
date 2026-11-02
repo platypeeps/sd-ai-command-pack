@@ -4,9 +4,9 @@ These verbs do not need a checkout. A new task takes the repository enclosing
 the current directory by default; ``--no-repo`` files one that belongs to no
 checkout, and ``--here`` refuses rather than filing a repo-less task.
 ``--kind`` files one of the other hand kinds: a ``followup`` takes a checkout
-as a task does, and the three that carry no repository at all -- ``personal``,
-``work-idea`` and ``personal-idea`` -- have the repository question already
-answered. ``edit --kind`` moves a row between the same five -- see
+as a task does, and the two that carry no repository at all -- ``work-idea``
+and ``personal-idea`` -- have the repository question already answered.
+``edit --kind`` moves a row between the same four -- see
 ``LibraryKinds``.
 """
 
@@ -81,10 +81,10 @@ class LibraryKinds:
 
 
 #: What `add --kind` and `edit --kind` read from `sd_db.workflow`, as
-#: attributes. `REPO_LESS_KINDS` is the three of the hand kinds that carry no
-#: repository -- `personal`, `work-idea` and `personal-idea` -- read as a group
-#: by `reads.backlog_items(repo=reads.NO_REPO)`. `followup` was a fourth until
-#: sd:809.
+#: attributes. `REPO_LESS_KINDS` is the two of the hand kinds that carry no
+#: repository -- `work-idea` and `personal-idea` -- read as a group by
+#: `reads.backlog_items(repo=reads.NO_REPO)`. `followup` was one until sd:809,
+#: and `personal` until its kind retired (sd:7004).
 KIND_NEEDS = ("HAND_KINDS", "REPO_LESS_KINDS")
 
 
@@ -132,9 +132,9 @@ def _task_repo(args: argparse.Namespace, connection: Any, workflow: Any) -> str 
     the two reasons applied.
 
     A kind in `workflow.REPO_LESS_KINDS` settles the question before any of that. Those
-    three -- `personal`, `work-idea` and `personal-idea` -- carry no repository
-    by definition, and the group is read by asking for exactly that
-    (`reads.backlog_items(repo=reads.NO_REPO)`), so a `personal` row that took
+    two -- `work-idea` and `personal-idea` -- carry no repository by
+    definition, and the group is read by asking for exactly that
+    (`reads.backlog_items(repo=reads.NO_REPO)`), so an idea row that took
     the checkout cwd happened to be in would be missing from the one query
     written to list it. A `followup` is not one of them since sd:809: a
     followup from a code review is about the checkout it was filed in, so it
@@ -862,7 +862,7 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
             f"item {args.item} is a work item; `sd work deliver {args.item} "
             f"{args.delivered_by}` records its delivery")
     if kind != "task" and not row["repo"]:
-        # sd:772. `followup` and `personal` take task statuses since sd:768,
+        # sd:772. `followup` takes task statuses since sd:768,
         # and every kind but `task` that carries no repository is one no
         # checkout can verify a commit for. Pointing at `sd work deliver`
         # sent the caller to a verb that refuses the same row. The close hint
@@ -1724,8 +1724,7 @@ def register(groups: Any, store: Any) -> None:
     items.add_argument("--here", action="store_true",
                        help="only this checkout's items; refuse unless it is registered in the sd database")
     items.add_argument("--kind", help="filter by item kind, such as task or followup; `report`, a scheduled "
-                                      "job's run, closes with `sd reports acknowledge N`; `skill-review`, "
-                                      "a skill catalogue review the runner works, closes when the run ends")
+                                      "job's run, closes with `sd reports acknowledge N`")
     items.add_argument("--status", help="filter by workflow status")
     items.add_argument("--since", type=since, metavar="DATE|DURATION",
                        help="only items created or updated since then: YYYY-MM-DD (00:00 UTC) "
@@ -1748,7 +1747,7 @@ def register(groups: Any, store: Any) -> None:
         "--kind", default="task",
         help="what the item is (default: task), from the kinds the installed sd_db offers; a "
              "followup takes a checkout as a task does (an sd_db older than sd:809 files it "
-             "with none), and personal, work-idea and personal-idea carry no repository")
+             "with none), and work-idea and personal-idea carry no repository")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _recurrence_flags(add)
     add.add_argument("--ref", metavar="SOURCE:ID",
@@ -1787,9 +1786,8 @@ def register(groups: Any, store: Any) -> None:
     belongs.add_argument("--no-repo", action="store_true",
                          help="leave the item belonging to no checkout")
     kind = edit.add_argument(
-        "--kind", help="reclassify the item; a move to personal, work-idea or "
-                       "personal-idea carries no repository and needs --no-repo in "
-                       "the same command")
+        "--kind", help="reclassify the item; a move to work-idea or personal-idea "
+                       "carries no repository and needs --no-repo in the same command")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _recurrence_flags(edit, clear=True)
     park = edit.add_mutually_exclusive_group()
