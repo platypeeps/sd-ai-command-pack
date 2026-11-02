@@ -17,14 +17,14 @@
 // Show draws the active rows by default: merging, next (a held one keeps its place), building and blocked, each still
 // waiting on the runner, a builder or the operator. All adds the ended ones, cancelled and landed; ?show=all keeps it.
 // Each lane's counts read every row, whatever Show draws; the Overview rail entry counts the active rows.
-// pack sd:7084: the rail holds the views, Overview (builds and lanes), Ended builds and Last 7 days. The realms are filter
+// pack sd:7084: the rail holds the views, Overview (builds and lanes) and Ended builds; Last 7 days moved to Metrics'
+// Lane times (pack sd:7233). The realms are filter
 // chips, as pack sd:6016's tabs were: Personal, then the dashboard.realms realms (SHELL_REALMS). None picked shows every
 // realm; ?realm=work,personal keeps a pick. A lane's realm is its checkout's (places.realm_of). A lane whose realm is
 // unknown (no readable realm list) or that was not read shows under every pick: a chip never hides what the page cannot
 // place. Each chip counts its active rows. Runner assignments (pack sd:7115, Management's Ship lane folded in): the
 // runner's queued and running assignments, read from /api/queue/runner, under Builds on Overview (pack sd:7217).
-window.PAGE_VIEWS = [{ id: 'overview', label: 'Overview', key: 'o' }, { id: 'ended', label: 'Ended builds', key: 'e' },
-  { id: 'times', label: 'Last 7 days', key: 'l' }];
+window.PAGE_VIEWS = [{ id: 'overview', label: 'Overview', key: 'o' }, { id: 'ended', label: 'Ended builds', key: 'e' }];
 const QUEUE_REALMS = [{ id: 'personal', label: 'Personal' },
   ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'all'].includes(r.id)).map(r => ({ id: r.id, label: r.label }))];
 (() => {
@@ -122,21 +122,6 @@ const QUEUE_REALMS = [{ id: 'personal', label: 'Personal' },
     return [landed.length ? `Idle, landed today: ${named}${landed.length > IDLE_NAMED ? ` · ${landed.length - IDLE_NAMED} more` : ''}.` : '',
       quiet ? `Idle, quiet: ${plural(quiet, 'lane')}.` : ''].filter(Boolean).join(' ');
   }
-  // Times (pack sd:6006): each lane's last 7 days from its history rows, median wait (enqueue to claim) and gate time
-  // (speculative gate plus prepare), and its slowest entry, enqueue to end. A lane with no entry folds into one line; a
-  // read that failed is its own row. A median wait past an hour says the lane run files the parallel-lanes question.
-  const mins = s => s == null ? 'none ended' : dur(Math.round(s));
-  function timesTable(lanes) {
-    const read = lanes.filter(l => l.times && (l.times.error || l.times.entries)), quiet = lanes.length - read.length;
-    const days = (read.find(l => l.times.days) || { times: { days: 7 } }).times.days;
-    if (!read.length) return html`<p class="idle">No lane ran an entry in the last ${String(days)} days.</p>`;
-    const cells = l => l.times.error ? html`<td colspan="4" class="why">▨ not read: ${l.times.error}</td>`
-      : html`<td class="num">${String(l.times.entries)}</td><td class="num"${l.times.over ? html` data-over=""` : ''}>${mins(l.times.wait)}</td><td class="num">${mins(l.times.gate)}</td><td class="why">${l.times.slowest ? html`<code>sd:${String(l.times.slowest.item)}</code> ${l.times.slowest.title} · ${mins(l.times.slowest.total)}` : 'none ended'}</td>`;
-    const over = read.filter(l => l.times.over);
-    return html`<h2 class="times-h">Last ${String(days)} days</h2><table class="ledger times" aria-label="Wait and gate time per lane, last ${String(days)} days"><thead><tr><th scope="col">Lane</th><th scope="col" class="num">Entries</th><th scope="col" class="num">Median wait</th><th scope="col" class="num">Median gate</th><th scope="col">Slowest entry</th></tr></thead>
-      <tbody>${read.map(l => html`<tr><td class="what">${l.repo}</td>${cells(l)}</tr>`)}</tbody></table>
-      ${over.map(l => html`<p class="over">▲ ${l.repo}: median wait past 1 h. The lane run files the parallel-lanes question.</p>`)}${quiet ? html`<p class="idle">No entry in ${String(days)} days: ${plural(quiet, 'lane')}.</p>` : ''}`;
-  }
   // Builds panel (pack sd:6095): one row per open build run, above the lanes. Its state is one of four: working; waiting
   // on me (the run is held, or an open question note asks); stalled (the builder's log has not grown for 15 min, shown
   // only); lost (no supervisor beat for 3 min, which the dispatcher's next reap settles). Cancel asks first and posts the
@@ -231,7 +216,7 @@ const QUEUE_REALMS = [{ id: 'personal', label: 'Personal' },
     put($('details'), l ? lane(l) : html`<p class="why">${DOC ? 'No lane is open: no lane has a row to show.' : 'No lane is open: the lanes were not read.'}</p>`);
   }
   function draw() {
-    if (!DOC) { put($('readings'), html``); put($('show'), html``); put($('realms'), html``); put($('lanes'), html``); put($('idle'), html``); put($('times'), html``); details(); return; }
+    if (!DOC) { put($('readings'), html``); put($('show'), html``); put($('realms'), html``); put($('lanes'), html``); put($('idle'), html``); details(); return; }
     putEntries();
     const L = DOC.load, gates = DOC.gates;
     put($('readings'), html`<div><dt>load5</dt><dd>${L.load5.toFixed(1)}<small>1m ${L.load1.toFixed(1)} · 15m ${L.load15.toFixed(1)} · ${TREND[L.trend]}</small></dd></div>
@@ -254,9 +239,7 @@ const QUEUE_REALMS = [{ id: 'personal', label: 'Personal' },
       : !lanes.length ? html`<p class="done">No lane in the picked realms. Clearing the realm chips shows ${plural(DOC.lanes.length, 'lane')}.</p>`
       : html`<p class="done">No lane has a row to show.</p>`}`);
     put($('idle'), html`${idleLine(idle)}`);
-    put($('times'), timesTable(lanes));
     window.shell.view.count('overview', every.filter(r => ACTIVE.includes(r.state)).length);
-    window.shell.view.count('times', null);
     details();
   }
 

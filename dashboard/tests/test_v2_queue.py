@@ -184,11 +184,6 @@ class TheRows(Lane, ScreenCase):
             ("merging", 3), ("next", 9), ("next", 12), ("building", "queue-notes-1"), ("building", "sd1775-2"),
             ("blocked", 5), ("blocked", 4), ("cancelled", 1), ("landed", 7)])
 
-    def test_a_lane_whose_remote_names_no_github_repository_says_its_times_were_not_read(self):
-        # Pack sd:6006: each lane carries its 7-day times; a lane with no history key is named, never a quiet lane.
-        self.assertEqual(self.doc()["lanes"][0]["times"],
-                         {"error": "its remote names no GitHub repository, so it has no lane history"})
-
     def worktrees(self):
         """The fixture with the worktree `lane enqueue` records on the next and blocked rows (sd:5064)."""
         self.list([{**e, "worktree": f"/work/sd-{e['item']}"} if e["status"] in ("pending", "prepared") else e
@@ -1004,19 +999,6 @@ class TheInProcessRead(RealLane):
         self.assertEqual(lane["revision"], queue_screen.revision(self.entries()))
         self.assertEqual(Path(lane["lane"]), Path(self.listed()["queue"]).parent.parent)
 
-    def test_each_lane_carries_its_wait_and_gate_times_from_the_history_rows(self):
-        """Pack sd:6006: the median wait from enqueue to claim, read by the pack's own `sd_lane.lane_times`."""
-        self.store([{**self.seeds()[0], "id": "seed-timed", "item": 7, "status": "running", "step": "prepare",
-                     "position": 7, "enqueued_at": "2026-09-06T10:00:00Z", "started_at": "2026-09-06T11:30:00Z"}])
-        times = queue_screen.document(self.connection, now=NOW)["lanes"][0]["times"]
-        self.assertEqual((times["entries"], times["wait"], times["gate"], times["over"]), (1, 5400, None, True))
-
-    def test_a_failed_times_read_is_named_on_its_lane(self):
-        lane_module = queue_screen.pack_module("sd_lane")
-        with mock.patch.object(lane_module, "lane_times", side_effect=sqlite3.OperationalError("database is locked")):
-            times = queue_screen.document(self.connection, now=NOW)["lanes"][0]["times"]
-        self.assertEqual(times, {"error": "the lane times were not read: OperationalError: database is locked"})
-
     def test_a_lane_hosted_on_a_satellite_reads_the_same_entries(self):
         # Pack sd:3003: the queue sits in the hub database whichever machine runs the lane.
         hub = queue_screen.document(self.connection, now=NOW)["lanes"][0]
@@ -1215,15 +1197,15 @@ R.after = ELS.builds.html;""")
         self.assertIn("PR #161", lanes)
 
     def test_the_realm_chips_narrow_the_lanes_none_picked_shows_all_and_each_chip_counts_its_active_rows(self):
-        """Pack sd:7084: the realms are filter chips, not tabs. None picked shows every lane; a pick narrows the lanes
-        and the times, and the address keeps it (?realm=)."""
+        """Pack sd:7084: the realms are filter chips, not tabs. None picked shows every lane; a pick narrows the lanes,
+        and the address keeps it (?realm=)."""
         conf = Path(self.tmp.name) / "realms.conf"
         conf.write_text(f"realm|work|Work|{self.checkout.parent}/*\n")
         realms = "window.SHELL_REALMS = [{ id: 'work', label: 'Work' }];\n"
         chip = r'data-f="realm" data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
         with mock.patch.object(places, "REALMS_CONFIG", conf):
             none = self.run_page("R.chips = ELS.realms.html; R.lanes = ELS.lanes.html;", search="", shell=realms + VIEW_SHELL)
-            personal = self.run_page("R.lanes = ELS.lanes.html; R.times = ELS.times.html; R.chips = ELS.realms.html;",
+            personal = self.run_page("R.lanes = ELS.lanes.html; R.chips = ELS.realms.html;",
                                      search="?realm=personal", shell=realms + VIEW_SHELL)
             pick = self.run_page("window.shell.url = q => OUT.urls.push(q); OUT.urls = [];"
                                  " ELS.realms.listeners.click[0]({ target: { closest: s => s === 'button[data-f=\"realm\"]' ? { dataset: { v: 'work' } } : null } });"
@@ -1231,7 +1213,6 @@ R.after = ELS.builds.html;""")
         self.assertEqual(re.findall(chip, none["R"]["chips"]), [("personal", "false", "0"), ("work", "false", "7")])
         self.assertIn('aria-label="Active lanes"', none["R"]["lanes"])
         self.assertIn("No lane in the picked realms. Clearing the realm chips shows 1 lane.", personal["R"]["lanes"])
-        self.assertIn("No lane ran an entry", personal["R"]["times"])
         self.assertEqual(re.findall(chip, personal["R"]["chips"])[0], ("personal", "true", "0"))
         self.assertEqual(pick["urls"], [{"realm": "personal,work"}])
         self.assertIn('aria-label="Active lanes"', pick["R"]["lanes"])
@@ -1241,29 +1222,12 @@ R.after = ELS.builds.html;""")
         # No realm list: the lane's realm is unknown, so no chip hides it.
         self.assertIn('aria-label="Active lanes"', out["R"]["lanes"])
 
-    def test_the_times_table_shows_each_lanes_medians_and_slowest_entry(self):
-        """Pack sd:6006: one row per lane with entries in 7 days; a median wait past an hour says the question files."""
-        read = {"days": 7, "entries": 4, "wait": 4500.0, "gate": 610.0, "over": True,
-                "slowest": {"item": 42, "title": "A slow one", "total": 9000.0}}
-        with mock.patch.object(queue_screen, "times", return_value=read):
-            times = self.run_page("R.times = ELS.times.html;")["R"]["times"]
-        self.assertIn('aria-label="Wait and gate time per lane, last 7 days"', times)
-        cells = re.findall(r"<td[^>]*>(.*?)</td>", re.search(r"<tbody>(.*?)</tbody>", times, re.S)[1], re.S)
-        self.assertEqual(cells[:4], ["system", "4", "1h 15m", "10m 10s"])
-        self.assertIn("▲ system: median wait past 1 h. The lane run files the parallel-lanes question.", times)
-        self.assertIn("<code>sd:42</code> A slow one · 2h 30m", times)
-
-    def test_a_lane_whose_times_were_not_read_says_so(self):
-        with mock.patch.object(queue_screen, "times", return_value={"error": "database is locked"}):
-            times = self.run_page("R.times = ELS.times.html;")["R"]["times"]
-        self.assertIn("▨ not read: database is locked", times)
-
-    def test_overview_ended_builds_and_last_7_days_are_rail_views_each_with_its_panel(self):
+    def test_overview_and_ended_builds_are_rail_views_each_with_its_panel(self):
         """Pack sd:7084: views switch only in the rail. Overview holds the builds and the lanes, Ended builds the ended
-        runs (its rail entry counts them), Last 7 days the times; no tab row sits on the page."""
+        runs (its rail entry counts them); no tab row sits on the page. Last 7 days moved to Metrics (pack sd:7233)."""
         page = (V2 / "queue.html").read_text(encoding="utf-8")
-        for panel, inner in (("view-overview", ('id="builds"', 'id="lanes"', 'id="idle"')), ("view-ended", ('id="ended"',)),
-                             ("view-times", ('id="times"',))):
+        self.assertNotIn('id="view-times"', page)
+        for panel, inner in (("view-overview", ('id="builds"', 'id="lanes"', 'id="idle"')), ("view-ended", ('id="ended"',))):
             start = page.index(f'id="{panel}"')
             for one in inner:
                 self.assertLess(start, page.index(one), (panel, one))
@@ -1272,10 +1236,9 @@ R.after = ELS.builds.html;""")
         out = self.run_page(f"""const B = {json.dumps(self.BUILDS)};
 window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : [404, {{ error: 'no' }}];
 await window.PAGE_AGAIN.run(); await flush(); await flush();
-R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key]); R.times = ELS.times.html; R.ended = ELS.ended.html;""",
+R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key]); R.ended = ELS.ended.html;""",
                             shell=VIEW_SHELL)
-        self.assertEqual(out["R"]["views"], [["overview", "Overview", "o"], ["ended", "Ended builds", "e"], ["times", "Last 7 days", "l"]])
-        self.assertIn("Last 7 days</h2>", out["R"]["times"])
+        self.assertEqual(out["R"]["views"], [["overview", "Overview", "o"], ["ended", "Ended builds", "e"]])
         self.assertTrue(out["R"]["ended"].startswith('<ul class="qrows ended">'), out["R"]["ended"])
         self.assertEqual((out["counts"]["overview"], out["counts"]["ended"]), (7, 1))
 
@@ -1298,7 +1261,7 @@ R.views = window.PAGE_VIEWS.map(v => v.id); R.runner = ELS.runner.html;""", shel
         self.assertLess(page.index('id="builds"'), page.index('id="runner"'))
         self.assertLess(page.index('id="runner"'), page.index('id="lanes"'))
         out = self.runner_page([200, self.RUNNER])
-        self.assertEqual(out["R"]["views"], ["overview", "ended", "times"])
+        self.assertEqual(out["R"]["views"], ["overview", "ended"])
         self.assertNotIn("assignments", out["counts"])
         live = out["R"]["runner"]
         self.assertIn("Runner assignments", live)
@@ -1534,7 +1497,7 @@ R.det = ELS.adv.html;""")
         self.assertEqual(out["R"]["idle"], "Idle, quiet: 1 lane.")
         # The line under the title counts the managed repositories; the rail entries carry the counts (pack sd:7084).
         self.assertIn("2 managed repositories · read", out["R"]["subhead"])
-        self.assertEqual(sorted(out["counts"]), ["ended", "overview", "times"])
+        self.assertEqual(sorted(out["counts"]), ["ended", "overview"])
 
     def test_only_next_rows_carry_controls_and_the_ends_are_off(self):
         lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]

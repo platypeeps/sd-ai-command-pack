@@ -20,3 +20,4 @@ from `GET /api/queue/runner` (`queue_screen.runner`, pack sd:7115). Pack
 sd:7217 retired their own Assignments view: its Waiting on you list repeated
 Writing's pieces at `ready_to_send`. An old `#view=assignments` link opens
 Overview.
+Last 7 days moved to Metrics' Lane times view (pack sd:7233).

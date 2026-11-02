@@ -15,6 +15,11 @@ Progress areas already make:
 - `age`: open items by days in their current status (`reads.age_histogram`).
 - `observed`: observed workflow activity (`reporting.metrics`).
 - `ci`: the lane's gate runs over the page's range (`CI_DAYS`), per repository, and the flaky heads (`_ci`, sd:5473).
+- `lanes`: each managed repository's lane over the last 7 days (`times`, pack sd:6006, moved from Queue in pack
+  sd:7233): the median wait from enqueue to claim, the median gate time (the speculative gate plus the prepare step)
+  and the slowest entry, enqueue to end, read from each entry's history rows by the pack's `sd_lane.lane_times`. A
+  median wait past an hour is `over`: the lane runner files the parallel-lanes question then. The range leaves it at 7
+  days, as it leaves Age.
 - `controls`: the provider registry as `provider_controls.snapshot` reads it, with its `revision`, and per bill the
   one cap write the route takes (`_writes`), the read the classic Usage area's forms make (sd:3387).
 - `range`: the page's range, `7d` or `6mo` (`RANGES`, pack sd:7208). With `6mo`, `ranged` holds the parts the range
@@ -37,6 +42,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sqlite3
 import statistics
@@ -47,11 +53,13 @@ from datetime import datetime, timedelta, timezone
 from sd_db import provider_controls, reads, registry, reporting, usage
 from sd_db.errors import SdDbError
 
+from . import pack_module
 from .operations_screen import BILL_NAME
+from .queue_screen import READ_FAILURES
 from .tasks_screen import is_scheduled
 
 __all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "MONTHS", "RANGES", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW",
-           "document", "health", "slow"]
+           "document", "health", "slow", "times"]
 
 #: The vendor window the trend draws: seven days, in minutes.
 WINDOW = 10080
@@ -391,6 +399,39 @@ def _scorecard_months(connection, months):
     return _scorecard_rows(summed.values())
 
 
+def times(connection, remote: str | None, now: float) -> dict:
+    """One lane's last `sd_lane.TIMES_DAYS`: its median wait and gate time and its slowest entry (pack sd:6006).
+
+    Read through the pack's own `sd_lane.lane_times` on the request's connection, from each entry's history rows. A
+    read that failed, or a remote that names no GitHub repository, is `{"error": ...}`, never a quiet lane.
+    """
+    from sd_db.protection import github_slug
+
+    found = github_slug(remote)
+    if found is None:
+        return {"error": "its remote names no GitHub repository, so it has no lane history"}
+    try:
+        read = pack_module("sd_lane").lane_times
+    except (ImportError, AttributeError) as error:
+        return {"error": f"the pack's sd_lane reads no lane times: {error}"}
+    try:
+        return read(connection, "/".join(found).lower(), now=now)
+    except READ_FAILURES as error:
+        return {"error": f"the lane times were not read: {type(error).__name__}: {error}"}
+
+
+def _lanes(connection, now) -> dict:
+    """Each managed repository's lane times (pack sd:7233), by folder name: the history is in the database, so a lane
+    needs no checkout here."""
+    from sd_db import repos
+
+    clock = _stamp(now).timestamp()
+    managed = sorted((row for row in repos.registered(connection) if row["managed"]), key=lambda row: row["path"])
+    return {"error": "", "lanes": [{"repo": os.path.basename(os.path.expanduser(row["path"]).rstrip("/")),
+                                    "path": os.path.expanduser(row["path"]),
+                                    "times": times(connection, row["remote"], clock)} for row in managed]}
+
+
 def _ranged(connection, now, today):
     """The parts the 6mo range changes, each guarded on its own (pack sd:7208)."""
     months = _months(today)
@@ -435,6 +476,7 @@ def document(connection, *, now: str, kept=None, span: str = "7d") -> dict:
         "observed": _guard(lambda: {"error": "", **reporting.metrics(connection, now=now)}),
         "controls": _guard(lambda: _controls(connection)),
         "ci": ci,
+        "lanes": _guard(lambda: _lanes(connection, now)),
         "unread": list(UNREAD),
         **ranged,
     }

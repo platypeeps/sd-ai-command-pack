@@ -1,7 +1,7 @@
 # Metrics
 
 Metrics is at `/metrics` (sd:2119): spend against budget, the week, the
-provider scorecard, the month's usage and age in status. Skill use moved to
+provider scorecard, the month's usage, lane times and age in status. Skill use moved to
 the Skills page's Usage view (sd:5881); an old `/metrics#view=skills`
 address opens it there.
 `GET /api/metrics` (`metrics_screen.document`) reads sd.db and the provider
@@ -24,6 +24,14 @@ when its reason is sd-ship's gate refusal; a review stop or a conflict ran no
 gate and counts as stopped. A flaky head failed its gate and later passed at
 that same head in the same repository. Flakiness is per head, not per test:
 no store names the failing test.
+
+Lane times took Queue's Last 7 days (pack sd:7233): each managed lane's
+median wait from enqueue to claim, median gate time (the speculative gate
+plus prepare) and slowest entry, enqueue to end, from the entries' history
+rows (`metrics_screen.times`, the pack's `sd_lane.lane_times`, pack sd:6006).
+It reads 7 days whatever the range. A lane with no entry folds into one line;
+a read that failed is its own unknown row. A median wait past an hour is
+caution: the lane run files the parallel-lanes question then.
 
 Configure and Cap write (sd:3387). They post the routes the classic Usage
 forms post, `/api/providers/configure` and `/api/bills/<bill>/cap`, with the
