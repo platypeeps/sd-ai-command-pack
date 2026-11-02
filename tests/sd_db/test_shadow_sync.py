@@ -1897,8 +1897,8 @@ class TheRevisit(SyncCase):
         """Sd:7265. A shadow row has no other read that closes it; a
         contribution's own queue read refreshes it. On the hub 1,750 older
         contribution observations held every slot, and merged pulls read
-        open on Trackers for weeks. A deferred shadow row still goes before
-        a fresh contribution, and after every fresh shadow row."""
+        open on Trackers for weeks. A deferred shadow row goes after every
+        undeferred row, as any deferred row does."""
         from sd_db import shadow_sync
 
         failing = self.stored(1, last_seen="2026-08-10T00:00:00+00:00")
@@ -1914,13 +1914,37 @@ class TheRevisit(SyncCase):
             return pull(number, **({"state": "closed", "merged": True} if number == 2 else {}))
 
         with patch.object(shadow_sync, "REVISIT_LIMIT", 1):
-            for hours, number in ((0, 1), (1, 2), (2, 1), (3, 1)):
+            for hours, number in ((0, 1), (1, 2), (2, 3), (3, 4), (4, 1)):
                 runner = QueryGh(lambda query: [], read=read)
                 sync(self.connection, now=self.now + timedelta(hours=hours), runner=runner,
                      contribution_client=Offline())
                 self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/{number}"], hours)
         self.assertEqual(self.states()[merged][0], "merged")
         self.assertEqual(self.states()[failing][0], "open")
+
+    def test_failing_shadow_rows_do_not_starve_a_contribution(self):
+        """Lead review of 599e62606: only a revisit folds a contribution
+        whose repository moved. Twenty shadow rows that always fail take
+        one run's slots, then go after the fresh contribution."""
+        from sd_db import shadow_sync
+
+        for number in range(1, shadow_sync.REVISIT_LIMIT + 1):
+            self.stored(number, last_seen=f"2026-08-{number + 1:02d}T00:00:00+00:00")
+        contribution = f"repos/{self.REPO}/pulls/{shadow_sync.REVISIT_LIMIT + 1}"
+        self.observed(f"https://github.com/{self.REPO}/pull/{shadow_sync.REVISIT_LIMIT + 1}",
+                      observed_at="2026-08-01T00:00:00Z")
+
+        def read(path):
+            if path == contribution:
+                return pull(int(path.rsplit("/", 1)[1]))
+            return 404, {"message": "Not Found"}
+
+        for hours, expected in ((0, False), (1, True)):
+            runner = QueryGh(lambda query: [], read=read)
+            sync(self.connection, now=self.now + timedelta(hours=hours), runner=runner,
+                 contribution_client=Offline())
+            self.assertEqual(contribution in runner.paths, expected, hours)
+            self.assertEqual(len(runner.paths), shadow_sync.REVISIT_LIMIT, hours)
 
     def test_a_fold_into_a_live_key_keeps_that_key_state(self):
         """The search already observed the pull under its new url: its state wins, the old key is a tombstone."""

@@ -848,10 +848,10 @@ def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str,
     or None, and the contribution key or None. A url this run's search saw
     is current and is left out. One in `unsettled`, which a run read and
     left as it was -- a failed read, or a contribution's unmoved answer --
-    goes after the rest of its kind, in the order it was deferred, so rows
-    that always fail cannot starve the others, nor the oldest of them the
-    rest. Every shadow row goes before every contribution-only one
-    (sd:7265). The caller reads the first `REVISIT_LIMIT`.
+    goes after the rest, in the order it was deferred, so rows that always
+    fail cannot starve the others, nor the oldest of them the rest. Of the
+    rest, shadow rows go before contribution-only ones (sd:7265). The
+    caller reads the first `REVISIT_LIMIT`.
     """
     floor = datetime.min.replace(tzinfo=timezone.utc)
     current = {identity(url) or url for url in seen}
@@ -870,12 +870,12 @@ def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str,
             continue
         rows.setdefault(name, {"url": entry["url"], "shadow": None, "key": None, "at": observed})["key"] = entry["key"]
     # By identity: a shadow row and a contribution can spell one url two ways.
-    # Shadow rows first (sd:7265): no other read closes one, and 1,750 older
-    # contributions, which their own queue read refreshes, held every slot.
+    # Undeferred shadow rows first (sd:7265): no other read closes one, and
+    # 1,750 older contributions held every slot. A deferred one goes after
+    # the contributions: only a revisit folds one whose repository moved.
     turn = {identity(url) or url: index for index, url in enumerate(unsettled)}
-    ordered = sorted(rows.values(), key=lambda row: (row["shadow"] is None,
-                                                     turn.get(identity(row["url"]) or row["url"], -1),
-                                                     row["at"], row["url"]))
+    ordered = sorted(rows.values(), key=lambda row: (turn.get(identity(row["url"]) or row["url"], -1),
+                                                     row["shadow"] is None, row["at"], row["url"]))
     return [{name: row[name] for name in ("url", "shadow", "key")} for row in ordered]
 
 
