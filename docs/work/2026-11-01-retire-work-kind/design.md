@@ -77,7 +77,7 @@ The `docs/work` folder reader stays, keyed by source and not by kind. Note
 `sd-status` reads an archived `prd.md` folder through `Rows.item` and
 `progress.item_for_artifact`; with a kind filter and no `work` row, each one
 reads `unknown`. On disk now: 8 `prd.md` folders in hoa, 7 in system, 2 in the
-pack, and the mezmo folders on the work satellite. Open question 1.
+pack, and the mezmo folders on the work satellite. Ruling #40102 keeps it.
 
 Kept and still used by tasks: `cancel_work` with `task_guard` (renamed
 `cancel_task`), `completion_record`, `waived_suffix`, `CANCELLABLE_TASK_KINDS`,
@@ -172,7 +172,7 @@ their code; incidental seeds move to `task` in slice 2.
 ## What the operator loses
 
 - A whole-item `sd-ship --deliver` no longer requires an acceptance file. A
-  task may still give one, with waivers (sd:3704). Open question 2.
+  task may still give one, with waivers (sd:3704). Ruling #40103.
 - No new delivery writes `shipped_at`, so `reads` "Shipped" and the report's
   delivered count stop growing from deliveries. None was written after
   2026-10-05.
@@ -260,16 +260,15 @@ stay on Opus.
 
 ## Open questions
 
-1. The `docs/work` reader. Note #39209 lists it for deletion.
-   Option: re-key it to `source = 'docs/work'` (Recommended). Every `prd.md`
-   folder keeps its row; a two-line change.
-   Option: delete it. Archived folders then read from git, and hoa sd:1276
-   needs `item: sd:1276` in a hoa file.
+Both are answered (operator rulings, 2026-11-01).
+
+1. The `docs/work` reader. Note #39209 listed it for deletion.
+   Ruling #40102: keep it, keyed on `source = 'docs/work'`. Every `prd.md`
+   folder keeps its row; slice 2 makes the two-line change.
 2. Whole-item delivery evidence. `work` required an acceptance file with a
    result per criterion; a task makes it optional.
-   Option: accept the loss (Recommended). No `work` row was filed after
-   2026-10-05, and the lane review checks the claim.
-   Option: require `--acceptance-file` on every `--deliver`.
+   Ruling #40103: accept the loss. `--deliver` no longer requires an
+   acceptance file; a task may still give one, with waivers.
 
 Decided here, each a routine call (recorded on the item):
 
