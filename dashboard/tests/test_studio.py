@@ -268,6 +268,7 @@ class TheServer(BrowserSession):
         request = urllib.request.Request(self.base + "/studio/files/art/shirts/cat/candidates/one.png")
         with self.assertRaises(urllib.error.HTTPError) as refused:
             urllib.request.urlopen(request, timeout=5)
+        refused.exception.close()
         self.assertEqual(refused.exception.code, 403)
 
 
