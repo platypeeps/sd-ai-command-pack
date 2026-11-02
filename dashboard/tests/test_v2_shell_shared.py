@@ -1369,10 +1369,15 @@ class EverySetAsideIsOneSegmentGroup(unittest.TestCase):
             for toggle in ("Show hidden", "show-parked", "f-hidden", "Parked only", "Hide hidden"):
                 self.assertNotIn(toggle, text)
 
+    #: Pack sd:7263 (operator 2026-11-02): Contributions draws the shell's group less its All, so it reads the shell's
+    #: mode but draws its own two buttons; test_v2_contributions pins them.
+    OWN_GROUP = {"contributions.js"}
+
     def test_every_page_that_sets_rows_aside_draws_the_shells_group(self):
         for name, key in self.PAGES.items():
             with self.subTest(page=name):
-                self.assertRegex(PAGE_JS[name], r"shell\.aside\.(seg|buttons)\('" + re.escape(key) + "'")
+                if name not in self.OWN_GROUP:
+                    self.assertRegex(PAGE_JS[name], r"shell\.aside\.(seg|buttons)\('" + re.escape(key) + "'")
                 self.assertRegex(PAGE_JS[name], rf"shell\.aside\.mode\('{key}'[,)]")
 
 
