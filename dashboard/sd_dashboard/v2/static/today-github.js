@@ -83,7 +83,7 @@
   function table() {
     const L = window.shell.list, rows = shown();
     if (!rows.length) return html`<p class="st-line st-empty">No ${closed() ? '' : 'open '}pull request ${ready() ? 'is ready to merge' : all() ? 'is listed' : 'is assigned to you or opened by you'}.</p>`;
-    return html`<table class="ledger st" aria-labelledby="github-h">
+    return html`<table class="ledger st" aria-labelledby="github-h" data-toolbar="github-filters">
       <thead><tr><th scope="col"><span class="sr">State</span></th><th scope="col">Pull request</th><th scope="col">Repo</th><th scope="col">Why</th><th scope="col">Activity</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
       <tbody>${L.pageOf(rows, st()).map(row)}</tbody></table>${L.pager(rows.length, st(), 'pull requests')}`;
   }
