@@ -8,8 +8,9 @@ branch: docs/sd-7064-design
 # Design — retire-work-kind
 
 The item's row holds status, progress and decisions; this page holds the shape.
-The tables give a path and its line numbers at origin/main `5cf6b4990`. Pack sd:7004's branch
-(`feat/sd-7004-kinds`, migration 046) moves some of them.
+The tables give a path and its line numbers at origin/main `5cf6b4990`.
+Pack sd:7004's migration 046 landed after that, in `7d4eb11d1`, and moves
+some of them.
 
 ## Problem
 
@@ -215,9 +216,8 @@ their code; incidental seeds move to `task` in slice 2.
 
 ## Slices
 
-Each slice is one PR. Slice 5 needs pack sd:7004 (046) on main; slices 1 to 4
-do not, but land after it to avoid conflicts in `RUNNABLE_KINDS` and
-`_CLOSABLE_KINDS`.
+Each slice is one PR. Slice 5 needs pack sd:7004's 046 on main, which
+`7d4eb11d1` landed.
 
 1. Stop producers. Delete `register_work_item`, `sd work register`,
    `sd-db work register` and the `sd-plan` step; `register` lands `task`.
