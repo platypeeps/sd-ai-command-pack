@@ -333,7 +333,7 @@ class TheDocument(ScreenCase):
         self.assertNotIn("assignments", doc["sources"])
         lane = queue_screen.runner(self.connection)
         self.assertNotIn("merges", lane)
-        self.assertEqual(sorted(lane), ["live", "ready"])
+        self.assertEqual(sorted(lane), ["live"])
         self.assertEqual((doc["sessions"]["registered"], doc["sessions"]["abandoned"]), (2, 1))
         jobs = {job["name"]: job for job in doc["jobs"]}
         self.assertEqual((jobs["nightly-sync"]["state"], jobs["nightly-sync"]["capabilities"]["retry"]["allowed"]), ("failed", True))
@@ -2127,7 +2127,7 @@ class TheViews(PageScript):
         page = (V2 / "management.html").read_text(encoding="utf-8")
         self.assertNotRegex(page, r'role="tab|class="subviews|class="sv"')
         out = self.run_page("R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key || null]);")
-        # pack sd:7115: the Ship lane view folded into Queue's Assignments view.
+        # pack sd:7115: the Ship lane view folded into Queue (its Overview since pack sd:7217).
         self.assertEqual(out["R"]["views"], [["repos", "Repos", None], ["sessions", "Sessions", None],
                                              ["deploys", "Deploys", None], ["schedules", "Schedules", "c"]])
         self.assertNotIn('id="view-lane"', page)
