@@ -22,7 +22,7 @@ from unittest import mock
 
 import test_v2_briefs as brief_tests
 import test_v2_documents as document_tests
-from sd_dashboard import documents_screen, publish_drain, publishing
+from sd_dashboard import documents_screen, publish_drain, publishing, research_slides
 from sd_db import repos
 from support import NOW, ScreenCase
 
@@ -1068,7 +1068,9 @@ esac
         publish_drain.run(record)
         said = (self.base / "argv").read_text(encoding="utf-8").split("\n")
         self.assertIn("--restricted", said)
-        self.assertEqual(said[said.index("--tools") + 1], "Read,Edit,Bash")
+        self.assertEqual(said[said.index("--tools") + 1], "Read,Edit,Write,Bash")
+        # Write is a tool only: no rule allows it outside a Drive update's work folder (sd:7252).
+        self.assertFalse([tool for tool in said[said.index("--allowedTools") + 1].split(",") if tool.startswith("Write")])
         allowed = said[said.index("--allowedTools") + 1].split(",")
         self.assertIn("mcp__notion__notion-create-pages", allowed)
         self.assertIn("mcp__workspace-mcp__import_to_google_doc", allowed)
@@ -1154,6 +1156,43 @@ esac
         document = json.loads((publish_drain.state_dir() / "runs" / f"{run['id']}.json").read_text(encoding="utf-8"))
         self.assertNotIn("upload", document["allowed"])
         self.assertNotIn("archify-image", Path(document["prompt"]).read_text(encoding="utf-8"))
+
+    UPDATE_TOOLS = ["mcp__workspace-mcp__get_doc_as_markdown", "mcp__workspace-mcp__update_drive_file"]
+
+    def drive_request(self, second=0, **fields):
+        (self.queue / "lab.plan.drive.json").write_text(json.dumps({"repo": str(self.checkout), "fingerprint": "d1",
+                                                                     "content": "# Plan\n", **fields}), encoding="utf-8")
+        now = datetime.datetime(2026, 11, 2, 19, 0, second, tzinfo=datetime.timezone.utc)
+        status, run = publish_drain.start(None, self.checkout, "plan", now=now, spawn=self.spawn)
+        self.assertEqual(status, 202, run)
+        document = json.loads((publish_drain.state_dir() / "runs" / f"{run['id']}.json").read_text(encoding="utf-8"))
+        return document["allowed"].split(","), Path(document["prompt"]).read_text(encoding="utf-8")
+
+    def test_a_drive_update_adds_the_read_back_the_highlight_and_the_replace(self):
+        """sd:7252: a Drive request naming its `file` marks what changed, so the drain reads back and replaces."""
+        allowed, prompt = self.drive_request(file="1AbCdEf")
+        self.assertEqual([tool for tool in allowed if tool in self.UPDATE_TOOLS], self.UPDATE_TOOLS)
+        work = research_slides.attachments() / "sd-drain-plan-20261102T190000Z"
+        self.assertIn(f"Bash({publish_drain_kit()} highlight *)", allowed)
+        self.assertEqual([tool for tool in allowed if tool.startswith("Write")], [f"Write(/{work}/**)"])
+        self.assertTrue(work.is_dir())
+        self.assertIn(f"{publish_drain_kit()} highlight --previous {work}/previous.md", prompt)
+        self.assertIn("Never delete, move, trash or share a page or file", prompt)
+
+    def test_a_drive_create_or_a_notion_write_gets_no_update_tools(self):
+        for second, fields in enumerate(({}, {"file": ""}, {"file": "1AbCdEf", "action": "trash"})):
+            with self.subTest(fields=fields):
+                allowed, prompt = self.drive_request(second, **fields)
+                self.assertFalse([tool for tool in allowed if "get_doc_as_markdown" in tool or "highlight" in tool
+                                  or tool.startswith("Write")])
+                self.assertNotIn("highlight --previous", prompt)
+                (self.queue / "lab.plan.drive.json").unlink()
+        self.request()
+        now = datetime.datetime(2026, 11, 2, 19, 0, 9, tzinfo=datetime.timezone.utc)
+        status, run = publish_drain.start(None, self.checkout, "plan", now=now, spawn=self.spawn)
+        document = json.loads((publish_drain.state_dir() / "runs" / f"{run['id']}.json").read_text(encoding="utf-8"))
+        self.assertNotIn("update_drive_file", document["allowed"])
+        self.assertNotIn("get_doc_as_markdown", document["allowed"])
 
     def test_a_trashed_request_reads_done(self):
         self.trash_request()
