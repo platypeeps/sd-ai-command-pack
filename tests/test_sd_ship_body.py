@@ -152,6 +152,27 @@ class ClosingTests(unittest.TestCase):
         self.assertIn(f"`sd reports acknowledge {report}`", caught.exception.workflow["next_action"])
 
 
+class ClosableKindTests(unittest.TestCase):
+    def test_the_closable_kinds_are_kinds_the_schema_allows(self):
+        """sd:7004: `personal` left `item.kind`, so a merge closes no such row."""
+        import sqlite3
+        import tempfile
+
+        from sd_db.migrate import initialise
+        from sd_db.workflow import schema_kinds
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "sd.db"
+            initialise(path)
+            connection = sqlite3.connect(path)
+            connection.row_factory = sqlite3.Row
+            try:
+                allowed = set(schema_kinds(connection))
+            finally:
+                connection.close()
+        self.assertEqual(set(sd_ship_body._CLOSABLE_KINDS) - allowed, set())
+
+
 class SummaryHeadingTests(unittest.TestCase):
     """sd:5375: the `## Summary` group headings `<repo> sd:N` a delivering enqueue reads."""
 

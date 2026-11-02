@@ -224,6 +224,21 @@ def _authorship(root, skill):
     return latest, sorted(vendors)
 
 
+def is_review(row):
+    """Whether `row` is a skill review: a `task` the catalogue filed with
+    `fields.skill_review.action` `review`. The kind `skill-review` held it
+    until migration 46 (sd:7004); `runner.delivery_candidates` spells the
+    same test in SQL."""
+    if row["kind"] != "task" or row["source"] != "skill-request":
+        return False
+    try:
+        fields = json.loads(row["fields"] or "{}")
+    except (TypeError, ValueError):
+        return False
+    review = fields.get("skill_review") if isinstance(fields, dict) else None
+    return isinstance(review, dict) and review.get("action") == "review"
+
+
 def request(connection, name, action, *, expected_revision=None, path_name=None, root=None, home=None, who):
     """File intent only, as one ready item. No branch, skill or installed surface is changed here.
 
@@ -266,7 +281,7 @@ def request(connection, name, action, *, expected_revision=None, path_name=None,
                  f"{action.capitalize()} {name} in an isolated checkout. " +
                  (f"Move contrib/{name} to skills/{name} and add it to the {path_name} path." if action == "promote" else f"Move skills/{name} to contrib/{name} and remove it from every path.") +
                  " Preserve unrelated work, run the pack checks and follow its sd-ship skill to prepare one pull request. The operator owns merging.")
-        item = create_item(connection, kind="skill-review" if action == "review" else "task",
+        item = create_item(connection, kind="task",
             title=f"{action.capitalize()} {name}", status="ready", repo=key,
             branch=f"skill-{action}/{name}-{uuid.uuid4().hex[:10]}", source_commit=_git(root, "rev-parse", "HEAD"),
             source="skill-request", external_id=identity,
@@ -282,7 +297,7 @@ def record_review_proposals(connection, item, assignment, provider, document):
         source = json.loads(state["item"]["fields"] or "{}").get("skill_review", {})
         held = runner.queue_state(connection, assignment)
         configured = registry.read(connection=connection).providers.get(provider)
-        if state["item"]["kind"] != "skill-review" or held["item"] != item or held["role"] != "reviewer" or held["status"] != "running" or held["provider"] != provider:
+        if not is_review(state["item"]) or held["item"] != item or held["role"] != "reviewer" or held["status"] != "running" or held["provider"] != provider:
             raise workflow.WorkflowError("proposal result must come from this skill's running reviewer assignment")
         if not configured or configured.vendor.lower() in (source.get("latest_author_vendors") or [source.get("latest_author_vendor")]):
             raise workflow.WorkflowError("skill reviewer must have a different vendor from the latest author")
@@ -317,7 +332,7 @@ def apply_proposals(connection, item, notes, *, expected_revision, who):
     with transaction(connection):
         state = workflow._checked_state(connection, item, expected_revision)
         source = json.loads(state["item"]["fields"] or "{}").get("skill_review", {})
-        if state["item"]["kind"] != "skill-review" or not source.get("review_result"):
+        if not is_review(state["item"]) or not source.get("review_result"):
             raise workflow.WorkflowError("a completed skill review is required")
         if connection.execute("SELECT 1 FROM assignment WHERE item=? AND status IN ('queued','running','ending')", (item,)).fetchone():
             raise workflow.WorkflowError("wait for the reviewer to finish and release its checkout")

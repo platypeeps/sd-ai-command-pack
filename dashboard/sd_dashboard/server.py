@@ -891,6 +891,8 @@ class Dashboard(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
             )
         try:
+            if path.startswith("/studio/files/"):
+                return self._studio_file(context, connection, path[len("/studio/files/"):])
             if path.startswith("/api/"):
                 from . import v2
 
@@ -1324,6 +1326,50 @@ class Dashboard(BaseHTTPRequestHandler):
         if kind.startswith("text/html"):
             return self._send(200, body, kind, policy=POLICY)
         self._send(200, body, kind, overrides=FONT_HEADERS if kind.startswith("font/") else ASSET_HEADERS)
+
+    def _studio_file(self, context, connection, tail: str) -> None:
+        """sd:6920: one gallery file from a Studio project's root, under a sandbox; a seekable type answers a Range."""
+        from . import studio
+
+        if not self._session(context):
+            return self._send(403, error_page(403, f"Reload the page to open a Studio file: {SESSION_ENDED}").encode("utf-8"),
+                              "text/html; charset=utf-8")
+        found = studio.located(connection, tail)
+        if found is None:
+            return self._send(404, error_page(404, "No such Studio file.").encode("utf-8"), "text/html; charset=utf-8")
+        target, kind = found
+        try:
+            handle = open(target, "rb")  # noqa: SIM115 - closed below, after the answer streams
+        except OSError as problem:
+            return self._send(503, error_page(503, str(problem)).encode("utf-8"), "text/html; charset=utf-8")
+        with handle:
+            size = os.fstat(handle.fileno()).st_size
+            ranged = target.suffix.lower() in studio.RANGED
+            status, start, length = studio.byte_range(self.headers.get("Range") if ranged else None, size)
+            overrides = {"Accept-Ranges": "bytes"} if ranged else {}
+            if status == 416:
+                overrides["Content-Range"] = f"bytes */{size}"
+                return self._send(416, b"", kind, policy=studio.POLICY, overrides=overrides)
+            if status == 206:
+                overrides["Content-Range"] = f"bytes {start}-{start + length - 1}/{size}"
+            self._started = True
+            self._policy, self._overrides = studio.POLICY, overrides
+            self.send_response(status)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(length))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            if self.command == "HEAD":
+                return None
+            handle.seek(start)
+            left = length
+            while left > 0:
+                chunk = handle.read(min(left, 1 << 16))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                left -= len(chunk)
+        return None
 
     def _lane_shot(self, tail: str) -> None:
         """sd:6728: one PNG the lane drew of a changed page, `<repo>/lane/logs/shots-<item>-<stamp>/<page>.png`."""

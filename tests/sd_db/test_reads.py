@@ -172,7 +172,7 @@ class TheUnscopedBacklog(unittest.TestCase):
             upsert_repo(writer, repo)
             scoped = create_item(writer, kind="work", title="Scoped work",
                                  status="planning", repo=repo)
-            chore = create_item(writer, kind="personal", title="Fix the fence",
+            chore = create_item(writer, kind="work-idea", title="Fence the repo",
                                 status="planning")
             spark = create_item(writer, kind="personal-idea",
                                 title="A thought that is not an article",
@@ -197,7 +197,7 @@ class TheUnscopedBacklog(unittest.TestCase):
             # Facets still compose, which is what makes the pane of glass work:
             # one kind within the unscoped rows.
             self.assertEqual([row["id"] for row in reads.backlog_items(
-                connection, repo=reads.NO_REPO, kind="personal")], [chore])
+                connection, repo=reads.NO_REPO, kind="work-idea")], [chore])
 
     def test_a_followup_with_a_repository_is_read_with_it_and_an_old_one_stays_unscoped(self):
         """sd:809. A followup took no repository before, so no checkout's brief
@@ -268,7 +268,7 @@ class TheUnscopedBacklog(unittest.TestCase):
             upsert_repo(writer, reads.NO_REPO_TOKEN)
             named = create_item(writer, kind="work", title="In a repo called none",
                                 status="planning", repo=reads.NO_REPO_TOKEN)
-            unscoped = create_item(writer, kind="personal", title="Fix the fence",
+            unscoped = create_item(writer, kind="work-idea", title="Fence the repo",
                                    status="planning")
             writer.commit()
             writer.close()
@@ -453,8 +453,8 @@ class CaptureItems(unittest.TestCase):
                 ("idea", "planning", repositories[1], "2026-09-06", WHEN),
                 ("idea", "done", repositories[0], "2026-09-04", WHEN),
                 ("report", "planning", None, "2026-08-31", None),
-                ("skill-review", "planning", None, "2026-08-31", None),
-                ("personal", "blocked", None, "2026-08-31", None),
+                ("work-idea", "planning", None, "2026-08-31", None),
+                ("personal-idea", "blocked", None, "2026-08-31", None),
             )
             ids = []
             for kind, status, repo, updated, parked in fixtures:

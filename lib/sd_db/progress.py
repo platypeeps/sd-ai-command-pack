@@ -36,8 +36,7 @@ def _work_guard(connection: sqlite3.Connection, row: dict) -> str:
     return ""
 
 
-#: The task kinds `task_guard` admits (sd:1005). `personal` is left out: a
-#: personal item is the operator's own list and has nothing to supersede.
+#: The task kinds `task_guard` admits (sd:1005).
 CANCELLABLE_TASK_KINDS = ("task", "followup")
 
 

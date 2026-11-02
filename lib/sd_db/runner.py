@@ -49,9 +49,9 @@ def queue_state(connection, assignment: int) -> dict:
 #: whatever repository and branch it carries, so readiness, enqueue, claim and
 #: the Today and Backlog run selection refuse it too: `create_item` accepts a
 #: repository and a branch for any kind, and since sd:809 a task reclassified
-#: to `followup` keeps both. `delivery_candidates` delivers these less
-#: `skill-review`.
-RUNNABLE_KINDS = ("work", "task", "report", "skill-review")
+#: to `followup` keeps both. `delivery_candidates` delivers these less a
+#: skill review, a `task` since sd:7004 (`skills_catalog.is_review`).
+RUNNABLE_KINDS = ("work", "task", "report")
 
 
 def _item(connection, item: int, *, delivery=False) -> dict:
@@ -601,16 +601,19 @@ def delivery_candidates(connection) -> list[dict]:
     """The items a push is owed, by kind and not by exception.
 
     An allow-list, and it used to be `kind != 'skill-review'`. That read as "a
-    personal to-do is not agent work because it has no repository", which the
-    schema does not enforce: `create_item` accepts a repository for any kind and
-    the item screen can set one, so a `personal` row with a repository and a
-    branch was a delivery candidate and would have been observed by the runner.
-    The three kinds named here are the ones the dashboard's run panel offers,
-    less `skill-review`, which the panel offers and delivery does not -- so the
-    two gates now agree instead of drifting apart as kinds are added.
+    to-do of another kind is not agent work because it has no repository",
+    which the schema does not enforce: `create_item` accepts a repository for
+    any kind, so a row of another kind with a repository and a branch was a
+    delivery candidate and would have been observed by the runner.
+    The kinds are `RUNNABLE_KINDS`, the ones the dashboard's run panel offers,
+    so the two gates agree instead of drifting apart as kinds are added. A
+    skill review is left out: the panel offers it and delivery does not, and
+    since sd:7004 it is a `task` whose fields say so (`skills_catalog.is_review`).
     """
+    kinds = ", ".join(f"'{kind}'" for kind in RUNNABLE_KINDS)
     return [dict(row) for row in connection.execute("SELECT item.id, item.repo, item.branch, repo.remote "
-        "FROM item JOIN repo ON repo.path = item.repo WHERE item.status = 'ready_to_send' AND item.kind IN ('work', 'task', 'report') "
+        f"FROM item JOIN repo ON repo.path = item.repo WHERE item.status = 'ready_to_send' AND item.kind IN ({kinds}) "
+        "AND NOT (item.source IS 'skill-request' AND json_extract(item.fields, '$.skill_review.action') IS 'review') "
         "AND item.branch IS NOT NULL AND NOT EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id "
         "AND (status IN ('queued','running','ending') OR (role = 'merge' AND phase = 'merged')))")]
 

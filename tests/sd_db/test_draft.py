@@ -93,7 +93,7 @@ class Queue(Case):
         self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/sat'")
         cases = {"unmanaged": self.item(repo="/fixture/off"), "no remote": self.item(repo="/fixture/none"),
                  "satellite lane": self.item(repo="/fixture/sat"), "no repo": self.item(repo=None),
-                 "followup": self.item(kind="followup"), "personal": self.item(kind="personal", repo=None),
+                 "followup": self.item(kind="followup"), "work-idea": self.item(kind="work-idea", repo=None),
                  "ready": self.item(status="ready")}
         for case, item in cases.items():
             with self.subTest(case=case):
