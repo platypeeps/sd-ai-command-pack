@@ -529,7 +529,7 @@ class ItemKind(BrowserSession):
     def test_a_store_older_than_migration_009_offers_only_the_kinds_its_check_admits(self):
         """The page reads through `connect(write=False)`, which accepts a store
         that predates the migration widening `item.kind`; on one, `edit_item`
-        refuses the four kinds it added, so the select must not offer them.
+        refuses the kinds it added, so the select must not offer them.
         The store here is narrowed the way migration 009 widened it: the CHECK
         text edited in place under `writable_schema`, with a schema-cookie
         bump so the next connection reads the narrow list. Only the CHECK is
@@ -541,9 +541,9 @@ class ItemKind(BrowserSession):
         item = self.item("Errand", kind="task")
         narrower = connect(self.path)
         current = narrower.execute("SELECT sql FROM sqlite_master WHERE name = 'item'").fetchone()[0]
-        # Anchored on the four kinds alone: pack migration 032 dropped `dep`, the kind before them.
-        narrow = re.sub(r",\s*'personal', 'followup',\s*'work-idea', 'personal-idea'\)\)", "))", current)
-        self.assertNotEqual(narrow, current, "the CHECK did not carry the four kinds, so this proves nothing")
+        # Anchored on the three kinds 009 added that remain: 046 dropped `personal` (sd:7004).
+        narrow = re.sub(r",\s*'followup',\s*'work-idea', 'personal-idea'\)\)", "))", current)
+        self.assertNotEqual(narrow, current, "the CHECK did not carry the three kinds, so this proves nothing")
         cookie = narrower.execute("PRAGMA schema_version").fetchone()[0]
         narrower.execute("PRAGMA writable_schema = ON")
         narrower.execute("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = 'item'", (narrow,))
@@ -555,7 +555,7 @@ class ItemKind(BrowserSession):
         reader = connect(self.path, write=False)
         self.addCleanup(reader.close)
         self.assertEqual(workflow.schema_kinds(reader), tuple(kind for kind in workflow.schema_kinds(reader)
-                                                             if kind not in ("personal", "followup", "work-idea", "personal-idea")))
+                                                             if kind not in ("followup", "work-idea", "personal-idea")))
         panel = str(controls.item_controls(reader, item))
         form = re.search(rf'<form[^>]*action="/api/items/{item}"[^>]*>.*?</form>', panel).group(0)
         options = Fields(form).options["kind"]
@@ -564,8 +564,8 @@ class ItemKind(BrowserSession):
         # more: the same store, through a writer, refuses a withheld kind.
         writer = connect(self.path)
         self.addCleanup(writer.close)
-        with self.assertRaisesRegex(workflow.WorkflowError, "no item kind 'personal'"):
-            workflow.edit_item(writer, item, {"kind": "personal"}, who="test",
+        with self.assertRaisesRegex(workflow.WorkflowError, "no item kind 'work-idea'"):
+            workflow.edit_item(writer, item, {"kind": "work-idea"}, who="test",
                                expected_revision=workflow.item_state(writer, item)["revision"])
 
     def test_a_kind_change_is_written_and_noted_and_a_produced_kind_is_refused(self):
@@ -574,23 +574,21 @@ class ItemKind(BrowserSession):
         before = self.snapshot()
         self.assertEqual(self.post(f"/api/items/{item}", {"revision": revision, "kind": "report"})[0], 400)
         self.assertEqual(before, self.snapshot())
-        status, _, state = self.post(f"/api/items/{item}", {"revision": revision, "kind": "personal"})
+        status, _, state = self.post(f"/api/items/{item}", {"revision": revision, "kind": "work-idea"})
         self.assertEqual(status, 200)
-        self.assertEqual(state["item"]["kind"], "personal")
+        self.assertEqual(state["item"]["kind"], "work-idea")
         self.assertEqual((state["notes"][-1]["body"], state["notes"][-1]["session"]),
-                         ("Changed kind task -> personal by dashboard", "dashboard"))
+                         ("Changed kind task -> work-idea by dashboard", "dashboard"))
 
 
 class ItemStatusOnly(BrowserSession):
-    """sd:772 -- a personal item gets the status control alone.
+    """sd:772 -- a personal item got the status control alone.
 
-    `workflow.allowed_statuses` offers a personal item the task statuses
-    (sd:768) and `workflow.edit_item` refuses its details, so the panel splits:
-    the status form renders and the `Save details` form does not.
-
-    A followup shared this branch until sd:816. `edit_item` stopped refusing
+    A followup shared that branch until sd:816. `edit_item` stopped refusing
     its details at sd:809, so the panel now renders both forms for it and
-    `FollowupDetails` below owns what the details form holds.
+    `FollowupDetails` below owns what the details form holds. The branch went
+    with the `personal` kind (sd:7004): no kind takes the task statuses
+    without its details.
     """
 
     def panel(self, item):
@@ -603,8 +601,8 @@ class ItemStatusOnly(BrowserSession):
     def details_form(self, item):
         return re.search(rf'<form[^>]*action="/api/items/{item}"[^>]*>', self.panel(item))
 
-    def test_followup_and_personal_offer_the_task_statuses(self):
-        for kind in ("followup", "personal"):
+    def test_followup_offers_the_task_statuses(self):
+        for kind in ("followup",):
             with self.subTest(kind=kind):
                 item = self.item(f"A {kind} item", kind=kind)
                 markup = self.status_form(item)
@@ -615,17 +613,9 @@ class ItemStatusOnly(BrowserSession):
                 self.assertEqual([entry["attributes"]["value"] for entry in options
                                   if "selected" in entry["attributes"]], ["planning"])
 
-    def test_a_personal_item_gets_no_details_form_and_a_followup_now_does(self):
+    def test_a_followup_now_gets_a_details_form(self):
         """sd:816 -- the hint that named `sd task edit ID` is gone, because
-        the form it stood in for is on the panel. A personal item keeps the
-        hint: `edit_item` still refuses its details.
-        """
-        personal = self.item("A personal item", kind="personal")
-        self.assertIsNone(self.details_form(personal))
-        self.assertNotIn('name="title"', self.panel(personal))
-        self.assertNotIn("sd task edit", self.panel(personal))
-        self.assertIn("Its other fields keep their own editing workflow.", self.panel(personal))
-
+        the form it stood in for is on the panel."""
         followup = self.item("A followup item", kind="followup")
         self.assertIsNotNone(self.details_form(followup))
         self.assertIn('name="title"', self.panel(followup))
@@ -653,18 +643,6 @@ class ItemStatusOnly(BrowserSession):
         self.assertIn("Status is controlled by the active workflow.", panel)
         self.assertIsNone(self.status_form(item))
         self.assertIsNotNone(self.details_form(item))
-
-    def test_a_personal_item_a_run_owns_is_not_also_told_it_can_finish_here(self):
-        # The personal branch printed "can finish or reopen here" beside the
-        # line saying the workflow owns the status (PR #344 review).
-        item = self.item("Owned by a run", kind="personal")
-        create_assignment(self.connection, item=item, role="author", status="queued")
-        panel = self.panel(item)
-        self.assertIn("Status is controlled by the active workflow.", panel)
-        self.assertNotIn("can finish or reopen here", panel)
-        self.assertIn("Its other fields keep their own editing workflow.", panel)
-        free = self.item("Nobody's run", kind="personal")
-        self.assertIn("A personal item can finish or reopen here.", self.panel(free))
 
     def test_task_and_work_keep_both_forms(self):
         task = self.item("Errand", kind="task")
@@ -790,7 +768,7 @@ class FollowupDetails(BrowserSession):
     `edit_item` takes its title, body, priority, due date and repository. The
     panel still offered the status control alone and a hint naming
     `sd task edit ID`, and `screens.artifact` decoded `{"text": ...}` for
-    `task`, `report` and `skill-review` only -- so every followup filed with
+    `task`, `report` and the skill-review kind only -- so every followup filed with
     `sd task add --kind followup` showed its body as raw JSON.
 
     `kind` stays out of the form. `edit_item` would take it, but reclassifying

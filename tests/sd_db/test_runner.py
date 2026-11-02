@@ -50,7 +50,7 @@ class Queue(unittest.TestCase):
         workflow.edit_item(self.db, prepared, {'kind': 'followup'}, who='alex')
         by_hand = create_item(self.db, kind='followup', title='Configured by hand',
                               repo='/fixture/repo', branch='work/by-hand', status='ready')
-        reason = 'item {} is a followup item; an agent runs only work, task, report and skill-review items'
+        reason = 'item {} is a followup item; an agent runs only work, task and report items'
         for item in (prepared, by_hand):
             with self.subTest(item=item):
                 row = item_state(self.db, item)['item']

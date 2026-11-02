@@ -14,7 +14,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, initialise, registry, runner, skills_catalog, upsert_repo
+from sd_db import (
+    connect,
+    initialise,
+    registry,
+    runner,
+    skills_catalog,
+    upsert_repo,
+    workflow,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
@@ -253,6 +261,22 @@ class SkillRequests(SkillFixture):
         self.assertTrue((self.repo / "contrib/sd-candidate/SKILL.md").exists())
         self.assertTrue((self.repo / "skills/sd-kept/SKILL.md").exists())
 
+    def test_a_review_task_is_not_delivered_and_a_promotion_is(self):
+        """A review writes no commit: delivery left its kind out, and now
+        leaves the review task out (sd:7004). A promotion stays deliverable."""
+        review = self.request("review", "sd-kept")["item"]
+        promoted = self.request("promote", "sd-candidate", "development")["item"]
+        self.assertFalse(skills_catalog.is_review(promoted))
+        self.db.execute("UPDATE item SET status = 'ready_to_send' WHERE id IN (?, ?)", (review["id"], promoted["id"]))
+        self.db.commit()
+        self.assertEqual([row["id"] for row in runner.delivery_candidates(self.db)], [promoted["id"]])
+
+    def test_proposals_are_refused_on_a_task_that_is_not_a_review(self):
+        promoted = self.request("promote", "sd-candidate", "development")["item"]
+        assignment = runner.enqueue(self.db, [promoted["id"]], role="reviewer", scope="skill-review", who="test")[0]["id"]
+        with self.assertRaisesRegex(workflow.WorkflowError, "this skill's running reviewer"):
+            skills_catalog.record_review_proposals(self.db, promoted["id"], assignment, "claude", {})
+
     def test_repeating_same_intent_has_one_item(self):
         first = self.request("promote", "sd-candidate", "development")
         second = self.request("promote", "sd-candidate", "development")
@@ -264,7 +288,9 @@ class SkillRequests(SkillFixture):
     def test_review_files_one_item_and_the_dashboard_writes_the_same_row(self):
         head = self.git("rev-parse", "HEAD")
         first = self.request("review", "sd-kept")
-        self.assertEqual(first["item"]["kind"], "skill-review")
+        # A task marked by its fields (sd:7004): `skill-review` left item.kind.
+        self.assertEqual(first["item"]["kind"], "task")
+        self.assertTrue(skills_catalog.is_review(first["item"]))
         self.assertEqual(first["item"]["source"], "skill-request")
         self.assertEqual(first["item"]["source_commit"], head)
         self.assertEqual(first["item"]["status"], "ready")

@@ -368,9 +368,10 @@ class TheKindsForPersonalAndFollowupWork(SchemaCase):
 
     def test_rows_and_the_rows_that_reference_them_survive_and_the_kinds_land(self):
         self._at_version_eight()
-        result = migrate(self.path)
-        self.assertEqual((result.before, result.applied), (8, list(range(9, SCHEMA_VERSION + 1))))
-        connection = connect(self.path, write=True)
+        # Through 45: 46 retires `personal` (`TheRetiredItemKinds`).
+        result = self.migrate_through(45)
+        self.assertEqual((result.before, result.applied), (8, list(range(9, 46))))
+        connection = sqlite3.connect(self.path)
         self.addCleanup(connection.close)
         self.assertEqual(
             [tuple(row) for row in connection.execute(
@@ -522,8 +523,10 @@ class TheKindsForPersonalAndFollowupWork(SchemaCase):
         """
         from sd_db.runner import delivery_candidates
         self._at_version_eight()
-        migrate(self.path)
-        connection = connect(self.path, write=True)
+        # Through 45: 46 retires `personal` (`TheRetiredItemKinds`).
+        self.migrate_through(45)
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
         self.addCleanup(connection.close)
         for kind in self.ADDED:
             connection.execute(
@@ -2136,14 +2139,15 @@ class TheDeadItemKinds(SchemaCase):
         raw = sqlite3.connect(self.path)
         page = raw.execute("SELECT rootpage FROM sqlite_master WHERE name = 'item'").fetchone()[0]
         raw.close()
-        result = migrate(self.path)
-        self.assertEqual((result.before, result.applied), (31, list(range(32, SCHEMA_VERSION + 1))))
-        connection = connect(self.path, write=True)
+        # Through 45: 46 moves two of these kinds on (`TheRetiredItemKinds`).
+        result = self.migrate_through(45)
+        self.assertEqual((result.before, result.applied), (31, list(range(32, 46))))
+        connection = sqlite3.connect(self.path)
         self.addCleanup(connection.close)
         self.assertEqual(self._kinds(connection), self.KINDS)
         self.assertEqual(sorted(row[0] for row in connection.execute("SELECT kind FROM item")), sorted(self.KINDS))
         self.assertEqual(connection.execute("SELECT rootpage FROM sqlite_master WHERE name = 'item'").fetchone()[0], page)
-        self.assertEqual(self._sql(connection), self._sql(self._reference(SCHEMA_VERSION)))
+        self.assertEqual(self._sql(connection), self._sql(self._reference(45)))
         self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
         for dead in ("proposal", "dep"):
             with self.subTest(kind=dead), self.assertRaises(sqlite3.IntegrityError):
@@ -2199,7 +2203,7 @@ class TheDeadItemKinds(SchemaCase):
                 raw.close()
 
     def test_a_replay_on_the_new_shape_changes_nothing(self):
-        initialise(self.path)
+        self.migrate_through(32)
         raw = sqlite3.connect(self.path, isolation_level=None)
         self.addCleanup(raw.close)
         before = self._sql(raw)
@@ -2220,6 +2224,174 @@ class TheDeadItemKinds(SchemaCase):
         raw.execute("DELETE FROM item WHERE kind = 'dep'")
         result = self.migrate_through(32)
         self.assertEqual((result.before, result.applied), (31, [32]))
+
+
+class TheRetiredItemKinds(SchemaCase):
+    """Migration 46 (sd:7004). `personal` and `skill-review` rows become
+    `task` rows and both words leave `item.kind`'s CHECK, edited in place as
+    32 did. One transaction: a failure leaves 45 untouched; an unknown shape
+    is refused; a replay changes nothing; the reverse widens the list back."""
+
+    VERSION = 46
+    BEFORE = ("work", "idea", "task", "report", "skill-review", "personal", "followup", "work-idea", "personal-idea")
+    AFTER = ("work", "idea", "task", "report", "followup", "work-idea", "personal-idea")
+
+    def _sql(self, connection):
+        return connection.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'item'").fetchone()[0]
+
+    def _reference(self, upto):
+        return TheSettingKind._reference(self, upto)  # type: ignore[arg-type]
+
+    def _body(self):
+        return dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+
+    def _at_forty_five(self, *kinds):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.execute("INSERT INTO repo (path, created_at, updated_at) VALUES ('/repo', 't', 't')")
+        raw.executemany("INSERT INTO item (kind, repo, title, status, created_at, updated_at) "
+                        "VALUES (?, ?, ?, 'done', 't1', 't2')",
+                        [(kind, None if kind == "personal" else "/repo", f"a {kind}") for kind in kinds])
+        raw.execute("INSERT INTO note (item, timestamp, kind, body) SELECT id, 't', 'comment', title FROM item")
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(
+            "SELECT id, kind, repo, title, status, updated_at FROM item ORDER BY id")]
+
+    def _kinds(self, connection):
+        from sd_db.workflow import schema_kinds
+
+        connection.row_factory = sqlite3.Row
+        return schema_kinds(connection)
+
+    def test_rows_of_the_retired_kinds_become_tasks_and_the_check_narrows(self):
+        self._at_forty_five(*self.BEFORE)
+        raw = sqlite3.connect(self.path)
+        before = self._rows(raw)
+        notes = raw.execute("SELECT count(*) FROM note").fetchone()[0]
+        raw.close()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._kinds(connection), self.AFTER)
+        moved = {"personal": "task", "skill-review": "task"}
+        self.assertEqual(self._rows(connection),
+                         [(id_, moved.get(kind, kind), *rest) for id_, kind, *rest in before])
+        self.assertEqual(connection.execute("SELECT count(*) FROM note").fetchone()[0], notes)
+        self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+        self.assertEqual(self._sql(connection), self._sql(self._reference(SCHEMA_VERSION)))
+        self.assertEqual(connection.execute("PRAGMA writable_schema").fetchone()[0], 0)
+        self.assertEqual([row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE name LIKE 'migration_046%'")], [])
+
+    def test_a_retired_kind_is_refused_after_the_migration(self):
+        initialise(self.path)
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        for retired in ("personal", "skill-review"):
+            with self.subTest(kind=retired), self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("INSERT INTO item (kind, title, status, created_at, updated_at) "
+                                   "VALUES (?, 't', 'planning', 't', 't')", (retired,))
+
+    def test_a_second_migrate_applies_nothing(self):
+        self._at_forty_five("personal")
+        migrate(self.path)
+        self.assertEqual(migrate(self.path).applied, [])
+
+    def test_a_failure_after_the_update_leaves_forty_five_and_a_rerun_finishes(self):
+        """Failure table, row "Crash after the `UPDATE`": the abort comes
+        from the second guard, after the rows moved, so the transaction is
+        what puts them back."""
+        self._at_forty_five("personal", "skill-review", "task")
+        raw = sqlite3.connect(self.path)
+        before, sql = self._rows(raw), self._sql(raw)
+        raw.close()
+        # The UPDATE runs; the abort comes after it, from inside the file.
+        body = self._body().replace("DROP TABLE migration_046_guard;",
+                                    "INSERT INTO migration_046_guard VALUES ('stopped');\nDROP TABLE migration_046_guard;")
+        self.assertNotEqual(body, self._body())
+        path = self.home / "046_stopped.sql"
+        path.write_text(body, encoding="utf-8")
+        through = [m for m in schema_module.migrations() if m[0] < self.VERSION] + [(self.VERSION, path)]
+        with mock.patch("sd_db.migrate.migrations", return_value=through), \
+                self.assertRaisesRegex(sqlite3.IntegrityError, "migration_046_refuses"):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual((self._rows(raw), self._sql(raw)), (before, sql))
+        raw.close()
+        result = self.migrate_through(self.VERSION)
+        self.assertEqual(result.applied, [self.VERSION])
+        raw = sqlite3.connect(self.path)
+        self.addCleanup(raw.close)
+        self.assertEqual(sorted(row[0] for row in raw.execute("SELECT kind FROM item")), ["task", "task", "task"])
+
+    def test_an_unknown_item_shape_is_refused_and_left_at_forty_five(self):
+        shapes = {
+            "another order": lambda sql: sql.replace("'personal', 'followup'", "'followup', 'personal'"),
+            "a personal at the end": lambda sql: sql.replace(
+                "'skill-review',\n                                    'personal', 'followup',",
+                "'followup',").replace("'personal-idea'))", "'personal-idea', 'personal'))"),
+            "a second kind CHECK": lambda sql: sql[:-1] + ",\n    check (kind in ('personal', 'task')))",
+            "no kind CHECK": lambda sql: re.sub(r"\n\s*CHECK \(kind IN \([^)]*\)\)", "", sql),
+        }
+        for shape, change in shapes.items():
+            with self.subTest(shape=shape):
+                self.path.unlink(missing_ok=True)
+                self._at_forty_five("task")
+                raw = sqlite3.connect(self.path, isolation_level=None)
+                old = self._sql(raw)
+                raw.execute("PRAGMA writable_schema = ON")
+                raw.execute("UPDATE sqlite_master SET sql = ? WHERE name = 'item'", (change(old),))
+                raw.execute("PRAGMA writable_schema = RESET")
+                before = self._sql(raw)
+                self.assertNotEqual(before, old)
+                raw.close()
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "migration_046_refuses"):
+                    migrate(self.path)
+                raw = sqlite3.connect(self.path)
+                self.assertEqual(schema_version(raw), self.VERSION - 1)
+                self.assertEqual(self._sql(raw), before)
+                raw.close()
+
+    def test_a_replay_on_the_new_shape_changes_nothing(self):
+        self._at_forty_five("personal", "task")
+        migrate(self.path)
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        before, rows = self._sql(raw), self._rows(raw)
+        raw.executescript("BEGIN;\n" + self._body() + "\nCOMMIT;")
+        self.assertEqual((self._sql(raw), self._rows(raw)), (before, rows))
+
+    def test_a_restore_of_an_older_snapshot_keeps_every_count(self):
+        """A restore replays 46 onto a snapshot at 45 and refuses a changed
+        row count (`backup._upgrade_restore_candidate`)."""
+        from sd_db.backup import _upgrade_restore_candidate
+
+        self._at_forty_five("personal", "skill-review", "task")
+        _upgrade_restore_candidate(self.path)
+        raw = sqlite3.connect(self.path)
+        self.addCleanup(raw.close)
+        self.assertEqual(schema_version(raw), SCHEMA_VERSION)
+        self.assertEqual(sorted(row[0] for row in raw.execute("SELECT kind FROM item")), ["task", "task", "task"])
+
+    def test_the_reverse_widens_the_list_back(self):
+        self._at_forty_five("personal")
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in self._body().splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._sql(raw), self._sql(self._reference(self.VERSION - 1)))
+        self.assertEqual(self._kinds(raw), self.BEFORE)
+        # The moved row stays a task: the migration recorded no original kind.
+        self.assertEqual([row[0] for row in raw.execute("SELECT kind FROM item")], ["task"])
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
 class TheConnection(SchemaCase):
