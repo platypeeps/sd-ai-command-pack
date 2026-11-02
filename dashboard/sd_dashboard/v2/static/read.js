@@ -10,7 +10,7 @@
 //   barrier     a reread never settles on a read that started before its write landed (PR 73, r4167523338).
 //
 // const rows = shell.read({
-//   source: '/api/rows',            the document route
+//   source: '/api/rows',            the document route, or a function that names it at each read (Metrics' range, pack sd:7208)
 //   what: 'the rows',               the loading, error and partial texts name it
 //   adopt: doc => ({ objects, state }),  keep the document; the objects to put, and the state (null, partial, empty, error)
 //   clear: err => {},               drop the page's data after a failed read
@@ -30,11 +30,12 @@
 (() => {
   const capital = s => s.charAt(0).toUpperCase() + s.slice(1);
   window.SHELL_READ = ({ fetch, commands: C, state: shellState, row, listen }) => spec => {
-    const { source, what } = spec, state = s => shellState(s, spec.slot), open = () => !spec.active || spec.active();
+    const { what } = spec, state = s => shellState(s, spec.slot), open = () => !spec.active || spec.active();
+    const at = () => typeof spec.source === 'function' ? spec.source() : spec.source;
     let generation = 0, applied = 0, putIds = new Set(), picks = [], flight = null, queued = null;
     listen('shell:picked', e => { picks = (e && e.detail) || []; });
 
-    async function get() {
+    async function get(source) {
       const r = await fetch(source, { headers: { Accept: 'application/json' } });
       const out = await r.json().catch(() => null);
       if (!r.ok) throw new Error((out && out.error) || `HTTP ${r.status}`);
@@ -55,10 +56,10 @@
       else unselect();
     }
     async function run(after, quiet) {
-      const mine = ++generation;
+      const mine = ++generation, source = at();
       if (!after && !quiet) state({ kind: 'loading', text: `Reading ${what}. Rows appear when ${source} answers.`, source });
       let doc;
-      try { doc = await get(); } catch (err) {
+      try { doc = await get(source); } catch (err) {
         if (mine !== generation) return false;
         retire(new Set());
         if (after) {

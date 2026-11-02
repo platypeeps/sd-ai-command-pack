@@ -7,7 +7,13 @@
  * states: default · hover (the reference link) · focus · active · disabled (filing) · error (not filed) · success (filed);
  * a failed read is a row naming it. */
 .issues-sec { margin-top: var(--space-xl); }
+/* pack sd:7215: GitHub's filter bars are put straight into their .filters row, where the shell's full-width .fbar
+ * pushed the table's column filter onto a second line; sized to their content, both share one row. */
+:is(#github-filters, #issues-filters, #intake-filters) > .fbar { flex: 0 1 auto; }
 .issues-sec .tally { gap: var(--space-md); line-height: 1; }
+/* pack sd:7214: each GitHub head is its title, its tally and .tools with Refresh from GitHub; the tally rides at the
+ * right beside the button, as the shell's title line puts a tally, and the button ends the row. */
+:is(#github-tally, #issues-tally, #intake-tally) { margin-left: auto; }
 .issues tbody tr { cursor: default; }
 .issues tbody tr:hover td { background: transparent; }
 .issues td { vertical-align: top; height: auto; padding-block: var(--space-xs); }

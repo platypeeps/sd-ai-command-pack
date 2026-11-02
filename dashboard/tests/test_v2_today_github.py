@@ -156,6 +156,31 @@ class TheDocument(ScreenCase):
         self.assertLess(html.index('src="/ui/today-github.js"'), html.index('src="/ui/shell.js"'))
         self.assertIn("{ id: 'pulls', label: 'Pull requests' }", (V2 / "static" / "github.js").read_text(encoding="utf-8"))
 
+    def views(self):
+        html = (V2 / "github.html").read_text(encoding="utf-8")
+        return dict(re.findall(r'<div id="view-([a-z]+)"[^>]*>(.*?)(?=<div id="view-|</main>)', html, re.S))
+
+    def test_each_view_has_one_filter_row_its_table_joins(self):
+        """pack sd:7215: a table that names no toolbar row gets its column filter as a second row (shell.js); each GitHub
+        view's table names its view's one filter row, as Health's do."""
+        views = self.views()
+        self.assertEqual(sorted(views), ["intake", "issues", "pulls"])
+        drawn = {"pulls": re.findall(r'<table class="ledger st"[^>]*>', PAGE_JS)}
+        for view, body in views.items():
+            rows = re.findall(r'<div class="filters toolbar-2" id="([a-z-]+)"', body)
+            self.assertEqual(len(rows), 1, view)
+            tables = re.findall(r"<table[^>]*>", body) + drawn.get(view, [])
+            self.assertTrue(tables, view)
+            for table in tables:
+                self.assertIn(f'data-toolbar="{rows[0]}"', table, view)
+
+    def test_refresh_sits_alone_in_each_heads_tools_beside_the_tally(self):
+        """pack sd:7214: the tally sat inside .tools and pushed Refresh from GitHub under it, off the right edge on Pull
+        requests; as on Research, the tally is the head's own item and .tools holds the button alone."""
+        for view, body in self.views().items():
+            self.assertRegex(body, r'</h2>\s*<p class="tally" id="[a-z]+-tally"></p>\s*<div class="tools"><span id="'
+                             + view + r'-sync"></span></div>', view)
+
 
 class TheDetails(ScreenCase):
     """sd:5633: what a pull request row's Details show, read from the same stores."""
