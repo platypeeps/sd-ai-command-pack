@@ -1,6 +1,6 @@
 // Writing (sd:2125). Built from the design source's products/system/designs/pages/writing.js at 2729265.
 // build: pieces come from /api/writing through shell.read; Stage, Correct, Park and Revive post the routes the old item page
-// posts. The vault ideas column, the draft editor's save and the evidence summaries have no reader or writer yet (see below).
+// posts. The draft editor's save and the evidence summaries have no reader or writer yet (see below).
 // Page commands for the palette; the shell reads this when it loads.
 const { html, put } = window.markup;
 window.PAGE_COMMANDS = [
@@ -106,7 +106,7 @@ addEventListener('DOMContentLoaded', () => {
     put(document.getElementById('strip'), html`<span class="fact"><b>${act.length}</b> active</span>
        <span class="fact"><span class="g-caution" aria-hidden="true">▲</span><b>${bad}</b> gates want you</span>
        <span class="fact"><b>${act.filter(p => p.stage === 'ready').length}</b> at Ready, <b>${pub}</b> publishable</span>
-       <span class="fact"><span class="g-unknown" aria-hidden="true">▨</span>vault ideas not read</span>
+       ${D.ideas?.state === 'read' ? html`<span class="fact"><b>${D.ideas.count}</b> ideas in the vault inbox</span>` : html`<span class="fact" title="${D.ideas?.reason || 'the read gave no ideas'}"><span class="g-unknown" aria-hidden="true">▨</span>vault ideas not read</span>`}
        <button class="help" type="button" aria-label="Help: lamps" data-help="<b>D R F A</b>: draft, research, fact-check, adversarial, in that order on every card. <b>●</b> passes against this draft, <b>▲</b> stale or findings open, <b>■</b> verdict not pass, <b>◌</b> not written yet, <b>▨</b> file exists but no gate verdict is recorded. Source: <code>sd_db.writing._problems</code>.">${ICON('circle-help')}</button>
        <span class="src">read ${String(D.read).slice(11, 16)} UTC</span>`);
     const parkedN = pieces.filter(p => p.parked).length;
@@ -129,12 +129,16 @@ addEventListener('DOMContentLoaded', () => {
   }
   function renderBoard() {
     const v = pieces.filter(p => window.shell.aside.shows(parked, p.parked));
-    // build: no reader for the vault's blog ideas exists yet (the design read `sd store list sdw.blog-idea --json`), so the
-    // column says so and keeps its drop zone, which refuses a piece as the design does.
+    // pack sd:7244: the inbox blog ideas, highest score first, from writing_screen's `ideas`. An idea card is no piece: it
+    // takes no selection, and its title links out only where the read gave an http href. The drop zone refuses a piece.
+    const I = D?.ideas || { state: 'unknown', reason: 'the read gave no ideas', rows: [] };
+    const idea = i => html`<article class="card idea" aria-label="Idea: ${i.title}"><div class="top"><span class="id">${i.created || ''}</span><span class="tag">${i.score == null ? 'no score' : `${i.score}/10`}</span></div>
+      <div class="t">${i.href ? html`<a class="ext" href="${i.href}" target="_blank" rel="noopener noreferrer">${i.title}</a>` : i.title}</div></article>`;
     const ideaCol = html`<div class="col vault" data-drop="stage:ideas">
-      <header><span class="label">Ideas · vault</span><span class="n" title="vault ideas are not read here">—</span></header>
+      <header><span class="label">Ideas · vault</span>${I.state === 'read' ? html`<span class="n" title="inbox ideas in the vault">${I.count}</span>` : html`<span class="n" title="vault ideas not read">—</span>`}</header>
       <div><p class="refusal" role="note"></p><div class="drop">
-        <p class="empty">Not read: the dashboard has no reader for the vault's blog ideas yet. <code>sd store list sdw.blog-idea --json</code> lists them.</p>
+        ${I.state === 'read' ? html`${I.rows.map(idea)}<p class="empty">${I.count ? `Highest ${I.rows.length} of ${I.count} inbox ideas.` : 'No idea in the vault inbox.'} <a href="/tasks?base=blog-idea">Tasks</a> lists them all.</p>`
+          : html`<p class="empty">Not read: ${I.reason}</p>`}
       </div></div></div>`;
     put(document.getElementById('view-board'), html`<div class="board" id="board" role="listbox" aria-label="Pieces by stage">${ideaCol}${STAGES.map(([s, name]) => {
       const rows = v.filter(p => p.stage === s);

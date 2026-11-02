@@ -4,12 +4,14 @@
 draft up to `DRAFT_CHARS` (pack sd:7242). The repository goes out by its folder name only, so no local path leaves. Its `attention` is the
 page's rail badge (sd:3446, `_attention`). Each piece's `realm` is `places.realm_of` of its repo, the rule Tasks' Realm
 filter uses (sd:5064). Its `grill` is its open question notes and the count of its rulings (pack sd:6700): Details
-walks the questions, and Apply answers waits until none is open.
+walks the questions, and Apply answers waits until none is open. Its `ideas` are the vault's inbox blog ideas
+(pack sd:7244), the `sdw.blog-idea` rows `records.list_rows` reads, highest score first: IDEAS of them beside the inbox
+count, each with a link only for http. A failed read is unknown with its reason, never an empty inbox.
 """
 
 from pathlib import Path
 
-from sd_db import writing
+from sd_db import records, writing
 from sd_db.workflow import WorkflowError
 
 from .decisions import RULING, parse
@@ -32,6 +34,37 @@ def _draft(document: str | None) -> tuple[list[str], bool, int]:
             break
         kept.append(paragraph)
     return kept, len(kept) < len(paragraphs), len(prose.split())
+
+
+#: Inbox ideas the Ideas column shows; the header counts them all.
+IDEAS = 10
+
+
+def read_ideas(connection) -> list[dict]:
+    return records.list_rows(connection, "blog-idea", stage="inbox")
+
+
+def _score(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ideas(connection) -> dict:
+    """The inbox blog ideas, highest score first, or why they were not read."""
+    try:
+        got = read_ideas(connection)
+    except Exception as error:  # noqa: BLE001 - a failed read says its cause, never an empty inbox
+        return {"state": "unknown", "reason": str(error) or type(error).__name__, "count": None, "rows": []}
+    rows = []
+    for row in got:
+        fields = row["fields"]
+        url = fields.get("url") if isinstance(fields.get("url"), str) else ""
+        rows.append({"item": row["id"], "title": row["title"], "score": _score(fields.get("score")), "url": url,
+                     "href": href(url) if url else None, "created": fields.get("dateCreated")})
+    rows.sort(key=lambda idea: (idea["score"] is None, -(idea["score"] or 0), idea["title"].casefold()))
+    return {"state": "read", "reason": "", "count": len(rows), "rows": rows[:IDEAS]}
 
 
 def document(connection, *, now):
@@ -62,7 +95,7 @@ def document(connection, *, now):
             # pack sd:6977: adversarial.md against the draft by its digest stamp; Apply review shows only when current.
             "adversarial": gates.get("companions", {}).get("adversarial"),
         })
-    return {"read": now, "stages": list(writing.STAGES), "pieces": pieces, "attention": _attention(pieces),
+    return {"read": now, "stages": list(writing.STAGES), "pieces": pieces, "attention": _attention(pieces), "ideas": _ideas(connection),
             "realms": {key: found[key] for key in ("state", "source", "problems")}}
 
 

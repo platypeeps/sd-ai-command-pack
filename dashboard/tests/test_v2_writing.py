@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import subprocess
 import unittest
 from pathlib import Path
@@ -109,6 +110,36 @@ class TheDocument(Pieces):
         with mock.patch.object(writing_screen, "DRAFT_CHARS", 3 * len(paragraphs[0])):
             piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
         self.assertEqual((piece["draft"], piece["draft_cut"], piece["words"]), (paragraphs[:3], True, 54))
+
+    def test_the_ideas_are_the_inbox_blog_ideas_highest_score_first(self):
+        """pack sd:7244: the Ideas column reads the `sdw.blog-idea` rows through `records.list_rows`: inbox only, highest
+        score first, a link only for http, at most IDEAS of them beside the inbox count."""
+        from sd_db import create_item
+
+        made = {title: create_item(self.connection, kind="idea", title=title, status="planning", source="vault",
+                                   path=f"Blog Ideas/{title}.md", stage=stage,
+                                   fields={"kind": kind, "score": score, "url": url, "dateCreated": "2026-10-01"})
+                for title, kind, stage, score, url in (
+                    ("Low idea", "blog-idea", "inbox", "3", "https://example.test/low"),
+                    ("High idea", "blog-idea", "inbox", "9", "javascript:alert(1)"),
+                    ("Unscored idea", "blog-idea", "inbox", "", ""),
+                    ("Declined idea", "blog-idea", "declined", "10", ""),
+                    ("A tip", "tip", "inbox", "10", ""))}
+        ideas = writing_screen.document(self.connection, now=NOW)["ideas"]
+        def row(title, score, url, link):
+            return {"item": made[title], "title": title, "score": score, "url": url, "href": link, "created": "2026-10-01"}
+        self.assertEqual(ideas, {"state": "read", "reason": "", "count": 3, "rows": [
+            row("High idea", 9.0, "javascript:alert(1)", None), row("Low idea", 3.0, "https://example.test/low", "https://example.test/low"),
+            row("Unscored idea", None, "", None)]})
+        with mock.patch.object(writing_screen, "IDEAS", 1):
+            ideas = writing_screen.document(self.connection, now=NOW)["ideas"]
+        self.assertEqual((ideas["count"], [r["title"] for r in ideas["rows"]]), (3, ["High idea"]))
+
+    def test_a_failed_ideas_read_is_unknown_with_its_reason_and_the_pieces_still_read(self):
+        with mock.patch.object(writing_screen, "read_ideas", side_effect=sqlite3.OperationalError("no such column: stage")):
+            doc = writing_screen.document(self.connection, now=NOW)
+        self.assertEqual(doc["ideas"], {"state": "unknown", "reason": "no such column: stage", "count": None, "rows": []})
+        self.assertEqual(len(doc["pieces"]), 2)
 
     def test_a_published_piece_carries_its_claims_url_and_a_link_only_for_http(self):
         # sd:3465: the writing claim URL becomes a link; an address in another scheme stays text.
@@ -228,6 +259,11 @@ DOC = {"read": NOW, "stages": list(writing.STAGES), "pieces": [
     piece(14, "File Owned", "review", owner="file", next=["ready"], gates_ok=True),
 ]}
 DOC["attention"] = writing_screen._attention(DOC["pieces"])
+#: pack sd:7244: the inbox ideas, highest score first, IDEAS of them beside the inbox count.
+DOC["ideas"] = {"state": "read", "reason": "", "count": 207, "rows": [
+    {"item": 501, "title": "Gates are cheaper than rework", "score": 9.0, "url": "https://example.test/gates",
+     "href": "https://example.test/gates", "created": "2026-10-01"},
+    {"item": 502, "title": "An idea with no source", "score": None, "url": "", "href": None, "created": "2026-09-30"}]}
 
 #: One piece per gate lamp the badge counts, beside the stories above (sd:3446).
 LAMPS = [
@@ -516,15 +552,31 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         # Columns in stage order: Drafting holds #11, Review holds #12 and #14.
         self.assertEqual(re.findall(r'<article class="card[^"]*"[^>]*data-id="(\d+)"', board), ["11", "12", "14"])
         self.assertNotIn('data-id="13"', board, "a parked piece shows only with Parked on")
-        self.assertIn("Not read: the dashboard has no reader for the vault's blog ideas yet.", board)
         card = re.search(r'<article class="card"[^>]*data-id="11".*?</article>', board, re.S).group(0)
         self.assertEqual(re.findall(r'data-s="(\w+)"', card), ["ok", "ok", "queued", "unknown"])
         self.assertIn("<b>3</b> active", out["html"]["strip"])
-        self.assertIn("vault ideas not read", out["html"]["strip"])
         self.assertEqual(out["page_attention"], {"state": "ok", "n": 0, "what": "pieces need a gate"})
         # sd:6701: Open | Parked | All, the shell's set-aside group, with each count.
         self.assertEqual(re.findall(r'data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>', out["html"]["parked-seg"]),
                          [("open", "true", "3"), ("aside", "false", "1"), ("all", "false", "4")])
+
+    def test_the_ideas_column_lists_the_inbox_ideas_and_the_strip_counts_them(self):
+        """pack sd:7244: each idea card has its score and its title, a link only where the read gave an http href; the
+        header and the strip carry the inbox count. A failed read keeps the column unknown with its reason."""
+        out = self.run_page("")
+        col = re.search(r'<div class="col vault".*?</div></div></div>', out["html"]["view-board"], re.S).group(0)
+        self.assertIn('<span class="n" title="inbox ideas in the vault">207</span>', col)
+        self.assertEqual(re.findall(r'<span class="tag">([^<]+)</span>', col), ["9/10", "no score"])
+        self.assertIn('<a class="ext" href="https://example.test/gates" target="_blank" rel="noopener noreferrer">Gates are cheaper than rework</a>', col)
+        self.assertIn('<div class="t">An idea with no source</div>', col)
+        self.assertIn("Highest 2 of 207 inbox ideas.", col)
+        self.assertNotIn("data-id=", col, "an idea card took a piece's selection")
+        self.assertIn("<b>207</b> ideas in the vault inbox", out["html"]["strip"])
+        self.assertNotIn("vault ideas not read", out["html"]["strip"])
+        unread = "DOC.ideas = { state: 'unknown', reason: 'no such column: stage', count: null, rows: [] };\n"
+        out = self.run_page("", prelude=unread)
+        self.assertIn("Not read: no such column: stage", out["html"]["view-board"])
+        self.assertIn("vault ideas not read", out["html"]["strip"])
 
     def test_parked_shows_the_parked_pieces_alone_and_all_shows_every_piece(self):
         def board(search):

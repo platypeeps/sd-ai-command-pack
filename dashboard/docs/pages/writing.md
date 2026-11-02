@@ -35,10 +35,14 @@ button per option or a box for words; each answer posts
 is answered, posts Fix with `{"grill": "apply"}`: claude edits the draft to
 follow each ruling and leaves the edit uncommitted.
 
+The Ideas column (pack sd:7244) is `ideas` in the same read: the
+`sdw.blog-idea` rows at stage inbox, read with `records.list_rows`, highest
+score first. It shows `IDEAS` of them with the inbox count in its header and
+the strip, and links a title only to an http address. A failed read leaves
+the column unknown with its reason; the pieces still read.
+
 Not read yet, so drawn as gaps:
 
-- the vault's blog ideas column: the design read `sd store list sdw.blog-idea`,
-  and the database holds no vault idea rows;
 - the evidence summaries inside `research.md`, `fact-check.md` and
   `adversarial.md`: the editor shows each file's size, time and lamp;
 - a draft save: the editor is read only, since no route writes a draft.
