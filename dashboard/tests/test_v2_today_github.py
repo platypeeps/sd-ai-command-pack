@@ -174,6 +174,13 @@ class TheDocument(ScreenCase):
             for table in tables:
                 self.assertIn(f'data-toolbar="{rows[0]}"', table, view)
 
+    def test_refresh_sits_alone_in_each_heads_tools_beside_the_tally(self):
+        """pack sd:7214: the tally sat inside .tools and pushed Refresh from GitHub under it, off the right edge on Pull
+        requests; as on Research, the tally is the head's own item and .tools holds the button alone."""
+        for view, body in self.views().items():
+            self.assertRegex(body, r'</h2>\s*<p class="tally" id="[a-z]+-tally"></p>\s*<div class="tools"><span id="'
+                             + view + r'-sync"></span></div>', view)
+
 
 class TheDetails(ScreenCase):
     """sd:5633: what a pull request row's Details show, read from the same stores."""
