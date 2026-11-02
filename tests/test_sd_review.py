@@ -544,7 +544,7 @@ class SubjectTests(ReviewFixture):
         self.addCleanup(patched.stop)
 
     def item(self, root: pathlib.Path, name: str, status: str, branch: str) -> pathlib.Path:
-        """A work item whose status and branch are the row's, as `sd work register` leaves them."""
+        """A work item whose status and branch are the row's, as the build leaves them."""
         folder = root / "docs" / "work" / name
         folder.mkdir(parents=True)
         (folder / "prd.md").write_text("---\ntitle: probe\n---\n\n- [ ] one\n", encoding="utf-8")

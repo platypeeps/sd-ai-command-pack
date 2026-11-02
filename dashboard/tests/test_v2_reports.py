@@ -578,6 +578,29 @@ shellRun(cmd('report.fix'), C.get('r{n}')); await flush();""", answer=answer)
         self.assertEqual(out["toasts"][-1], [f"Fix started · #{n} · debug session in herdr pane w9:p1", False])
         self.assertEqual(out["gets"], ["/api/reports", "/api/reports"])
 
+    def test_fix_on_an_expired_login_opens_its_credentials_row_and_leads_the_bar(self):
+        """sd:6964: the cold-outreach-triage run of sd:6951, its account made an example; no session can sign in, so
+        Fix opens Health > Credentials on that Google login's row, asks nothing and posts nothing. The plain failed
+        report keeps Acknowledge first and its debug-session Fix."""
+        n = reporting.ingest(self.connection, job="cold-outreach-triage", run_id="r9", started="2026-09-08T14:04:05Z",
+                             ended="2026-09-08T14:04:19Z", exit_code=1, attention=True, attention_basis="job exited 1",
+                             source_path="/home/example/repos/system/local-cron-jobs/logs/cold-outreach-triage.log",
+                             text="Triage did not run. The Gmail search returned \"ACTION REQUIRED: Google Authentication "
+                                  "Needed\" for the work account.\nRESULT: unavailable, workspace-mcp Gmail auth expired "
+                                  "for ops@example.test\nFAILED rc=1\n")["item"]["id"]
+        with mock.patch.object(reports_screen, "_html_folders", lambda: 2):
+            doc = reports_screen.document(self.connection, now=LATER, jobs=self.jobs, tz=TZ, config=self.families)
+        plain = self.ids["failed"]
+        out = self.run_page(f"""const fix = cmd('report.fix'), ack = cmd('report.ack'), o = C.get('r{n}'), p = C.get('r{plain}');
+R.primary = [fix.primary(o), ack.primary(o), fix.primary(p), ack.primary(p)]; R.ask = [!!fix.askFirst(o), !!fix.askFirst(p)];
+R.does = fix.does(o); shellRun(fix, o); await flush(); R.href = location.href;""", doc=doc)
+        self.assertEqual(out["R"]["href"], "/health?area=cred&row=cred%3Agoogle%3Aops%40example.test")
+        self.assertEqual(out["toasts"][-1], ["Health opens on google:ops@example.test", False])
+        self.assertEqual((out["posts"], out["confirms"]), ([], []))
+        self.assertEqual(out["R"]["primary"], [True, False, False, True])
+        self.assertEqual(out["R"]["ask"], [False, True])
+        self.assertEqual(out["R"]["does"], "Opens the expired login's row on Health, where Sign in is.")
+
     def test_undo_reopens_the_report_under_the_revision_the_acknowledgement_answered(self):
         n = self.ids["clean"]
         out = self.run_page(f"shellRun(cmd('report.ack'), C.get('r{n}')); await flush(); lastUndo().undo(); await flush();",

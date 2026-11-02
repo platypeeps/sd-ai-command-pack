@@ -70,9 +70,11 @@ class TheLookupUnderASecondHome(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HOME": str(first)}):
             with sd_db.connect(sd_db.default_path(first), write=True) as connection:
                 stored = sd_db.repos.add(connection, checkout, home=first)
-                sd_db.workflow.register_work_item(
-                    connection, repo=str(checkout), path=f"docs/work/{ITEM}/prd.md",
-                    title="A thing", created_at="2026-09-24", who="fixture")
+                # The row `work register` filed until pack sd:7064 retired it.
+                sd_db.writes.create_item(
+                    connection, kind="work", status="planning", title="A thing", repo=str(checkout),
+                    path=f"docs/work/{ITEM}/prd.md", source="docs/work",
+                    external_id=f"{stored}::docs/work/{ITEM}/prd.md")
                 cls.task = sd_db.writes.create_item(
                     connection, kind="task", title="Written under A", repo=str(checkout))
                 row = connection.execute("SELECT repo FROM item WHERE id = ?", (cls.task,)).fetchone()

@@ -18,14 +18,16 @@
   // session for a report. It asks first, naming that, and posts /api/items/<id>/fix with the row's revision through
   // post(o, path), which answers the server's reply. A post with no answer may have started a session, so it says that. No Undo:
   // a session runs on. `item(o)` is the item id; `report(o)` is true for a report.
-  function fix(on, { item, report, when = () => true, post }) {
-    return { id: `${on}.fix`, on, label: 'Fix', does: o => report(o) ? 'Asks first, then starts claude in herdr to fix this report.' : 'Asks first, then starts claude in herdr as a builder on this item.', key: 'f', risk: 'safe', askFirst: true, executes: true, icon: 'bot', when,
-      cli: () => 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
-      sends: o => `POST /api/items/${item(o)}/fix {revision}`,
+  // sd:6964: `login(o)` is a report's expired login (job_failures.login): no session can sign in for the operator, so Fix
+  // then opens that login's row on Health > Credentials, where Sign in is, and asks nothing first.
+  function fix(on, { item, report, login = () => null, when = () => true, post }) {
+    return { id: `${on}.fix`, on, label: 'Fix', does: o => login(o) ? 'Opens the expired login\'s row on Health, where Sign in is.' : report(o) ? 'Asks first, then starts claude in herdr to fix this report.' : 'Asks first, then starts claude in herdr as a builder on this item.', key: 'f', risk: 'safe', askFirst: o => !login(o), executes: true, icon: 'bot', when,
+      cli: o => login(o) ? `no CLI: opens ${login(o).href}` : 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
+      sends: o => login(o) ? `GET ${login(o).href}` : `POST /api/items/${item(o)}/fix {revision}`,
       consequence: o => report(o)
         ? `Opens a herdr workspace and starts claude on report #${item(o)}: the sd-debug skill finds the cause and fixes it, and acknowledges the report after a clean run.`
         : `Opens a herdr workspace in the item's checkout and starts claude as a builder on #${item(o)}: a worktree, commits, a pull-request body and the lane.`,
-      run: o => Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`)).then(
+      run: o => login(o) ? (location.href = login(o).href, `Health opens on ${login(o).row ? login(o).row.replace(/^cred:/, '') : 'Credentials'}`) : Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`)).then(
         out => `Fix started · #${item(o)} · ${out.fix.session} session in herdr pane ${out.fix.pane}`,
         err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) };
   }

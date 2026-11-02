@@ -270,7 +270,9 @@ class Reader:
                 connection,
                 source=SOURCE,
                 external_id=identity,
-                kind="work",
+                # A task: `work` is retiring (pack sd:7064), and migration
+                # 047 moves the rows this landed before to `task` as well.
+                kind="task",
                 title=payload["title"],
                 status=payload["status"],
                 who=WHO,

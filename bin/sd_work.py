@@ -93,8 +93,7 @@ def _kinds(workflow: Any) -> None:
 
     `sd_db.workflow` imports on builds older than sd:743, so the import
     `_library` checks cannot stand in for this; the alternative is an
-    `AttributeError` traceback naming a Python attribute. `REGISTER_NEEDS`
-    is the same check for `register`.
+    `AttributeError` traceback naming a Python attribute.
     """
     missing = [name for name in KIND_NEEDS if not hasattr(workflow, name)]
     if missing:
@@ -245,7 +244,7 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
         changes["priority"] = None
     if args.clear_due:
         changes["due"] = None
-    # Clear only: `sd work register` records a branch from git, and `edit_item` refuses any other value (sd:2729).
+    # Clear only: the build records a branch (`build.py`), and `edit_item` refuses any other value (sd:2729).
     if args.clear_branch:
         changes["branch"] = None
     # The field `add` sets and nothing could change afterwards. It is not in
@@ -330,174 +329,6 @@ def _library():
             "t, whose lib/ is the sd_db bin/ runs"
         ) from error
     return sd_db, workflow
-
-
-#: What `register` calls that a build predating it does not carry, as
-#: `(module suffix, attribute)`.
-#:
-#: The import above cannot stand in for this. `sd_db.workflow` has existed for
-#: a long time and imports cleanly on every build; `register_work_item` is new
-#: inside it. Checking only that the module arrived would let a stale library
-#: reach the call and fail there as an `AttributeError` -- a traceback, in a
-#: verb that is careful never to produce one, and naming a Python attribute
-#: rather than the install that is behind. Named, all three, so the remedy is
-#: a sentence instead of a stack.
-REGISTER_NEEDS = (
-    ("workflow", "register_work_item"),
-    ("repos", "registered_for"),
-    ("sources.docs_work", "default_branch"),
-)
-
-
-def _register_library(sd_db):
-    """The three modules `register` reads and writes through, or a refusal.
-
-    Checked before the first of them is called, so a machine carrying a build
-    that predates the verb is told which install to fix rather than which
-    attribute was absent.
-    """
-
-    import importlib  # noqa: PLC0415 - only this verb needs it
-
-    found = {}
-    missing = []
-    for module_name, attribute in REGISTER_NEEDS:
-        try:
-            module = importlib.import_module(f"sd_db.{module_name}")
-        except ImportError:
-            missing.append(f"sd_db.{module_name}")
-            continue
-        if not hasattr(module, attribute):
-            missing.append(f"sd_db.{module_name}.{attribute}")
-            continue
-        found[module_name] = module
-    if missing:
-        raise WorkRefusal(
-            "the installed sd_db cannot register work items; it is missing "
-            + ", ".join(missing)
-            + ". Update this pack checkout, whose lib/ is the sd_db bin/ runs, "
-            "then run this again."
-        )
-    return tuple(found[name] for name, _ in REGISTER_NEEDS)
-
-
-def _frontmatter(prd: pathlib.Path) -> tuple[str, str]:
-    """`title:` and `created:`, or a refusal naming the file and what it lacks."""
-
-    try:
-        from sd_db.sources.frontmatter import FrontmatterError  # noqa: PLC0415
-        from sd_db.sources.frontmatter import read as read_frontmatter  # noqa: PLC0415
-    except ImportError as error:
-        raise WorkRefusal(
-            "the installed sd_db cannot read work-item frontmatter; update this pack checkou"
-            "t, whose lib/ is the sd_db bin/ runs"
-        ) from error
-    try:
-        front, _ = read_frontmatter(prd.read_text(encoding="utf-8"))
-    except (FrontmatterError, OSError, UnicodeError) as failure:
-        raise WorkRefusal(f"{prd}: {failure}") from failure
-    title, created = front.get("title"), front.get("created")
-    if not title or not created:
-        raise WorkRefusal(
-            f"{prd} needs `title:` and `created:` in its frontmatter; "
-            "the row takes its name and its date from the file, not from you")
-    return str(title), str(created)
-
-
-def _working_branch(docs_work: Any, root: pathlib.Path) -> str | None:
-    """The local branch this row is to be worked on, or None when there is none.
-
-    `item.branch` is read one way everywhere: as the branch the work happens
-    ON. The runner refuses a row without one, `configure_item` refuses the
-    remote default for it, `sd-plan` checks it out and pushes to it. So what
-    goes in the column is a local head, or nothing.
-
-    This verb used to write `docs_work.default_branch(root)` -- `origin/main`,
-    a remote-tracking name that passes the runner's shape check and names no
-    local head, so a row carrying it reads as runnable everywhere and fails
-    only inside the clone. System sd:462 (platypeeps/system#265) established
-    that, repaired the 65 rows that carried it, and changed the library's own
-    verb; this verb was not in that enumeration, so it went on writing the
-    value the repair removed. `default_branch` still means what its docstring
-    says -- the branch a merge lands on -- and is still read below for the
-    comparison; it was the wrong source for this column, not a wrong function.
-
-    One case names a working branch honestly: the checkout is on a local
-    branch that is not the default, as a runner clone on `plan/<slug>` is when
-    `sd-plan` registers the folder it just wrote. On the default, or detached,
-    the answer is None -- the state a task row starts in, and the one
-    `sd work register` fills from a checkout on a branch.
-
-    Mirrored from `sd_db.jobs.cli._working_branch` rather than imported: that
-    module is a CLI whose import opens the library's own argument parser, and
-    this verb's contract with `sd_db` is the three attributes `REGISTER_NEEDS`
-    names. The agreement that matters is the value in the column, which
-    `tests/test_sd_work.py` pins on both sides of the default.
-    """
-    current = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
-    if not current:
-        return None
-    # `origin/main` -> `main`. When `origin/HEAD` is unreadable -- a checkout
-    # with no remote -- `default_branch` guesses `origin/main`, and `main` and
-    # `master` are the two names the fleet's defaults go by, so the guess is
-    # widened to the pair. When it was read, the read name alone is the
-    # default: a local `main` in a repository whose default is `dev` is a
-    # working branch by this function's own definition, and the unconditional
-    # pair discarded it (sd:639).
-    _, _, default = docs_work.default_branch(root).partition("/")
-    read = sd_lib.git_output(
-        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], root)
-    defaults = {default} if read else {default, "main", "master"}
-    if current in defaults:
-        return None
-    return current
-
-
-def _register(sd_db, connection, args, who: str) -> Any:
-    """Make the row that owns a `docs/work` folder already on disk.
-
-    The folder is the input and git is the rest of it: the title and date come
-    from the frontmatter, the branch and commit from the checkout, and the
-    status is always `planning`, because an item nobody has started is what a
-    new folder is. Nothing here decides anything, which is why it takes no
-    flags beyond the path.
-
-    There is no repository argument, for the reason `sd-status` has none
-    (R10-D6): the checkout is the one enclosing the working directory, and the
-    path is relative to it. A row whose path resolved against a checkout the
-    caller was not standing in would name a file nobody can read. Which *row*
-    that checkout belongs to is a further question, answered below by its
-    origin rather than by its place on this disk.
-    """
-
-    workflow, repos, docs_work = _register_library(sd_db)
-    root = sd_lib.repo_root()
-    if root is None:
-        raise WorkRefusal("register requires a Git checkout; run `sd work register PATH` "
-                          "from inside the checkout that holds PATH")
-    prd = (root / args.path).resolve()
-    try:
-        relative = prd.relative_to(root).as_posix()
-    except ValueError:
-        raise WorkRefusal(f"{args.path} is outside {root}") from None
-    if not prd.is_file():
-        raise WorkRefusal(f"no file at {prd}")
-    title, created = _frontmatter(prd)
-    # The repository this checkout *is*, not the directory it sits in. A
-    # runner clone carries the same files at another path, and resolving by
-    # path alone refuses every run made from one. A linked worktree is looked
-    # up as its main checkout (sd:1293), the way `add` files a task; the
-    # folder and the commit are still read from the worktree, where they are.
-    origin = sd_lib.git_output(["remote", "get-url", "origin"], root)
-    checkout = sd_lib.main_worktree_root(root)
-    repo = sd_lib.stored_repo(repos.registered_for(connection, str(checkout), origin or None))
-    commit = sd_lib.git_output(
-        ["log", "-1", "--format=%H", "--", relative], root)
-    return workflow.register_work_item(
-        connection, repo=repo, path=relative, title=title, created_at=created,
-        branch=_working_branch(docs_work, root),
-        source_commit=commit or None, who=who,
-    )
 
 
 #: The row belongs to no checkout, said as a sentence rather than as a blank.
@@ -607,12 +438,6 @@ def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = No
     if isinstance(value, dict) and "next_occurrence" in value:
         _occurrence_line(value, following)
     if isinstance(value, dict):
-        # `register` is the one verb that can do nothing and still succeed.
-        # Registering twice is deliberately not an error -- the unique index
-        # makes the second call safe -- but a caller who cannot tell the two
-        # apart will read "here is the row" as "I just made it".
-        if value.get("created") is False:
-            print("already registered; nothing changed")
         _print_notes(value, None if audit else audited)
         print(f"revision: {value['revision']}")
 
@@ -881,14 +706,14 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
 
 
 #: The names a default branch goes by; a row on one has no branch of its own
-#: to land, so a close needs no merge of it (see `_working_branch`).
+#: to land, so a close needs no merge of it.
 DEFAULT_BRANCHES = ("main", "master")
 
 
 def _refuse_unlanded_branch(workflow: Any, connection: Any, args: argparse.Namespace) -> None:
     """Refuse a plain close of a row worked on its own branch (sd:1990).
 
-    `sd work register` records the branch an item is worked on.
+    The build records the branch an item is worked on (`build.py`).
     Three such items were closed with a plain `sd task status done` while
     their branches had no pull request, and one never reached main. A close
     now needs a recorded merge (the `Code delivery` comment `sd-ship` writes,
@@ -1410,8 +1235,6 @@ def run(args: argparse.Namespace) -> int:
             result, following = _change_status(workflow, connection, args, who)
         elif action == "note":
             result = _note(workflow, connection, args, who, revision)
-        elif action == "register":
-            result = _register(sd_db, connection, args, who)
         elif action in {"relink", "cancel", "cancel-task", "deliver"}:
             import sd_db.progress as progress
 
@@ -1775,7 +1598,7 @@ def register(groups: Any, store: Any) -> None:
     due.add_argument("--due", help="YYYY-MM-DD; to defer the item, set a later date, or park it with --park")
     due.add_argument("--clear-due", action="store_true")
     edit.add_argument("--clear-branch", action="store_true",
-                      help="clear a stale branch name; `sd work register` records one")
+                      help="clear a stale branch name; the build records one")
     # `--belongs-to` and not `--repo`: see `_belongs_to`. `--no-repo` is the
     # word `add` already uses for the same idea, so the pair reads the same on
     # both verbs.
@@ -1868,13 +1691,6 @@ def register(groups: Any, store: Any) -> None:
     cancel.add_argument("item", type=item_id, help=ITEM_HELP)
     cancel.add_argument("--reason", required=True)
     _output(cancel, "cancel", revision=True)
-    register_verb = working.add_parser(
-        "register", help="make the row that owns a docs/work folder on disk")
-    register_verb.add_argument(
-        "path", help="docs/work/<item>/prd.md, relative to the repository; "
-        "a design.md-only folder names its row with `item: sd:<id>` instead")
-    _output(register_verb, "register")
-
     deliver = working.add_parser("deliver", help="verify a delivery commit and complete its item")
     deliver.add_argument("item", type=item_id, help=ITEM_HELP)
     deliver.add_argument("commit", help="full commit SHA carrying the item's Delivers trailer")

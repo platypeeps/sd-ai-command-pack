@@ -80,8 +80,6 @@ REACHED_WITH_THE_LIBRARY = {
     "sd-ship::Ship.row_merges": "a Ship exists only after main() called the helper",
     # Handed that same `Ship` by `Ship.adjudicate`.
     "sd_ship_dispositions.py::adjudicate": "called with a Ship, built after the helper",
-    # Only called from `_register`, after `_register_library(sd_db)`.
-    "sd_work.py::_frontmatter": "_register() is handed sd_db and resolves the library first",
 }
 
 SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
