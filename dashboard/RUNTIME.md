@@ -295,7 +295,8 @@ Publish now answers 202 with a run id; the run takes Adversarial review's shape 
 It runs `claude -p` on Sonnet, `--restricted`, allowing Notion and Drive read and write tools, Edit on the queue, and Bash on `sd-db repo channels` and `sd-research-kit delivered` only.
 A drain holding a trash request also gets `notion-delete-pages` and `update_drive_file`; both trash recoverably.
 A drain holding a Drive update, a Drive request that names its `file`, also gets `get_doc_as_markdown`, `update_drive_file`,
-the kit's `highlight` and Write in its work folder under the workspace-mcp attachments folder, to mark what changed (sd:7252).
+the kit's `highlight` and Write to `sd-<run id>-*` names at the top of the workspace-mcp attachments folder, to mark what
+changed (sd:7252).
 The outcome is read from the queue, not the model. claude is `CLAUDE_BIN`, else on PATH, else `~/.local/bin/claude`; it needs the MCP servers `notion` and `workspace-mcp`.
 Experiment on the Research page (sd:5296, `research_experiments.py`) starts `python3 -m sd_dashboard.research_experiments run <folder>` from this folder through `sweep.spawn`.
 One lock, `~/.local/state/system/research-experiments/lock`, holds every run: a second start is a 409. Each run is one `claude -p` with an exact allowlist: Notion reads and writes through the user's `notion` server alone.

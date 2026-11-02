@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
@@ -1172,11 +1173,22 @@ esac
         """sd:7252: a Drive request naming its `file` marks what changed, so the drain reads back and replaces."""
         allowed, prompt = self.drive_request(file="1AbCdEf")
         self.assertEqual([tool for tool in allowed if tool in self.UPDATE_TOOLS], self.UPDATE_TOOLS)
-        work = research_slides.attachments() / "sd-drain-plan-20261102T190000Z"
+        # Top-level names in the attachments folder, the run id their prefix: workspace-mcp reads that folder's top level.
+        folder = research_slides.attachments()
+        work = f"{folder}/sd-drain-plan-20261102T190000Z-"
         self.assertIn(f"Bash({publish_drain_kit()} highlight *)", allowed)
-        self.assertEqual([tool for tool in allowed if tool.startswith("Write")], [f"Write(/{work}/**)"])
-        self.assertTrue(work.is_dir())
-        self.assertIn(f"{publish_drain_kit()} highlight --previous {work}/previous.md", prompt)
+        rules = [tool for tool in allowed if tool.startswith("Write")]
+        self.assertEqual(rules, [f"Write(/{work}*)"])
+        self.assertTrue(folder.is_dir())
+        self.assertFalse([path for path in folder.iterdir() if path.is_dir()])
+        self.assertIn(f"{publish_drain_kit()} highlight --previous {work}previous.md --since", prompt)
+        self.assertIn(f"`file_path` `{work}marked.html`", prompt)
+        glob = rules[0][len("Write(/"):-1]
+        self.assertTrue(fnmatch.fnmatchcase(f"{work}marked.html", glob))
+        for other in (f"{folder}/sd-drain-plan-20261102T190001Z-marked.html", f"{folder}/memory-retro-draft.html",
+                      f"{folder}/sd-drain-plan-20261102T190000Z.html", f"{folder}/../sd-drain-plan-20261102T190000Z-x"):
+            with self.subTest(other=other):
+                self.assertFalse(fnmatch.fnmatchcase(other, glob))
         self.assertIn("Never delete, move, trash or share a page or file", prompt)
 
     def test_a_drive_create_or_a_notion_write_gets_no_update_tools(self):

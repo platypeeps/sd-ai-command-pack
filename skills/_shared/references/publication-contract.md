@@ -499,9 +499,9 @@ Draining is six steps per request, and the order matters:
      of scope for now. And `sd-publish-drive`'s publishing folder is not a
      mirror: a blog publishes from it, so a review mark there would ship.
      The headless Publish now drain gets `get_doc_as_markdown`,
-     `update_drive_file`, `highlight` and Write in a work folder under the
-     workspace-mcp attachments folder only for a run that holds such an
-     update, and its prompt names those paths.
+     `update_drive_file`, `highlight` and Write to `sd-<run id>-*` names
+     at the top of the workspace-mcp attachments folder only for a run
+     that holds such an update, and its prompt names those paths.
 
    - `notion-row` -- the Notion connector, one database row. Run
      `sd-research-kit project` first, at the start of the drain, and drain
