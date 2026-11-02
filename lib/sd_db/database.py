@@ -143,7 +143,12 @@ def lock_holders(connection) -> str:
     this lists every other process with the database, its WAL or its
     shared memory open: one of them holds the write transaction, and its
     elapsed time points at the long one. A read that fails says so.
+    A remote connection's lock is on the hub, whose files this machine
+    cannot list, so the report names the hub instead (pack sd:7196).
     """
+    hub = served_by(connection.connection if isinstance(connection, Patient) else connection)
+    if hub is not None:
+        return f"{HOLDERS} unread: the lock is on the hub {hub}; list them there"
     try:
         path = next(row[2] for row in connection.execute("PRAGMA database_list") if row[1] == "main")
         files = [name for name in (path, path + "-wal", path + "-shm") if path and os.path.exists(name)]

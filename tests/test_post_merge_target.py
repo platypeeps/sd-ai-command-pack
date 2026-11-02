@@ -87,6 +87,15 @@ class ThePostMergeTargetRuns(unittest.TestCase):
         self.git("switch", "-q", "--detach")
         self.assertEqual(self.post_merge(), [f"repo-sync.sh refresh {self.checkout}", "dashboard.sh health"])
 
+    def test_the_refresh_waits_on_the_lanes_alone_inside_the_lanes_bound(self) -> None:
+        # REGRESSION sd:7209: the drain waited on every gate and lane up to 45 minutes, past the lane's 600 s,
+        # where system's post-merge skips the gate wait and bounds the rest at 420 s (system sd:5799).
+        tool = self.tmp / "system/local-repo-sync/repo-sync.sh"
+        tool.write_text(f'echo "lanes_only=$REPO_SYNC_LANES_ONLY wait=$REPO_SYNC_DRAIN_WAIT" >> "{self.tmp}/calls"\n',
+                        encoding="utf-8")
+        self.git("switch", "-q", "--detach")
+        self.assertEqual(self.post_merge()[0], "lanes_only=1 wait=420")
+
 
 if __name__ == "__main__":
     unittest.main()
