@@ -416,6 +416,15 @@ class TheSixMonths(Fixture):
             ("2026-08", True, 7.0, 7.0, {"capped": 0.0, "plan": 0.0}),    # a row on no bill is a row and its dollars
             ("2026-09", True, 80.0, None, {"capped": 80.0, "plan": 0.0})])
 
+    def test_an_open_hold_on_no_bill_is_no_row_in_an_empty_month(self):
+        """pack sd:7229: the read's roles carry every open hold whatever its month, so one on no bill made each empty
+        month read $0 spent, not no rows."""
+        self.cost("reserved", "2026-05-02T10:00:00Z", provider="claude", bill=None, role="author", usd=2, call_id="old")
+        months = self.ranged()["ranged"]["spend"]["months"]
+        self.assertEqual([(m["month"], m["rows"], m["unbilled"]) for m in months], [
+            ("2026-04", False, None), ("2026-05", False, None), ("2026-06", False, None),
+            ("2026-07", True, None), ("2026-08", True, 7.0), ("2026-09", True, None)])
+
     def test_each_month_is_sd_usage_s_own_read_and_there_are_six(self):
         months = []
         real = usage.read
