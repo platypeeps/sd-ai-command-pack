@@ -119,6 +119,17 @@ class DispositionTests(unittest.TestCase):
         self.assertEqual([row["path"] for row in findings], [f"f{n}.py" for n in range(7)])
         self.assertTrue(all(len(row["summary"]) == sd_ship_dispositions.SUMMARY_CHARS for row in findings))
 
+    def test_a_blocking_refusal_keeps_the_full_finding_text_in_its_record(self):
+        """pack sd:7133. The refusal's `summary` is cut; `text` keeps the whole finding for the prepare log."""
+        long = "Dating the answer from arrival assumes fresh observations. " * 8
+        row = {"disposition": "blocking", "severity": "high", "path": "a.py", "line": 3, "summary": long}
+        review = SimpleNamespace(args=SimpleNamespace(no_item=False, review_id=None, item=7))
+        refusal = sd_ship_dispositions.blocking_refusal(review, "abc123", {"findings": [row]}, "local review blocking")
+        [finding] = ship.failure("prepare", refusal)["findings"]
+        self.assertEqual(finding["text"], long.strip())
+        self.assertTrue(finding["summary"].endswith("..."))
+        self.assertLess(len(finding["summary"]), len(long))
+
     def test_blank_template_and_retired_flags_refuse_without_writing(self):
         self.blocked()
         blank = json.loads(self.command().stdout)["proposal"]

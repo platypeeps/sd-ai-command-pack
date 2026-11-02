@@ -5432,10 +5432,19 @@ class FailureNotes(SharedQueue):
                                      closes=(2,))["expected_head"]
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding\nmore"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
-        body = f"Lane failed in prepare at {head[:12]}: a blocking finding"
         [entry] = self.entries()
+        body = f"Lane failed in prepare at {head[:12]}: a blocking finding; full text: {entry['prepare_log']}"
         self.assertEqual((self.lane_notes(), set(self.note_kinds)), ([(1, body), (2, body)], {"comment"}))
         self.assertEqual((entry["status"], entry["note"]), ("failed", {"sd:1": "written", "sd:2": "written"}))
+
+    def test_a_failed_prepare_note_points_at_the_prepare_log(self) -> None:
+        """pack sd:7133. The note's reason is cut; the log holds the whole finding, so the note names it."""
+        row = {"status": "failed", "step": "prepare", "item": 1, "expected_head": "a" * 40,
+               "reason": "a blocking finding", "prepare_log": "/logs/prepare-1-x.log", "log_host": "hub"}
+        notes: list[str] = []
+        sd_lane.note_ended(row, self.repo, lambda item, body, main: notes.append(body) or "written")
+        self.assertEqual(notes, [f"Lane failed in prepare at {'a' * 12}: a blocking finding; full text: "
+                                 "/logs/prepare-1-x.log"])
 
     def test_a_skip_notes_its_item(self) -> None:
         tree = self.worktree("topic")
@@ -5462,7 +5471,9 @@ class FailureNotes(SharedQueue):
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "merge")] = {"ok": False, "phase": "merging", "error": "the merge was refused"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
-        self.assertEqual(self.lane_notes(), [(1, "Lane failed in merge at head-1: the merge was refused")])
+        [entry] = self.entries()
+        self.assertEqual(self.lane_notes(), [(1, "Lane failed in merge at head-1: the merge was refused; "
+                                                 f"full text: {entry['merge_log']}")])
 
     def test_an_exception_in_the_merge_step_notes_merge(self) -> None:
         """pack sd:5968: a raise after `advance` names merge in the note and the finish record, not prepare."""

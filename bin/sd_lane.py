@@ -2813,10 +2813,11 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
 def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None) -> dict[str, str]:
     """Note each item `row` carries, its own and its `closes`, once it ends failed or skipped (sd:5963).
 
-    The note names the step, the reason's first line and the head, as a
-    `comment`: `sd task note` writes no `exec` note. No item status changes;
-    the entry holds that state. A write that fails is kept in the answer,
-    `{"sd:N": "written" or "failed: ..."}`, and changes no outcome. `note`
+    The note names the step, the reason's first line, the head and the step's
+    log, where the full text is (sd:7133), as a `comment`: `sd task note`
+    writes no `exec` note. No item status changes; the entry holds that
+    state. A write that fails is kept in the answer, `{"sd:N": "written" or
+    "failed: ..."}`, and changes no outcome. `note`
     defaults to `default_note`, read at the call, so a suite can replace it.
     """
     if row.get("status") not in NOTED:
@@ -2825,6 +2826,9 @@ def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None
                   str(row.get("code") or "no reason recorded"))
     head = str(row.get("head") or row.get("expected_head") or "an unrecorded head")[:12]
     body = f"Lane {row['status']} in {row.get('step') or 'the lane'} at {head}: {reason[:400]}"
+    log = row.get("merge_log" if row.get("step") == "merge" else "prepare_log")
+    if log:  # the reason is cut; the step's log holds the whole answer, a blocking finding's full text included
+        body += f"; full text: {log}"
     written: dict[str, str] = {}
     for item in dict.fromkeys([row.get("item"), *(row.get("closes") or ())]):
         try:
