@@ -1,7 +1,7 @@
 """The rail split by job (sd:5781).
 
-What this slice promises: the rail's Now group is Today, Decide, Briefs and Queue, and its Work group gains GitHub after
-Tasks. Today has no tabs since sd:5921. Decide holds Decisions and Scoring, the Review page renamed; its
+What this slice promises: the rail's Now group is Today, Decide and Briefs (Queue left it in pack sd:7234), and its
+Work group gains GitHub after Tasks. Today has no tabs since sd:5921. Decide holds Decisions and Scoring, the Review page renamed; its
 rail badge counts both. GitHub holds Pull requests, Your issues and Intake. Each old address reaches its new home with its
 query: `/review` serves Decide and opens Scoring, and Today's `#view=decisions`, `#view=github` and `#view=issues` open the
 view on its new page. The `moved:start` blocks run under JavaScriptCore (osascript) with a stand-in location and history.
@@ -67,8 +67,9 @@ def moved(script, *, path="/today", search="", hash=""):
 
 
 class TheRail(unittest.TestCase):
-    def test_now_is_today_decide_briefs_and_queue(self):
-        self.assertEqual([name for name, _, _ in group("Now")], ["Today", "Decide", "Briefs", "Queue"])
+    def test_now_is_today_decide_and_briefs(self):
+        # pack sd:7234: Queue left the rail; Today's Queue view holds it.
+        self.assertEqual([name for name, _, _ in group("Now")], ["Today", "Decide", "Briefs"])
         # Decide keeps Review's chord and icon: g l still opens the queue's page.
         self.assertIn(("Decide", "list-checks", "l"), group("Now"))
 
@@ -93,12 +94,13 @@ class TheGitHubRegistration(Registers, unittest.TestCase):
 class TheTabs(unittest.TestCase):
     def test_today_is_one_page_whose_sections_are_rail_views(self):
         # sd:5921 folded Now, Inbox, Status and Work into one page; pack sd:7090 made its sections the rail's views, each
-        # a <section id="view-<id>"> panel, so the page still draws no tab row of its own. Pack sd:7218: In motion second.
-        self.assertEqual(views(js("today.js")), [("needs", "Needs you"), ("motion", "In motion"), ("digest", "Since yesterday"),
-                                                 ("timeline", "Timeline"), ("queues", "Queues")])
+        # a <section id="view-<id>"> panel, so the page still draws no tab row of its own. Pack sd:7218: what runs now
+        # second; pack sd:7234: Queue holds it, with Queues and In motion folded in.
+        self.assertEqual(views(js("today.js")), [("needs", "Needs you"), ("queue", "Queue"), ("digest", "Since yesterday"),
+                                                 ("timeline", "Timeline")])
         self.assertEqual(panels("today.html"), [])
         page = (V2 / "today.html").read_text(encoding="utf-8")
-        for id_ in ("needs", "digest", "timeline", "motion", "queues"):
+        for id_ in ("needs", "queue", "digest", "timeline"):
             with self.subTest(view=id_):
                 self.assertRegex(page, rf'<section [^>]*id="view-{id_}"')
         page = (V2 / "today.html").read_text(encoding="utf-8")

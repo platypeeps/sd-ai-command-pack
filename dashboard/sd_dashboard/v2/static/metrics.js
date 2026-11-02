@@ -9,6 +9,7 @@
 // Age. A lamp shows the view that holds its reading. Skill use moved to Skills' Usage view (sd:5881).
 // pack sd:7208: the range 6mo reads /api/metrics?range=6mo and draws its `ranged` parts: Spend adds each month by bill,
 // and Providers and CI read the six months. The lamps and the badge stay on the 7d reading. ?range=6mo keeps the choice.
+// pack sd:7233: Lane times, Queue's Last 7 days moved here, reads the document's `lanes`: 7 days whatever the range.
 // moved:start
 // sd:5881: an old address of the Skills view opens Skills' Usage view, keeping its query (?row=).
 {
@@ -17,7 +18,7 @@
 }
 // moved:end
 window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 'Providers' }, { id: 'ci', label: 'CI' },
-  { id: 'age', label: 'Age' }];
+  { id: 'times', label: 'Lane times' }, { id: 'age', label: 'Age' }];
 (() => {
   const { html, put, plural, cells } = window.markup;
   const $ = id => document.getElementById(id);
@@ -88,6 +89,13 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     put1('ci', d.ci.error ? { kind: 'CI · not read', title: 'CI health', s: 'unknown', facts: [['Reason', d.ci.error]], cli: 'sd-ship -C CHECKOUT lane list' }
       : { kind: `CI · ${d.ci.days} days`, title: 'Gate runs through the merge lane', s: d.ci.flaky.length ? 'caution' : 'ok',
         facts: [['Since', at(d.ci.since)], ['Repositories', d.ci.repos.length], ['Flaky heads', d.ci.flaky.length], ['Unreadable entries', d.ci.unreadable], ['Source', 'reads.lane_entries']], cli: 'sd-ship -C CHECKOUT lane list' });
+    if (d.lanes && !d.lanes.error) d.lanes.lanes.filter(l => l.times.error || l.times.entries).forEach(l => put1(`lane:${l.path}`, l.times.error
+      ? { kind: 'Lane times · not read', title: l.repo, s: 'unknown', facts: [['Reason', l.times.error]], cli: `sd-ship -C ${l.path} lane list` }
+      : { kind: `Lane times · ${l.times.days} days`, title: l.repo, s: l.times.over ? 'caution' : 'ok',
+        facts: [['Entries', l.times.entries], ['Median wait', mins(l.times.wait)], ['Median gate', mins(l.times.gate)],
+          ['Slowest entry', l.times.slowest ? `sd:${l.times.slowest.item} ${l.times.slowest.title} · ${mins(l.times.slowest.total)}` : 'none ended'],
+          ['Source', 'sd_lane.lane_times: each entry\'s history rows']],
+        note: l.times.over ? 'Median wait past 1 h: the lane run files the parallel-lanes question.' : '', cli: `sd-ship -C ${l.path} lane list` }));
     d.unread.forEach(x => put1(`unread:${x.id}`, { kind: 'Not read', title: x.name, s: 'unknown', facts: [['Reason', x.reason]], cli: '—' }));
   }
   const windowed = b => ['subscription', 'plan'].includes(b.cost_basis);
@@ -95,6 +103,8 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   const scState = r => r.fallthrough && !r.passes ? 'caution' : 'ok';
   const at = iso => `${String(iso).slice(5, 16).replace('T', ' ')}Z`;
   const rate = r => r == null ? '—' : `${Math.round(r * 100)}%`;
+  const dur = s => s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`;
+  const mins = s => s == null ? 'none ended' : dur(Math.round(s));
   // A repository name may break after its owner, so a narrow table keeps every column on screen.
   const slashed = name => { const cut = name.indexOf('/'); return cut < 0 ? name : html`${name.slice(0, cut + 1)}<wbr>${name.slice(cut + 1)}`; };
   // A repository with a flaky head is caution, as its row in Flaky tests; a gate failure alone is the gate doing its job.
@@ -196,6 +206,22 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     put($('flaky-body'), c.flaky.length ? html`${c.flaky.map(f => row(`flaky:${f.repository}:${f.head}`, html`<td class="what"><button type="button">sd:${f.item}</button><small>${f.repository}</small></td><td class="mono">${f.head.slice(0, 12)}</td><td class="mono hide-sm">${f.failed.map(at).join(' · ')}</td><td class="mono">${at(f.passed)}</td>`))}`
       : html`<tr><td colspan="4" class="why">No head failed its gate and then passed at that head ${within(c)}.</td></tr>`);
   }
+  // Lane times (pack sd:6006, moved from Queue in pack sd:7233): one row per lane with an entry in 7 days, a read that
+  // failed its own unknown row; the quiet lanes fold into one line. A median wait past an hour is caution, in words too.
+  function laneTimes() {
+    const T = DOC?.lanes;
+    if (!T || T.error) { put($('times-body'), html`<tr><td colspan="6">${unknownBlock(T ? T.error : 'the Metrics document did not arrive')}</td></tr>`); $('times-note').textContent = ''; return; }
+    const read = T.lanes.filter(l => l.times.error || l.times.entries), quiet = T.lanes.length - read.length;
+    const days = (read.find(l => l.times.days) || { times: { days: 7 } }).times.days;
+    put($('times-body'), read.length ? html`${read.map(l => { const t = l.times, st = t.error ? 'unknown' : t.over ? 'caution' : 'ok';
+      return row(`lane:${l.path}`, html`<td class="g g-${st}">${G[st]}<span class="sr">${t.error ? 'not read' : t.over ? 'caution: median wait past 1 h' : 'normal'}</span></td><td class="what"><button type="button">${l.repo}</button></td>${t.error
+        ? html`<td colspan="4" class="why">▨ not read: ${t.error}</td>`
+        : html`<td class="num">${String(t.entries)}</td><td class="num">${mins(t.wait)}</td><td class="num">${mins(t.gate)}</td><td class="mono hide-sm">${t.slowest ? html`sd:${String(t.slowest.item)} ${t.slowest.title} · ${mins(t.slowest.total)}` : 'none ended'}</td>`}`); })}`
+      : html`<tr><td colspan="6" class="why">No lane ran an entry in the last ${String(days)} days.</td></tr>`);
+    const over = read.filter(l => !l.times.error && l.times.over).map(l => l.repo);
+    $('times-note').textContent = [over.length ? `▲ Median wait past 1 h: ${over.join(', ')}. The lane run files the parallel-lanes question.` : '',
+      quiet && read.length ? `No entry in ${days} days: ${plural(quiet, 'lane')}.` : ''].filter(Boolean).join(' ');
+  }
   // pack sd:7208: each of the six months by bill. A month with no ledger row says so, never $0; a window bill is not a zero.
   function months() {
     const sm = DOC?.ranged?.spend;
@@ -215,6 +241,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     lamps(); spend(); months(); trends(); tables(); age();
     put($('model'), unreadBlock('model'));
     ci();
+    laneTimes();
     const o = DOC?.observed;
     put($('observed'), !DOC ? html`` : o.error ? unknownBlock(o.error) : html`<p class="foot-note">Observed ${o.since} → ${o.until}: ${plural(o.recorded_requests, 'request')} recorded, ${plural(o.finished_review_attempts, 'finished review attempt')}, ${plural(o.recorded_deliveries, 'recorded delivery', 'recorded deliveries')}. <button class="linkbtn" type="button" data-ev="observed">Details</button></p>`);
   }
@@ -299,7 +326,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     adopt: doc => {
       DOC = doc; evidence(); CELLS = readCells(); attention();
       document.body.dataset.observed = doc.read;
-      const parts = [...['usage', 'trend', 'numbers', 'scorecard', 'age', 'observed', 'controls', 'ci'].map(k => [k, doc[k]]),
+      const parts = [...['usage', 'trend', 'numbers', 'scorecard', 'age', 'observed', 'controls', 'ci', 'lanes'].map(k => [k, doc[k]]),
         ...(doc.ranged ? ['spend', 'scorecard', 'ci'].map(k => [`6mo ${k}`, doc.ranged[k]]) : [])];
       const failed = parts.filter(([, p]) => p.error || p.stale);
       FIRST = CELLS.find(c => c.state === 'warning' || c.state === 'caution')?.ev || Object.keys(EV).find(k => k.startsWith('win:')) || null;

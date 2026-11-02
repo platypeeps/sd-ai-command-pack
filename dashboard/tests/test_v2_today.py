@@ -197,19 +197,16 @@ class TheAssets(BrowserSession):
         self.assertIn("put($('track-plot'), marks.length ? html`<svg ", TODAY_JS)
 
 
-    def test_each_in_motion_table_carries_its_caption(self):
-        """pack sd:6975: each In motion table says in one line what it holds."""
-        section = re.search(r'<section id="view-motion" aria-labelledby="motion-h" hidden>(.*?)</section>',
+    def test_the_queue_table_carries_its_caption(self):
+        """pack sd:6975: a table says in one line what it holds; pack sd:7234: the Queue view has one table."""
+        section = re.search(r'<section id="view-queue" aria-labelledby="queue-h" hidden>(.*?)</section>',
                             (V2 / "today.html").read_text(encoding="utf-8"), re.S).group(1)
         tables = re.findall(r"<table\b.*?</table>", section, re.S)
-        self.assertEqual(len(tables), 2)
+        self.assertEqual(len(tables), 1)
         captions = [" ".join(Parsed(m.group(1)).text) if (m := re.search(r"<caption>(.*?)</caption>", t, re.S)) else None
                     for t in tables]
         self.assertEqual(captions, [
-            "Headless build runs: items, stage, start, ETA from past runs, model and cost.",
-            # pack sd:7222: the sessions band by repo.
-            "Open items with a live worktree, lane entry, sd-* command or herdr agent, grouped by repo, longest-running first.",
-        ])
+            "One row per repo; open one for its working, merging, next, blocked, suggested and ended rows."])
 
 class TheShellPort(BrowserSession):
     def test_the_shell_builds_nothing_the_policy_refuses(self):
@@ -366,3 +363,5 @@ JSON.stringify({
 
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route = "today", "Today", "/today"
+    # pack sd:7234: the Queue view's lane, build and runner routes.
+    api = ("/api/queue", "/api/queue/move", "/api/queue/builds", "/api/queue/builds/retry", "/api/queue/runner")

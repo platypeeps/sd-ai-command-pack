@@ -398,7 +398,8 @@ Each goes to the operator as its own question on the dashboard.
 - [ ] `--plan` with `creating` set and no candidate row exits non-zero and prints no create.
 - [ ] After a refused `Status` is set back to `written` in a fixture, with no item change, the next `project` queues
       the item and its plan writes `Status`.
-- [ ] `--plan` with a live row lacking the `Status` property exits non-zero, naming `Status`.
+- [ ] `--plan` with a database lacking the `Status` property writes the rest and names `Status` in `skipped`
+      (sd:7246); a database lacking the title exits non-zero, naming it.
 - [ ] `--plan --missing` exits non-zero and prints no create.
 - [ ] `delivered <name> <fp> --url https://example.test/<32 hex>` records the row id on the item; a second run adds no
       note.

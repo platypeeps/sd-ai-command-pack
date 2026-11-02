@@ -982,6 +982,11 @@ class Dashboard(BaseHTTPRequestHandler):
                              for key in ("id", "title", "kind", "status", "repo", "parked_at")},
                     "revision": state["revision"],
                 })
+            if path == "/queue":
+                # pack sd:7234: Queue became Today's Queue view; its Show All is that view's Ended builds filter.
+                shown = "?show=ended" if (parameters.get("show") or [""])[0] == "all" else ""
+                return self._send(301, b"", "text/plain; charset=utf-8",
+                                  overrides={"Location": f"/today{shown}#view=queue"})
             if path == "/backlog":
                 # sd:2356: Tasks took over /backlog; an old address opens Tasks with the same query. v1's screen
                 # was deleted in sd:2622.
