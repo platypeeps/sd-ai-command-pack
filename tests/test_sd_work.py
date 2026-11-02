@@ -1,6 +1,7 @@
 """The real CLI operates on a scratch database, without repository ceremony."""
 
 import argparse
+import contextlib
 import getpass
 import importlib
 import importlib.machinery
@@ -39,6 +40,15 @@ def scratch_environment(home: Path) -> dict[str, str]:
     Claude session started yesterday printed one more line after local midnight (sd:7154).
     """
     return {**{key: value for key, value in os.environ.items() if key != "CLAUDE_PID"}, "HOME": str(home)}
+
+
+@contextlib.contextmanager
+def database(*args, **kwargs):
+    """`sd_db.connect` that commits and then closes: a bare `with` commits only, and the unclosed
+    connection printed a ResourceWarning into whichever later test's captured stderr ran the collector
+    (sd:7154)."""
+    with contextlib.closing(sd_db.connect(*args, **kwargs)) as connection, connection:
+        yield connection
 
 
 class TaskCLI(unittest.TestCase):
@@ -112,7 +122,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_task_status_refuses_a_vault_row_and_names_the_stage_move(self):
         """sd:3972: a base row moves by stage only; the refusal says so and writes nothing."""
-        with sd_db.connect(home=self.home) as connection:
+        with database(home=self.home) as connection:
             item = sd_db.create_item(connection, kind="idea", title="Example idea", source="vault",
                                      external_id="topic:System/Databases/Topics/Example idea.md",
                                      stage="active", fields={"kind": "topic"})
@@ -124,7 +134,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_task_status_done_on_a_report_names_the_acknowledge_command(self):
         """sd:5065: a report closes by acknowledgement, so the refusal names that command."""
-        with sd_db.connect(home=self.home) as connection:
+        with database(home=self.home) as connection:
             item = sd_db.create_item(connection, kind="report", title="Example report")
         refused = self.call("task", "status", item, "done", code=1)
         self.assertIn(f"`sd reports acknowledge {item} --resolve-followups`", refused.stderr)
@@ -146,7 +156,7 @@ class TaskCLI(unittest.TestCase):
         old = json.loads(self.call("task", "add", "--priority", "3", "Old", "--json").stdout)["item"]["id"]
         new = json.loads(self.call("task", "add", "--priority", "3", "New", "--json").stdout)["item"]["id"]
         touched = json.loads(self.call("task", "add", "--priority", "3", "Touched", "--json").stdout)["item"]["id"]
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             connection.execute("UPDATE item SET created_at = '2026-01-01T00:00:00+00:00', "
                                "updated_at = '2026-01-02T00:00:00+00:00' WHERE id = ?", (old,))
             connection.execute("UPDATE item SET created_at = '2026-01-01T00:00:00+00:00' WHERE id = ?", (touched,))
@@ -271,7 +281,7 @@ class TaskCLI(unittest.TestCase):
         for title in ("One", "Two"):
             state = json.loads(self.call("task", "add", "--priority", "3", title, "--json").stdout)
             self.call("task", "status", state["item"]["id"], "in_progress")
-        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+        with database(sd_db.default_path(self.home), write=False) as connection:
             expected = [dict(row) for row in sd_db.reads.today_items(connection)]
         self.assertEqual(json.loads(self.call("today", "--json").stdout), expected)
 
@@ -284,7 +294,7 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual((result["item"]["kind"], result["item"]["status"]), ("task", "planning"))
         readback = json.loads(self.call("store", "item", item, "--json").stdout)
         self.assertEqual(readback["notes"], result["notes"])
-        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+        with database(sd_db.default_path(self.home), write=False) as connection:
             self.assertEqual(sd_db.reads.open_followups(connection), [])
         self.assertNotIn("advisory", self.call("task", "note", item, "--body", "Again").stderr)
 
@@ -391,7 +401,7 @@ class TaskCLI(unittest.TestCase):
         """The transition sentence `--delivered-by` and `sd work deliver` write."""
         sha = "b" * 40
         item = json.loads(self.call("task", "add", "--priority", "3", "Delivered", "--json").stdout)["item"]["id"]
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             workflow.change_status(connection, item, "done", who="fixture",
                                    reason=f"delivered at {sha} on origin/main")
         result = self.call("task", "note", item, "--body", "Late note")
@@ -409,7 +419,7 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual((state["note"]["kind"], state["note"]["body"]),
                          ("decision", f"Ruling on note #{asked}: Database rows"))
         self.assertTrue(next(note for note in state["notes"] if note["id"] == asked)["resolved_at"])
-        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+        with database(sd_db.default_path(self.home), write=False) as connection:
             self.assertEqual([row["id"] for row in sd_db.reads.open_notes(connection, "question")], [])
         self.assertNotIn("Decisions waiting", self.call("today").stdout)
 
@@ -439,7 +449,7 @@ class TaskCLI(unittest.TestCase):
         asked = self.question(item)
         before = json.loads(self.call("task", "show", item, "--json").stdout)
         args = argparse.Namespace(item=item, kind="decision", answers=asked)
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection, \
+        with database(sd_db.default_path(self.home), write=True) as connection, \
                 unittest.mock.patch.object(workflow, "resolve_item_note", side_effect=workflow.WorkflowError("cut")):
             with self.assertRaises(workflow.WorkflowError):
                 sd_work._answer(workflow, connection, args, "Pack store", "tester", None)
@@ -449,7 +459,7 @@ class TaskCLI(unittest.TestCase):
         """A filed review batch with one Approve-or-Reject question: the batch and the question's note."""
         import sd_db.review as review
 
-        with sd_db.connect(home=self.home) as connection:
+        with database(home=self.home) as connection:
             item = review.file(connection, {
                 "schema": 1, "queue": "nightly", "batch": "2026-10-18", "title": "Nightly review 2026-10-18",
                 "source": "system@6c4317b", "mode": "open",
@@ -484,7 +494,7 @@ class TaskCLI(unittest.TestCase):
         compact trail missed its own ruling. `harness_session` keeps it, a teammate's mark included."""
         import sd_db.review as review
 
-        with sd_db.connect(home=self.home) as connection:
+        with database(home=self.home) as connection:
             item = review.file(connection, {
                 "schema": 1, "queue": "nightly", "batch": "2026-10-18", "title": "Nightly review 2026-10-18",
                 "source": "system@6c4317b", "mode": "open",
@@ -503,7 +513,7 @@ class TaskCLI(unittest.TestCase):
             self.assertEqual([(note["kind"], note["session"], note["harness_session"]) for note in mine],
                              [("comment", getpass.getuser(), session), ("decision", getpass.getuser(), session)])
             ruled[session] = state["note"]["id"]
-        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+        with database(sd_db.default_path(self.home), write=False) as connection:
             for session in ("session-under-test", "session-under-test:agent-1"):
                 self.assertEqual([row["id"] for row in sd_db.reads.session_trail(connection, session, limit=10)],
                                  [ruled[session]])
@@ -530,7 +540,7 @@ class TaskCLI(unittest.TestCase):
         item, asked = self.batch_question()
         before = json.loads(self.call("task", "show", item, "--json").stdout)
         args = argparse.Namespace(item=item, kind="decision", answers=asked, option="Reject")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection, \
+        with database(sd_db.default_path(self.home), write=True) as connection, \
                 unittest.mock.patch.object(review, "rule", side_effect=review.ReviewError("cut")):
             with self.assertRaises(review.ReviewError):
                 sd_work._answer(workflow, connection, args, "Not now", "tester", None)
@@ -544,7 +554,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_answers_refuses_a_review_batch_question(self):
         """A batch question is Review's: its ruling may file a task, which `review.rule` writes and a note does not."""
-        with sd_db.connect(home=self.home) as connection:
+        with database(home=self.home) as connection:
             item = sd_db.create_item(connection, kind="task", title="Batch", source="task-ref",
                                      external_id="review:example:1")
         asked = self.question(item)
@@ -624,7 +634,7 @@ class TaskCLI(unittest.TestCase):
         repository the kind cannot have and is refused rather than ignored.
         """
         root = self._checkout("project")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
 
         ordinary = json.loads(self.call("task", "add", "--priority", "3", "Ordinary", "--json", cwd=root).stdout)
@@ -645,7 +655,7 @@ class TaskCLI(unittest.TestCase):
                       "--json", cwd=root).stdout)
         self.assertIsNone(redundant["item"]["repo"])
 
-        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+        with database(sd_db.default_path(self.home), write=False) as connection:
             grouped = sorted(row["kind"] for row in
                              sd_db.reads.backlog_items(connection, repo=sd_db.reads.NO_REPO))
         # sd:809: `followup` left the set, so the loop above files none; sd:7004 took `personal`.
@@ -676,7 +686,7 @@ class TaskCLI(unittest.TestCase):
             "task", "add", "--priority", "3", "Insisting", "--kind", "followup", "--here", cwd=root,
             code=1).stderr)
 
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
 
         filed = json.loads(self.call(
@@ -704,7 +714,7 @@ class TaskCLI(unittest.TestCase):
             "task", "add", "--priority", "3", "Outside", "--kind", "followup", "--json").stdout)
         self.assertIsNone(outside["item"]["repo"])
 
-        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+        with database(sd_db.default_path(self.home), write=False) as connection:
             in_repo = sorted(row["id"] for row in
                              sd_db.reads.backlog_items(connection, repo=str(root.resolve())))
             unscoped = sorted(row["id"] for row in
@@ -718,7 +728,7 @@ class TaskCLI(unittest.TestCase):
         """sd:2729. `--clear-branch` is the one way a stale branch name leaves a row."""
         state = json.loads(self.call("task", "add", "--priority", "3", "Worked on a branch", "--json").stdout)
         item = state["item"]["id"]
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.writes.set_item_fields(connection, item, branch="feat/gone")
         before = json.loads(self.call("store", "item", item, "--json").stdout)
         refused = self.call("task", "edit", item, "--clear-branch",
@@ -777,7 +787,7 @@ class TaskCLI(unittest.TestCase):
         date and repository, as it does a task's. Before sd:809 it refused
         every field but `kind`."""
         first, second = self._checkout("first"), self._checkout("second")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, first, home=self.home)
             sd_db.repos.add(connection, second, home=self.home)
         state = json.loads(self.call(
@@ -865,7 +875,7 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("not a registered repository",
                       self.call("task", "add", "--priority", "3", "Insisting", "--here", cwd=root, code=1).stderr)
 
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
 
         filed = json.loads(self.call("task", "add", "--priority", "3", "Inside", "--json", cwd=root).stdout)
@@ -893,7 +903,7 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("not a registered repository",
                       self.call("store", "items", "--here", cwd=root, code=1).stderr)
         self.assertIn("Git checkout", self.call("store", "items", "--here", code=1).stderr)
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
             sd_db.repos.add(connection, other, home=self.home)
         self.call("task", "add", "--priority", "3", "Mine", cwd=root)
@@ -920,7 +930,7 @@ class TaskCLI(unittest.TestCase):
         either half.
         """
         first, second = self._checkout("first"), self._checkout("second")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, first, home=self.home)
             sd_db.repos.add(connection, second, home=self.home)
 
@@ -946,7 +956,7 @@ class TaskCLI(unittest.TestCase):
     def test_an_idea_row_moves_to_a_repository_and_back_and_keeps_its_kind(self):
         """sd:5142: `--belongs-to` and `--no-repo` move an idea; every other field edit on it stays refused."""
         root = self._checkout("ideas")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
             item = sd_db.writes.create_item(connection, kind="idea", title="Blog idea", source="vault",
                                             external_id="blog-idea:Blog Ideas/Blog idea.md")
@@ -959,7 +969,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_the_move_is_recorded_on_the_item_rather_than_happening_silently(self):
         root = self._checkout("recorded")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
         state = json.loads(self.call("task", "add", "--priority", "3", "Mis-filed", "--json").stdout)
         item = state["item"]["id"]
@@ -978,7 +988,7 @@ class TaskCLI(unittest.TestCase):
         is a field nobody reads.
         """
         root = self._checkout("visible")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
         item = json.loads(self.call("task", "add", "--priority", "3", "Mis-filed", "--json").stdout)["item"]["id"]
 
@@ -1032,7 +1042,7 @@ class TaskCLI(unittest.TestCase):
         root = self._checkout(name)
         subprocess.run(["git", "checkout", "-q", "--detach"], cwd=str(root), check=True,
                        capture_output=True, text=True, env=clean_environment())
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
         return root
 
@@ -1090,7 +1100,7 @@ class TaskCLI(unittest.TestCase):
     def test_add_belongs_to_files_the_item_into_another_checkout_in_one_call(self):
         """sd:3567. Filing into another repository took an add and then an edit."""
         first, second, stranger = self._checkout("first"), self._checkout("second"), self._checkout("stranger")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, first, home=self.home)
             sd_db.repos.add(connection, second, home=self.home)
         linked = self.home / "first-linked"
@@ -1179,7 +1189,7 @@ class TaskCLI(unittest.TestCase):
     def test_edit_moves_a_task_with_a_repository_to_a_repo_less_kind_in_one_edit(self):
         """sd:743. `--kind work-idea --no-repo` is one edit, attributed and noted."""
         root = self._checkout("reclassified")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
         state = json.loads(self.call("task", "add", "--priority", "3", "Not work at all", "--json", cwd=root).stdout)
         item = state["item"]["id"]
@@ -1196,7 +1206,7 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual(added[0]["body"].splitlines()[0],
                          f"Changed kind task -> work-idea by {getpass.getuser()}")
 
-        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+        with database(sd_db.default_path(self.home), write=False) as connection:
             row = connection.execute("SELECT kind, repo FROM item WHERE id = ?", (item,)).fetchone()
         self.assertEqual((row["kind"], row["repo"]), ("work-idea", None))
         self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), moved)
@@ -1215,7 +1225,7 @@ class TaskCLI(unittest.TestCase):
         """A contribution task keeps its kind, and `edit_item` is what says so."""
         state = json.loads(self.call("task", "add", "--priority", "3", "Upstream pull request", "--json").stdout)
         item = state["item"]["id"]
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.writes.set_item_fields(
                 connection, item, fields={"contribution": {"url": "https://example.invalid/pr/1"}})
             connection.commit()
@@ -1424,7 +1434,7 @@ class Recurrence(unittest.TestCase):
     def test_a_completion_that_ends_the_series_says_so(self):
         """The runtime case the write-time checks cannot see: no `due` left."""
         item = self.add("Ends", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY")["item"]["id"]
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.writes.set_item_fields(connection, item, due=None)
             connection.commit()
         shown = self.call("task", "status", item, "done").stdout
@@ -1434,7 +1444,7 @@ class Recurrence(unittest.TestCase):
 
     def test_a_completion_that_ends_the_series_carries_its_reason_in_json(self):
         item = self.add("Ends", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY")["item"]["id"]
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.writes.set_item_fields(connection, item, due=None)
             connection.commit()
         completed = json.loads(self.call("task", "status", item, "done", "--json").stdout)
@@ -1485,7 +1495,7 @@ class WorkRegister(unittest.TestCase):
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.email", "t@example.com")
         self.git("config", "user.name", "T")
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, self.root, home=self.home)
 
     def git(self, *args):
@@ -1982,7 +1992,7 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
     def test_today_repo_keeps_one_repositorys_rows(self):
         """pack sd:6488: `--only NAME` filters every section and the counts; `fleet` is no repository."""
         app, lib = "~/repos/example.test/app", "~/repos/example.test/lib"
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+        with database(sd_db.default_path(self.home), write=True) as connection:
             for repo in (app, lib):
                 sd_db.upsert_repo(connection, repo)
             made = {}
