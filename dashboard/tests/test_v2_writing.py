@@ -22,6 +22,7 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import places, server, v2, writing_screen
+from sd_dashboard.v2.pages import writing as writing_page
 from sd_db import upsert_repo, writing
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
@@ -140,6 +141,22 @@ class TheDocument(Pieces):
             doc = writing_screen.document(self.connection, now=NOW)
         self.assertEqual(doc["ideas"], {"state": "unknown", "reason": "no such column: stage", "count": None, "rows": []})
         self.assertEqual(len(doc["pieces"]), 2)
+
+    def test_a_report_reads_one_piece_file_read_only_up_to_a_bound(self):
+        """pack sd:7242: a gate's view icon reads its report through /api/writing/<id>/<gate>: the file beside the
+        piece's index.md, cut at REPORT_CHARS; a missing file or a non-piece is a 404 that says which."""
+        item, parked = self.ids["fixture"], self.ids["parked"]
+        before = self.snapshot()
+        self.assertEqual(writing_screen.report(self.connection, f"/api/writing/{item}/fact-check"),
+                         (200, {"item": item, "name": "fact-check.md", "text": "Fact-check fixture report\n", "cut": False}))
+        self.assertEqual(self.snapshot(), before)
+        with mock.patch.object(writing_screen, "REPORT_CHARS", 10):
+            self.assertEqual(writing_screen.report(self.connection, f"/api/writing/{item}/fact-check")[1]["text"], "Fact-check")
+            self.assertIs(writing_screen.report(self.connection, f"/api/writing/{item}/fact-check")[1]["cut"], True)
+        self.assertEqual(writing_screen.report(self.connection, f"/api/writing/{parked}/fact-check"),
+                         (404, {"error": f"#{parked} has no fact-check.md."}))
+        self.assertEqual(writing_screen.report(self.connection, "/api/writing/999999/research")[0], 404)
+        self.assertEqual(writing_page.REPORT, writing_screen.REPORT, "the route and the reader parse one path")
 
     def test_a_published_piece_carries_its_claims_url_and_a_link_only_for_http(self):
         # sd:3465: the writing claim URL becomes a link; an address in another scheme stays text.
@@ -633,6 +650,34 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         out = self.run_page("R.off = cmd('piece.draft').when(C.get('11'));", prelude="DOC.pieces[0].draft = []; DOC.pieces[0].words = 0;\n")
         self.assertEqual(out["R"]["off"], "no draft yet")
 
+    def test_each_gate_row_has_a_refresh_and_a_view_icon(self):
+        """pack sd:7242: Draft reads again and opens Show draft; Research and Fact-check copy the skill line, since no
+        route runs them; Adversarial runs Refresh review. Each report's view opens it in the editor's evidence pane,
+        read through /api/writing/<id>/<gate>; a missing file's view is off and says missing."""
+        report = "[200, { item: 11, name: 'adversarial.md', text: 'Adversarial report body', cut: false }]"
+        answer = ("(path) => path === '/api/writing' ? [200, DOC] : path === '/api/writing/11/adversarial' ? " + report
+                  + " : [200, {}]")
+        out = self.run_page("open('11'); await flush(); R.details = ELS.details.html;"
+                            " const view = { target: { closest: s => s === '[data-gate-view]' ? { dataset: { gateView: 'adversarial' } } : null } };"
+                            " ELS.details.listeners.click.forEach(f => f(view)); await flush(); await flush(); R.editor = ELS['view-editor'].html;",
+                            answer=answer)
+        gates = re.search(r'<ul class="gates">.*?</ul>', out["R"]["details"], re.S).group(0)
+        rows = re.findall(r"<li>.*?</li>", gates, re.S)
+        self.assertEqual(len(rows), 4)
+        draft, research, fact, adversarial = rows
+        self.assertIn('data-gate-again=""', draft)
+        self.assertIn('data-cmd="piece.draft" data-obj="11"', draft)
+        self.assertIn('data-copy="claude &quot;/sd-research piece=2026/three-budgets&quot;"', research)
+        self.assertIn('data-gate-view="research"', research)
+        self.assertIn('data-copy="claude &quot;/sd-fact-check input=content/2026/three-budgets/index.md&quot;"', fact)
+        self.assertIn("disabled", fact)
+        self.assertIn("Fact-check: missing", fact)
+        self.assertIn('data-cmd="piece.review" data-obj="11"', adversarial)
+        self.assertIn('data-gate-view="adversarial"', adversarial)
+        self.assertIn("Adversarial report body", out["R"]["editor"])
+        self.assertIn('aria-pressed="true">Adversarial</button>', out["R"]["editor"])
+        self.assertIn("/api/writing/11/adversarial", out["gets"])
+
     def test_the_details_link_the_claims_url(self):
         # sd:3465: "Already published" named the claim only; the Details now link where it went, http and https only.
         claim = {"claim": "c1aim0000000", "url": "https://example.test/p", "phase": "published", "href": "https://example.test/p"}
@@ -662,7 +707,7 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
 
 
 class TheRegistration(Registers, unittest.TestCase):
-    page, section, route, api = "writing", "Writing", "/writing", ("/api/writing",)
+    page, section, route, api = "writing", "Writing", "/writing", ("/api/writing", "/api/writing/1/research")
 
 
 if __name__ == "__main__":

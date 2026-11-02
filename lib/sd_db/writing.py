@@ -267,6 +267,19 @@ def piece_files(row) -> dict[str, dict | None]:
     return found
 
 
+def read_report(row, gate: str, limit: int) -> str | None:
+    """Up to `limit` + 1 characters of the piece's report for `gate`, a REPORTS key, so a caller can tell a cut; None for
+    one absent or outside the repository. Any other read failure raises: it is not a missing file."""
+    candidate = _path(row["repo"], row["piece"], row["path"]).with_name(REPORTS[gate])
+    try:
+        if not candidate.resolve(strict=True).is_relative_to(_disk(row["repo"])):
+            return None
+    except FileNotFoundError:
+        return None
+    with candidate.open(encoding="utf-8", errors="replace") as handle:
+        return handle.read(limit + 1)
+
+
 def piece_for_key(connection: sqlite3.Connection, repo: str, piece: str) -> sqlite3.Row | None:
     probe = sdpaths.keys(repo)
     return connection.execute(

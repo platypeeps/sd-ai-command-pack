@@ -41,8 +41,14 @@ score first. It shows `IDEAS` of them with the inbox count in its header and
 the strip, and links a title only to an http address. A failed read leaves
 the column unknown with its reason; the pieces still read.
 
-Not read yet, so drawn as gaps:
+Each gate row in Details has a refresh and a view icon (pack sd:7242).
+Draft's refresh reads the pieces again and its view is Show draft.
+Adversarial's refresh is Refresh review. No route runs research or a
+fact-check, so their refresh copies the line that does, to run in the
+content repository. A report's view opens it in the editor's evidence
+pane, read only from `GET /api/writing/<id>/<gate>`
+(`writing_screen.report`) and cut at `REPORT_CHARS`; a missing report's
+view is off and says so.
 
-- the evidence summaries inside `research.md`, `fact-check.md` and
-  `adversarial.md`: the editor shows each file's size, time and lamp;
-- a draft save: the editor is read only, since no route writes a draft.
+Not read yet, so drawn as a gap: a draft save. The editor is read only,
+since no route writes a draft.

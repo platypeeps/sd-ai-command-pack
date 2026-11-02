@@ -9,6 +9,7 @@ walks the questions, and Apply answers waits until none is open. Its `ideas` are
 count, each with a link only for http. A failed read is unknown with its reason, never an empty inbox.
 """
 
+import re
 from pathlib import Path
 
 from sd_db import records, writing
@@ -34,6 +35,30 @@ def _draft(document: str | None) -> tuple[list[str], bool, int]:
             break
         kept.append(paragraph)
     return kept, len(kept) < len(paragraphs), len(prose.split())
+
+
+#: A gate's view icon reads its report at /api/writing/<item>/<gate> (pack sd:7242), cut at REPORT_CHARS: of the 60
+#: reports measured 2026-11-02 the largest held 261,321 bytes and all held 1,766,726, so a cut is rare and says so.
+REPORT = r"/api/writing/([1-9][0-9]{0,17})/(research|fact-check|adversarial)"
+REPORT_CHARS = 512_000
+
+
+def report(connection, path: str):
+    """One piece report, read only: `{item, name, text, cut}`, or a 404 that names the missing file or the non-piece."""
+    item, gate = re.fullmatch(REPORT, path).groups()
+    item, name = int(item), writing.REPORTS[gate]
+    row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
+    if row is None or row["kind"] != "idea" or not row["piece"]:
+        return 404, {"error": f"#{item} is not a writing piece."}
+    try:
+        text = writing.read_report(row, gate, REPORT_CHARS)
+    except WorkflowError as error:
+        return 404, {"error": f"#{item}: {error}"}
+    except OSError as error:  # a failed read is not a missing file: it says its cause
+        return 500, {"error": f"#{item} {name} not read: {error.strerror or error}"}
+    if text is None:
+        return 404, {"error": f"#{item} has no {name}."}
+    return 200, {"item": item, "name": name, "text": text[:REPORT_CHARS], "cut": len(text) > REPORT_CHARS}
 
 
 #: Inbox ideas the Ideas column shows; the header counts them all.

@@ -166,7 +166,7 @@ addEventListener('DOMContentLoaded', () => {
         ${p.publication ? html`<dt>Published</dt><dd>${p.publication.href ? html`<a class="ext" href="${p.publication.href}" target="_blank" rel="noopener noreferrer">${p.publication.url}</a>` : html`<code>${p.publication.url}</code>`}</dd>` : ''}
       </dl>
       <h3 class="label">Gates</h3>
-      <ul class="gates">${L.map(([, n, s, w]) => html`<li><span class="g g-${s}" aria-hidden="true">${GLYPH[s]}</span><span>${n}</span><span class="what">${w}</span></li>`)}</ul>
+      <ul class="gates">${L.map(([k, n, s, w]) => html`<li><span class="g g-${s}" aria-hidden="true">${GLYPH[s]}</span><span>${n}</span><span class="what">${w}</span><span class="acts">${gateActs(p, k, n)}</span></li>`)}</ul>
       <div class="publish">
         <span class="label">Publish gate</span>
         ${P.ok ? html`<p class="why">Open: stage Ready, gates pass, readiness recorded for this draft. Publish is copy only, since it posts outside: <code>sd writing publication-claim</code>, then <code>publication-dispatch</code> on the recorded claim.</p>` : html`<p class="why">Closed. Publish stays off until each of these clears:</p><ul>${P.why.map(w => html`<li>${w}</li>`)}</ul>`}
@@ -174,6 +174,23 @@ addEventListener('DOMContentLoaded', () => {
       ${grillPane(p)}
       <h3>Act</h3>${C.bar(String(p.id))}
       <p class="foot">Observed ${utc(D.read)} from the workflow database and the piece files in <code>${p.repo}/${p.folder}/${p.piece}/</code>.</p>`);
+  }
+
+  // pack sd:7242: each gate's refresh and view icons. Draft reads the pieces again and shows the draft; Adversarial runs
+  // Refresh review. No route runs research or a fact-check, so theirs copies the line that does, run in the content
+  // repository. A report's view opens it read only in the editor's evidence pane; a missing one's view is off.
+  const GATE = { R: ['research', 'research.md'], F: ['factcheck', 'fact-check.md'], A: ['adversarial', 'adversarial.md'] };
+  const cmdIcon = (id, p, icon, label) => {
+    const why = C.offWhy(CMDS.find(c => c.id === id), { id: String(p.id) }), say = why ? `${label}: ${why}` : label;
+    return html`<button class="icon-btn" type="button" data-cmd="${id}" data-obj="${p.id}" aria-label="${say}" title="${say}"${why ? html` disabled` : ''}>${ICON(icon)}</button>`;
+  };
+  function gateActs(p, k, n) {
+    if (k === 'D') return html`<button class="icon-btn" type="button" data-gate-again="" aria-label="Draft: read the pieces again" title="Draft: read the pieces again">${ICON('rotate-ccw')}</button>${cmdIcon('piece.draft', p, 'eye', 'Draft: Show draft')}`;
+    const line = { R: `claude "/sd-research piece=${p.piece}"`, F: `claude "/sd-fact-check input=${p.folder}/${p.piece}/index.md"` }[k];
+    const again = line ? html`<button class="icon-btn" type="button" data-copy="${line}" aria-label="${n}: no route runs it; copy the line to run in ${p.repo}" title="Copy, to run in ${p.repo}: ${line}">${ICON('copy')}</button>`
+      : cmdIcon('piece.review', p, 'rotate-ccw', 'Adversarial: Refresh review');
+    const [tab, file] = GATE[k], say = p.files[file] ? `${n}: view ${file}` : `${n}: missing`;
+    return html`${again}<button class="icon-btn" type="button" data-gate-view="${tab}" aria-label="${say}" title="${say}"${p.files[file] ? '' : html` disabled`}>${ICON('eye')}</button>`;
   }
 
   // pack sd:6700: the first open grill question, with a button per option or a box for words.
@@ -190,17 +207,30 @@ addEventListener('DOMContentLoaded', () => {
   }
 
   // ---------- Editor ----------
-  // build: read only. No route writes a draft, so the design's Edit button and its save state are not drawn, and the
-  // evidence tabs show each file's facts and its lamp: no reader summarises research.md, fact-check.md or adversarial.md yet.
+  // build: read only. No route writes a draft, so the design's Edit button and its save state are not drawn. The evidence
+  // tabs show each file's facts, its lamp and its text, read once per change time from /api/writing/<id>/<gate> (pack sd:7242).
   let evTab = 'research';
+  const reports = new Map();
+  function evText(p, file, gate) {
+    const key = `${p.id}/${file}/${p.files[file].mtime}`, got = reports.get(key), tab = evTab;
+    if (!got) {
+      reports.set(key, { state: 'reading' });
+      window.shell.getJSON(`/api/writing/${p.id}/${gate}`).then(r => ({ state: 'read', ...r }), e => ({ state: 'failed', reason: e.message }))
+        .then(r => { reports.set(key, r); if (view === 'editor' && +selected === p.id && evTab === tab) renderEditor(); });
+    }
+    const r = reports.get(key);
+    if (r.state === 'reading') return html`<p>Reading ${file}…</p>`;
+    if (r.state === 'failed') return html`<p>${file} not read: ${r.reason}. Reloading the page retries it.</p>`;
+    return html`<pre class="ev-text" tabindex="0" aria-label="${file}, read only">${r.text}</pre>${r.cut ? html`<p>The first ${r.text.length.toLocaleString()} characters; the rest stays in the file.</p>` : ''}`;
+  }
   function renderEditor() {
     const p = byId(selected), el = document.getElementById('view-editor');
     if (!p) { put(el, html`<p class="note">${D ? 'Select a piece on the board first.' : 'The pieces were not read. Reload retries it.'}</p>`); return; }
     const P = publishState(p), fx = p.files;
     const fm = n => fx[n] ? `${(fx[n].bytes / 1024).toFixed(1)} KB · ${utc(fx[n].mtime)}` : 'missing';
     const g = gates(p);
-    const ev = { research: ['research.md', 1], factcheck: ['fact-check.md', 2], adversarial: ['adversarial.md', 3] };
-    const [file, at] = ev[evTab];
+    const ev = { research: ['research.md', 1, 'research'], factcheck: ['fact-check.md', 2, 'fact-check'], adversarial: ['adversarial.md', 3, 'adversarial'] };
+    const [file, at, gate] = ev[evTab];
     put(el, html`<div class="ed-head">
         <button class="btn quiet sm" type="button" id="back">${ICON('chevron-left')}Board</button>
         <h2>#${p.id} ${p.title}</h2>${lamps(p)}
@@ -215,7 +245,7 @@ addEventListener('DOMContentLoaded', () => {
         </div>
         <aside class="evidence" aria-label="Evidence">
           <div class="seg" role="group" aria-label="Evidence file">${[['research', 'Research'], ['factcheck', 'Fact-check'], ['adversarial', 'Adversarial']].map(([k, n]) => html`<button type="button" data-ev="${k}" aria-pressed="${String(evTab === k)}">${n}</button>`)}</div>
-          <div class="ev"><h3 class="label">${file}</h3>${fx[file] ? html`<dl><dt>File</dt><dd>${fm(file)}</dd><dt>Lamp</dt><dd>${GLYPH[g[at][2]]} ${g[at][3]}</dd></dl>` : html`<p>${file} is missing.</p>`}</div>
+          <div class="ev"><h3 class="label">${file}</h3>${fx[file] ? html`<dl><dt>File</dt><dd>${fm(file)}</dd><dt>Lamp</dt><dd>${GLYPH[g[at][2]]} ${g[at][3]}</dd></dl>${evText(p, file, gate)}` : html`<p>${file} is missing.</p>`}</div>
           <p class="why">An edit changes the draft digest, so every gate goes stale until research is re-stamped and both verdicts are recorded again.</p>
         </aside>
       </div>`);
@@ -243,7 +273,11 @@ addEventListener('DOMContentLoaded', () => {
   const asked = p => { const n = p.grill?.open.length; return n ? `${markup.plural(n, 'grill question')} open; answer them first` : ''; };
   const fixPost = (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision }).then(out => { reading?.reread(); return out; });
   // An answer is Decide's: /api/decisions/answer writes the ruling and resolves the question under the piece's revision.
+  // pack sd:7242: a gate's view opens its report in the editor; Draft's refresh reads the pieces again.
   document.getElementById('details').addEventListener('click', e => {
+    const v = e.target.closest?.('[data-gate-view]');
+    if (v) { evTab = v.dataset.gateView; setView('editor'); return; }
+    if (e.target.closest?.('[data-gate-again]')) { reading?.load(); return; }
     const b = e.target.closest?.('[data-grill-answer]'), p = byId(selected), q = p?.grill?.open[0];
     if (!b || !q) return;
     const option = (b.dataset.grillAnswer || document.getElementById('details').querySelector('#grill-text')?.value || '').trim();
