@@ -73,7 +73,9 @@
   }
   function unselect() {
     SELECTED = null;
-    put($('details'), html`<p class="why">${!DOC ? 'The projects were not read, so nothing is selected.' : !ROWS.length ? 'No project.json is under the repositories yet.' : 'No project matches these filters. Clear them to see the list.'}</p>`);
+    put($('details'), html`<p class="why">${!DOC ? 'The projects were not read, so nothing is selected.'
+      : !ROWS.length ? (DOC.problems || []).length ? 'The scan could not read every folder, so nothing is selected. The note above names each one.'
+        : 'No project.json is under the repositories yet.' : 'No project matches these filters. Clear them to see the list.'}</p>`);
   }
   let reader = null;
   const start = () => window.shell.read({ source: '/api/studio', what: 'the projects',
@@ -81,8 +83,12 @@
       DOC = doc;
       document.body.dataset.observed = doc.read;
       ROWS = (doc.projects || []).map(r => ({ ...r, type: 'project', label: r.title }));
+      // sd:7151: a scan that could not read a folder says so first; only a clean scan with no project says there is none.
+      const problems = doc.problems || [];
       return { objects: ROWS,
-        state: ROWS.length ? null : { kind: 'empty', text: 'No project.json is under the repositories yet.', source: '/api/studio' } };
+        state: problems.length ? { kind: 'partial', text: `${problems.join(' · ')}. ${ROWS.length ? 'The list holds the projects the scan read.'
+          : 'No project was read, so this is not a sign that none exists.'}`, source: '/api/studio' }
+          : ROWS.length ? null : { kind: 'empty', text: 'No project.json is under the repositories yet.', source: '/api/studio' } };
     },
     clear: () => { DOC = null; ROWS = []; draw(); },
     draw, current: () => SELECTED, first: () => shown().slice((L.page - 1) * L.size)[0]?.id,
