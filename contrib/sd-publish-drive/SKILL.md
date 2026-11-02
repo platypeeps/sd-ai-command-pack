@@ -51,5 +51,6 @@ Never guess or build the live URL from a title or slug. A plausible 404 reads as
 ## Safety rules
 
 - The only external writes are the one confirmed native import and the same-ID move into the publishing folder. No deletes, no sharing changes, no direct import into the publishing folder, no other destination.
+- Never run `sd-research-kit highlight` on this copy: the primary blog publishes from it, so a review change mark would ship.
 - A tip is used once. A tip at `inbox` never ships.
 - Nothing is sent to a personal blog, a schedule, social media or email.

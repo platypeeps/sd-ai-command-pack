@@ -478,6 +478,27 @@ Draining is six steps per request, and the order matters:
      under My Drive's root; create the repo folder when it is missing, and do
      not adopt a `Briefs` folder found somewhere else.
 
+     **An update marks what changed (sd:7252).** Where the request names a
+     `file` that is not in the trash, the reader has seen that copy, so mark
+     the paragraphs that differ from it. Read the Doc with
+     `get_doc_as_markdown` (`comment_mode: "none"`) into a file, write
+     `content` to a `.md` file, and run
+     `sd-research-kit highlight --previous <read-back.md> --since "<time>" <content.md> <out.html>`.
+     `<time>` is the file's last-modified time as Drive reports it, in local
+     time with its zone. Then replace the body with `update_drive_file`,
+     `file_path` the `<out.html>` and `source_format: "html"`: an HTML import
+     keeps headings, tables and code blocks as the Markdown one does. Each
+     changed `<p>` and `<li>` gets a yellow background, and one note opens
+     the Doc: the count and the changed sections, or `No changes since`.
+     The read-back holds a reader's own edits, so they count as seen. A read
+     that fails, or a `highlight` that exits non-zero, leaves the request: an
+     unknown baseline would mark nothing or everything. Three writes carry
+     no mark. A create has nothing to compare against. A Notion mirror is out
+     of scope for now. And `sd-publish-drive`'s publishing folder is not a
+     mirror: a blog publishes from it, so a review mark there would ship.
+     The headless Publish now drain holds neither `get_doc_as_markdown` nor
+     `update_drive_file` for a mirror request, so its updates go unmarked.
+
    - `notion-row` -- the Notion connector, one database row. Run
      `sd-research-kit project` first, at the start of the drain, and drain
      experiments before tasks: a task's plan refuses while its experiment has

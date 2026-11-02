@@ -28,7 +28,7 @@ appearing in it would be linted:
                           (default `~/.cache/...`) and re-exec with it.
 
 `checklinks`, `review`, `pins` and `publish` need nothing but the standard
-library.
+library; `highlight` needs python-markdown only for a Markdown input.
 """
 
 from __future__ import annotations
@@ -48,7 +48,8 @@ CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "convent
 USAGE = """usage: sd-research-kit <verb> [arguments]
 
 Each verb acts on the research repo at the current directory, except the three
-marked (queue), which act on the machine's mirror queue. There is no repo argument.
+marked (queue), which act on the machine's mirror queue, and highlight, which
+acts on the files it names. There is no repo argument.
 
   render          render research.conf.py into docs/dashboard/ and the vault,
                   and queue changed mirrors (SD_MIRROR_REQUEUE=1,
@@ -66,6 +67,8 @@ marked (queue), which act on the machine's mirror queue. There is no repo argume
   upload <request> <upload_url> <authorization>             (queue)
   project [--plan <request> --live <file>|--missing] [--writing <request>]
                                                             (queue)
+  highlight --previous <baseline.md> [--since <time>] <in> <out.html>
+                  mark what changed since a Google Doc's read-back copy
 
 Exit codes: 0 done; 1 a check failed or the verb is unknown; 2 bad arguments,
 or review outside a research repo.
@@ -155,6 +158,16 @@ def main(argv: list[str]) -> int:
     if verb == "upload":
         # Like `delivered`: a request name, and Notion's upload, not a checkout.
         return int(load("sd_research_publish").upload_main(rest))
+    if verb == "highlight":
+        # Files, not a checkout: the shared step of every Google Doc update
+        # (sd:7252). Markdown input is laid out with python-markdown, as render's is.
+        highlight = load("sd_research_highlight")
+        parsed = highlight.highlight_args(rest)
+        if parsed is None:
+            return 2
+        if highlight.is_markdown(parsed[2]) and importlib.util.find_spec("markdown") is None:
+            reexec_with("markdown", "markdown", ["highlight"] + rest)
+        return int(highlight.highlight_main(rest))
     if verb == "project":
         # Like `delivered`, it acts on the machine's queue and the workflow
         # database, never on a checkout, so its arguments are not R10-D6's.
