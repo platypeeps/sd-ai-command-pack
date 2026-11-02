@@ -4,7 +4,8 @@ Both commands render `sd_db.today.sections` here, so a section reads the same
 in each. Every section prints in `sd_db.today.ORDER`, empty or not: a heading
 `<Section> (<count>)`, then a plain ASCII table (a header row, a rule of
 dashes, aligned columns) of at most `ROWS` rows, then `… N more`. Work is the
-exception to the cap: it is the list, and it prints whole. An empty section
+exception to the cap: it is the list, and it prints whole. `sd today --all`
+lifts the cap for every section. An empty section
 is its heading alone. The one-line summary, the gate line, Delivered's
 `+N closed by hand` line and Decisions' `+N review questions wait` line are
 plain lines.
@@ -190,12 +191,13 @@ def table(heads: list[str], rows: list[list[str]], width: int, flex: str = "Titl
     return [line(heads), line("-" * size for size in sizes), *(line(row) for row in cut)]
 
 
-def section_table(section: str, rows: list[dict[str, Any]], now: datetime.datetime, width: int) -> list[str]:
-    """One section: its heading, its table capped at `ROWS` unless `UNCAPPED`, and the `… N more` line."""
+def section_table(section: str, rows: list[dict[str, Any]], now: datetime.datetime, width: int, *,
+                  show_all: bool = False) -> list[str]:
+    """One section: its heading, its table capped at `ROWS` unless `UNCAPPED` or `show_all`, and the `… N more` line."""
     lines = [f"{HEADINGS[section]} ({len(rows)})"]
     if not rows:
         return lines
-    shown = rows if section in UNCAPPED else rows[:ROWS]
+    shown = rows if show_all or section in UNCAPPED else rows[:ROWS]
     cells = columns(section, now)
     lines += table([head for head, _ in cells], [[cell(row) for _, cell in cells] for row in shown], width)
     if len(rows) > len(shown):
@@ -249,16 +251,19 @@ def summary_line(summary: dict[str, int], keys: Iterable[str]) -> str:
 
 
 def render_sections(found: dict[str, Any], *, now: datetime.datetime, width: int = DEFAULT_WIDTH,
-           keys: Iterable[str] | None = None) -> str:
-    """`found` (from `sd_db.today.sections`) as text: the summary line, then each section in `keys`' order."""
+           keys: Iterable[str] | None = None, show_all: bool = False) -> str:
+    """`found` (from `sd_db.today.sections`) as text: the summary line, then each section in `keys`' order.
+
+    `show_all` prints every row of every section, with no `… N more` line.
+    """
     order = list(keys if keys is not None else HEADINGS)
     lines = [summary_line(found["summary"], order)]
     for key in order:
         if key == "operations":
-            lines += ["", *operations_table(found[key], now, width)]
+            lines += ["", *operations_table(found[key], now, width, rows=None if show_all else ROWS)]
             continue
         rows = found[key]["entries"] if key == "landing" else found[key]
-        lines += ["", *section_table(key, rows, now, width)]
+        lines += ["", *section_table(key, rows, now, width, show_all=show_all)]
         if key == "delivered" and found.get("closed_by_hand"):
             lines.append(f"+{len(found['closed_by_hand'])} closed by hand")
         if key == "decisions" and (batched := found["summary"].get("review_questions")):

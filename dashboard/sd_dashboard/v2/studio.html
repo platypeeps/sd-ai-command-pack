@@ -1,0 +1,62 @@
+<!doctype html>
+<!--
+  Studio (sd:6920, slice 2 of sd:6919), at /studio: the creative projects under REPO_ROOT, each a folder in a registered
+  repository with a project.json, and each artifact root's files. Shape: docs/work/2026-10-31-studio/design.md.
+  Data: /api/studio (studio.document: each project's kind, title, brief, item and roots, each root's files listed from
+  disk; a project.json that does not parse, or a root that leaves its folder, lists with its reason), read when the page
+  opens. Each file opens at /studio/files/<repo>/<path>, served sandboxed; audio and video seek through a Range.
+  Read-only: the stage strip, pin and hide are slice 3 (sd:6921), the actions slice 4 (sd:6922). Nothing here is sample data.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Studio · system</title>
+<link rel="stylesheet" href="/ui/fonts.css">
+<link rel="stylesheet" href="/ui/tokens.css">
+<script src="/ui/theme.js"></script>
+<script src="/ui/markup.js"></script>
+<link rel="stylesheet" href="/ui/shell.css">
+<link rel="stylesheet" href="/ui/documents.css">
+<link rel="stylesheet" href="/ui/studio.css">
+</head>
+<body data-page="Studio" data-scope="studio" data-scope-note="the creative projects: every project.json under the repositories">
+<script src="/ui/icons.js"></script>
+<div class="shell">
+  <main id="main">
+    <header class="head">
+      <div>
+        <h1>Studio</h1>
+        <p><span id="sub">Reading the projects…</span> · read from disk, each file served sandboxed</p>
+      </div>
+    </header>
+
+    <div id="state" hidden></div>
+    <!-- The toolbar standard (sd:5281): one control row, the shell's Shapeshift bar (sd:5539), which filters the ledger. -->
+    <div class="toolbar" id="toolbar" data-shift></div>
+
+    <section aria-labelledby="list-h">
+      <div class="sec-head">
+        <h2 id="list-h">Projects <button class="help" type="button" aria-label="Help: Projects" data-help="<b>One row per project.json</b> in a registered repository under the repositories folder. Kind is the file's: shirt, song or episode. <b>▲</b> means the file does not parse, names an unknown kind or role, or names a root outside its folder; that root is left out. Enter opens Details, with each root's files.">
+          <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+        <p class="tally" id="tally"></p>
+      </div>
+      <div class="filters toolbar-2" id="filters"></div>
+      <table class="ledger" aria-labelledby="list-h" data-tfilter="page" data-toolbar="toolbar">
+        <thead id="rows-head"></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="empty" id="empty" hidden></p>
+      <div id="pager"></div>
+      <div id="help"></div>
+    </section>
+  </main>
+
+  <div class="details" id="details"><p class="why">Select a project to see its brief and its files.</p></div>
+</div>
+<script src="/ui/sections.js"></script>
+<script src="/ui/read.js"></script>
+<script src="/ui/studio.js"></script>
+<script src="/ui/shell.js"></script>
+</body>
+</html>
