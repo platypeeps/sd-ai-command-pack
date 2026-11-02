@@ -100,25 +100,6 @@ def item_controls(connection, item_id):
 def _item_controls(connection, item_id, row, revision):
     if row["kind"] not in ("task", "work", *workflow.TASK_STATUS_KINDS):
         return Markup("")
-    if row["kind"] not in ("task", "work", "followup"):
-        # A personal item takes the task statuses, and the panel holds the
-        # status control alone: `workflow.edit_item` refuses its details, so a
-        # `Save details` form would offer a save the library rejects in its
-        # entirety, title included.
-        # A followup left this branch in sd:816. `edit_item` has accepted its
-        # title, body, priority, due date and repository since sd:809, and the
-        # panel used to name `sd task edit ID` for want of a form of its own.
-        #
-        # "Can finish or reopen here" only while it can: with a queued or
-        # running assignment `allowed_statuses` is empty, `_status_control`
-        # says the workflow owns the status, and a second line offering the
-        # opposite beside it was a contradiction (PR #344 review).
-        statuses = workflow.allowed_statuses(connection, item_id)
-        offered = f"A {row['kind']} item can finish or reopen here. " if statuses else ""
-        return tag("section", tag("h2", "Manage this item"),
-            _status_control(connection, item_id, row, revision, statuses),
-            tag("p", offered + "Its other fields keep their own editing workflow.", class_="hint"),
-            class_="control-panel")
     if row["kind"] == "work":
         from sd_db import progress
 

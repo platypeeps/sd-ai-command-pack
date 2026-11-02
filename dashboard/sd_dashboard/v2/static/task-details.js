@@ -115,12 +115,12 @@
     const EDITABLE = t => !!t?.edit?.allowed;
     const noEdit = t => t.edit?.reason || `a ${t.kind} item uses its own editing workflow`;
     // build: sd_db.workflow.TASK_STATUS_KINDS; workflow._recurring refuses a rule on any other kind.
-    const RECURS = ['task', 'personal', 'followup'];
+    const RECURS = ['task', 'followup'];
     // build (sd:3012): sd_db.progress.CANCELLABLE_TASK_KINDS, the kinds task_guard lets sd task cancel close.
     const CLOSES = ['task', 'followup'];
     // sd:6231: the Kind field's kinds, sd_db.workflow.HAND_KINDS, the ones sd task edit --kind sets; REPO_LESS is
     // workflow.REPO_LESS_KINDS, which carry no repository, so a move to one clears the repo in the same edit (--no-repo).
-    const KINDS = ['task', 'personal', 'followup', 'work-idea', 'personal-idea'], REPO_LESS = ['personal', 'work-idea', 'personal-idea'];
+    const KINDS = ['task', 'followup', 'work-idea', 'personal-idea'], REPO_LESS = ['work-idea', 'personal-idea'];
     const repeats = t => !!t?.recurrence;
     // build (sd:2250): sd stores a rule only from sd_db.recurrence.PARTS. A rule with any other part (COUNT), written around
     // the library, cannot be walked: completing it ends the series. test_v2_tasks holds this set to the library's.
@@ -574,11 +574,11 @@
         host.lead?.() && repeats(t) ? html`<dt><label for="det-lead">Lead</label>${hint('Lead', 'How many days before the due date the next one opens.')}</dt><dd><select id="det-lead" class="fld"${dis}>${
           [...new Set([...LEADS, t.lead ?? 0])].sort((a, b) => a - b).map(n => html`<option value="${n}"${n === (t.lead ?? 0) ? html` selected` : ''}>${n ? `${plural(n, 'day')} early` : 'On the due date'}</option>`)}</select></dd>` : ''}`;
     }
-    // sd:6231: Kind, a select of the hand kinds. edit_item takes a kind change on any hand kind, so a personal item, whose
+    // sd:6231: Kind, a select of the hand kinds. edit_item takes a kind change on any hand kind, so an idea, whose
     // other fields are off, can still be reclassified; a kind with a producer (work, report, idea) is off with the reason.
     function kindField(t, gone) {
       const why = gone ? 'this task was not read again after the change' : KINDS.includes(t.kind) ? '' : `${t.kind} items are owned by their producer; their kind cannot be changed here`;
-      return html`<dt><label for="det-kind">Kind</label>${hint('Kind', 'What the item is: a task, a personal to-do, a followup or an idea. Personal and idea kinds carry no repo.')}</dt><dd><select id="det-kind" class="fld"${why ? html` disabled title="${why}"` : ''}>${
+      return html`<dt><label for="det-kind">Kind</label>${hint('Kind', 'What the item is: a task, a followup or an idea. Idea kinds carry no repo.')}</dt><dd><select id="det-kind" class="fld"${why ? html` disabled title="${why}"` : ''}>${
         (KINDS.includes(t.kind) ? KINDS : [t.kind, ...KINDS]).map(k => html`<option value="${k}"${k === t.kind ? html` selected` : ''}>${k}</option>`)}</select></dd>`;
     }
     // The repos a task can move to: every registered one (the capture's list) once read, else the ones these rows name.
