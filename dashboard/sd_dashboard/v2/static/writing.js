@@ -10,17 +10,20 @@ window.PAGE_COMMANDS = [
   { label: 'Show parked pieces', icon: 'archive', run: () => document.querySelector('#parked-seg [data-v="aside"]')?.click() },
 ];
 window.PAGE_ATTENTION = { state: 'unknown', n: 0, what: 'pieces not read' };
-// Realm views (sd:5064): Personal, the dashboard.realms realms (SHELL_REALMS, from /ui/sections.js), then All. A piece's realm is
-// places.realm_of of its repo, as on Tasks; a realm view no piece is in hides once the pieces are read, but Personal and All
-// stay (sd:5642). Board and editor are this page's panels and b and e its v keys, so a realm takes neither; nor btn or menu,
+// Realm views (sd:5064): Personal, then the dashboard.realms realms (SHELL_REALMS, from /ui/sections.js). A piece's realm is
+// places.realm_of of its repo, as on Tasks; a realm view no piece is in hides once the pieces are read, but Personal stays
+// (sd:5642). Board and editor are this page's panels and b and e its v keys, so a realm takes neither; nor btn or menu,
 // the layout menu's view-btn and view-menu (sd:5641), which the shell would hide as panels.
+// sd:7213: no All view. Every piece sits in one view: its realm's, else Personal, which takes a piece of no realm, of one
+// not read (realm_of None) and of one that has no view here. An old #view=all link opens Personal; a stays unused, so
+// the other views keep their keys.
 window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
-  ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'all', 'board', 'editor', 'btn', 'menu'].includes(r.id)).map(r => ({ id: r.id, label: r.label })),
-  { id: 'all', label: 'All', key: 'a' }];
+  ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'all', 'board', 'editor', 'btn', 'menu'].includes(r.id)).map(r => ({ id: r.id, label: r.label }))];
 {
   const used = new Set(['b', 'e', 'a']);
   window.PAGE_VIEWS.forEach(v => { if (!v.key) { v.key = [...v.id].find(c => /[a-z]/.test(c) && !used.has(c)); used.add(v.key); } });
 }
+if (location.hash === '#view=all') history.replaceState(history.state, '', '#view=personal');
 
 addEventListener('DOMContentLoaded', () => {
   const { ICON, toast, suggest, openPane } = window.shell;
@@ -32,8 +35,9 @@ addEventListener('DOMContentLoaded', () => {
   // Stages: sd_db.writing.STAGES minus inbox and declined (no piece holds them); the vault inbox leads as "Ideas".
   const STAGES = [['accepted', 'Accepted'], ['researching', 'Researching'], ['drafting', 'Drafting'], ['review', 'Review'], ['ready', 'Ready'], ['published', 'Published']];
   const SL = Object.fromEntries(STAGES);
-  let D = null, pieces = [], REALM = window.shell.view?.current() || 'all';
-  const inRealm = (p, r = REALM) => r === 'all' || p.realm === r;
+  let D = null, pieces = [], REALM = window.shell.view?.current() || 'personal';
+  const viewOf = p => (p.realm !== 'personal' && window.PAGE_VIEWS.some(v => v.id === p.realm) ? p.realm : 'personal');
+  const inRealm = (p, r = REALM) => viewOf(p) === r;
   // Another realm reads again quietly, so the reader's objects and first pick follow the pieces the view shows.
   document.addEventListener('shell:view', e => { if (e.detail.id === REALM) return; REALM = e.detail.id; if (D) reading.load(true); });
   const byId = id => pieces.find(p => p.id === +id);
@@ -467,7 +471,7 @@ addEventListener('DOMContentLoaded', () => {
     source: '/api/writing', what: 'the pieces',
     adopt: doc => {
       // Personal stays, as on Tasks (sd:5642): it is where personal writing goes, so its tab shows with nothing in it.
-      (window.PAGE_VIEWS || []).forEach(v => { if (!['personal', 'all'].includes(v.id)) window.shell.view?.hide(v.id, !(doc.pieces || []).some(p => p.realm === v.id)); });
+      (window.PAGE_VIEWS || []).forEach(v => { if (v.id !== 'personal') window.shell.view?.hide(v.id, !(doc.pieces || []).some(p => inRealm(p, v.id))); });
       D = doc; pieces = (doc.pieces || []).filter(p => inRealm(p));
       document.body.dataset.observed = D.read;
       const known = ['read', 'partial'].includes(doc.realms?.state);
