@@ -17,7 +17,34 @@ spec = importlib.util.spec_from_file_location("fixture_collectors", HERE / "coll
 collectors = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(collectors)
 
+#: The view budget a stand-in tile runs under: a loaded gate starves a five-second one (sd:6777, sd:7144).
+ROOM = 60.0
+
+
+class Patches:
+    """Several patches as one reusable context, so a test can enter `tile` once per subtest."""
+
+    def __init__(self, patches):
+        self.patches = patches
+
+    def __enter__(self):
+        self.stack = contextlib.ExitStack()
+        for item in self.patches:
+            self.stack.enter_context(item)
+
+    def __exit__(self, *exc):
+        return self.stack.__exit__(*exc)
+
+
 class Resources(unittest.TestCase):
+    def test_a_stand_in_tile_outwaits_the_production_budget(self):
+        """sd:7144: a five-second view budget refused a one-line tile on a loaded gate."""
+        tile, _ = self.tile("import sys\nsys.stdout.write('{\"html\": \"\"}')\n")
+        production = dict(reports_screen.VIEW_SECONDS)
+        with tile:
+            self.assertTrue(all(reports_screen.VIEW_SECONDS[area] > production[area] for area in production))
+        self.assertEqual(reports_screen.VIEW_SECONDS, production)
+
     def test_research_config_is_data_without_execution(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -73,13 +100,20 @@ class Resources(unittest.TestCase):
             self.assertNotIn("does not run", html)
             self.assertFalse(marker.exists())
 
-    def tile(self, source):
-        """A stand-in for `sd_tile.py`: a real child, read the way the real one is."""
+    def tile(self, source, *, seconds=ROOM):
+        """A stand-in for `sd_tile.py`: a real child, read the way the real one is.
+
+        Its view budget is `seconds`, not the five of production: a one-line script ran past five on a loaded gate
+        and the view refused it (sd:7144). A test of the budget itself passes `seconds=None`.
+        """
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         script = Path(directory.name) / "tile.py"
         script.write_text(source)
-        return patch.object(reports_screen, "TILE", script), Path(directory.name)
+        patches = [patch.object(reports_screen, "TILE", script)]
+        if seconds is not None:
+            patches.append(patch.dict(reports_screen.VIEW_SECONDS, dict.fromkeys(reports_screen.VIEW_SECONDS, seconds)))
+        return Patches(patches), Path(directory.name)
 
     def test_resource_observations_are_visible_and_escaped_in_every_view(self):
         payload = {"html": "<p>Healthy content</p>", "rows": [
@@ -178,7 +212,7 @@ class Resources(unittest.TestCase):
         # The tile leaves a marker only if its minute runs out, so a view that
         # returns without it killed the tile rather than waited (sd:2667).
         tile, directory = self.tile(self.SPAWN + "import time\ntime.sleep(60)\n"
-                                    "open(sys.argv[0] + '.finished', 'w').close()\n")
+                                    "open(sys.argv[0] + '.finished', 'w').close()\n", seconds=None)
         with tile, self.assertRaisesRegex(ValueError, "stopped at its budget: .*ran past its budget of 5 seconds") as refused:
             reports_screen.collect("vault")
         self.assertFalse((directory / "tile.py.finished").exists(), "the view waited for the tile instead of killing it")
@@ -223,12 +257,13 @@ cat {str(root)!r}/"$3.json"
         vault.mkdir(parents=True)
         (vault / "Vault note.md").write_text("---\nstatus: inbox\ndateCreated: 2026-01-01\n---\n")
         # The real tile under a 60-second ceiling: at five, a loaded gate refused it (sd:6777).
+        # `tile` sets the view's budget; the tile's own ceiling is the line below.
         tile, _ = self.tile(
             "import importlib.util, sys\n"
             f"spec = importlib.util.spec_from_file_location('sd_tile', {str(reports_screen.TILE)!r})\n"
             "sd_tile = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(sd_tile)\n"
             "sd_tile.TILE_SECONDS = 60.0\nsys.exit(sd_tile.main(sys.argv[1:]))\n")
-        with tile, patch.dict(reports_screen.VIEW_SECONDS, {"queues": 60.0}), \
+        with tile, \
                 patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}", "OBSIDIAN_VAULT": str(stub / "vault")}):
             html = str(reports_screen.resources({"resource": ["queues"]}))
         return html, (stub / "calls").read_text().splitlines()
