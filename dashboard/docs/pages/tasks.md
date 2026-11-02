@@ -44,10 +44,12 @@ Tasks filters on. v1's screen and its run selection were deleted in sd:2622;
 `/classic/backlog` is a 404.
 
 Realm sub tabs (sd:6263; sd:5753 had made Realm a filter) narrow every layout to the rows of one realm or place:
-Personal (the first tab), each realm `dashboard.realms` names, HOA or Home; All shows every row, and each tab carries
-its count. The filters apply inside each tab. Each row carries `realm` from `places.realm_of` and `area` from
-`places.area_of`, the rule the HOA and Home pages' Tasks views use: the hoa checkout's items, or items with no repo. A
-report is in neither. The shell keeps the tab as `#view=<id>`; an older `?realm=<id>` link (Metrics, Today) shows that tab.
+Personal (the first tab), each realm `dashboard.realms` names, HOA or Home, and each tab carries its count. The filters
+apply inside each tab. Each row carries `realm` from `places.realm_of` and `area` from `places.area_of`, the rule the HOA
+and Home pages' Tasks views use: the hoa checkout's items, or items with no repo. A report is in neither. A row whose realm
+has no tab, a report or a row read without a realm list, sits in Personal, so pack sd:7216 dropped the All tab. The shell
+keeps the tab as `#view=<id>`; an older `?realm=<id>` link (Metrics, Today) shows that tab, and `?realm=all` or
+`#view=all` opens Personal.
 
 Personal and Work carry Run sweep (sd:5096, sd:5097) in their subhead, with the realm's last run.
 It posts `/api/tasks/sweep {"realm"}`, which starts `realm_sweep run <realm>` in the background, one run per realm
