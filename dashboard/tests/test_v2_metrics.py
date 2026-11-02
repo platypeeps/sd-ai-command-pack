@@ -36,8 +36,9 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import metrics_screen, server, v2
-from sd_db import provider_controls, reads, transition, usage, workflow
+from sd_db import provider_controls, reads, transition, upsert_repo, usage, workflow
 from support import NOW, ScreenCase, before_5648, record_cost
+from test_v2_queue import RealLane
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
 from test_v2_tasks import SHELL, STAND_IN
@@ -612,11 +613,12 @@ class TheScript(Controlled):
     def test_the_panels_are_the_shells_views(self):
         """sd:5080: Spend (spend, the week, usage), Providers, CI and Age are PAGE_VIEWS panels; Skills moved (sd:5881)."""
         views = re.search(r"window\.PAGE_VIEWS = (\[.*?\]);", METRICS_JS, re.S).group(1)
-        self.assertEqual(re.findall(r"id: '([a-z]+)'", views), ["spend", "providers", "ci", "age"])
+        self.assertEqual(re.findall(r"id: '([a-z]+)'", views), ["spend", "providers", "ci", "times", "age"])
         page = (V2 / "metrics.html").read_text(encoding="utf-8")
         panels = {m.group(1): re.findall(r'<section class="panel" id="([a-z-]+)"', m.group(2))
                   for m in re.finditer(r'<div id="view-([a-z]+)"(.*?)(?=<div id="view-|</main>)', page, re.S)}
-        self.assertEqual(panels, {"spend": ["spend", "week", "usage"], "providers": ["scorecard"], "ci": ["ci"], "age": ["age"]})
+        self.assertEqual(panels, {"spend": ["spend", "week", "usage"], "providers": ["scorecard"], "ci": ["ci"],
+                                  "times": ["times"], "age": ["age"]})
 
     def test_a_lamp_shows_the_view_that_holds_its_reading(self):
         out = self.run_page("""const lamp = (cell, ev, view) => ({ dataset: { cell, ev, view } });
@@ -697,6 +699,44 @@ C.run(cmd('bill.cap'), OBJ.get('bill:capped')); await flush();""")
         self.assertEqual(out["R"]["cf"], out["R"]["cap"])
         self.assertEqual(out["posts"], [])
         self.assertIn("controls: RegistryError", out["states"][-1]["text"])
+
+    # Pack sd:7233: Lane times, Queue's Last 7 days moved here (pack sd:6006).
+    TIMES = {"error": "", "lanes": [
+        {"repo": "system", "path": "/repos/system", "times": {"days": 7, "entries": 4, "wait": 4500.0, "gate": 610.0,
+                                                              "over": True, "slowest": {"item": 42, "title": "A slow one", "total": 9000.0}}},
+        {"repo": "quiet", "path": "/repos/quiet", "times": {"days": 7, "entries": 0, "wait": None, "gate": None, "over": False,
+                                                            "slowest": None}},
+        {"repo": "locked", "path": "/repos/locked", "times": {"error": "the lane times were not read: database is locked"}}]}
+
+    def test_lane_times_shows_each_lanes_medians_and_slowest_entry_and_folds_the_quiet_ones(self):
+        """Pack sd:7233: one row per lane with an entry in 7 days; a median wait past an hour is ▲ caution and says the
+        question files; a lane with no entry folds into the note; a selected row shows its facts and CLI line."""
+        doc = self.doc()
+        doc["lanes"] = self.TIMES
+        out = self.run_page("R.body = ELS['times-body'].html; R.note = ELS['times-note'].textContent;"
+                            " open('lane:/repos/system'); R.det = ELS.details.html;", doc)
+        body = out["R"]["body"]
+        self.assertEqual(re.findall(r'<tr data-ev="([^"]+)"', body), ["lane:/repos/system", "lane:/repos/locked"])
+        system = re.search(r'<tr data-ev="lane:/repos/system".*?</tr>', body).group(0)
+        self.assertIn('<td class="g g-caution">▲<span class="sr">caution: median wait past 1 h</span></td>', system)
+        self.assertEqual(re.findall(r'<td class="num">(.*?)</td>', system), ["4", "1h 15m", "10m 10s"])
+        self.assertIn("sd:42 A slow one · 2h 30m", system)
+        self.assertIn('<td class="g g-unknown">▨<span class="sr">not read</span></td>', body)
+        self.assertIn("▨ not read: the lane times were not read: database is locked", body)
+        self.assertEqual(out["R"]["note"], "▲ Median wait past 1 h: system. The lane run files the parallel-lanes question."
+                                           " No entry in 7 days: 1 lane.")
+        self.assertIn("sd-ship -C /repos/system lane list", out["R"]["det"])
+        self.assertIn("Median wait past 1 h: the lane run files the parallel-lanes question.", out["R"]["det"])
+
+    def test_lane_times_with_no_entry_says_so_and_a_failed_read_is_unknown(self):
+        doc = self.doc()
+        doc["lanes"] = {"error": "", "lanes": [self.TIMES["lanes"][1]]}
+        quiet = self.run_page("R.body = ELS['times-body'].html;", doc)["R"]["body"]
+        self.assertIn("No lane ran an entry in the last 7 days.", quiet)
+        doc["lanes"] = {"error": "OperationalError: database is locked"}
+        out = self.run_page("R.body = ELS['times-body'].html;", doc)
+        self.assertIn("<b>▨ Not read.</b> OperationalError: database is locked", out["R"]["body"])
+        self.assertIn("lanes: OperationalError: database is locked", out["states"][-1]["text"])
 
     def test_a_part_that_failed_is_a_partial_read_and_its_panel_is_unknown(self):
         doc = self.doc()
@@ -889,6 +929,41 @@ FIELD_VALUES = { enabled: 'kimi, opus' }; C.run(cmd('providers.configure'), OBJ.
         out = self.write("open('sc:kimi'); R.det = ELS.details.html;")
         self.assertIn("<dt>Author order</dt><dd>2 of 2</dd>", out["R"]["det"])
         self.assertIn("<dt>Reviewer order</dt><dd>1 of 2</dd>", out["R"]["det"])
+
+
+class TheLaneTimes(RealLane):
+    """Pack sd:7233: Metrics' `lanes`, each managed lane's last 7 days, read by the pinned pack's `sd_lane.lane_times`
+    from the entries' history rows (pack sd:6006); Queue no longer reads them."""
+
+    def lanes(self):
+        return metrics_screen.document(self.connection, now=NOW)["lanes"]
+
+    def test_each_lane_carries_its_wait_and_gate_times_from_the_history_rows(self):
+        self.store([{**self.seeds()[0], "id": "seed-timed", "item": 7, "status": "running", "step": "prepare",
+                     "position": 7, "enqueued_at": "2026-09-06T10:00:00Z", "started_at": "2026-09-06T11:30:00Z"}])
+        lanes = self.lanes()
+        self.assertEqual((lanes["error"], [(lane["repo"], lane["path"]) for lane in lanes["lanes"]]),
+                         ("", [("system", str(self.checkout))]))
+        times = lanes["lanes"][0]["times"]
+        self.assertEqual((times["entries"], times["wait"], times["gate"], times["over"]), (1, 5400, None, True))
+
+    def test_a_failed_times_read_is_named_on_its_lane(self):
+        lane_module = metrics_screen.pack_module("sd_lane")
+        with mock.patch.object(lane_module, "lane_times", side_effect=sqlite3.OperationalError("database is locked")):
+            times = self.lanes()["lanes"][0]["times"]
+        self.assertEqual(times, {"error": "the lane times were not read: OperationalError: database is locked"})
+
+    def test_a_lane_whose_remote_names_no_github_repository_says_its_times_were_not_read(self):
+        upsert_repo(self.connection, "/elsewhere/other", remote="git@example.invalid:x.git", managed=1)
+        self.connection.commit()
+        lanes = {lane["repo"]: lane["times"] for lane in self.lanes()["lanes"]}
+        self.assertEqual(lanes["other"], {"error": "its remote names no GitHub repository, so it has no lane history"})
+
+    def test_queue_reads_no_lane_times(self):
+        from sd_dashboard import queue_screen
+
+        self.assertFalse(hasattr(queue_screen, "times"))
+        self.assertNotIn("times", queue_screen.document(self.connection, now=NOW)["lanes"][0])
 
 
 class TheRegistration(Registers, unittest.TestCase):
