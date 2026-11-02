@@ -182,8 +182,17 @@ class TheList(ReaderCase):
     CLICK = ("const click = (el, attr, v) => ELS[el].listeners.click[0]({ target: { closest: s => s === `[data-${attr}]`"
              " ? { dataset: { [attr]: v } } : null } });\n")
 
-    def test_today_has_no_views(self):
-        self.assertNotIn("PAGE_VIEWS", TODAY_JS)
+    def test_today_sections_are_rail_views_and_a_lamp_shows_needs_you(self):
+        """Pack sd:7084: Needs you, Since yesterday, Timeline, In motion and Queues are views, each a view-<id> panel;
+        a lamp filters Needs you, so it shows that view."""
+        page = (V2 / "today.html").read_text(encoding="utf-8")
+        views = re.findall(r"\{ id: '([a-z]+)', label: '([^']+)'", TODAY_JS)
+        self.assertEqual(views, [("needs", "Needs you"), ("digest", "Since yesterday"), ("timeline", "Timeline"),
+                                 ("motion", "In motion"), ("queues", "Queues")])
+        for view, _ in views:
+            self.assertIn(f'id="view-{view}"', page)
+        self.assertIn('href="#view=motion" id="lamp-sessions"', page)
+        self.assertIn("if (srcFilter) window.shell.view.show('needs');", TODAY_JS)
         self.assertNotIn("todayCount", TODAY_JS)
 
     def test_a_group_row_opens_to_its_first_five_members_then_the_rest(self):

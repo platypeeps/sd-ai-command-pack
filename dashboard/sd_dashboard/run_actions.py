@@ -33,6 +33,7 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | topic.remove       | a topic row not retired                      | `records.edit_row`, stage retired             |
 | topic.restore      | a retired topic row                          | `records.edit_row`, stage candidate           |
 | topic.delete       | a topic row                                  | `sd-db item remove <id>`, preview then apply  |
+| learning.add       | books or videos, an http(s) URL, a title     | `sd store add sdw.learning <title> ...`       |
 
 A step is bounded (`Step.seconds`), and its output is kept to its last `OUTPUT_CHARS` characters. The answer is
 `{action, line, exit, output, cut}` for a step that ran, whatever its exit. A refusal before the step ran is a
@@ -705,6 +706,46 @@ def topic_add(connection, values, jobs=None) -> Step:
     return Step(line="sd store add " + " ".join(shlex.quote(a) for a in args), argv=(_command("sd"), "store", "add", *args))
 
 
+#: Add book and Add video (pack sd:7081): each view's content type for a new row, and the hosts a video is youtube on.
+LEARNING_KINDS = {"books": "book", "videos": "video"}
+YOUTUBE_HOSTS = ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be")
+
+
+def learning_add(connection, values, jobs=None) -> Step:
+    """Add book or Add video: a to-read or to-watch learning row for a URL, through `sd store add`, as Add watch files a
+    market row. The title is the one typed, else the page's `<title>` through the source intake's bounded fetch; a URL
+    a learning row already holds is refused by that row's number."""
+    import shlex
+    import time
+    from datetime import date
+
+    from sd_db import records
+
+    from . import source_intake
+
+    given = _fields(values, {"view", "url", "title"})
+    if given["view"] not in LEARNING_KINDS:
+        raise ValueError("Add to books or videos; nothing ran.")
+    url = _text(given["url"], "URL")
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname or len(url) > URL_MAX or re.search(r"\s", url):
+        raise ValueError(f"Add an http or https URL of at most {URL_MAX} characters, with no spaces; nothing ran.")
+    held = next((row["id"] for row in records.list_rows(connection, "learning") if row["fields"].get("url") == url), None)
+    if held is not None:
+        raise ValueError(f"That URL is already in Learning as #{held}; nothing ran.")
+    typed = given["title"].strip() if isinstance(given["title"], str) else ""
+    if typed and re.search(r"[/\\]", typed):
+        raise ValueError("Name the row without a slash: its title is a vault file name; nothing ran.")
+    title = typed or source_intake._title(url, time.monotonic() + source_intake.TITLE_SECONDS).removesuffix(" - YouTube")
+    title = re.sub(r"\s+", " ", re.sub(r"[/\\:#\[\]|\"]", " ", title)).strip()
+    if not title or title.startswith((".", "-")) or len(title) > 120:
+        raise ValueError("Name the row: a title starts with a letter or digit and has at most 120 characters; nothing ran.")
+    kind = "youtube" if given["view"] == "videos" and parts.hostname in YOUTUBE_HOSTS else LEARNING_KINDS[given["view"]]
+    args = ["sdw.learning", title, "--field", f"content-type={kind}", "--field", f"url={url}",
+            "--field", f"dateCreated={date.today().isoformat()}"]
+    return Step(line="sd store add " + " ".join(shlex.quote(a) for a in args), argv=(_command("sd"), "store", "add", *args))
+
+
 # ---------- Remove and Delete (sd:6703) ----------
 
 #: The stage Remove moves a row to: the one its routine skips. market-watch refreshes active watches and the brief
@@ -828,6 +869,7 @@ ACTIONS = {
     "topic.remove": ("Remove topic", _move("topic")),
     "topic.restore": ("Restore topic", _move("topic", restore=True)),
     "topic.delete": ("Delete topic", _delete("topic")),
+    "learning.add": ("Add", learning_add),
 }
 
 

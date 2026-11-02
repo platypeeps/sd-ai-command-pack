@@ -2,9 +2,9 @@
 // reference is marked "build:". The rows are /api/management (management_screen.py), never sample data. A command that
 // executes posts to a route server.action_route answers, and its toast comes after the write lands, not before.
 const { html, put, plural, cells } = window.markup;
-// sd:5080: the five areas are the shell's views (shell.js, view:start): the shell draws the tabs, keeps #view=<id> and the
+// sd:5080: the four areas are the shell's views (shell.js, view:start): the shell draws the tabs, keeps #view=<id> and the
 // last choice, and fires 'shell:view'. Each lamp shows its view. Set before shell.js reads it.
-window.PAGE_VIEWS = [{ id: 'repos', label: 'Repos' }, { id: 'lane', label: 'Ship lane' }, { id: 'sessions', label: 'Sessions' },
+window.PAGE_VIEWS = [{ id: 'repos', label: 'Repos' }, { id: 'sessions', label: 'Sessions' },
   { id: 'deploys', label: 'Deploys' }, { id: 'schedules', label: 'Schedules', key: 'c' }];
 // Chat scope = the selected repo. Set before shell.js reads it; a repo page is its own URL, so the scope is right on load.
 (() => { const r = new URLSearchParams(location.search).get('repo'); if (r) document.body.dataset.scope = r.replace(/^~\/(repos\/)?/, ''); })();
@@ -17,7 +17,7 @@ const SDDB = 'sd-db';
 
 // ---------- Data (build): /api/management, read through shell.read on load and after each write ----------
 let DOC = null, READ = '';
-let REPOS = [], ALL = [], GIT = null, LANE = null, SESS = null, CLAUDE = null, SERVICES = [], CRON = [], SATS = null, UPLOAD = null;
+let REPOS = [], ALL = [], GIT = null, SESS = null, CLAUDE = null, SERVICES = [], CRON = [], SATS = null, UPLOAD = null;
 const tilde = p => { const h = GIT?.root ? GIT.root.replace(/\/repos\/?$/, '') : ''; return h && p.startsWith(h + '/') ? '~' + p.slice(h.length) : p; };
 const nameOf = p => p.replace(/^~\/(repos\/)?/, '');
 const hhmm = iso => iso ? iso.slice(11, 16) : '';
@@ -47,7 +47,7 @@ function absorb(doc) {
   // build (sd:1629): the settings columns sort on their shown words.
   ALL.forEach(r => { const rv = r.review || {}, rt = r.runtimes || {}; r.floor = rv.severity_floor || ''; r.copilot = rv.automatic_deep == null ? '' : String(rv.automatic_deep);
     r.python = rt.python?.value || ''; r.node = rt.node?.value || ''; });
-  LANE = doc.lane; SESS = doc.sessions; CLAUDE = doc.claude; SERVICES = doc.services || []; SATS = doc.satellites || null; UPLOAD = doc.upload || null;
+  SESS = doc.sessions; CLAUDE = doc.claude; SERVICES = doc.services || []; SATS = doc.satellites || null; UPLOAD = doc.upload || null;
   CRON = (doc.jobs || []).map(j => ({ ...j, next: nextRun(j.schedule), rank: stateOf(j) }));
 }
 // Age of the last fetch at the reading, as v1 words it (repos_screen._age).
@@ -126,7 +126,7 @@ const params = new URLSearchParams(location.search);
 const details = document.getElementById('details');
 const repoParam = params.get('repo');
 // The shell owns the view (#view=<id>); an older ?view= link still opens its view (DOMContentLoaded below). Either is
-// checked against the five names before anything indexes by it.
+// checked against the four names before anything indexes by it.
 const VIEWS = window.PAGE_VIEWS.map(v => v.id);
 let view = 'repos';
 const LIST_STATE = () => ({ repos: [RS, 'name', 1, repoCols()], deploys: [DS, 'name', 1, SVC_COLS], schedules: [SS, 'rank', 1, SCHED_COLS] })[view];
@@ -164,16 +164,13 @@ function showView(v) {
   applyText();
   defaultDetails();
 }
-// build: the five lamps count from the reading; a source that failed is unknown and says so. A lamp shows its view.
-const LOOK = { repos: 'folder-code', lane: 'git-merge', sessions: 'bot', deploys: 'rocket', schedules: 'calendar-clock' };
+// build: the four lamps count from the reading; a source that failed is unknown and says so. A lamp shows its view.
+const LOOK = { repos: 'folder-code', sessions: 'bot', deploys: 'rocket', schedules: 'calendar-clock' };
 function lamps() {
   const L = {};
   const set = (v, state, val) => { L[v] = { state, val }; };
   if (DOC?.repos) set('repos', 'ok', html`<b>${REPOS.length}</b> rows · ${REPOS.filter(r => r.merge === 'auto').length} auto`);
   else set('repos', 'unknown', html`▨ not read`);
-  const live = LANE ? LANE.live.length : 0;
-  if (LANE) set('lane', 'ok', html`<b>${LANE.live.filter(a => a.status === 'queued').length}</b> queued · ${LANE.live.some(a => a.status === 'running') ? 'running' : live ? 'waiting' : 'idle'}`);
-  else set('lane', 'unknown', html`▨ not read`);
   // build (sd:5106): a Claude session that waits on the operator lights the lamp first. Sessions not read, or one whose
   // status was not read, are not "nobody waits": the lamp is unknown unless an abandoned worktree already lights it.
   const waiting = CLAUDE ? CLAUDE.sessions.filter(r => r.waiting).length : 0;
@@ -274,7 +271,8 @@ function renderRepos() {
   shell.view.count('repos', rows.length);
   put(el, html`<div class="sec-head"><h2 id="repos-h">Repos <button class="help" type="button" aria-label="Help: Repos" data-help="<b>The sd-db repo table is the enumeration.</b> One row per registered checkout. Open a repo for its settings page: the sd-db row, its review declaration and GitHub protection, each with the route an edit takes.">${I('circle-help')}</button></h2>
       <p class="tally">${hides(rows.length, ALL.length, 'repo')}<span>${REPOS.length} registered</span><span>${managed} managed</span><span>${auto} lane merge auto</span></p>
-      <p class="tally" id="git-tally">${GIT ? html`${c.repos ?? 0} checkouts under ${tilde(GIT.root || '') || 'the fleet root'} · ${c.dirty ?? 0} dirty · ${c.ahead ?? 0} ahead · ${GIT.repos.filter(g => g.state === 'behind').length} behind default · git read ${seen(GIT)}` : html`<span class="g-unknown">▨</span> git state not read: ${why('git')}`} <button class="btn quiet sm" type="button" data-cmd="repos.refresh" data-obj="repos:git">${I('rotate-ccw')}<span>Refresh git state</span></button></p></div>
+      <p class="tally" id="git-tally">${GIT ? html`${c.repos ?? 0} checkouts under ${tilde(GIT.root || '') || 'the fleet root'} · ${c.dirty ?? 0} dirty · ${c.ahead ?? 0} ahead · ${GIT.repos.filter(g => g.state === 'behind').length} behind default · git read ${seen(GIT)}` : html`<span class="g-unknown">▨</span> git state not read: ${why('git')}`}</p>
+      <div class="tools"><button class="btn quiet sm" type="button" data-cmd="repos.refresh" data-obj="repos:git">${I('rotate-ccw')}<span>Refresh git state</span></button></div></div>
     <div class="filters toolbar-2">${filterBar(html`${filterSeg('managed', 'Managed', ['yes', 'no'], RS.managed)}${filterSeg('merge', 'Lane merge', ['auto', 'manual'], RS.merge)}${filterSeg('cols', 'Columns', ['git', 'settings'], RS.cols)}`, repoChips().length)}</div>
     ${rows.length ? html`<table class="ledger" aria-labelledby="repos-h" data-tfilter="page" data-toolbar="toolbar"><thead>${shell.list.sortHead(repoCols(), RS)}</thead>
       <tbody>${shown.map(r => html`<tr data-id="${'repo:' + r.path}" data-repo="${r.path}">
@@ -609,17 +607,13 @@ function flipRepo(field, o) {
     () => setRepo(field, REPOS.find(x => x.path === o.path) || r, before, value));
 }
 const colOf = field => field === 'runner-merge' ? 'runner_merge' : 'managed';
-const asgOf = n => (LANE?.live || []).find(a => a.id === n);
 
 // ---------- Commands (products/system/commands.md) ----------
-// build (sd:2485): one object per drawn row, for shell.read to put and to retire once a read stops listing it. A queue row
-// is drawn as asg:<n> whatever its role, so its object is too. Process and live-worktree rows take no command; their objects
+// build (sd:2485): one object per drawn row, for shell.read to put and to retire once a read stops listing it. The ship
+// lane's assignment and ready rows moved to Queue's Assignments view (pack sd:7115). Process and live-worktree rows take no command; their objects
 // let a selection or a ?row= link survive a read. A pending proposal is the page's own and stays until it is withdrawn.
 function objects() {
   const out = ALL.map(r => ({ id: `repo:${r.path}`, type: 'repo', label: r.name, path: r.path, row: r }));
-  const asg = a => out.push({ id: `asg:${a.id}`, type: 'assignment', label: `#${a.id} ${a.title || a.role}`, n: a.id, status: a.status, repo: a.repo || 'no repo', item: a.item });
-  (LANE?.live || []).forEach(asg);
-  (LANE?.ready || []).forEach(t => out.push({ id: `ready:${t.id}`, type: 'item', label: `#${t.id} ${t.title}`, item: t.id }));
   (CLAUDE?.sessions || []).forEach(r => out.push({ id: `cs:${r.id}`, type: 'claude session', label: r.name || r.id, sid: r.id, pid: r.pid, row: r }));
   if (SESS) out.push({ id: 'wt:abandoned', type: 'worktrees', label: `${SESS.abandoned} abandoned worktrees`, n: SESS.abandoned },
     { id: 'wt:live', type: 'live worktrees', label: `${SESS.registered - SESS.abandoned} live worktrees` },
@@ -714,10 +708,6 @@ function registerCommands() {
       undo: undoOf },
     ...Object.values(ROUTE).map(([type]) => ({ id: `${type.split(' ')[0].toLowerCase().replace('-', '')}.withdraw`, on: type, label: 'Withdraw', does: 'Drops this proposal from the list; nothing was run.', risk: 'safe', executes: false,
       run: o => { withdraw(o.key, true); return `Proposal withdrawn · ${o.title}`; } })),
-    window.commands.showAssignment(),
-    // build: the item opens in Tasks, whose Details read it.
-    { id: 'item.show', on: 'item', label: 'Open item', does: 'Opens the work item.', key: 'o', icon: 'arrow-up-right', risk: 'safe', primary: () => true, cli: o => `sd task show ${o.item}`, executes: false,
-      run: o => window.shell.openItem(o.item) },
     { id: 'wt.prune', on: 'worktrees', label: 'Prune', does: 'Removes records of worktrees whose folders are gone; this cannot be undone.', key: 'p', risk: 'confirm', primary: () => true, when: () => 'no dashboard route: run the CLI line', cli: () => 'sd sessions prune --abandoned',
       consequence: o => `Removes ${o.n} worktree registrations whose directories are gone. Branches and files stay.` },
     // Services on this Mac. build: each posts /api/services/<label>/<action> with the service's revision; when() is its capability.
@@ -872,35 +862,6 @@ document.addEventListener('shell:open', e => {
   else if (!id.startsWith('prop:')) selectRow(id, true);
 });
 document.addEventListener('shell:picked', e => document.querySelectorAll('.ledger tbody tr[data-id]').forEach(tr => tr.toggleAttribute('data-picked', e.detail.includes(tr.dataset.id))));
-
-// ---------- Ship lane ----------
-const ASTATE = { blocked: 'caution', queued: 'queued', running: 'queued', ending: 'queued', done: 'ok', cancelled: 'ok' };
-const asgRepo = a => (a.repo || 'no repo').replace(/^~\/repos\//, '');
-function renderLane() {
-  const el = document.getElementById('view-lane');
-  if (!LANE) { put(el, unknown('The lane was not read', why('lane'), 'sd assignments list')); return; }
-  const queued = LANE.live.filter(a => a.status === 'queued'), running = LANE.live.filter(a => a.status !== 'queued');
-  const lease = running.filter(a => a.role === 'merge');
-  put(el, html`
-    <ul class="strip" aria-label="Lane state">
-      <li><span class="label">Queue</span><span class="val">${queued.length} queued · ${running.length} running</span></li>
-      <li><span class="label">Claim</span><span class="val">${lease.length ? `${lease.length} merge running` : 'no merge running'}</span></li>
-      <li><span class="label">Lane merge</span><span class="val">${REPOS.filter(r => r.merge === 'auto').length} repos auto</span></li>
-    </ul>
-    <div class="sec-head"><h2 id="queue-h">Queue <button class="help" type="button" aria-label="Help: merge lane" data-help="<b>One writer per repo.</b> A merge or serial assignment takes an exclusive lease on its repo; nothing else in that repo starts until the lease is released. The runner queues a merge only for runner_merge=auto repos, after a done author run with a reviewed head.">${I('circle-help')}</button></h2><p class="tally">assignment table · ${hhmm(READ)} UTC</p></div>
-    ${LANE.live.length ? html`<table class="ledger" aria-labelledby="queue-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Assignment</th><th scope="col">Repo</th><th scope="col">Role</th><th scope="col">Since</th>${ACTH}</tr></thead>
-      <tbody>${LANE.live.map(a => html`<tr data-id="asg:${a.id}"><td class="g g-queued">◌<span class="sr">${a.status}</span></td><td class="what"><button type="button">#${a.id} ${a.title || a.role}</button></td><td class="d mono" data-k="repo">${asgRepo(a)}</td><td class="d mono">${a.role} · ${a.status}</td><td class="d mono"><time class="rel" datetime="${a.started || a.queued_at || ''}"></time></td>${ACT('asg:' + a.id)}</tr>`)}</tbody></table>`
-      : html`<p class="empty"><span class="g-queued" aria-hidden="true">◌</span> Nothing queued or running.</p>`}
-    <div class="sec-head"><h2 id="ready-h">Waiting on you</h2><p class="tally">${LANE.ready.length} ready_to_send · not lane candidates</p></div>
-    ${LANE.ready.length ? html`<table class="ledger" aria-labelledby="ready-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Item</th><th scope="col">Repo</th>${ACTH}</tr></thead>
-      <tbody>${LANE.ready.map(t => html`<tr data-id="ready:${t.id}"><td class="g g-queued">◌<span class="sr">queued</span></td><td class="what"><button type="button">#${t.id} ${t.title}</button></td><td class="d mono" data-k="repo">${asgRepo(t)}</td>${ACT('ready:' + t.id)}</tr>`)}</tbody></table>`
-      : html`<p class="empty">No item waits at ready_to_send.</p>`}`);
-}
-document.getElementById('view-lane').addEventListener('click', e => {
-  if (e.target.closest('a')) return;
-  if (e.target.closest('.rowact')) return;
-  const tr = e.target.closest('tr[data-id]'); if (tr) selectRow(tr.dataset.id, true);
-});
 
 // ---------- Sessions and agents ----------
 // build (sd:5106): each Claude session on this Mac (claude_sessions.py), the ones waiting on you first. Safe to exit is the
@@ -1084,11 +1045,6 @@ function defaultDetails() {
   const first = document.querySelector(`#view-${view} tr[data-id]`);
   if (first) selectRow(first.dataset.id, false);
 }
-function asgDetails(a, act) {
-  const st = ASTATE[a.status] || 'unknown';
-  return html`<p class="kind"><span class="g-${st}">${GLYPH[st]}</span> Assignment · ${a.status}</p><h2>${a.title || a.role}</h2><dl><dt>Assignment</dt><dd>#${a.id}${a.item ? ` · item #${a.item}` : ''}</dd><dt>Repo</dt><dd>${a.repo || '—'}</dd><dt>Role</dt><dd>${a.role} · ${a.lane} lane</dd><dt>Agent</dt><dd>${a.provider || '—'}</dd>
-    <dt>Queued</dt><dd><time class="rel" datetime="${a.queued_at || ''}" data-long data-empty="never"></time></dd><dt>Started</dt><dd><time class="rel" datetime="${a.started || ''}" data-long data-empty="never"></time></dd><dt>Ended</dt><dd><time class="rel" datetime="${a.ended || ''}" data-long data-empty="never"></time></dd></dl>${act}`;
-}
 // build (sd:3388): the job's log and its last request, as v1 Operations > Jobs showed them. A log that was not read is unknown
 // with its reason, never an empty log.
 const requestDetail = r => r ? `${r.action} · ${r.status}${r.who ? ` · ${r.who}` : ''}${r.at ? ` · ${r.at}` : ''}${r.message ? ` · ${r.message}` : ''}` : 'none recorded';
@@ -1118,13 +1074,6 @@ function selectRow(id, open) {
       <dt>Last request</dt><dd>${requestDetail(c.last_request)}</dd></dl>
       ${c.last_exit === 127 ? html`<p class="why">Exit 127: the shell could not find the command. A retry fails the same way until the path is fixed.</p>` : ''}${act}${logDetail(c)}`;
     shell.suggest([`Why did ${c.name} exit ${c.last_exit ?? 0}?`, `What does ${c.name} do and who reads its output?`, 'Which schedules overlap tonight?']);
-  } else if (kind === 'asg') {
-    const a = asgOf(+key); if (!a) return;
-    h = asgDetails(a, act);
-    shell.suggest([`Why is #${a.id} ${a.status}?`, `What else is blocked in ${asgRepo(a).split('/').pop()}?`, 'Group blocked runs by cause']);
-  } else if (kind === 'ready') {
-    const t = LANE.ready.find(x => String(x.id) === key); if (!t) return;
-    h = html`<p class="kind"><span class="g-queued">◌</span> Item · ready_to_send</p><h2>${t.title}</h2><dl><dt>Item</dt><dd>#${t.id}</dd><dt>Repo</dt><dd>${t.repo || '—'}</dd><dt>Lane</dt><dd>not a candidate: it waits on you</dd></dl>${act}`;
   } else if (kind === 'repo') {
     const r = ALL.find(x => x.path === key); if (!r) return;
     const g = r.git, pw = pullWhy({ row: r });
@@ -1176,14 +1125,14 @@ function selectRow(id, open) {
   }
   put(details, h); swap();
   if (shell.commands.get(id)) shell.commands.select(id); else shell.setContext(details.querySelector('h2')?.textContent || '');
-  if (!['cron', 'asg'].includes(kind)) shell.suggest(['What changed here in the last day?', 'What should I look at first on this page?', 'Explain this row']);
+  if (kind !== 'cron') shell.suggest(['What changed here in the last day?', 'What should I look at first on this page?', 'Explain this row']);
   shell.row(id);
   if (open) shell.openPane('tab-details');
 }
 
 // ---------- Filter: the shell's Shapeshift bar (sd:5539) ----------
 // Its text is this view's filter: free words and the managed:, merge: and state: chips. A chip control sets the bar's text.
-const RENDER = new Map([['repos', renderRepos], ['lane', renderLane], ['sessions', renderSessions], ['deploys', renderDeploys], ['schedules', renderSchedules]]);
+const RENDER = new Map([['repos', renderRepos], ['sessions', renderSessions], ['deploys', renderDeploys], ['schedules', renderSchedules]]);
 function render() {
   const draw = RENDER.get(view);
   if (!draw) throw new Error(`no such view: ${view}`);
@@ -1222,16 +1171,16 @@ function adopt(doc) {
   return { objects: objects(), state: failed.length ? { kind: 'partial', text: `Not read: ${failed.join(', ')}. Each shows why in its view.`, source: '/api/management' } : null };
 }
 function clear(err) {
-  DOC = null; READ = ''; GIT = LANE = SESS = CLAUDE = SATS = null; REPOS = []; ALL = []; SERVICES = []; CRON = [];
+  DOC = null; READ = ''; GIT = SESS = CLAUDE = SATS = null; REPOS = []; ALL = []; SERVICES = []; CRON = [];
   FAILED = err.message;
 }
 function draw() {
   lamps();
   pageAttention();
   if (!DOC) { VIEWS.forEach(v => put(document.getElementById(`view-${v}`), unknown('Management was not read', FAILED, '/api/management'))); return; }
-  renderLane(); renderSessions(); renderDeploys(); renderSchedules(); renderRepos();
+  renderSessions(); renderDeploys(); renderSchedules(); renderRepos();
   document.getElementById('subhead').textContent = repoParam ? `Settings for ${repoParam}. Chat is scoped to this repo.`
-    : `Every repo setting, the merge lane, sessions, services and schedules. Read ${hhmm(READ)} UTC.`;
+    : `Every repo setting, sessions, services and schedules. Read ${hhmm(READ)} UTC.`;
 }
 // The repos view selects no row by default: Details explains how an edit lands, or shows the repo's settings.
 const inView = id => !!id && !!document.querySelector(`#view-${view} tr[data-id="${CSS.escape(id)}"]`);
@@ -1256,7 +1205,7 @@ document.addEventListener('DOMContentLoaded', () => {
     shell.view.show(c.dataset.view);
   });
   reading = shell.read({
-    source: '/api/management', what: 'repos, the lane, sessions, services and jobs', adopt, clear, draw,
+    source: '/api/management', what: 'repos, sessions, services and jobs', adopt, clear, draw,
     current: () => shell.row(), first: firstRow,
     // A ?row= of another view is not selected there: the view's first row is.
     select: id => { const at = inView(id) ? id : firstRow(); if (at) selectRow(at, false); else nothingSelected(); },

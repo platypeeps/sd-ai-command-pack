@@ -1931,6 +1931,16 @@ class Landing(Lane):
                                                         "elsewhere"), answer["post_merge"])
         self.assertEqual((self.notes[-1][1], self.note_kinds[-1]), (f"Post-merge: {answer['post_merge']}", "followup"))
 
+    def test_a_variable_the_lanes_environment_omits_never_reaches_the_post_merge(self) -> None:
+        """sd:7051: `{**os.environ, **environ}` put back what the caller dropped, such as a GIT_DIR naming
+        another repository, so the target ran against it."""
+        self.post_merge('@echo "[$$GIT_DIR]" > env.out')
+        environ = clean_environment()  # read before the ambient value is set: it has no GIT_DIR
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(self.tmp / "decoy" / ".git")}):
+            ran = sd_lane.make_post_merge(self.repo, environ, "fast-forwarded to origin/main")
+        self.assertEqual(ran, f"make post-merge passed in {self.repo}")
+        self.assertEqual((self.repo / "env.out").read_text(encoding="utf-8").strip(), "[]")
+
     def test_a_pinned_detached_checkout_runs_the_post_merge_that_refreshes_it(self) -> None:
         """sd:3647. The hub's main checkout is pinned (detached): the fast-forward skips it, and `repo-sync.sh
         refresh`, which the target runs, moves only a pinned checkout. So the target must run for it."""
@@ -2051,7 +2061,7 @@ class Landing(Lane):
         self.merge_lands(tree, 1, head)
         policy = {"release": {"verify": 'test "$SD_RELEASE_VERSION" = 0.1.0'}}
 
-        def killed(world, command, tag, version, sha):
+        def killed(world, command, tag, version, sha, deploy=False):
             raise Killed
         with mock.patch.object(sd_lane.ReleaseWorld, "verify", killed), self.assertRaises(Killed):
             self.released(policy)
@@ -2082,16 +2092,43 @@ class Landing(Lane):
         self.assertEqual(self.entries()[0]["release"], "owed")  # the mark waits; no chain runs
         self.assertEqual(self.tag_on_origin("v0.1.0"), "")
 
-    def test_a_release_declared_before_the_deploy_refusal_runs_nothing(self) -> None:
-        """Older state: the reader accepted any `release` object, so a stored one may name a deploy repository;
-        a tag-only chain would skip the deploy it names."""
+    def test_an_explicitly_empty_release_types_releases_nothing(self) -> None:
+        """sd:7016: `release_types: []` fell back to the default types, so a `feat` still tagged."""
         tree, head = self.topic()
         self.feat_on_origin_main()
         self.merge_lands(tree, 1, head)
-        answer = self.released({"release": {"deploy_repo": "~/repos/org/deploy", "file": "v.yaml", "key": "image.tag"}})
-        self.assertTrue(answer["release"].startswith("not run: the policy declaration: release: deploy_repo"), answer)
-        self.assertIn("pack sd:7014", answer["release"])
+        answer = self.released({"commit_convention": {"release_types": []}, "release": {}})
+        self.assertEqual(answer["release"], "nothing to release: release_types names no type")
+        self.assertEqual((self.entries()[0]["release"]["step"], self.tag_on_origin("v0.1.0")), ("done", ""))
+
+    def test_a_stored_release_the_reader_refuses_runs_nothing(self) -> None:
+        """Older state: the reader accepted any `release` object, so a stored one may name a deploy repository
+        with no file or key; a tag-only chain would skip the deploy it names."""
+        tree, head = self.topic()
+        self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        answer = self.released({"release": {"deploy_repo": "~/repos/org/deploy"}})
+        self.assertEqual(answer["release"], "not run: the policy declaration: release: deploy_repo, file and key "
+                                            "are declared together", answer)
         self.assertEqual((self.entries()[0]["release"], self.tag_on_origin("v0.1.0")), ("owed", ""))
+
+    def test_a_run_killed_after_the_tag_push_resumes_at_the_bump(self) -> None:
+        """sd:7014: a policy naming a deploy repository runs the bump after the tag, under the deploy policy."""
+        tree, head = self.topic()
+        self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        policy = {"merge_method": "rebase",
+                  "release": {"deploy_repo": str(self.tmp / "deploy"), "file": "values.yaml", "key": "image.tag"}}
+        made = []
+
+        def killed(world):
+            made.append((world.deploy, world.file, world.merge_method))
+            raise Killed
+        with mock.patch.object(sd_lane.ReleaseWorld, "deployed", killed), self.assertRaises(Killed):
+            self.released(policy)
+        chain = self.entries()[0]["release"]
+        self.assertEqual((chain["step"], chain["tag"]), ("bump", "v0.1.0"))
+        self.assertEqual(made, [(self.tmp / "deploy", "values.yaml", "rebase")], "the deploy policy's merge method")
 
 
 class Killed(BaseException):
@@ -2270,9 +2307,9 @@ class Publishing(SharedQueue):
         """Failure table, enqueue: a hub fault after the write landed; the verb says hub_unavailable."""
         real = sd_lane.on_hub
 
-        def landed_then_lost(queue: sd_lane.Queue, work: Any) -> Any:
+        def landed_then_lost(queue: sd_lane.Queue, work: Any, **options: Any) -> Any:
             before = self.rows()
-            answer = real(queue, work)
+            answer = real(queue, work, **options)
             if self.rows() == before:  # a read, such as enqueue's check before it publishes (sd:3283)
                 return answer
             raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
@@ -2282,6 +2319,25 @@ class Publishing(SharedQueue):
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
             sd_lane.enqueue_entry(self.feature, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual(len(self.entries()), 1)
+
+
+class HubReads(SharedQueue):
+    """pack sd:7042: a read of the queue takes no write lock, so it waits on no writer."""
+
+    def test_a_queue_read_does_not_wait_on_a_writer(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        import sd_db
+        writer = sd_db.connect(home=self.tmp)
+        self.addCleanup(writer.close)
+        writer.execute("BEGIN IMMEDIATE")
+        started = time.monotonic()
+        try:
+            entries = sd_lane.read_queue(self.store())
+            waited = time.monotonic() - started
+        finally:
+            writer.execute("ROLLBACK")
+        self.assertLess(waited, 1.0, "a queue read waited on the write lock")
+        self.assertEqual(len(entries), 1)
 
 
 class EnqueuePrechecks(SharedQueue):
@@ -2849,8 +2905,8 @@ class ClaimAndLease(SharedQueue):
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         real = sd_lane.on_hub
 
-        def claim_lands_then_hub_goes(queue: sd_lane.Queue, work: Any) -> Any:
-            answer = real(queue, work)
+        def claim_lands_then_hub_goes(queue: sd_lane.Queue, work: Any, **options: Any) -> Any:
+            answer = real(queue, work, **options)
             if any(body["status"] == "running" for _, body in self.rows()):
                 raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
             return answer
@@ -3337,8 +3393,8 @@ class HubSkew(RefusingHub):
         real_hub, real_read = sd_lane.on_hub, sd_lane.sd_lib.lane_elsewhere
         lost, drops = [True], [True]
 
-        def claim_lands_answer_lost(queue: sd_lane.Queue, work: Any) -> Any:
-            answer = real_hub(queue, work)
+        def claim_lands_answer_lost(queue: sd_lane.Queue, work: Any, **options: Any) -> Any:
+            answer = real_hub(queue, work, **options)
             if lost and any(body["status"] == "running" for _, body in self.rows()):
                 lost.clear()
                 raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
@@ -5016,10 +5072,10 @@ class Watch(Lane):
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         on_hub, faults = sd_lane.on_hub, [sd_lane.LaneError("down", code=sd_lane.HUB_UNAVAILABLE)]
 
-        def flaky(queue: sd_lane.Queue, work: Any) -> Any:
+        def flaky(queue: sd_lane.Queue, work: Any, **options: Any) -> Any:
             if faults:
                 raise faults.pop()
-            return on_hub(queue, work)
+            return on_hub(queue, work, **options)
         with mock.patch.object(sd_lane, "on_hub", flaky), mock.patch.object(
                 sd_lane, "watch_pause", lambda: sd_lane.run_lane(self.repo, self.environ, self.ship)):
             code, lines = self.watch_items(self.repo, 1)
@@ -5376,10 +5432,19 @@ class FailureNotes(SharedQueue):
                                      closes=(2,))["expected_head"]
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding\nmore"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
-        body = f"Lane failed in prepare at {head[:12]}: a blocking finding"
         [entry] = self.entries()
+        body = f"Lane failed in prepare at {head[:12]}: a blocking finding; full text: {entry['prepare_log']}"
         self.assertEqual((self.lane_notes(), set(self.note_kinds)), ([(1, body), (2, body)], {"comment"}))
         self.assertEqual((entry["status"], entry["note"]), ("failed", {"sd:1": "written", "sd:2": "written"}))
+
+    def test_a_failed_prepare_note_points_at_the_prepare_log(self) -> None:
+        """pack sd:7133. The note's reason is cut; the log holds the whole finding, so the note names it."""
+        row = {"status": "failed", "step": "prepare", "item": 1, "expected_head": "a" * 40,
+               "reason": "a blocking finding", "prepare_log": "/logs/prepare-1-x.log", "log_host": "hub"}
+        notes: list[str] = []
+        sd_lane.note_ended(row, self.repo, lambda item, body, main: notes.append(body) or "written")
+        self.assertEqual(notes, [f"Lane failed in prepare at {'a' * 12}: a blocking finding; full text: "
+                                 "/logs/prepare-1-x.log"])
 
     def test_a_skip_notes_its_item(self) -> None:
         tree = self.worktree("topic")
@@ -5406,7 +5471,9 @@ class FailureNotes(SharedQueue):
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "merge")] = {"ok": False, "phase": "merging", "error": "the merge was refused"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
-        self.assertEqual(self.lane_notes(), [(1, "Lane failed in merge at head-1: the merge was refused")])
+        [entry] = self.entries()
+        self.assertEqual(self.lane_notes(), [(1, "Lane failed in merge at head-1: the merge was refused; "
+                                                 f"full text: {entry['merge_log']}")])
 
     def test_an_exception_in_the_merge_step_notes_merge(self) -> None:
         """pack sd:5968: a raise after `advance` names merge in the note and the finish record, not prepare."""

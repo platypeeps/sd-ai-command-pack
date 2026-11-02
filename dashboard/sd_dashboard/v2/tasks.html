@@ -34,10 +34,9 @@
   </div>
 
   <div id="state" hidden></div>
-  <!-- The toolbar standard (sd:5281): row 1, the realm tabs, add or find and the layouts; row 2, the filters. -->
+  <!-- The toolbar standard (sd:5281): row 1, add or find and the layouts; row 2, the filters, Open | Parked | All first (pack sd:7084). -->
   <div class="toolbar" id="toolbar">
     <div id="viewswitch"></div>
-    <div class="vseg" id="parked-seg" role="group" aria-label="Tasks shown"></div>
     <div class="shift" id="shift">
       <label class="sr" for="shift-in">Add or find a task</label>
       <div class="field">
@@ -63,6 +62,8 @@
     </div>
   </div>
   <div class="filters toolbar-2" id="filterbar" role="group" aria-label="Filters">
+    <!-- pack sd:7084: the set-aside group leads the filter row, as on every page. -->
+    <div class="vseg" id="parked-seg" role="group" aria-label="Tasks shown"></div>
     <div class="ffind">
       <label class="label" for="find-in">Text</label>
       <input id="find-in" type="search" autocomplete="off" spellcheck="false" placeholder="title, #id, repo">

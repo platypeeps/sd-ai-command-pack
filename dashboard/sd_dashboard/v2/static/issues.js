@@ -45,8 +45,9 @@
         : `No ${closedToo() ? '' : 'open '}issue is assigned to you or filed by you.`}</td></tr>`}${
         github ? html`<tr class="empty"><td colspan="4">Your GitHub issues outside the repos' issue sources were not read: ${github}. Read again tries again.</td></tr>` : ''}`);
     put($('issues-tally'), pool.length && !error ? html`<span>${open.length} ${showHidden() ? 'hidden' : 'open'}</span>${closedToo() ? html`<span>${pool.length - open.length} closed in 7 d</span>` : ''}` : html``);
-    if (L) put($('issues-filters'), error ? html`` : L.fbar(html`${hiddenSeg(openN, hiddenN)}${L.fseg('iss', 'State', [['open', open.length], ['closed', pool.length]].map(([v, n]) =>
-      ({ v, pressed: closedToo() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(n)}</span>` })))}`));
+    if (L) put($('issues-filters'), error ? html`` : L.fbar(html`${hiddenSeg(openN, hiddenN)}${L.fseg('iss', 'State',
+      // pack sd:7084: Open | Hidden | All already says open; one chip adds the issues closed in 7 days, a second press drops them.
+      [{ v: closedToo() ? 'open' : 'closed', pressed: closedToo(), label: html`with closed <span class="n">${String(pool.length - open.length)}</span>` }])}`));
     // The Your issues tab (sd:5080): the open rows not hidden, whichever list shows.
     window.shell?.view?.count('issues', error ? null : ISSUES.filter(r => isOpen(r) && !r.hidden).length);
     objects();
@@ -57,7 +58,7 @@
     const p = new URLSearchParams(location.search);
     if (v === 'closed') p.set('iss', 'closed'); else p.delete('iss');
     window.shell.url(p.toString()); draw();
-    $('issues-filters').querySelector?.(`[data-v="${v}"]`)?.focus();
+    $('issues-filters').querySelector?.('[data-f="iss"]')?.focus();
   }
   // Open | Hidden | All (sd:6175, sd:6701): one ?hidden= for both lists, as Contributions keeps it.
   function pickHidden(bar, v) {

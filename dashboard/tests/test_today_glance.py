@@ -206,6 +206,8 @@ class TheQueueRows(ReaderCase):
         self.assertIn("3 review rounds left blockers", rows)
         self.assertIn("<b>lane</b> · pending · position 2", rows)
         self.assertIn('data-qrepo="~/repos/system"', out["R"]["chips"])
+        # pack sd:7084: no All chip; none pressed shows every repo.
+        self.assertNotIn('data-qrepo=""', out["R"]["chips"])
         self.assertIn("<span>1 ready</span>", out["R"]["tally"])
 
     def test_a_failed_queues_read_says_so(self):

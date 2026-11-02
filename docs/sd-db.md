@@ -56,10 +56,11 @@ The setting is read first, so `off` asks Tailscale nothing. Each check reads the
 Scripts that write off the machine (the NAS copy, the `hub-pin` push) run `bin/sd-db fence` first.
 
 Every library write to this machine's own database asks the fence too (system sd:5986): each write statement, and its commit.
-A transaction open when the console renames the node rolls back at its commit.
+A commit more than 5 seconds after the console renames the node, or after a sleep, rolls back.
 Only `elsewhere` refuses: a Tailscale outage must not stop a healthy hub, and nothing it writes then leaves the machine.
 Reads stay allowed, so the old hub's dashboard still shows its stale records.
-A write inside a transaction uses an answer held 5 seconds per process (`FENCE_SECONDS`); every boundary that makes a write persist asks afresh: COMMIT and the outer savepoint's RELEASE.
+A write and every boundary that makes it persist (COMMIT, the outer savepoint's RELEASE) use an answer held 5 seconds per process (`FENCE_SECONDS`).
+The transaction's opening asks again once that answer is older than half of it, before SQLite's write lock, so a commit holds no other writer for a Tailscale call (sd:7042).
 A write outside a transaction (`execute`, `executemany`, a cursor's) runs in its own `BEGIN IMMEDIATE` ... `COMMIT`, so its commit is one that asks; a batch commits whole or not at all.
 A script's write outside a transaction refuses (sqlite3 commits before a script, so nothing can hold it): put `BEGIN IMMEDIATE` ... `COMMIT` inside the script. A writable `blobopen` needs a transaction.
 Another file, such as a test fixture or a backup target, is not the record and is not fenced.
@@ -322,7 +323,7 @@ Each key is a kind; each value is the object the old `.github/` file held, or fo
 | `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
 | `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
 | `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids, and optional `url` and `title` (sd:5302) | none |
-| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: it merges by `merge_method` (sd:6790; under rebase, prepare folds `fixup!` commits, writes the trailers on the tip and force-pushes it with a lease), and `review.human` holds the merge until that many humans approve the head; `ci` `{provider: jenkins, url, job}` makes the merge wait for a green Jenkins build of the head (`{pr}` in `job` is the PR number), and an unreachable Jenkins holds it as `ci_unreachable`; `test` `{setup, env, teardown}` is the recipe `sd-check` runs around the checks: unset `env` names or a failed `setup` fail them unrun, and `teardown` runs after them; `release` `{verify}` is the chain the lane runs after a merge (`bin/sd_release.py`, sd:6881): it pushes the next semver tag from `commit_convention.release_types` (default `feat`, `fix`) on origin's main, then runs `verify` in a detached worktree at the tagged commit with `SD_RELEASE_TAG` and `SD_RELEASE_VERSION`; a policy that holds `push` at ask files one question on the item and waits for a ruling that starts with `go`, a freeze window holds the tag, and a failed `verify` reports and rolls nothing back; `deploy_repo`, `file` and `key` are refused until the deploy bump lands (sd:7014) | none |
+| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: it merges by `merge_method` (sd:6790; under rebase, prepare folds `fixup!` commits, writes the trailers on the tip and force-pushes it with a lease), and `review.human` holds the merge until that many humans approve the head; `ci` `{provider: jenkins, url, job}` makes the merge wait for a green Jenkins build of the head (`{pr}` in `job` is the PR number), and an unreachable Jenkins holds it as `ci_unreachable`; `test` `{setup, env, teardown}` is the recipe `sd-check` runs around the checks: unset `env` names or a failed `setup` fail them unrun, and `teardown` runs after them; `release` `{deploy_repo, file, key, verify}` is the chain the lane runs after a merge (`bin/sd_release.py`, sd:6881, sd:7014): it pushes the next semver tag from `commit_convention.release_types` (default `feat`, `fix`; an empty list releases nothing) on origin's main; with `deploy_repo`, `file` and `key`, declared together, it opens a PR in the deploy repository setting `key` in `file` to the version, in the deployed value's form, and merges it with `gh pr merge --match-head-commit` once the deploy repository's own policy gates pass (green checks, `review.human`, a Jenkins `ci`), staying at merge until GitHub reads it `MERGED`; then it runs `verify` in a detached worktree at the merged deploy commit, or at the tagged commit when no deploy is declared, with `SD_RELEASE_TAG` and `SD_RELEASE_VERSION`; each act a policy holds at ask files one question on the item and waits for a ruling that starts with `go`, a freeze window holds the tag and the merge, and a failed `verify` reports and rolls nothing back | none |
 
     bin/sd-db repo declare PATH                     # every kind, as JSON
     bin/sd-db repo declare PATH review              # one kind
@@ -341,7 +342,7 @@ The `.github/` files are no longer read.
     bin/sd-db repo freeze PATH off                  # lift it
 
 A freeze window is a `freeze` state row keyed by the repository's GitHub `owner/name`, not a declaration: it is short-lived (sd:6879).
-Inside a window the lane claims no entry, so every entry stays pending in order, `sd-ship merge` refuses with `freeze_window`, and the release chain holds its tag.
+Inside a window the lane claims no entry, so every entry stays pending in order, `sd-ship merge` refuses with `freeze_window`, and the release chain holds its tag and its deploy merge.
 
 ## `judgments`: what the judgment models cost, by stage
 

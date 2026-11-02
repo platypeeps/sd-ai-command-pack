@@ -448,22 +448,31 @@ def queue_for(root: pathlib.Path, environ: dict[str, str]) -> Queue:
     return Queue(repository, lane_dir(root, environ), environ)
 
 
-def on_hub(queue: Queue, work: Callable[[Any], Any]) -> Any:
+def on_hub(queue: Queue, work: Callable[[Any], Any], *, write: bool = True) -> Any:
     """`work(connection)` in one hub database transaction, `BEGIN IMMEDIATE`; it replaces the queue file's lock.
 
     Local on the hub, over the tailnet session on a satellite. The read, the
     check and the write sit in one transaction, so a revision or head check
     keeps its meaning. A fault of the database or its session refuses with
     `HUB_UNAVAILABLE`: an unknown answer, since a write may have landed.
+    `write=False` reads in a plain `BEGIN` on a read-only connection: one
+    snapshot, and no write lock to wait on or hold (pack sd:7042).
     """
     require_sd_db()
     from sd_db.database import connect, transaction  # noqa: PLC0415
     from sd_db.errors import SdDbError  # noqa: PLC0415
     try:
-        connection = connect(hub_database(queue.environ), write=True)
+        connection = connect(hub_database(queue.environ), write=write)
         try:
-            with transaction(connection):
+            if write:
+                with transaction(connection):
+                    return work(connection)
+            connection.execute("BEGIN")
+            try:
                 return work(connection)
+            finally:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
         finally:
             connection.close()
     except (SdDbError, sqlite3.Error, OSError, EOFError) as error:
@@ -509,7 +518,7 @@ def update(queue: Queue, change: Callable[[list[dict[str, Any]]], Any],
 
 
 def read_queue(queue: Queue) -> list[dict[str, Any]]:
-    return on_hub(queue, lambda connection: stored(connection, queue.repository))
+    return on_hub(queue, lambda connection: stored(connection, queue.repository), write=False)
 
 
 def runner_write(queue: Queue, change: Callable[[list[dict[str, Any]]], Any],
@@ -2564,19 +2573,29 @@ def release_chain(root: pathlib.Path, queue: Queue, environ: dict[str, str], ans
     if not isinstance(release, dict):
         return answer
     sd_repo_policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
-    refused = sd_repo_policy.problems({"release": release})  # one stored before the reader refused a deploy
+    refused = sd_repo_policy.problems({"release": release})  # one stored before the reader checked `release`
     if refused:
         return {**answer, "release": f"not run: {'; '.join(refused)}"[:600]} if landed else answer
+    deploy = sd_lib.repo_disk(release["deploy_repo"]) if release.get("deploy_repo") else None
+    try:  # the deploy repository's own policy holds the bump and its merge, as `sd-ship merge` would
+        deploy_acts = sd_repo_policy.effective(sd_lib.repo_declaration(deploy, "policy", environ)) if deploy else None
+    except Exception as error:  # noqa: BLE001 -- unknown, not the defaults
+        return ({**answer, "release": f"not run: the policy of {deploy} was not read: {error}"[:600]} if landed
+                else answer)
     try:
-        reason = run_release(root, queue, environ, sd_repo_policy.effective(policy), release)
+        reason = run_release(root, queue, environ, sd_repo_policy.effective(policy), release, deploy, deploy_acts)
     except Exception as error:  # noqa: BLE001 -- the merges stand; the next run resumes the chain
         return {**answer, "release": f"failed: {type(error).__name__}: {error}"[:600]}
     return answer if reason is None else {**answer, "release": reason}
 
 
 def run_release(root: pathlib.Path, queue: Queue, environ: dict[str, str], acts: dict[str, Any],
-                release: dict[str, Any]) -> str | None:
-    """Start each owed mark, advance the oldest unfinished chain, store and note it; its reason, or None for no chain."""
+                release: dict[str, Any], deploy: pathlib.Path | None = None,
+                deploy_acts: dict[str, Any] | None = None) -> str | None:
+    """Start each owed mark, advance the oldest unfinished chain, store and note it; its reason, or None for no chain.
+
+    `deploy` is the deploy repository's checkout and `deploy_acts` its effective policy; None for a tag-only release.
+    """
     def take_release(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
         for row in entries:
             if row.get("status") == "merged" and row.get("release") == RELEASE_OWED:
@@ -2595,9 +2614,12 @@ def run_release(root: pathlib.Path, queue: Queue, environ: dict[str, str], acts:
     if chain is None:
         return None
     main = sd_lib.main_worktree_root(root).resolve()
-    world = ReleaseWorld(main, environ, release_frozen(queue), release_ruling(queue, chain["item"], main))
+    world = ReleaseWorld(main, environ, release_frozen(queue, deploy), release_ruling(queue, chain["item"], main),
+                         deploy=deploy, file=str(release.get("file") or ""),
+                         merge_method=(deploy_acts or {}).get("merge_method", "squash"))
     before = dict(chain["release"])
-    types = acts["commit_convention"].get("release_types") or sd_release.DEFAULT_TYPES
+    convention = acts["commit_convention"]  # an empty list releases nothing; only an absent key takes the default
+    types = convention["release_types"] if "release_types" in convention else sd_release.DEFAULT_TYPES
 
     def save_release(state: dict[str, Any]) -> None:
         """Store `state` on the chain's entry; the chain calls it at each step, before the next external act."""
@@ -2606,7 +2628,8 @@ def run_release(root: pathlib.Path, queue: Queue, environ: dict[str, str], acts:
                 if row["id"] == chain["id"]:
                     row["release"] = {**state, "at": stamp_now()}
         update(queue, store_release)
-    state = sd_release.advance_release(dict(before), release, acts, world, types, save=save_release)
+    state = sd_release.advance_release(dict(before), release, acts, world, types, save=save_release,
+                                       deploy_acts=deploy_acts)
     save_release(state)
     reason = str(state.get("reason") or "")
     if reason and reason != before.get("reason"):
@@ -2618,14 +2641,17 @@ def run_release(root: pathlib.Path, queue: Queue, environ: dict[str, str], acts:
 ReleaseWorld = sd_release.Repositories
 
 
-def release_frozen(queue: Queue) -> Callable[[], str | None]:
-    """The freeze window over the repository as one line; None when open."""
+def release_frozen(queue: Queue, deploy: pathlib.Path | None = None) -> Callable[[bool], str | None]:
+    """The freeze window over the repository, or with `True` the deploy one, as one line; None when open."""
     sd_lib.import_sd_db()
     from sd_db.writes import freeze_window  # noqa: PLC0415 - after the helper
 
-    def frozen() -> str | None:
-        window = on_hub(queue, lambda connection: freeze_window(connection, queue.repository))
-        return None if window is None else f"{queue.repository} is frozen until {window['until']}: {window['reason']}"
+    def frozen(on_deploy: bool) -> str | None:
+        target = repository_of(deploy) if on_deploy and deploy is not None else queue.repository
+        if target is None:  # unknown, not open
+            return f"the deploy repository {deploy} names no GitHub repository, so its freeze is unknown"
+        window = on_hub(queue, lambda connection: freeze_window(connection, target))
+        return None if window is None else f"{target} is frozen until {window['until']}: {window['reason']}"
     return frozen
 
 
@@ -2758,7 +2784,8 @@ def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> 
         if not (moved.startswith("fast-forwarded") or pinned):
             return f"make post-merge skipped: the main checkout did not fast-forward ({moved})"
         try:
-            done = sd_lib.run_group(command, cwd=main, env={**os.environ, **environ}, timeout=POST_MERGE_SECONDS)
+            # `environ` whole, never over `os.environ`: that put back what the caller dropped, such as GIT_DIR
+            done = sd_lib.run_group(command, cwd=main, env=dict(environ), timeout=POST_MERGE_SECONDS)
         except sd_lib.GroupTimeout:
             return f"make post-merge timed out after {POST_MERGE_SECONDS}s in {main}"
         except OSError as error:
@@ -2786,10 +2813,11 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
 def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None) -> dict[str, str]:
     """Note each item `row` carries, its own and its `closes`, once it ends failed or skipped (sd:5963).
 
-    The note names the step, the reason's first line and the head, as a
-    `comment`: `sd task note` writes no `exec` note. No item status changes;
-    the entry holds that state. A write that fails is kept in the answer,
-    `{"sd:N": "written" or "failed: ..."}`, and changes no outcome. `note`
+    The note names the step, the reason's first line, the head and the step's
+    log, where the full text is (sd:7133), as a `comment`: `sd task note`
+    writes no `exec` note. No item status changes; the entry holds that
+    state. A write that fails is kept in the answer, `{"sd:N": "written" or
+    "failed: ..."}`, and changes no outcome. `note`
     defaults to `default_note`, read at the call, so a suite can replace it.
     """
     if row.get("status") not in NOTED:
@@ -2798,6 +2826,9 @@ def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None
                   str(row.get("code") or "no reason recorded"))
     head = str(row.get("head") or row.get("expected_head") or "an unrecorded head")[:12]
     body = f"Lane {row['status']} in {row.get('step') or 'the lane'} at {head}: {reason[:400]}"
+    log = row.get("merge_log" if row.get("step") == "merge" else "prepare_log")
+    if log:  # the reason is cut; the step's log holds the whole answer, a blocking finding's full text included
+        body += f"; full text: {log}"
     written: dict[str, str] = {}
     for item in dict.fromkeys([row.get("item"), *(row.get("closes") or ())]):
         try:
@@ -4277,7 +4308,8 @@ def lane_main(args: Any) -> int:
         elif args.lane_command == "list":  # `enqueue_seq` orders an item's entries, as `newest_entry` does (sd:3419)
             queue = queue_for(root, environ)
             entries, order = on_hub(queue, lambda connection: (stored(connection, queue.repository),
-                                                               enqueue_order(connection, queue.repository)))
+                                                               enqueue_order(connection, queue.repository)),
+                                    write=False)
             rounds = item_rounds(entries, order)
             result = {"queue": str(queue_path(root, environ)), "revision": queue_revision(entries),
                       "entries": [{**shown(row), "enqueue_seq": order[row["id"]], "round": rounds[row["id"]]}
@@ -4305,7 +4337,7 @@ def lane_prune(root: pathlib.Path, environ: dict[str, str], *, dry_run: bool, as
     """`lane prune`: `prune_landed` against every merged lane head of the repository; a hub that does not answer
     refuses, so nothing goes on a partial list."""
     queue = queue_for(root, environ)
-    entries = on_hub(queue, lambda connection: stored(connection, queue.repository))
+    entries = on_hub(queue, lambda connection: stored(connection, queue.repository), write=False)
     heads = [str(row.get("head") or row.get("expected_head") or "") for row in entries if row.get("status") == "merged"]
     main = sd_lib.main_worktree_root(root).resolve()
     worktrees = [] if dry_run else [said for row in entries if (said := reap(queue, row))]  # sd:6727, first

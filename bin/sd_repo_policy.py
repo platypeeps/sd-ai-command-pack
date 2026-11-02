@@ -34,9 +34,8 @@ CI_FIELDS = ("provider", "url", "job")
 CI_PROVIDERS = ("jenkins",)
 #: `test`: run `setup` before the checks and `teardown` after them; each name in `env` must be set.
 TEST_FIELDS = ("setup", "env", "teardown")
-#: `release`: the chain after a merge (sd:6881, `sd_release`): the tag, then `verify`.
-RELEASE_FIELDS = ("verify",)
-#: The deploy bump and merge: refused, by name, until they land with pack sd:7014.
+#: `release`: the chain after a merge (sd:6881, sd:7014, `sd_release`); the deploy three are declared together.
+RELEASE_FIELDS = ("deploy_repo", "file", "key", "verify")
 RELEASE_DEPLOY = ("deploy_repo", "file", "key")
 ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 #: Slice 2's keys (design § Slices): accepted as objects now, so a preset written for both slices declares once.
@@ -146,13 +145,12 @@ def _release_problems(release: Any, where: str) -> list[str]:
     """`release`: the chain `sd_release` runs after a merge (sd:6881)."""
     if not isinstance(release, dict):
         return [f"{where} is a JSON object"]
-    deploy = sorted(set(release) & set(RELEASE_DEPLOY))
-    extra = sorted(set(release) - set(RELEASE_FIELDS) - set(RELEASE_DEPLOY))
-    found = [f"{where}: {', '.join(deploy)} not supported yet: the deploy bump and merge land with pack sd:7014; "
-             "declare verify only"] if deploy else []
-    found += [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
+    extra = sorted(set(release) - set(RELEASE_FIELDS))
+    found = [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
     found += [f"{where}: {key} is a non-empty string" for key in RELEASE_FIELDS
               if key in release and not (isinstance(release[key], str) and release[key].strip())]
+    if any(key in release for key in RELEASE_DEPLOY) and not all(key in release for key in RELEASE_DEPLOY):
+        found.append(f"{where}: deploy_repo, file and key are declared together")
     return found
 
 

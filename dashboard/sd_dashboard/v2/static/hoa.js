@@ -15,8 +15,8 @@
   // is off, or ''.
   let alView = 'open', ACKS = '';
   const AL_VIEWS = [['open', 'Open', a => !a.acked], ['acked', 'Acknowledged', a => a.acked], ['all', 'All', () => true]];
-  // sd:4965: the age lamps, tools/source-ages.py's rows for the Mission export and Vantaca. A source past its end date
-  // (Vantaca after 2026-10-31) is retired and not drawn.
+  // sd:4965: the age lamps, tools/source-ages.py's rows for the Mission export. A source past its end date or
+  // retired is not drawn.
   let SRC = [];
   const SRC_STATE = { ok: 'ok', stale: 'caution', unknown: 'unknown' };
   const srcOf = key => SRC.find(r => r.source === key);
@@ -455,7 +455,8 @@ let polling = 0;
     // sd:6693: Open | All is the shell's .vseg, the size of every other segment group.
     const seg = (v, word, count) => html`<button type="button" data-f="tasks" data-v="${v}" aria-pressed="${String(obShow === v)}">${word} <span class="n">${String(count)}</span></button>`;
     put($('ob-show'), DOC && !f.error ? html`${seg('open', 'Open', OB.length)}${seg('all', 'All', TASKS().length)}` : html``);
-    put($('ob-kinds'), html`${['all', ...kinds].map(k => html`<button class="chip" type="button" data-kind="${k}" aria-pressed="${String(k === kind)}">${k === 'all' ? 'All' : k} <b>${k === 'all' ? shown.length : n(k)}</b></button>`)}`);
+    // pack sd:7084: no All chip; none pressed is every kind, and a second press on the pressed one clears it.
+    put($('ob-kinds'), html`${kinds.map(k => html`<button class="chip" type="button" data-kind="${k}" aria-pressed="${String(k === kind)}">${k} <b>${n(k)}</b></button>`)}`);
     put($('ob-head'), window.shell.list.sortHead(OB_COLS, OB_ST));
     const rows = obRows();
     put($('ob-body'), !DOC ? html`` : f.error ? html`<tr><td colspan="7">${unknownBlock(f.error)}</td></tr>`
@@ -495,7 +496,7 @@ let polling = 0;
   let reader = null;
   const load = () => reader.load();
   // Read again (sd:5638): the shell's head button reads /api/hoa and the shown Briefs or Reports
-  // view again. Download from Vantaca or Mission, on Data sources, starts a download.
+  // view again. Download from Mission, on Data sources, starts a download.
   window.PAGE_AGAIN = { title: 'Read the HOA readings and the shown view again', run: () => Promise.all([load(), window.places.again()]) };
   // One timer at a time; each read that still sees a running job sets the next.
   function poll() { if (!polling) polling = setTimeout(() => { polling = 0; reader.reread(); }, SRC_POLL); }
@@ -556,7 +557,6 @@ let polling = 0;
   window.PAGE_COMMANDS = [
     { label: 'Read HOA again', icon: 'rotate-ccw', run: () => load() },
     { label: 'Fit the map to the HOA', icon: 'maximize-2', run: () => { center = null; zoomTo(1); } },
-    { label: 'Download from Vantaca', icon: 'download', run: () => downloadFrom('vantaca') },
     { label: 'Download from Mission', icon: 'download', run: () => downloadFrom('mission') },
     { label: 'Acknowledge all alarms', icon: 'check', run: () => acknowledgeAll() },
   ];
@@ -643,7 +643,7 @@ let polling = 0;
     });
     $('ob-kinds').addEventListener('click', e => {
       const b = e.target.closest('button[data-kind]'); if (!b) return;
-      kind = b.dataset.kind; drawTasks();
+      kind = b.dataset.kind === kind ? 'all' : b.dataset.kind; drawTasks();
     });
     // ---------- Acknowledge (sd:4967) ----------
     // The workflow database's view state, as Designs' Hide: POST /api/hoa/alarm. Undo is the same post with the old value.
@@ -714,7 +714,7 @@ let polling = 0;
     // POST /api/hoa/download {source} starts hoa_download.py detached: a Claude Chrome session opens the portal, waits for
     // the operator's login, then the checkout's own download runs. A 409 names the run going; a 400 the missing procedure.
     // HOA reads again until it ends; the source row shows "waiting for you to log in" while the session waits.
-    for (const [k, label] of [['vantaca', 'Vantaca'], ['mission', 'Mission']]) {
+    for (const [k, label] of [['mission', 'Mission']]) {
       DOWNLOADS[k] = { id: `download.${k}`, on: `${k} download`, label: `Download from ${label}`, icon: 'download', risk: 'safe', primary: () => true, executes: true,
         does: `Opens ${label} in Chrome, waits for your login, then downloads.`,
         when: () => { const d = DL[k]; return !d ? 'HOA is not read' : d.error || (d.running ? `a ${label} download is running now: ${downloadText(d)}` : true); },

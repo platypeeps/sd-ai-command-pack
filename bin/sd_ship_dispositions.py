@@ -90,22 +90,26 @@ def context(operation: Any, head: str) -> tuple[dict, list[dict]]:
             "adjudicator_binding": adjudicator_binding(operation.store.__file__)}, rows
 
 
-#: How much of one finding's summary a refusal repeats; `sd-ship adjudicate` prints it whole (sd:2102).
+#: How much of one finding's summary a refusal repeats; `text` and `sd-ship adjudicate` carry it whole (sd:2102, sd:7133).
 SUMMARY_CHARS = 160
 #: How many blocking findings a refusal's message names; its `findings` field carries every one.
 NAMED_FINDINGS = 5
 
 
 def blocking_findings(report: dict) -> list[dict]:
-    """sd:2102. Each blocking finding as a refusal names it: severity, place and a bounded summary."""
+    """sd:2102. Each blocking finding as a refusal names it: severity, place and a bounded summary.
+
+    `text` is the whole finding, whitespace folded, so the lane's prepare log
+    gives a builder the full finding, not the cut `summary` (sd:7133).
+    """
     rows = []
     for row in report.get("findings") or []:
         if isinstance(row, dict) and row.get("disposition") == "blocking":
-            summary = " ".join(str(row.get("summary") or "").split())
+            full = summary = " ".join(str(row.get("summary") or "").split())
             if len(summary) > SUMMARY_CHARS:
                 summary = summary[:SUMMARY_CHARS - 3].rstrip() + "..."
             rows.append({"severity": row.get("severity"), "path": row.get("path"), "line": row.get("line"),
-                         "summary": summary})
+                         "summary": summary, "text": full})
     return rows
 
 

@@ -411,6 +411,14 @@ def _gates() -> dict:
     return {"running": len(status.get("holders") or []), "cap": status["slots"], "waiting": len(status.get("waiters") or [])}
 
 
+def runner(connection) -> dict:
+    """The Assignments view (pack sd:7115, from Management's Ship lane): the queued and running assignments and the items
+    waiting at `ready_to_send`. The idle author runner's finished assignments and merge history are not listed (sd:5472)."""
+    keys = ("id", "item", "title", "repo", "role", "provider", "status", "lane", "queued_at", "started", "ended")
+    live = [{key: row[key] for key in keys} for row in reads.assignment_ledger(connection, live=True)]
+    return {"live": live, "ready": [dict(row) for row in reads.ready_to_send(connection)]}
+
+
 def document(connection, *, now: str = "") -> dict:
     """The page's document: the header readings and one section per repository lane."""
     from sd_db import repos

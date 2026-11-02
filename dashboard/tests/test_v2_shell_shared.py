@@ -525,6 +525,67 @@ class TheSharedRules(unittest.TestCase):
                 self.assertFalse("table-layout" in text or "<colgroup" in text)
 
 
+class OneLayoutOnEveryPage(unittest.TestCase):
+    """Pack sd:7084: views switch only in the rail; a section head's actions are quiet and one size; filters sit in the
+    filter row, not the toolbar."""
+
+    PAGES = {p.name: p.read_text(encoding="utf-8") for p in V2.glob("*.html")}
+
+    def test_the_shell_draws_no_tab_row(self):
+        """The rail's sub nav is the one view switch; #viewswitch is only the marker for views with no panel."""
+        self.assertNotIn(".viewswitch", SHELL_CSS)
+        self.assertNotIn(".viewswitch", SHELL_JS)
+        self.assertIn("#viewswitch, .place-switch:empty { display: none; }", SHELL_CSS)
+        for name, page in self.PAGES.items():
+            with self.subTest(name):
+                self.assertNotRegex(page, r'id="viewswitch"[^>]*>[^<]')
+
+    def test_every_section_head_action_is_a_quiet_button_of_one_size(self):
+        self.assertRegex(SHELL_CSS, r"\.sec-head \.tools \.btn \{ min-height: 2rem;")
+        for name, page in self.PAGES.items():
+            for tools in re.findall(r'<div class="sec-head">.*?<div class="tools"[^>]*>(.*?)</div>', page, re.S):
+                for cls in re.findall(r'<button class="(btn[^"]*)"', tools):
+                    with self.subTest(name, cls=cls):
+                        self.assertIn("quiet", cls.split())
+
+    def test_no_toolbar_row_holds_a_segment_group(self):
+        """A .vseg or .fseg is a filter: it sits in the filter row (.filters.toolbar-2), never in the toolbar."""
+        for name, page in self.PAGES.items():
+            for row in re.findall(r'<div class="toolbar"[^>]*>\n(.*?)\n  </div>', page, re.S):
+                with self.subTest(name):
+                    self.assertNotRegex(row, r'class="(vseg|fseg)"')
+
+    def test_no_section_head_or_tally_holds_a_filter(self):
+        """Briefs' Range chips sat in each view's tally, and a place's Issues set-aside group beside its title."""
+        class Heads(HTMLParser):
+            """The class names of every element inside a .sec-head."""
+
+            def __init__(self):
+                super().__init__()
+                self.depth, self.seen = 0, []
+
+            def handle_starttag(self, tag, attrs):
+                cls = (dict(attrs).get("class") or "").split()
+                if self.depth and tag == "div":
+                    self.depth += 1
+                elif tag == "div" and "sec-head" in cls:
+                    self.depth = 1
+                if self.depth:
+                    self.seen += cls
+
+            def handle_endtag(self, tag):
+                if self.depth and tag == "div":
+                    self.depth -= 1
+
+        for name, page in self.PAGES.items():
+            heads = Heads()
+            heads.feed(page)
+            with self.subTest(name):
+                self.assertFalse({"chips", "vseg", "fseg"} & set(heads.seen))
+        places = (STATIC / "places.js").read_text(encoding="utf-8")
+        self.assertIn('<div class="filters toolbar-2">${window.shell.aside.seg(\'issues-hidden\'', places)
+
+
 class EveryFoldControlIsALink(unittest.TestCase):
     """sd:5878: every expand, collapse, Show all and Show more control has the table bar's link look (shell.js tfolds), the
     one shared class `linkbtn`; Reports' Show all jobs and Notes' Show all were buttons (btn quiet sm)."""
@@ -1133,25 +1194,28 @@ class TheToolbarStandard(unittest.TestCase):
                 self.assertNotRegex(scripts, r"\[\s*'/'\s*,", "a / key of the page's own: the shell's bar owns /")
                 self.assertNotIn("shift-as", scripts)
 
-    def test_each_view_keeps_the_view_switch_and_row_one_visible(self):
-        # Review round 1: HOA's row 1 sat inside view-overview, so picking Tasks hid the tabs. Select each view as
-        # shell.viewApply (view-<id>) and places.place ([data-place-view]) do: every other panel turns hidden.
+    def test_each_view_keeps_row_one_visible(self):
+        # Review round 1: HOA's row 1 sat inside view-overview, so picking Tasks hid the tabs; pack sd:7084: Today's row 1
+        # sat inside Needs you. Select each view as shell.viewApply (view-<id>) and places.place ([data-place-view]) do:
+        # every other panel turns hidden.
         def panel(a):
             return a.get("data-place-view") or ((a.get("id") or "").startswith("view-") and a["id"])
         for page in self.PAGES:
             tags = tree(page)
             views = [panel(a) for (_t, _c, _i, a), _u in tags if panel(a)]
             for (_tag, cls, id_, _a), up in tags:
-                if id_ not in ("toolbar", "viewswitch") and not cls & {"viewswitch", "place-switch"}:
+                if id_ not in ("toolbar", "viewswitch") and "place-switch" not in cls:
                     continue
                 inside = {panel(a) for _t, _c, _i, a in up if panel(a)}
                 for shown in views:
                     with self.subTest(page=page.name, el=id_ or sorted(cls), view=shown):
                         self.assertEqual(inside - {shown}, set(), "selecting this view hides the switch")
 
-    def test_the_shell_draws_the_view_switch_at_the_start_of_row_one(self):
-        self.assertIn("viewHost ? viewHost.append(bar) : toolbar ? toolbar.prepend(bar) : viewPanel(VIEW_LIST[0]).before(bar);",
-                      (STATIC / "shell.js").read_text(encoding="utf-8"))
+    def test_the_shell_draws_the_view_switch_in_the_rail_alone(self):
+        # pack sd:7084: the rail's sub-entries are the one view switch; no page gets a tab row.
+        self.assertIn("rail.querySelector(`[data-section=\"${page}\"]`)?.closest('li')?.append(sub);", SHELL_JS)
+        self.assertNotIn("role', 'tablist'", SHELL_JS)
+        self.assertNotIn("toolbar.prepend(bar)", SHELL_JS)
 
 
 class TheToolbarBoxesAlign(unittest.TestCase):
@@ -1170,7 +1234,7 @@ class TheToolbarBoxesAlign(unittest.TestCase):
 
     def test_the_box_around_a_places_switch_has_no_margin_in_row_one(self):
         self.assertRegex(self.PLACES_CSS, r"\.place-switch \{ margin: 0 0 var\(--space-md\); \}")  # outside a toolbar it still spaces
-        body = self.rule(SHELL_CSS, ".toolbar .place-switch, .toolbar .viewswitch, .toolbar .vseg, .toolbar > .fgroup")
+        body = self.rule(SHELL_CSS, ".toolbar .place-switch, .toolbar .vseg, .toolbar > .fgroup")
         self.assertIsNotNone(body, "no row-1 rule zeroes the margin of the switch, the box around it and a chip group")
         self.assertIn("margin: 0;", body)
 
@@ -1180,13 +1244,13 @@ class TheToolbarBoxesAlign(unittest.TestCase):
         self.assertIn("--bar-h: var(--row-touch);", row)
         self.assertIn("--bar-h: calc(var(--row-touch) + 2 * (var(--space-3xs) + var(--rule-hair)));",
                       re.search(r"@media \(pointer: coarse\) \{ \.toolbar \{[^}]*\} \}", SHELL_CSS).group(0))
-        both = self.rule(SHELL_CSS, ".toolbar .viewswitch, .toolbar .vseg, .toolbar .shift .field")
-        self.assertIsNotNone(both, "the switch, the pressed group and the box share one rule")
+        both = self.rule(SHELL_CSS, ".toolbar .vseg, .toolbar .shift .field")
+        self.assertIsNotNone(both, "the pressed group and the box share one rule")
         self.assertIn("height: var(--bar-h);", both)
 
-    def test_a_tab_fills_the_switch_instead_of_setting_its_height(self):
-        # The touch rule gave a tab 44px, which made the switch 50px beside a 44px box; in row 1 the tab stretches instead.
-        body = self.rule(SHELL_CSS, ".toolbar .viewswitch [role=\"tab\"], .toolbar .vseg > button")
+    def test_a_segment_fills_its_group_instead_of_setting_its_height(self):
+        # The touch rule gave a tab 44px, which made the switch 50px beside a 44px box; in row 1 a segment stretches instead.
+        body = self.rule(SHELL_CSS, ".toolbar .vseg > button")
         self.assertIsNotNone(body)
         self.assertIn("min-height: 0;", body)
 
@@ -1228,16 +1292,15 @@ class EveryToolbarHasOneOrder(unittest.TestCase):
 
     def test_the_shell_puts_its_filters_after_the_segments_and_before_the_actions(self):
         js = (STATIC / "shell.js").read_text(encoding="utf-8")
-        self.assertIn("const segs = shiftRow.querySelectorAll(':scope > :is(.viewswitch, #viewswitch, .place-switch, .vseg)');", js)
+        self.assertIn("const segs = shiftRow.querySelectorAll(':scope > :is(#viewswitch, .place-switch, .vseg)');", js)
         self.assertIn("segEnd ? (segHelp || segEnd).after(el) : shiftRow.prepend(el);", js)
         self.assertIn("tools = row?.querySelector(':scope > .tools');", js)
         self.assertIn("tools ? tools.before(bar) : row ? row.append(bar) : twrap(t).before(bar);", js)
         self.assertIn(".toolbar > .tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs); margin-left: auto; }", SHELL_CSS)
 
     def test_one_segment_size_from_one_rule(self):
-        # The view switch's tab and a .vseg button share one rule, so a state group is the size of Tasks' realm tabs.
-        self.assertIn('.viewswitch [role="tab"], .vseg > button { display: inline-flex;', SHELL_CSS)
-        self.assertNotRegex(SHELL_CSS, r"(?m)^\.vseg > button \{ display")
+        # Every .vseg button takes one rule (pack sd:7084 dropped the tab row that shared it), so every group is one size.
+        self.assertEqual(len(re.findall(r"(?m)^\.vseg > button \{ display: inline-flex;", SHELL_CSS)), 1)
         for name, css in PAGE_CSS.items():
             with self.subTest(css=name):
                 self.assertNotRegex(wide(css), r"\.(vseg|viewswitch|repo-scope)\b[^{]*\{", "a page sizes a segment group")
@@ -1542,7 +1605,8 @@ window.PAGE_VIEWS = [{ id: 'reports', label: 'Reports' }, { id: 'cadence', label
 
 
 class TheViewSwitch(unittest.TestCase):
-    """The view switch, cut out of shell.js: one declaration, window.PAGE_VIEWS, draws the tablist and the rail's sub-entries."""
+    """The view switch, cut out of shell.js: one declaration, window.PAGE_VIEWS, draws the rail's sub-entries, the one
+    switch (pack sd:7084)."""
 
     def run_view(self, body, hash="", host=False, store=None):
         block = re.search(r"^  // view:start\n(.*?)^  // view:end$", SHELL_JS, re.S | re.M)
@@ -1552,7 +1616,7 @@ class TheViewSwitch(unittest.TestCase):
         script = (stand_in + block.group(1) + r"""
 var R = {};
 const shown = () => Object.values(PANELS).filter(p => !p.hidden).map(p => p.id);
-const SWITCH_SEL = MADE.find(e => e.getAttribute('role') === 'tablist'), SWITCH_TABS = SWITCH_SEL ? SWITCH_SEL.children : [];
+const RAIL = () => LI.children.length ? LI.children[0].children.map(li => li.children[0]) : [];
 try {
 (DOC.DOMContentLoaded || []).forEach(f => f({ type: 'DOMContentLoaded' }));
 """ + body + """
@@ -1580,13 +1644,13 @@ function run() { OUT.R = R; OUT.STORE = STORE; return JSON.stringify(OUT); }
             self.assertEqual(self.run_view("R.cur = view.current();", store=kept)["R"]["cur"], "reports", kept)
 
     def test_a_hidden_view_does_not_show_and_hiding_the_shown_one_shows_the_first_left(self):
-        # sd:5064: Writing hides a realm view no piece is in: its segment and rail entry go, and v-keys and show() skip it.
-        out = self.run_view("view.hide('reports', true); R.cur = view.current(); R.tab = SWITCH_TABS[0].hidden; R.li = MADE.filter(e => e.tagName === 'li')[0].hidden;"
+        # sd:5064: Writing hides a realm view no piece is in: its rail entry goes, and v-keys and show() skip it.
+        out = self.run_view("view.hide('reports', true); R.cur = view.current(); R.li = MADE.filter(e => e.tagName === 'li')[0].hidden;"
                             " R.back = view.show('reports'); R.cur2 = view.current(); view.hide('reports', false); R.again = view.show('reports');")
         r = out["R"]
-        self.assertEqual((r["cur"], r["tab"], r["li"], r["back"], r["cur2"], r["again"]), ("cadence", True, True, False, "cadence", True))
-        # The tab's display: inline-flex would beat the hidden attribute without its own rule.
-        self.assertRegex(SHELL_CSS, r'\.viewswitch \[role="tab"\]\[hidden\][^{]*\{ display: none; \}')
+        self.assertEqual((r["cur"], r["li"], r["back"], r["cur2"], r["again"]), ("cadence", True, False, "cadence", True))
+        # A panel's own display (Today's grid) would beat the hidden attribute without this rule.
+        self.assertIn('main [id^="view-"][hidden]', SHELL_CSS)
 
     def test_storage_that_throws_is_no_view(self):
         # sd:5753: keep: false went with the last views that set it (Designs' and Contributions' Hidden); a stored id no page
@@ -1596,15 +1660,16 @@ function run() { OUT.R = R; OUT.STORE = STORE; return JSON.stringify(OUT); }
         self.assertEqual(out["R"]["cur"], "cadence")
 
     def test_the_first_view_is_the_default_and_only_its_panel_renders(self):
-        out = self.run_view("R.cur = view.current(); R.shown = shown(); R.tabs = SWITCH_TABS.map(t => [t.getAttribute('aria-controls'), t.getAttribute('aria-selected'), t.tabIndex]);"
-                            " R.roles = Object.values(PANELS).map(p => [p.getAttribute('role'), p.getAttribute('aria-labelledby')]);")
+        out = self.run_view("R.cur = view.current(); R.shown = shown(); R.links = RAIL().map(a => [a.getAttribute('href'), a.getAttribute('aria-current')]);"
+                            " R.labels = Object.values(PANELS).map(p => [p.getAttribute('role'), p.getAttribute('aria-label')]);")
         self.assertEqual(out["R"]["cur"], "reports")
         self.assertEqual(out["R"]["shown"], ["view-reports"])
         # A view whose page has no panel is not drawn.
-        self.assertEqual(out["R"]["tabs"], [["view-reports", "true", 0], ["view-cadence", "false", -1]])
-        self.assertEqual(out["R"]["roles"], [["tabpanel", "vt-reports"], ["tabpanel", "vt-cadence"]])
-        # The tablist goes in once, before the first panel, and the page hears the first view once, at DOMContentLoaded.
-        self.assertEqual(out["before"], ["tablist", "view-reports"])
+        self.assertEqual(out["R"]["links"], [["/reports#view=reports", "true"], ["/reports#view=cadence", None]])
+        # A panel the page did not label takes its view's name; it is no tabpanel, as no tab names it.
+        self.assertEqual(out["R"]["labels"], [[None, "Reports"], [None, "Cadence"]])
+        # No tab row goes on the page, and the page hears the first view once, at DOMContentLoaded.
+        self.assertNotIn("before", out)
         self.assertEqual(out["events"], [{"id": "reports", "first": True, "api": None}])
         self.assertEqual(out["pushed"], [])
 
@@ -1626,21 +1691,17 @@ R.unknown = view.show('nope');""", hash="#view=cadence")
                                          {"id": "cadence", "first": False, "api": "/api/reports/cadence"},
                                          {"id": "reports", "first": False, "api": None}])
 
-    def test_a_segment_arrow_keys_and_a_v_chord_switch_the_view(self):
-        out = self.run_view("""SWITCH_TABS[1].fire('click'); R.click = view.current();
-document.activeElement = SWITCH_TABS[1]; SWITCH_SEL.fire('keydown', { key: 'ArrowRight', target: SWITCH_TABS[1] }); R.wrap = [view.current(), OUT.focused];
-SWITCH_SEL.fire('keydown', { key: 'End', target: SWITCH_TABS[0] }); R.end = view.current();
+    def test_a_rail_entry_and_a_v_chord_switch_the_view(self):
+        out = self.run_view("""RAIL()[1].fire('click'); R.click = view.current();
 const key = k => (DOC.keydown || []).forEach(f => f({ type: 'keydown', key: k, target: { matches: () => false }, preventDefault() {}, stopImmediatePropagation() {} }));
 key('v'); key('r'); R.chord = view.current(); R.keys = window.PAGE_KEYS;""")
         self.assertEqual(out["R"]["click"], "cadence")
-        self.assertEqual(out["R"]["wrap"], ["reports", "vt-reports"])
-        self.assertEqual(out["R"]["end"], "cadence")
         self.assertEqual(out["R"]["chord"], "reports")
         self.assertEqual(out["R"]["keys"], [["/", "Filter reports"], ["v r / v c", "Reports or Cadence view"]])
 
     def test_the_rail_lists_the_views_under_the_page_and_marks_the_current_one(self):
         out = self.run_view("""const links = () => LI.children[0].children.map(li => li.children[0]);
-R.links = links().map(a => [a.getAttribute('href'), a.textContent, a.getAttribute('aria-current')]);
+R.links = links().map(a => [a.getAttribute('href'), a.children[0].textContent, a.getAttribute('aria-current')]);
 let stopped = false; links()[1].fire('click', { preventDefault() { stopped = true; } }); R.after = [view.current(), stopped, location.hash];
 R.marked = links().map(a => a.getAttribute('aria-current'));""")
         self.assertEqual(out["R"]["links"], [["/reports#view=reports", "Reports", "true"], ["/reports#view=cadence", "Cadence", None]])
@@ -1648,21 +1709,22 @@ R.marked = links().map(a => a.getAttribute('aria-current'));""")
         self.assertEqual(out["R"]["after"], ["cadence", True, "#view=cadence"])
         self.assertEqual(out["R"]["marked"], [None, "true"])
 
-    def test_a_count_shows_on_its_segment_and_null_hides_it(self):
-        out = self.run_view("""view.count('cadence', 7); const n = SWITCH_TABS[1].children[1]; R.on = [n.textContent, n.hidden];
-view.count('cadence', null); R.off = n.hidden; R.label = SWITCH_TABS[1].children[0].textContent;""")
+    def test_a_count_shows_on_its_rail_entry_and_null_hides_it(self):
+        out = self.run_view("""view.count('cadence', 7); const n = RAIL()[1].children[1]; R.on = [n.textContent, n.hidden];
+view.count('cadence', null); R.off = n.hidden; R.label = RAIL()[1].children[0].textContent;""")
         self.assertEqual(out["R"]["on"], ["7", False])
         self.assertEqual((out["R"]["off"], out["R"]["label"]), (True, "Cadence"))
 
-    def test_a_page_with_a_host_gets_the_switch_there_and_keeps_views_without_a_panel(self):
-        out = self.run_view("""R.inHost = HOST.children[0] === SWITCH_SEL;
-R.tabs = SWITCH_TABS.map(t => [t.id, t.getAttribute('aria-controls')]);
+    def test_a_page_with_a_marker_keeps_views_without_a_panel_and_gets_no_tab_row(self):
+        out = self.run_view("""R.hostEmpty = HOST.children.length === 0;
+R.links = RAIL().map(a => a.getAttribute('href'));
 view.show('gone'); R.gone = [view.current(), shown(), location.hash];
 view.show('cadence'); R.back = shown();""", host=True)
-        # Tasks filters one board, matrix and list: its views have no panels, so the page names where the tablist goes.
-        self.assertTrue(out["R"]["inHost"], "the tablist did not go in the page's #viewswitch")
+        # Tasks filters one board, matrix and list: its views have no panels, so the page's #viewswitch marks that it keeps
+        # them; the rail lists them, and the marker stays empty (pack sd:7084).
+        self.assertTrue(out["R"]["hostEmpty"], "a tab row went in the page's #viewswitch")
         self.assertNotIn("before", out)
-        self.assertEqual(out["R"]["tabs"], [["vt-reports", "view-reports"], ["vt-cadence", "view-cadence"], ["vt-gone", None]])
+        self.assertEqual(out["R"]["links"], ["/reports#view=reports", "/reports#view=cadence", "/reports#view=gone"])
         self.assertEqual(out["R"]["gone"], ["gone", [], "#view=gone"])
         self.assertEqual(out["R"]["back"], ["view-cadence"])
         self.assertEqual([e["id"] for e in out["events"]], ["reports", "gone", "cadence"])
@@ -1675,10 +1737,10 @@ view.show('cadence'); R.back = shown();""", host=True)
         self.assertIn("data-pview", SHELL_JS)
         self.assertIn("viewShow(o.dataset.pview)", SHELL_JS)
 
-    def test_the_shell_hands_pages_the_view_api_and_styles_the_switch(self):
+    def test_the_shell_hands_pages_the_view_api_and_styles_the_rail_entries(self):
         self.assertRegex(SHELL_JS, r"window\.shell = \{[^\n]*\bview\b")
-        self.assertIn(".viewswitch", SHELL_CSS)
-        self.assertRegex(SHELL_CSS, r"\.viewswitch \[role=\"tab\"\][^{]*\{[^}]*white-space: nowrap")
+        self.assertIn('.rail nav .subnav a[aria-current="true"]', SHELL_CSS)
+        self.assertIn(".rail nav .subnav .n { margin-left: auto;", SHELL_CSS)
 
 
 

@@ -128,7 +128,7 @@ def build(result, sha=HEAD, building=False):
 
 
 class Release(unittest.TestCase):
-    """sd:6881. `release` takes the tag and its `verify`; the deploy bump and merge land with sd:7014."""
+    """sd:6881, sd:7014. `release` takes the tag's `verify` and the deploy bump's repository, file and key."""
 
     def test_the_release_key_takes_a_verify_command(self):
         self.assertEqual(sd_repo_policy.problems({"release": {}}), [])
@@ -139,14 +139,16 @@ class Release(unittest.TestCase):
             with self.subTest(release=release):
                 self.assertEqual(sd_repo_policy.problems({"release": release}), [f"the policy declaration: {problem}"])
 
-    def test_a_release_that_names_a_deploy_repository_is_refused_until_sd_7014(self):
-        """The operator's ruling on sd:6881: the first slice tags and verifies; a deploy key waits for sd:7014."""
-        for release in ({"deploy_repo": "~/repos/org/deploy", "file": "values.yaml", "key": "image.tag"},
-                        {"deploy_repo": "~/repos/org/deploy"}, {"file": "values.yaml"}, {"key": "image.tag"}):
+    def test_a_deploy_repository_file_and_key_are_declared_together(self):
+        deploy = {"deploy_repo": "~/repos/org/deploy", "file": "values.yaml", "key": "image.tag"}
+        self.assertEqual(sd_lib.declaration_problems("policy", {"release": {**deploy, "verify": "make smoke"}}), [])
+        for release in ({"deploy_repo": "~/repos/org/deploy"}, {"file": "values.yaml"}, {"key": "image.tag"},
+                        {"deploy_repo": "~/repos/org/deploy", "file": "values.yaml"}):
             with self.subTest(release=release):
                 self.assertEqual(sd_lib.declaration_problems("policy", {"release": release}),
-                                 [f"the policy declaration: release: {', '.join(sorted(release))} not supported yet: "
-                                  "the deploy bump and merge land with pack sd:7014; declare verify only"])
+                                 ["the policy declaration: release: deploy_repo, file and key are declared together"])
+        self.assertEqual(sd_lib.declaration_problems("policy", {"release": {**deploy, "key": " "}}),
+                         ["the policy declaration: release: key is a non-empty string"])
 
 
 class JenkinsWait(unittest.TestCase):
