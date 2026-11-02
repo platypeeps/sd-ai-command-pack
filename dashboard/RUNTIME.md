@@ -229,7 +229,7 @@ operator's herdr session, with claude given a builder prompt for a task or an
 herdr missing or its session down it answers 503 naming `herdr.sh start`.
 `herdr` must be on the LaunchAgent's PATH (`/opt/homebrew/bin` is). A launch
 that does not answer in 90 seconds is a 504 whose outcome is not known.
-Today's In motion (sd:3466, `active_sessions.py`) reads `herdr session list --json` and `herdr agent list` in that
+Today's Queue view (sd:3466, `active_sessions.py`) reads `herdr session list --json` and `herdr agent list` in that
 session, 5 seconds each, only when a Fix note or a worktree could tie an agent to an open item.
 A herdr that does not answer leaves Fix launches shown as not confirmed, never as ended.
 Today's `/api/now` also reads Queue's document (sd:5921, `queue_screen.document`): each lane, `sd gate status` and

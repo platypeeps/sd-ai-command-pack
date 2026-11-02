@@ -1161,7 +1161,7 @@ class TheUsage(Pack, ScreenCase):
         views = lambda js: re.findall(r"id: '([a-z]+)'", re.search(r"window\.PAGE_VIEWS = (\[.*?\]);", js, re.S).group(1))  # noqa: E731
         self.assertEqual(views(PAGE_JS), ["catalog", "intake", "usage"])
         self.assertIn('<section id="view-usage"', (V2 / "skills.html").read_text(encoding="utf-8"))
-        self.assertEqual(views(METRICS_JS), ["spend", "providers", "ci", "age"])
+        self.assertEqual(views(METRICS_JS), ["spend", "providers", "ci", "times", "age"])
         self.assertNotIn("view-skills", (V2 / "metrics.html").read_text(encoding="utf-8"))
         self.assertNotIn("skills", metrics_screen.document(self.connection, now=NOW))
 

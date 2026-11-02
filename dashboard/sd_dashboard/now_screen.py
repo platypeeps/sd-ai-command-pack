@@ -543,7 +543,7 @@ def work_needs(work: list[dict], live: set[int], today: str) -> list[dict]:
     """The work items as Needs you rows (sd:5921): one group row per kind, so a list of 142 reads as a few.
 
     Ready to send, past due, and in progress with no live session each collapse into one group row once there are two;
-    an item in progress with a session is In motion only, past due or not (sd:5954). A past-due member with priority 1,
+    an item in progress with a session is a Queue view live row only, past due or not (sd:5954). A past-due member with priority 1,
     or one more than `LATE_DAYS` late that does not recur, breaks out as its own row, so a group never hides it. What is
     left, due today and not started, is one queued group.
     """
@@ -642,7 +642,7 @@ def _lanes(connection, now: str) -> dict:
 
 
 def lane_summary(queue: dict) -> dict:
-    """What Today's Lane and Gate lamps and In motion's tally read from Queue's document (sd:5921)."""
+    """What Today's Lane and Gate lamps read from Queue's document (sd:5921)."""
     states: dict[str, int] = {}
     landed_in = set()
     problems = [p for p in queue.get("problems") or [] if isinstance(p, dict)] if isinstance(queue.get("problems"), list) else []
@@ -658,7 +658,8 @@ def lane_summary(queue: dict) -> dict:
 
 
 def motion(connection: sqlite3.Connection, active: dict, lanes: list[dict]) -> dict:
-    """In motion's Details and Fix (sd:6714): each session row gains its item's kind and revision, and its place in a lane.
+    """A live row's Details and Fix (sd:6714; the Queue view's since pack sd:7234): each session row gains its item's
+    kind and revision, and its place in a lane.
 
     `lane` is "<repo>: <state>", with the position for a next entry, or "" when no lane lists the item. An item whose
     revision could not be read has "" there, so Fix says it is off rather than post a stale click.
@@ -827,7 +828,8 @@ def queues(connection: sqlite3.Connection, now: str) -> dict:
 
 
 def builders(connection: sqlite3.Connection, now: str) -> dict:
-    """In motion's builder runs (sd:6003): each open headless build run (`sd_db.build`), oldest first, with its items,
+    """The builder runs a live row's and a run's Details read (sd:6003): each open headless build run
+    (`sd_db.build`), oldest first, with its items,
     its stage, when it started, its ETA from past runs and what it spent so far.
 
     The ETA is the start plus the median claim-to-release time of the last `done` runs, once there are `ETA_RUNS`;
@@ -900,7 +902,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     default, and a lane read that failed is a dark `lane` row, as a dark collector is.
     `spend` is the spend line (sd:6031, `spend`): the last 24 hours and the 7-day trend from the cost table.
     `queues` is the Queues panel (pack sd:6946, `queues`): ready items, build queue and merge lane in one list.
-    `builders` is In motion's builder runs (sd:6003, `builders`): each open build run's items, stage, start and ETA.
+    `builders` is the builder runs Details read (sd:6003, `builders`): each open build run's items, stage, start and ETA.
     `digest` is Since yesterday (sd:6002, `digest`): merged per repo, failed with why and fix, questions waiting.
     """
     collect_area, kept = fleet or fleet_module.collect, {}

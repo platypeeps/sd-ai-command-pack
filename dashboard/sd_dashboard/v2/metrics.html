@@ -4,7 +4,9 @@
   Data: /api/metrics (metrics_screen.document: sd usage's month, the 7-day window meter per day, the week's numbers,
   the provider scorecard, age in status and observed activity), read when the page opens and
   on Refresh, and the merge lane's gate runs per repository with the flaky heads (sd:5473). The range 6mo reads
-  /api/metrics?range=6mo: each of the last six months by bill, the providers and CI over those months (pack sd:7208). A part that did not read is
+  /api/metrics?range=6mo: each of the last six months by bill, the providers and CI over those months (pack sd:7208).
+  Lane times (pack sd:7233, Queue's Last 7 days moved here): each managed lane's median wait and gate time and its
+  slowest entry over 7 days, whatever the range (pack sd:6006). A part that did not read is
   unknown with its reason. By model has no reader and shows as unknown. Writes: Cap and Configure post /api/bills/<bill>/cap and /api/providers/configure with the
   registry revision the page read (sd:3387). Nothing here is sample data.
 -->
@@ -92,6 +94,15 @@
       <h3 class="sub gap" id="flaky-h">Flaky tests, by head</h3>
       <div class="scroll-x"><table class="tbl" id="flaky-table" aria-labelledby="flaky-h"><thead><tr><th scope="col">Item · repository</th><th scope="col">Head</th><th scope="col" class="hide-sm">Gate failed</th><th scope="col">Passed</th></tr></thead><tbody id="flaky-body"></tbody></table></div>
       <p class="foot-note">Per head, not per test: no store names the test that failed.</p>
+    </section>
+  </div>
+
+  <div id="view-times" aria-label="Lane times" hidden>
+    <section class="panel" id="times" aria-labelledby="times-h">
+      <div class="panel-head"><div><h2 id="times-h">Lane times <button class="help" type="button" aria-label="Help: lane times" data-help="<b>Each lane's last 7 days, whatever the range.</b> Wait runs from enqueue to the runner's claim; gate is the speculative gate plus the prepare step; the slowest entry runs from enqueue to its end. Each is read from the entries' history rows. A median wait past an hour is caution: the lane run files the parallel-lanes question then."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+        <p>The merge lanes over the last 7 days: median wait, median gate time and the slowest entry.</p></div></div>
+      <div class="scroll-x"><table class="tbl" id="times-table" aria-labelledby="times-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Lane</th><th scope="col" class="num">Entries</th><th scope="col" class="num">Median wait</th><th scope="col" class="num">Median gate</th><th scope="col" class="hide-sm">Slowest entry</th></tr></thead><tbody id="times-body"></tbody></table></div>
+      <p class="foot-note" id="times-note"></p>
     </section>
   </div>
 
