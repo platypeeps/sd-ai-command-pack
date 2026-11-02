@@ -17,6 +17,10 @@ Progress areas already make:
 - `ci`: the lane's gate runs over the page's range (`CI_DAYS`), per repository, and the flaky heads (`_ci`, sd:5473).
 - `controls`: the provider registry as `provider_controls.snapshot` reads it, with its `revision`, and per bill the
   one cap write the route takes (`_writes`), the read the classic Usage area's forms make (sd:3387).
+- `range`: the page's range, `7d` or `6mo` (`RANGES`, pack sd:7208). With `6mo`, `ranged` holds the parts the range
+  changes, read over the last six calendar months, this one to date (`_ranged`): `spend`, dollars by bill per month,
+  one `usage.read` a month; `scorecard`, the providers' six months; `ci`, the gate runs since the first month began.
+  The parts above stay as `7d` reads them, so the lamps and the rail badge do not move with the range.
 
 `usage` and `numbers` take seconds (`SLOW`): the served dashboard keeps them in a snapshot, and each then carries
 `observed`, when it was read, and `stale`, why its newest read failed (sd:4955). A stale month lights no lamp.
@@ -37,6 +41,7 @@ import re
 import sqlite3
 import statistics
 from collections import Counter
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from sd_db import provider_controls, reads, registry, reporting, usage
@@ -45,8 +50,8 @@ from sd_db.errors import SdDbError
 from .operations_screen import BILL_NAME
 from .tasks_screen import is_scheduled
 
-__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW", "document",
-           "health", "slow"]
+__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "MONTHS", "RANGES", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW",
+           "document", "health", "slow"]
 
 #: The vendor window the trend draws: seven days, in minutes.
 WINDOW = 10080
@@ -59,8 +64,12 @@ UNREAD = (
     {"id": "model", "name": "By model", "reason": "the cost ledger records bill and provider, not model; judgment.model covers Jev calls only"},
 )
 
-#: Days of lane runs CI health and Flaky tests read, ending now: the page's one range, 7d.
+#: Days of lane runs CI health and Flaky tests read, ending now, at the page's default range, 7d.
 CI_DAYS = TREND_DAYS
+
+#: The page's live ranges (pack sd:7208): 7d, the default, and the last `MONTHS` calendar months, this one to date.
+RANGES = ("7d", "6mo")
+MONTHS = 6
 
 #: A failed lane entry whose `reason` says sd-ship's gate refusal: prepare's "the repository gate failed …"
 #: (`sd_ship_review`) or merge's "repo.ci is local and sd/local-gate is failure on …" (`sd_local_gate`). The lane keeps
@@ -121,10 +130,14 @@ def _numbers(connection, now):
                                   for n in reads.weekly_numbers(connection, now=now)]}
 
 
-def _scorecard(connection, now):
+def _scorecard_rows(rows):
     return {"error": "", "rows": [{"provider": r.provider, "enabled": r.enabled, "reason": r.reason or "", "author_rank": r.author_rank,
                                    "reviewer_rank": r.reviewer_rank, "passes": r.passes, "blocking": r.blocking, "usd": r.usd,
-                                   "usd_per_pass": r.usd_per_pass, "fallthrough": r.fallthrough} for r in reads.scorecard(connection, now=now)]}
+                                   "usd_per_pass": r.usd_per_pass, "fallthrough": r.fallthrough} for r in rows]}
+
+
+def _scorecard(connection, now):
+    return _scorecard_rows(reads.scorecard(connection, now=now))
 
 
 def _age(connection, now):
@@ -159,7 +172,7 @@ def _ended(row) -> dict | None:
     return entry
 
 
-def _ci(connection, now):
+def _ci(connection, now, since=None):
     """CI health and Flaky tests from the lane's entries (sd:5473): the latest checkpoint of each, as `reads.lane_entries`
     reads it. An entry runs once: the lane queues a retry as a new entry, so one key does not fail and then pass.
 
@@ -167,8 +180,10 @@ def _ci(connection, now):
     passed over gate runs, passed plus `gate`; a review stop or a conflict ran no gate. A flaky head is one a gate failed
     at, and a later entry of the same repository passed at that same head: `head`, or `expected_head` where the failed
     entry names none, so a catch-up merge or a new commit is a new head. A body that is not a lane entry is `unreadable`.
+    The range is `CI_DAYS` ending now, or from `since`; `days` counts it in whole days.
     """
-    since = (_stamp(now) - timedelta(days=CI_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    days = CI_DAYS if since is None else math.ceil((_stamp(now) - _stamp(since)).total_seconds() / 86400)
+    since = since or (_stamp(now) - timedelta(days=CI_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     ended, unreadable = [], 0
     for row in reads.lane_entries(connection):
         try:
@@ -210,7 +225,7 @@ def _ci(connection, now):
         elif entry["status"] in PASSED and failed.get(key) and key not in flaky and at >= since:
             flaky[key] = {"repository": entry["repository"], "item": entry.get("item"), "title": entry.get("title") or "",
                           "head": head, "failed": failed[key], "passed": at, "status": entry["status"]}
-    return {"error": "", "days": CI_DAYS, "since": since, "unreadable": unreadable,
+    return {"error": "", "days": days, "since": since, "unreadable": unreadable,
             "repos": sorted(repos.values(), key=lambda r: (-r["gate"], r["repository"])),
             "flaky": sorted(flaky.values(), key=lambda f: f["passed"], reverse=True)}
 
@@ -337,6 +352,55 @@ def _controls(connection):
             "providers": [{key: entry[key] for key in ("name", "vendor", "enabled", "reason", "roles")} for entry in current["providers"]]}
 
 
+def _months(today) -> list[str]:
+    """The last `MONTHS` calendar months as `YYYY-MM`, oldest first, ending with today's."""
+    at = today.year * 12 + today.month - 1
+    return [f"{n // 12:04d}-{n % 12 + 1:02d}" for n in range(at - MONTHS + 1, at + 1)]
+
+
+def _spend_months(connection, now, months):
+    """Dollars by bill for each month, one `usage.read` a month, as `sd-db usage --month` reads it.
+
+    `unbilled` is the month's run and bound dollars on rows naming no listed bill (a start session's row may name
+    none), from the read's `roles`, which the bill list leaves out; None when no such row. `spent` is both. `rows` is
+    whether a bill's burn line has a point or such a row exists: a month without either is no rows, not $0.
+    """
+    found, bills = [], {}
+    for month in months:
+        read = usage.read(connection, month=month, now=now).document()
+        names = {bill["name"] for bill in read["bills"]}
+        for bill in read["bills"]:
+            bills.setdefault(bill["name"], bill["cost_basis"])
+        loose = [role for role in read["roles"] if role["bill"] not in names]
+        unbilled = round(sum(role["spent"] for role in loose), 6) if loose else None
+        found.append({"month": month, "rows": bool(loose) or any(bill["burn"] for bill in read["bills"]),
+                      "spent": round(read["spent"] + (unbilled or 0.0), 6), "unbilled": unbilled,
+                      "bills": {bill["name"]: bill["spent"] for bill in read["bills"]}})
+    return {"error": "", "bills": [{"name": name, "cost_basis": basis} for name, basis in bills.items()], "months": found}
+
+
+def _scorecard_months(connection, months):
+    """The provider scorecard summed over the months, one `reads.scorecard` a month; state and ranks are the provider's now."""
+    summed: dict = {}
+    for month in months:
+        for row in reads.scorecard(connection, now=f"{month}-01T00:00:00Z"):
+            held = summed.get(row.provider)
+            summed[row.provider] = row if held is None else replace(
+                held, passes=held.passes + row.passes, blocking=held.blocking + row.blocking, usd=held.usd + row.usd,
+                fallthrough=held.fallthrough + row.fallthrough)
+    return _scorecard_rows(summed.values())
+
+
+def _ranged(connection, now, today):
+    """The parts the 6mo range changes, each guarded on its own (pack sd:7208)."""
+    months = _months(today)
+    since = f"{months[0]}-01T00:00:00Z"
+    return {"months": months, "since": since,
+            "spend": _guard(lambda: _spend_months(connection, now, months)),
+            "scorecard": _guard(lambda: _scorecard_months(connection, months)),
+            "ci": _guard(lambda: _ci(connection, now, since=since))}
+
+
 def slow(connection, name: str, *, now: str) -> dict:
     """One part of `SLOW`, read now; it raises what its read raised."""
     if name == "usage":
@@ -346,18 +410,22 @@ def slow(connection, name: str, *, now: str) -> dict:
     raise ValueError(f"{name!r} is not a slow Metrics part")
 
 
-def document(connection, *, now: str, kept=None) -> dict:
+def document(connection, *, now: str, kept=None, span: str = "7d") -> dict:
     """The Metrics page's document: every reading, each guarded on its own, and the panels no reader covers.
 
     `kept(name)` answers a `SLOW` part from the server's snapshot, with `observed` and `stale`; without it they are
-    read now.
+    read now. `span` is one of `RANGES`; `6mo` adds `ranged`, read now.
     """
+    if span not in RANGES:
+        raise ValueError(f"{span!r} is not a Metrics range: {', '.join(RANGES)}")
     today = _stamp(now).date()
     read_slow = kept or (lambda name: slow(connection, name, now=now))
     spend, trend = _guard(lambda: read_slow("usage")), _guard(lambda: _trend(connection, today))
     ci = _guard(lambda: _ci(connection, now))
+    ranged = {"ranged": _ranged(connection, now, today)} if span == "6mo" else {}
     return {
         "read": now,
+        "range": span,
         "attention": _attention(spend, trend, ci),
         "usage": spend,
         "trend": trend,
@@ -368,4 +436,5 @@ def document(connection, *, now: str, kept=None) -> dict:
         "controls": _guard(lambda: _controls(connection)),
         "ci": ci,
         "unread": list(UNREAD),
+        **ranged,
     }

@@ -393,6 +393,74 @@ class TheGateRuns(Fixture):
             self.assertIn(f'code="{code}"', source)
 
 
+class TheSixMonths(Fixture):
+    """pack sd:7208: the 6mo range. NOW is 2026-09-06, so its months are 2026-04 to 2026-09, this one to date."""
+
+    def setUp(self):
+        super().setUp()
+        self.cost("run", "2026-07-15T10:00:00Z", provider="kimi", bill="capped", role="author", usd=5)
+        self.cost("meter", "2026-05-20T10:00:00Z", provider="claude", bill="plan", window_minutes=10080, used_percent=50)
+        self.cost("run", "2026-08-20T10:00:00Z", provider="claude", bill=None, role="author", usd=7)
+
+    def ranged(self):
+        return metrics_screen.document(self.connection, now=NOW, span="6mo")
+
+    def test_spend_is_each_months_dollars_by_bill_and_a_month_with_no_rows_is_marked(self):
+        spend = self.ranged()["ranged"]["spend"]
+        self.assertEqual(spend["bills"], [{"name": "capped", "cost_basis": "company"}, {"name": "plan", "cost_basis": "plan"}])
+        self.assertEqual([(m["month"], m["rows"], m["spent"], m["unbilled"], m["bills"]) for m in spend["months"]], [
+            ("2026-04", False, 0.0, None, {"capped": 0.0, "plan": 0.0}),
+            ("2026-05", False, 0.0, None, {"capped": 0.0, "plan": 0.0}),   # a meter reading is not a dollar row
+            ("2026-06", False, 0.0, None, {"capped": 0.0, "plan": 0.0}),
+            ("2026-07", True, 5.0, None, {"capped": 5.0, "plan": 0.0}),
+            ("2026-08", True, 7.0, 7.0, {"capped": 0.0, "plan": 0.0}),    # a row on no bill is a row and its dollars
+            ("2026-09", True, 80.0, None, {"capped": 80.0, "plan": 0.0})])
+
+    def test_each_month_is_sd_usage_s_own_read_and_there_are_six(self):
+        months = []
+        real = usage.read
+
+        def counted(connection, *, month=None, now=None):
+            months.append(month)
+            return real(connection, month=month, now=now)
+
+        with mock.patch.object(usage, "read", side_effect=counted):
+            spend = self.ranged()["ranged"]["spend"]
+        self.assertEqual([m for m in months if m], ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"])
+        for month in spend["months"]:
+            read = real(self.connection, month=month["month"], now=NOW).document()
+            self.assertEqual(month["spent"], read["spent"] + sum(r["spent"] for r in read["roles"] if r["bill"] is None))
+
+    def test_the_months_cross_a_year(self):
+        doc = metrics_screen.document(self.connection, now="2027-02-10T12:00:00Z", span="6mo")["ranged"]
+        self.assertEqual((doc["months"], doc["since"]), (["2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02"],
+                                                          "2026-09-01T00:00:00Z"))
+
+    def test_providers_and_ci_read_the_six_months_and_the_lamps_keep_7_days(self):
+        lane_run(self.connection, "old", "failed", "2026-08-01T10:00:00Z", expected="a" * 40, reason=GATE)
+        lane_run(self.connection, "again", "merged", "2026-08-02T10:00:00Z", head="a" * 40)
+        doc = self.ranged()
+        week = self.doc()
+        scorecard = {r["provider"]: r["usd"] for r in doc["ranged"]["scorecard"]["rows"]}
+        self.assertEqual(scorecard["kimi"], 85.0)
+        self.assertEqual({r["provider"]: r["usd"] for r in doc["scorecard"]["rows"]}["kimi"], 80.0)
+        ci = doc["ranged"]["ci"]
+        self.assertEqual((ci["since"], [(r["repository"], r["passed"], r["gate"]) for r in ci["repos"]], len(ci["flaky"])),
+                         ("2026-04-01T00:00:00Z", [("example/alpha", 1, 1)], 1))
+        self.assertEqual((doc["ci"], doc["attention"], doc["range"], week["range"]), (week["ci"], week["attention"], "6mo", "7d"))
+        self.assertNotIn("ranged", week)
+
+    def test_a_range_part_that_fails_is_its_error_and_the_rest_still_answer(self):
+        with mock.patch.object(reads, "scorecard", side_effect=sqlite3.OperationalError("database is locked")):
+            doc = self.ranged()
+        self.assertEqual(doc["ranged"]["scorecard"], {"error": "OperationalError: database is locked"})
+        self.assertEqual((doc["ranged"]["spend"]["error"], doc["ranged"]["ci"]["error"]), ("", ""))
+
+    def test_an_unknown_range_is_refused(self):
+        with self.assertRaises(ValueError):
+            metrics_screen.document(self.connection, now=NOW, span="30d")
+
+
 class TheControls(Controlled):
     def test_the_controls_carry_the_revision_the_routes_check_and_each_bills_write(self):
         controls = self.doc()["controls"]
@@ -462,13 +530,17 @@ class ThePage(BrowserSession):
         for path in re.findall(r'(?:src|href)="(/ui/[^"]+)"', body):
             self.assertEqual(self.request(path)[0], 200, path)
 
-    def test_the_data_route_needs_a_session_and_takes_no_query(self):
+    def test_the_data_route_needs_a_session_and_takes_a_range_alone(self):
         self.assertEqual(self.request("/api/metrics")[0], 403)
         cookie = {"Cookie": self.cookie}
-        self.assertEqual(self.request("/api/metrics?range=30", headers=cookie)[0], 400)
+        for query in ("range=30", "range=6mo&x=1", "range=6mo&range=7d", "x=1"):
+            self.assertEqual(self.request(f"/api/metrics?{query}", headers=cookie)[0], 400, query)
         status, _, body = self.request("/api/metrics", headers=cookie)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["numbers"]["error"], "")
+        self.assertNotIn("ranged", json.loads(body))
+        status, _, body = self.request("/api/metrics?range=6mo", headers=cookie)
+        self.assertEqual((status, json.loads(body)["range"], len(json.loads(body)["ranged"]["months"])), (200, "6mo", 6))
 
     def test_the_rail_opens_metrics_at_its_page_and_keeps_the_classic_usage_screen(self):
         self.assertEqual(v2.SECTIONS["Metrics"], "/metrics")
@@ -485,9 +557,9 @@ OUT.shown = []; window.shell.view = { show: id => { OUT.shown.push(id); return t
 class TheScript(Controlled):
     """metrics.js against the document `metrics_screen` builds from the fixture database."""
 
-    def run_page(self, body, doc=None, status=200):
+    def run_page(self, body, doc=None, status=200, before=""):
         doc = doc if doc is not None else self.doc()
-        script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + METRICS_SHELL + READ_SHELL
+        script = (STAND_IN + before + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + METRICS_SHELL + READ_SHELL
                   + f"\nvar DOC = {json.dumps(doc)}, STATUS = {status};\n"
                   + "ANSWER = (path, body) => path === '/api/metrics' ? [STATUS, DOC] : [404, { error: 'no answer' }];\n"
                   + METRICS_JS + "\nvar R = {};\n(async () => { try {\n(WIN_LISTENERS.DOMContentLoaded || []).forEach(f => f());\n"
@@ -658,6 +730,57 @@ R.lamps = ELS.annunciator.html; R.bills = ELS.bills.html;""")
         self.assertNotIn("data-cell=", out["R"]["lamps"])
         self.assertNotIn("data-ev=", out["R"]["bills"])
         self.assertEqual(out["attention"][-1], {"state": "unknown", "n": 0, "what": "Metrics not read"})
+
+    def six(self):
+        self.cost("run", "2026-07-15T10:00:00Z", provider="kimi", bill="capped", role="author", usd=5)
+        self.cost("run", "2026-07-16T10:00:00Z", provider="claude", bill="plan", role="reviewer", usd=0)
+        self.cost("run", "2026-07-17T10:00:00Z", provider="claude", bill=None, role="author", usd=2)
+        return metrics_screen.document(self.connection, now=NOW, span="6mo")
+
+    SIX = """var SIX = %s;
+ANSWER = path => path === '/api/metrics?range=6mo' ? [200, SIX] : path === '/api/metrics' ? [STATUS, DOC] : [404, { error: 'no answer' }];
+OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
+const press = (range, off) => ELS.range.listeners.click[0]({ target: { closest: s => s === 'button[data-range]'
+  ? { dataset: { range }, title: off || '', getAttribute: k => k === 'aria-disabled' && off ? 'true' : null } : null } });
+"""
+
+    def test_6mo_is_live_reads_the_six_months_and_keeps_the_choice_in_the_address(self):
+        """pack sd:7208: 6mo reads ?range=6mo; Spend draws each month by bill, a month with no rows says so, never $0."""
+        out = self.run_page(self.SIX % json.dumps(self.six()) + """R.before = ELS.range.html; R.hidden = ELS['months-block'].hidden;
+press('6mo'); await flush();
+R.after = ELS.range.html; R.shown = ELS['months-block'].hidden; R.head = ELS['months-head'].html; R.months = ELS['months-body'].html;
+R.note = ELS['months-note'].textContent; R.sc = ELS['sc-span'].textContent; R.ci = ELS['ci-body'].html; R.lamps = ELS.annunciator.html;
+open('mo:2026-04'); R.empty = ELS.details.html; open('mo:2026-07'); R.july = ELS.details.html;
+press('30d', 'off'); press('7d'); await flush(); R.back = ELS['months-block'].hidden;""")
+        r = out["R"]
+        self.assertRegex(r["before"], r'data-range="7d" aria-pressed="true">7d</button><button type="button" data-range="30d" aria-pressed="false" aria-disabled="true"')
+        self.assertIn('<button type="button" data-range="6mo" aria-pressed="false">6mo</button>', r["before"])
+        self.assertIn('<button type="button" data-range="6mo" aria-pressed="true">6mo</button>', r["after"])
+        self.assertEqual(out["gets"], ["/api/metrics", "/api/metrics?range=6mo", "/api/metrics"])
+        self.assertEqual(out["urls"], [[["range", "6mo"]], []])
+        self.assertEqual((r["hidden"], r["shown"], r["back"]), (True, False, True))
+        self.assertEqual(re.findall(r'<th scope="col"[^>]*>([^<]+)</th>', r["head"]), ["Month", "Total", "capped", "plan", "no bill"])
+        rows = dict(re.findall(r'<tr data-ev="mo:([\d-]+)".*?>(.*?)</tr>', r["months"]))
+        self.assertEqual(list(rows), ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"])
+        for month in ("2026-04", "2026-05", "2026-06", "2026-08"):
+            self.assertIn('<td class="why" colspan="4">no rows</td>', rows[month], month)
+            self.assertNotIn("$", rows[month], month)
+        self.assertEqual(re.findall(r'<td class="num">(.*?)</td>', rows["2026-07"]), ["$7.00", "$5.00", "▨ window", "$2.00"])
+        self.assertEqual(re.findall(r'<td class="num">(.*?)</td>', rows["2026-09"]), ["$80.00", "$80.00", "▨ window", "—"])
+        self.assertIn("<small>to date</small>", rows["2026-09"])
+        self.assertEqual(r["note"], "Total $87.00 over 2026-04 to 2026-09; 4 months with no ledger row. ▨ marks a bill that spends a vendor window, not a zero.")
+        self.assertEqual(r["sc"], "2026-04 to 2026-09.")
+        self.assertIn("No lane entry ended since 2026-04-01.", r["ci"])
+        self.assertIn('data-cell="ci" data-ev="ci" data-view="ci" data-state="unknown"', r["lamps"])
+        self.assertIn("<h2>2026-04 · no rows</h2>", r["empty"])
+        self.assertIn("<code>sd-db usage --month 2026-07</code>", r["july"])
+        self.assertIn("<dt>plan</dt><dd>window, not dollars</dd><dt>No bill</dt><dd>$2.00</dd>", r["july"])
+        self.assertEqual(out["toasts"], [["off", False]], "a range that is off says why and reads nothing")
+
+    def test_the_address_opens_the_page_at_6mo(self):
+        out = self.run_page("R.range = ELS.range.html;", before="location.search = '?range=6mo';\n")
+        self.assertEqual(out["gets"], ["/api/metrics?range=6mo"])
+        self.assertIn('data-range="6mo" aria-pressed="true"', out["R"]["range"])
 
     def test_a_selected_reading_shows_its_facts_and_cli_line(self):
         out = self.run_page("open('sc:kimi'); R.det = ELS.details.html;")

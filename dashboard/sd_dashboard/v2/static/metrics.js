@@ -7,6 +7,8 @@
 // build: bars are SVG rects sized by attribute, not CSSOM widths, and the age chart is the design's bar list only.
 // sd:5080: the panels are the shell's views (shell.js, view:start): Spend (spend, the week, usage), Providers, CI and
 // Age. A lamp shows the view that holds its reading. Skill use moved to Skills' Usage view (sd:5881).
+// pack sd:7208: the range 6mo reads /api/metrics?range=6mo and draws its `ranged` parts: Spend adds each month by bill,
+// and Providers and CI read the six months. The lamps and the badge stay on the 7d reading. ?range=6mo keeps the choice.
 // moved:start
 // sd:5881: an old address of the Skills view opens Skills' Usage view, keeping its query (?row=).
 {
@@ -27,6 +29,14 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   const unknownBlock = why => html`<p class="state-unknown"><b>▨ Not read.</b> ${why}</p>`;
   const track = (pct, cls = '') => html`<svg class="track${pct == null ? ' hatch' : ''}" viewBox="0 0 100 1" preserveAspectRatio="none" aria-hidden="true">${pct == null ? '' : html`<rect class="fill ${cls}" width="${Math.max(0, Math.min(100, pct)).toFixed(1)}" height="1"/>`}</svg>`;
   let DOC = null, EV = {}, CELLS = [], selected = null, FIRST = null, SAID = null;
+  // The range segment: 7d and 6mo are live; the others say why not (pack sd:7084, sd:7208).
+  const RANGES = [{ id: '24h', off: 'Most sources here are daily or weekly; 24h would be one reading' }, { id: '7d' },
+    { id: '30d', off: '30d switches on once the cost ledger holds 30 days of rows' }, { id: '6mo' }];
+  let range = new URLSearchParams(location.search).get('range') === '6mo' ? '6mo' : '7d';
+  // The part a ranged panel draws: the 6mo read's own, else the 7d one.
+  const part = k => DOC?.ranged ? DOC.ranged[k] : DOC?.[k];
+  const span = () => DOC?.ranged ? `${DOC.ranged.months[0]} to ${DOC.ranged.months[DOC.ranged.months.length - 1]}` : 'this month';
+  const within = c => DOC?.ranged ? `since ${c.since.slice(0, 10)}` : `in the last ${c.days} days`;
   // The registry's controls, by bill and by provider; a part that did not read leaves both empty.
   const ctlBill = name => DOC?.controls?.bills?.find(b => b.name === name) || null;
   const ctlProvider = name => DOC?.controls?.providers?.find(p => p.name === name) || null;
@@ -49,23 +59,29 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
         facts: u.bound.map(r => [`${r.bill || '—'} · ${r.provider || '—'}`, `${money(r.usd)} · ${r.timestamp}`]),
         note: 'Money a provider may have billed for a lost response; counted at the bound until corrected against the invoice.', cli: `sd-db usage --month ${u.month}` });
     }
+    const sm = d.ranged?.spend;
+    if (sm && !sm.error) sm.months.forEach(m => put1(`mo:${m.month}`, { kind: 'Spend · month', title: m.rows ? `${m.month} · ${money(m.spent)}` : `${m.month} · no rows`, s: m.rows ? 'ok' : 'unknown',
+      facts: m.rows ? [...sm.bills.map(b => [b.name, windowed(b) && !m.bills[b.name] ? 'window, not dollars' : money(m.bills[b.name])]), ['No bill', money(m.unbilled)]] : [['Ledger', 'no run or bound row this month']],
+      note: m.rows ? '' : 'No row is not a zero: the ledger holds nothing for this month.', cli: `sd-db usage --month ${m.month}` }));
     if (!d.trend.error) d.trend.series.forEach(s => s.points.forEach(([day, p, at], i) => put1(`t:${s.provider}:${day}`, { kind: 'Window reading', title: `${s.provider} · ${day}`, s: pctState(p),
       facts: [['Used', `${p}%`], ['Window', `${d.trend.window} min (7 days)`], ['Reading', `last meter row of the day · ${at}`], ['Source', 'reads.meter_days']], cli: 'sd-db usage --json' })));
     if (!d.numbers.error) d.numbers.rows.forEach(n => put1(`num:${n.key}`, { kind: 'The week', title: n.label, s: n.value == null ? 'unknown' : 'ok', facts: [['Value', numText(n)], ...n.inputs, ['Source', 'reads.weekly_numbers']], cli: '/operations?area=usage' }));
     const order = (role, name) => { const at = (d.controls.orders?.[role] || []).indexOf(name); return d.controls.error ? '— (not read)' : at < 0 ? 'not in the order' : `${at + 1} of ${d.controls.orders[role].length}`; };
-    if (!d.scorecard.error) d.scorecard.rows.forEach(r => put1(`sc:${r.provider}`, { type: 'provider', kind: 'Provider · this month', title: r.provider, label: r.provider, p: r.provider, s: scState(r),
+    const sc = part('scorecard');
+    if (!sc.error) sc.rows.forEach(r => put1(`sc:${r.provider}`, { type: 'provider', kind: `Provider · ${span()}`, title: r.provider, label: r.provider, p: r.provider, s: scState(r),
       revision: d.controls.revision, control: ctlProvider(r.provider),
       facts: [['Author order', order('author', r.provider)], ['Reviewer order', order('reviewer', r.provider)], ['Author rank', r.author_rank ?? '—'], ['Reviewer rank', r.reviewer_rank ?? '—'], ['Passes', r.passes], ['Blocking', r.blocking], ['$/pass', money(r.usd_per_pass)], ['Skipped', r.fallthrough], ['State', r.enabled ? 'enabled' : `disabled: ${r.reason || '—'}`]],
-      note: scState(r) === 'caution' ? `Asked ${r.fallthrough} times and fell through every time this month.` : '', cli: 'sd providers configure --file CONFIG.json' }));
+      note: scState(r) === 'caution' ? `Asked ${r.fallthrough} times and fell through every time, ${span()}.` : '', cli: 'sd providers configure --file CONFIG.json' }));
     if (!d.observed.error) put1('observed', { kind: 'Observed activity', title: `${d.observed.since} → ${d.observed.until}`, facts: [['Requests recorded', d.observed.recorded_requests], ['Finished review attempts', d.observed.finished_review_attempts], ['Recorded deliveries', d.observed.recorded_deliveries], ['Source', 'reporting.metrics']], note: d.observed.interpretation, cli: '—' });
-    if (!d.ci.error) {
+    const pc = part('ci');
+    if (!pc.error) {
       const lane = 'sd-ship -C CHECKOUT lane list', src = ['Source', 'reads.lane_entries: each lane entry\'s last checkpoint'];
       const said = f => f ? `sd:${f.item} · ${f.kind} · ${at(f.at)}` : '—';
-      d.ci.repos.forEach(r => put1(`ci:${r.repository}`, { kind: `CI · ${d.ci.days} days`, title: r.repository, s: ciState(r),
+      pc.repos.forEach(r => put1(`ci:${r.repository}`, { kind: `CI · ${d.ranged ? span() : `${pc.days} days`}`, title: r.repository, s: ciState(r),
         facts: [['Passed', r.passed], ['Gate failed', r.gate], ['Pass rate', rate(r.rate)], ['Stopped by review', r.review], ['Stopped otherwise', r.other], ['Failed, no reason kept', r.unknown],
           ['Last failure', said(r.newest)], ['Its reason', r.newest ? r.newest.reason || '—' : '—'], ['Last gate failure', said(r.newest_gate)], src],
         note: 'Pass rate is passed over gate runs. A review stop or a conflict ran no gate.', open: r.newest ? [window.shell.itemHref(r.newest.item), `Open sd:${r.newest.item} in Tasks`] : null, cli: lane }));
-      d.ci.flaky.forEach(f => put1(`flaky:${f.repository}:${f.head}`, { kind: 'CI · flaky head', title: `sd:${f.item} · ${f.head.slice(0, 12)}`, s: 'caution',
+      pc.flaky.forEach(f => put1(`flaky:${f.repository}:${f.head}`, { kind: 'CI · flaky head', title: `sd:${f.item} · ${f.head.slice(0, 12)}`, s: 'caution',
         facts: [['Repository', f.repository], ['Item', f.title || '—'], ['Head', f.head], ['Gate failed', f.failed.map(at).join(' · ')], ['Passed', `${at(f.passed)} (${f.status})`], src],
         note: 'Per head, not per test: the gate failed at this head, then passed at it with no new commit.', open: [window.shell.itemHref(f.item), `Open sd:${f.item} in Tasks`], cli: lane }));
     }
@@ -74,6 +90,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
         facts: [['Since', at(d.ci.since)], ['Repositories', d.ci.repos.length], ['Flaky heads', d.ci.flaky.length], ['Unreadable entries', d.ci.unreadable], ['Source', 'reads.lane_entries']], cli: 'sd-ship -C CHECKOUT lane list' });
     d.unread.forEach(x => put1(`unread:${x.id}`, { kind: 'Not read', title: x.name, s: 'unknown', facts: [['Reason', x.reason]], cli: '—' }));
   }
+  const windowed = b => ['subscription', 'plan'].includes(b.cost_basis);
   const numText = n => n.value == null ? '—' : n.unit === 'usd' ? money(n.value) : n.unit === 'hours' ? `${(+n.value).toFixed(1)} h` : n.value % 1 ? (+n.value).toFixed(1) : String(n.value);
   const scState = r => r.fallthrough && !r.passes ? 'caution' : 'ok';
   const at = iso => `${String(iso).slice(5, 16).replace('T', ' ')}Z`;
@@ -81,7 +98,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   // A repository name may break after its owner, so a narrow table keeps every column on screen.
   const slashed = name => { const cut = name.indexOf('/'); return cut < 0 ? name : html`${name.slice(0, cut + 1)}<wbr>${name.slice(cut + 1)}`; };
   // A repository with a flaky head is caution, as its row in Flaky tests; a gate failure alone is the gate doing its job.
-  const flakyIn = repo => (DOC?.ci?.flaky || []).filter(f => f.repository === repo).length;
+  const flakyIn = repo => (part('ci')?.flaky || []).filter(f => f.repository === repo).length;
   const ciState = r => flakyIn(r.repository) ? 'caution' : r.passed + r.gate ? 'ok' : 'unknown';
 
   // ---------- Annunciator ----------
@@ -122,7 +139,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     const u = DOC?.usage;
     if (!u || u.error) { put($('bills'), html`<li>${unknownBlock(u ? u.error : 'the Metrics document did not arrive')}</li>`); put($('windows'), html``); $('bills-note').textContent = ''; return; }
     // build: dollars are the month to date as sd usage reads them; a bill that spends a window shows hatched, not a zero.
-    const windowed = b => ['subscription', 'plan'].includes(b.cost_basis), max = Math.max(0.01, ...u.bills.map(b => b.spent));
+    const max = Math.max(0.01, ...u.bills.map(b => b.spent));
     // build (hallmark audit): a bill at 75% of its cap is caution and at its cap a warning, each with its glyph, not colour alone.
     const capState = b => b.cap == null ? 'ok' : b.spent >= b.cap ? 'warning' : b.spent / b.cap >= 0.75 ? 'caution' : 'ok';
     put($('bills'), html`${u.bills.map(b => { const st = capState(b); return bar(`bill:${b.name}`, b.name, `${b.cost_basis}${b.cap == null ? '' : ` · cap ${money(b.cap)}`}`, windowed(b) && !b.spent ? null : (b.cap ? b.spent / b.cap * 100 : b.spent / max * 100), windowed(b) && !b.spent ? '▨ window' : money(b.spent), st === 'ok' ? '' : st, st === 'ok' ? '' : st); })}`);
@@ -150,7 +167,9 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     const nums = d && !d.numbers.error ? d.numbers.rows : [];
     put($('week-body'), !d ? html`` : html`${d.numbers.error ? html`<tr><td colspan="4">${unknownBlock(d.numbers.error)}</td></tr>` : ''}${nums.map(n => { const st = n.value == null ? 'unknown' : 'ok';
       return row(`num:${n.key}`, html`<td class="g g-${st}">${G[st]}<span class="sr">${st}</span></td><td class="what"><button type="button">${n.label}</button></td><td class="num">${numText(n)}</td><td class="mono hide-sm">${n.inputs.map(i => i.join(' ')).join(' · ')}</td>`); })}`);
-    put($('sc-body'), !d ? html`` : d.scorecard.error ? html`<tr><td colspan="9">${unknownBlock(d.scorecard.error)}</td></tr>` : html`${d.scorecard.rows.map(r => { const st = scState(r);
+    const sc = part('scorecard');
+    $('sc-span').textContent = DOC?.ranged ? `${span()}.` : 'This month.';
+    put($('sc-body'), !d ? html`` : sc.error ? html`<tr><td colspan="9">${unknownBlock(sc.error)}</td></tr>` : html`${sc.rows.map(r => { const st = scState(r);
       return row(`sc:${r.provider}`, html`<td class="g g-${st}">${G[st]}<span class="sr">${st === 'caution' ? 'caution: skipped every call' : 'normal'}</span></td><td class="what"><button type="button">${r.provider}</button>${r.enabled ? '' : html`<small>disabled</small>`}</td><td class="num hide-sm">${r.author_rank ?? '—'}</td><td class="num hide-sm">${r.reviewer_rank ?? '—'}</td><td class="num">${r.passes}</td><td class="num hide-sm">${r.blocking}</td><td class="num">${money(r.usd_per_pass)}</td><td class="num">${r.fallthrough}</td><td class="act">${C.rowActions(`sc:${r.provider}`)}</td>`); })}`);
     const u = d?.usage;
     put($('roles-body'), !d ? html`` : u.error ? html`<tr><td colspan="6">${unknownBlock(u.error)}</td></tr>` : u.roles.length ? html`${u.roles.map((r, i) => row(`role:${i}`, html`<td class="what"><button type="button">${r.bill || '—'}</button><small>${r.provider || '—'}</small></td><td class="hide-sm">${r.role || '—'}</td><td class="num">${r.calls}</td><td class="num">${money(r.spent)}</td><td class="num hide-sm">${fmt(r.tokens_in)}</td><td class="num hide-sm">${fmt(r.tokens_out)}</td>`))}`
@@ -168,17 +187,32 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
       <table class="sr"><caption>Open items by age in status</caption><tbody>${a.buckets.map(b => html`<tr><th scope="row">${b.label}</th><td>${b.ready_to_send} ready to send, ${b.other} other</td></tr>`)}</tbody></table>`);
   }
   function ci() {
-    const c = DOC?.ci;
+    const c = part('ci');
     if (!c || c.error) { put($('ci-state'), unknownBlock(c ? c.error : 'the Metrics document did not arrive')); put($('ci-body'), html``); put($('flaky-body'), html``); return; }
     put($('ci-state'), c.unreadable ? html`<p class="foot-note"><span class="g-unknown" aria-hidden="true">▨</span> ${plural(c.unreadable, 'lane entry', 'lane entries')} ${c.unreadable === 1 ? 'is' : 'are'} not readable and ${c.unreadable === 1 ? 'is' : 'are'} not counted.</p>` : html``);
     put($('ci-body'), c.repos.length ? html`${c.repos.map(r => { const st = ciState(r), stopped = r.review + r.other + r.unknown;
       return row(`ci:${r.repository}`, html`<td class="g g-${st}">${G[st]}<span class="sr">${st === 'caution' ? 'caution: a flaky head' : st}</span></td><td class="what"><button type="button">${slashed(r.repository)}</button></td><td class="num hide-sm">${r.passed}</td><td class="num">${r.gate}</td><td class="num">${rate(r.rate)}</td><td class="num hide-sm">${stopped}</td><td class="mono hide-sm">${r.newest ? `sd:${r.newest.item} · ${r.newest.kind}` : '—'}</td>`); })}`
-      : html`<tr><td colspan="7" class="why">No lane entry ended in the last ${c.days} days.</td></tr>`);
+      : html`<tr><td colspan="7" class="why">No lane entry ended ${within(c)}.</td></tr>`);
     put($('flaky-body'), c.flaky.length ? html`${c.flaky.map(f => row(`flaky:${f.repository}:${f.head}`, html`<td class="what"><button type="button">sd:${f.item}</button><small>${f.repository}</small></td><td class="mono">${f.head.slice(0, 12)}</td><td class="mono hide-sm">${f.failed.map(at).join(' · ')}</td><td class="mono">${at(f.passed)}</td>`))}`
-      : html`<tr><td colspan="4" class="why">No head failed its gate and then passed at that head in the last ${c.days} days.</td></tr>`);
+      : html`<tr><td colspan="4" class="why">No head failed its gate and then passed at that head ${within(c)}.</td></tr>`);
+  }
+  // pack sd:7208: each of the six months by bill. A month with no ledger row says so, never $0; a window bill is not a zero.
+  function months() {
+    const sm = DOC?.ranged?.spend;
+    $('months-block').hidden = !sm;
+    if (!sm) return;
+    if (sm.error) { put($('months-head'), html``); put($('months-body'), html`<tr><td>${unknownBlock(sm.error)}</td></tr>`); $('months-note').textContent = ''; return; }
+    // A run row may name no bill (a start session's): its dollars are their own column, shown when a month holds one.
+    const loose = sm.months.some(m => m.unbilled != null), cols = sm.bills.length + 1 + (loose ? 1 : 0);
+    put($('months-head'), html`<tr><th scope="col">Month</th><th scope="col" class="num">Total</th>${sm.bills.map(b => html`<th scope="col" class="num">${b.name}</th>`)}${loose ? html`<th scope="col" class="num">no bill</th>` : ''}</tr>`);
+    put($('months-body'), html`${sm.months.map(m => row(`mo:${m.month}`, html`<td class="what"><button type="button">${m.month}</button>${m.month === DOC.usage?.month ? html`<small>to date</small>` : ''}</td>${m.rows
+      ? html`<td class="num">${money(m.spent)}</td>${sm.bills.map(b => html`<td class="num">${windowed(b) && !m.bills[b.name] ? '▨ window' : money(m.bills[b.name])}</td>`)}${loose ? html`<td class="num">${money(m.unbilled)}</td>` : ''}`
+      : html`<td class="why" colspan="${cols}">no rows</td>`}`))}`);
+    const read = sm.months.filter(m => m.rows), empty = sm.months.length - read.length;
+    $('months-note').textContent = `Total ${money(read.reduce((n, m) => n + m.spent, 0))} over ${span()}${empty ? `; ${plural(empty, 'month')} with no ledger row` : ''}. ▨ marks a bill that spends a vendor window, not a zero.`;
   }
   function draw() {
-    lamps(); spend(); trends(); tables(); age();
+    lamps(); spend(); months(); trends(); tables(); age();
     put($('model'), unreadBlock('model'));
     ci();
     const o = DOC?.observed;
@@ -251,21 +285,27 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
       answer => window.shell.post('/api/providers/configure', { revision: answer.revision, ...before }));
   }
 
+  function ranges() {
+    put($('range'), html`${RANGES.map(r => html`<button type="button" data-range="${r.id}" aria-pressed="${String(r.id === range)}"${r.off ? html` aria-disabled="true" title="${r.off}"` : ''}>${r.id}</button>`)}`);
+  }
+
   // ---------- Reader (read.js) ----------
   let reader = null;
   const load = () => reader.load();
   // Read again (sd:5638): the shell's head button reads the Metrics readings again.
   window.PAGE_AGAIN = { title: 'Read the Metrics readings again', run: load };
   const spec = {
-    source: '/api/metrics', what: 'the Metrics readings',
+    source: () => range === '6mo' ? '/api/metrics?range=6mo' : '/api/metrics', what: 'the Metrics readings',
     adopt: doc => {
       DOC = doc; evidence(); CELLS = readCells(); attention();
       document.body.dataset.observed = doc.read;
-      const failed = ['usage', 'trend', 'numbers', 'scorecard', 'age', 'observed', 'controls', 'ci'].filter(k => doc[k].error || doc[k].stale);
+      const parts = [...['usage', 'trend', 'numbers', 'scorecard', 'age', 'observed', 'controls', 'ci'].map(k => [k, doc[k]]),
+        ...(doc.ranged ? ['spend', 'scorecard', 'ci'].map(k => [`6mo ${k}`, doc.ranged[k]]) : [])];
+      const failed = parts.filter(([, p]) => p.error || p.stale);
       FIRST = CELLS.find(c => c.state === 'warning' || c.state === 'caution')?.ev || Object.keys(EV).find(k => k.startsWith('win:')) || null;
       put($('subhead'), html`Spend against budget, the week, providers, CI and the month's usage · read <time class="rel" datetime="${doc.read}"></time>`);
       return { objects: Object.entries(EV).map(([id, e]) => ({ ...e, id, type: e.type || 'reading', label: e.label || e.title })),
-        state: failed.length ? { kind: 'partial', text: `${failed.map(k => `${k}: ${doc[k].error || `stale since ${hhmm(doc[k].observed)}: ${doc[k].stale}`}`).join(' · ')}. The other readings are current.`, source: '/api/metrics' } : null };
+        state: failed.length ? { kind: 'partial', text: `${failed.map(([k, p]) => `${k}: ${p.error || `stale since ${hhmm(p.observed)}: ${p.stale}`}`).join(' · ')}. The other readings are current.`, source: spec.source() } : null };
     },
     clear: () => {
       DOC = null; EV = {}; CELLS = []; FIRST = null;
@@ -316,7 +356,13 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     $('trends').addEventListener('keydown', e => {
       const el = e.target.closest?.('svg [data-ev]'); if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); show(el.dataset.ev, true); }
     });
-    $('range').addEventListener('click', e => { const c = e.target.closest('button[aria-disabled="true"]'); if (c) S.toast(c.title); });
+    $('range').addEventListener('click', e => {
+      const c = e.target.closest('button[data-range]'); if (!c) return;
+      if (c.getAttribute('aria-disabled') === 'true') { S.toast(c.title); return; }
+      if (c.dataset.range === range) return;
+      range = c.dataset.range; S.url(range === '7d' ? [] : [['range', range]]); ranges(); load();
+    });
+    ranges();
     document.addEventListener('shell:open', e => { if (EV[e.detail]) show(e.detail, true); });
     load();
   });
