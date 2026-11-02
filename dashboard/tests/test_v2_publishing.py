@@ -789,6 +789,95 @@ class BriefDesignation(brief_tests.BriefCase):
         self.assertEqual([(c["channel"], c["state"]) for c in brief["pub"]["copies"]], [("drive", "queued")])
 
 
+class PieceDesignation(ScreenCase):
+    """Mirror to Drive on a writing piece (pack sd:7243): `fields.publish.drive` on its item, then the pack's
+    `enqueue_pieces`, as Publish to on a brief. One designation covers the piece's four files."""
+
+    def setUp(self):
+        super().setUp()
+        from sd_db import upsert_repo, writing
+        from sd_db.writes import create_item
+
+        self.checkout = (Path(self.tmp.name) / "writing").resolve()
+        folder = self.checkout / "content" / "2026" / "a-piece"
+        folder.mkdir(parents=True)
+        (folder / "index.md").write_text("---\ntitle: A piece\nstatus: review\n---\n\n## Draft\n\nA claim.\n", encoding="utf-8")
+        upsert_repo(self.connection, str(self.checkout), pieces_source="file")
+        self.piece = writing.import_piece(self.connection, str(self.checkout), "2026/a-piece", who="operator")["item"]["id"]
+        self.task = create_item(self.connection, kind="task", title="A task")
+        self.queued = []
+
+    def enqueue(self, connection, items):
+        self.queued.append((items, self.fields()["publish"]))
+        return ["mirror: queued 2026-a-piece-draft -> Briefs/writing"]
+
+    def fields(self):
+        return json.loads(self.connection.execute("SELECT fields FROM item WHERE id = ?", (self.piece,)).fetchone()[0] or "{}")
+
+    def test_a_mirror_writes_the_designation_then_asks_the_pack_to_queue_the_piece(self):
+        answer = publishing.designate_piece(self.connection, self.piece, "drive", enqueue=self.enqueue)
+        self.assertEqual((answer["already"], answer["queued"], answer["exit"]), (False, True, 0))
+        self.assertEqual(self.fields()["publish"], {"drive": {}})
+        self.assertEqual(self.queued, [({self.piece}, {"drive": {}})])
+
+    def test_a_second_mirror_keeps_the_designation_and_queues_again(self):
+        publishing.designate_piece(self.connection, self.piece, "drive", enqueue=self.enqueue)
+        answer = publishing.designate_piece(self.connection, self.piece, "drive", enqueue=self.enqueue)
+        self.assertTrue(answer["already"])
+        self.assertEqual(len(self.queued), 2)
+
+    def test_an_enqueue_that_fails_keeps_the_designation_for_the_next_mirror(self):
+        # Failure table, "Mirror: designate": the designation stands and the answer says nothing was queued.
+        answer = publishing.designate_piece(self.connection, self.piece, "drive",
+                                            enqueue=mock.Mock(side_effect=OSError("disk full")))
+        self.assertEqual((answer["queued"], answer["exit"]), (False, 1))
+        self.assertIn("disk full", answer["lines"][0])
+        self.assertEqual(self.fields()["publish"], {"drive": {}})
+        with mock.patch.object(publishing, "kit", return_value=object()):
+            answer = publishing.designate_piece(self.connection, self.piece, "drive")
+        self.assertEqual((answer["queued"], answer["exit"]), (False, 1))
+        self.assertIn("no enqueue_pieces", answer["lines"][0])
+        answer = publishing.designate_piece(self.connection, self.piece, "drive", enqueue=self.enqueue)
+        self.assertEqual((answer["already"], answer["queued"]), (True, True))
+
+    def test_a_channel_the_repo_leaves_out_or_an_unread_setting_writes_nothing(self):
+        repos.set_channels(self.connection, str(self.checkout), {"obsidian": {}})
+        with self.assertRaisesRegex(publishing.Refused, "not a channel of writing"):
+            publishing.designate_piece(self.connection, self.piece, "drive", enqueue=self.enqueue)
+        with mock.patch.object(publishing, "read_channels", return_value=(None, "hub down")), \
+                self.assertRaisesRegex(publishing.Refused, "hub down; nothing was designated"):
+            publishing.designate_piece(self.connection, self.piece, "drive", enqueue=self.enqueue)
+        self.assertNotIn("publish", self.fields())
+        self.assertEqual(self.queued, [])
+
+    def test_what_is_not_a_piece_is_refused(self):
+        with self.assertRaisesRegex(publishing.Refused, "not a writing piece"):
+            publishing.designate_piece(self.connection, self.task, "drive", enqueue=self.enqueue)
+        self.assertEqual(self.queued, [])
+        for values in ({"item": self.piece, "channel": "obsidian"}, {"item": "7", "channel": "drive"}, {"item": self.piece}):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                publishing.piece_request(values)
+
+    def test_each_file_carries_its_copy_from_the_queue_the_receipt_or_the_item(self):
+        queue, receipts = Path(self.tmp.name) / "queue", Path(self.tmp.name) / "receipts"
+        queue.mkdir()
+        receipts.mkdir()
+        (queue / "writing.2026-a-piece-research.drive.json").write_text(json.dumps({"repo": str(self.checkout)}))
+        (receipts / "writing.2026-a-piece-draft.drive.json").write_text(
+            json.dumps({"repo": str(self.checkout), "delivered": "abc", "url": DRIVE_URL}))
+        published = {f"{self.checkout}::2026-a-piece-adversarial": {"drive": DRIVE_URL + "?a"}}
+        mirror = publishing.piece_mirror(self.checkout, "2026/a-piece", {"publish": {"drive": {}}, "published": published},
+                                         queue=queue, receipts=receipts)
+        self.assertEqual(mirror["choice"], {"drive": True, "notion": False})
+        got = {name: [(c["channel"], c["state"], c["url"]) for c in copies] for name, copies in mirror["copies"].items()}
+        self.assertEqual(got, {"index.md": [("drive", "published", DRIVE_URL)],
+                               "research.md": [("drive", "queued", None)],
+                               "fact-check.md": [],
+                               "adversarial.md": [("drive", "published", DRIVE_URL + "?a")]})
+        self.assertEqual(publishing.piece_mirror(self.checkout, "2026/a-piece", {}, queue=queue, receipts=receipts)["choice"],
+                         {"drive": False, "notion": False})
+
+
 class BriefUndesignation(brief_tests.BriefCase):
     """Unticking a brief's destination (sd:5489): the trash request first, with the item's URL, then fields.publish."""
 
