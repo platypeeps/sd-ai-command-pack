@@ -920,6 +920,7 @@
     return html`<div class="actions">${on.map(button)}</div>
       <details class="cli-all"><summary>Same thing from the CLI</summary>${off.map(c => html`<p class="why off"><b>${c.label}</b> is off: ${offWhy(c, o)}</p>`)}${on.filter(c => noCli(cliOf(c, o))).map(c => html`<p class="why"><b>${c.label}</b> has no CLI${c.cli ? `: ${cliOf(c, o).replace(/^no (CLI|sd verb):?\s*/, '')}` : '; it is dashboard only'}.</p>`)}${on.filter(c => !noCli(cliOf(c, o))).map(c => html`<div class="cli fold"><button class="cli-line" type="button" aria-expanded="false" title="Show the full command"><code>${cliOf(c, o)}</code></button><button class="icon-btn" type="button" data-copy="${cliOf(c, o)}" aria-label="Copy: ${cliOf(c, o)}">${ICON('copy')}</button></div>${executes(c, o) ? (c.sends ? html`<p class="why"><b>${c.label}</b> runs here and sends <code>${c.sends(o)}</code>.</p>` : '') : html`<p class="why"><b>${c.label}</b> is copy only: the dashboard does not run this line.</p>`}`)}</details>`;
   }
+  // menu:start
   // Action menu: opens from ⋯ or the "." key; letters run commands.
   const menuEl = document.createElement('div');
   menuEl.className = 'actmenu'; menuEl.setAttribute('role', 'menu'); menuEl.setAttribute('aria-label', 'Actions'); menuEl.hidden = true;
@@ -931,7 +932,10 @@
     anchor?.setAttribute?.('aria-expanded', 'true');
     menuEl.setAttribute('aria-label', `Actions for ${o.label}`);
     // sd:6687: `menu: false` is a command Details' fields and its key already do; the ⋯ menu skips it, the key still runs.
-    const on = live(o).filter(c => c.menu !== false);
+    // sd:7206: so is a command the row shows as a button. The row's own .rowact says which: rowActions draws the primary
+    // alone or every icon command, by the row's mode. With no row to read (the "." key off the list), the menu keeps all.
+    const shown = new Set([...(anchor?.closest?.('.rowact')?.querySelectorAll('[data-cmd]') || [])].filter(b => b.dataset.obj === id).map(b => b.dataset.cmd));
+    const on = live(o).filter(c => c.menu !== false && !shown.has(c.id));
     put(menuEl, html`<p class="label">${o.label}</p>${on.map(c => html`<button role="menuitem" type="button" data-cmd="${c.id}" data-obj="${id}"><span>${c.label}${c.risk === 'confirm' || c.fields ? '…' : ''}</span><small>${doesOf(c, o)}</small><code>${shownCli(c, o)}</code>${c.key ? html`<kbd>${c.key}</kbd>` : ''}</button>`)}
       <button role="menuitem" type="button" data-menu-open="${id}"><span>Open details</span><code></code><kbd>↵</kbd></button>
       <button role="menuitem" type="button" data-menu-ask="${id}"><span>Ask in chat</span><code></code><kbd>c</kbd></button>`);
@@ -951,6 +955,7 @@
     const c = menuObj && live(menuObj).find(x => x.key === e.key);
     if (c) { e.preventDefault(); e.stopPropagation(); const o = menuObj; closeMenu(); run(c, o); }
   });
+  // menu:end
   document.addEventListener('click', e => {
     const m = e.target.closest('[data-menu-for]');
     if (m) { e.stopPropagation(); menuEl.hidden || menuObj?.id !== m.dataset.menuFor ? openMenu(m.dataset.menuFor, m) : closeMenu(); return; }

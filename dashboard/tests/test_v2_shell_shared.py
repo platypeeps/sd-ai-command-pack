@@ -675,6 +675,40 @@ class TheBulkBar(unittest.TestCase):
         self.assertIn('data-bulk="t.hide">Hide</button>', out["html"])
 
 
+class TheRowMenu(unittest.TestCase):
+    """sd:7206: the ⋯ menu leaves out a command its row already shows as a button; the menu's key still runs it."""
+
+    def run_menu(self, body):
+        found = re.search(r"^  // menu:start\n(.*?)^  // menu:end$", SHELL_JS, re.S | re.M)
+        self.assertIsNotNone(found, "shell.js has no menu:start ... menu:end block")
+        return run_js("""var innerHeight = 900, body = document.body, put = window.markup.put, RAN = [];
+  const OBJ = new Map([['r1', { id: 'r1', label: 'Row one' }]]);
+  const CMDS = [{ id: 't.open', label: 'Open', icon: 'eye', key: 'o', primary: () => true },
+    { id: 't.snooze', label: 'Snooze', icon: 'clock', key: 'z' }, { id: 't.copy', label: 'Copy', key: 'y' }];
+  const live = () => CMDS, doesOf = c => `${c.label} it`, shownCli = () => '', run = (c, o) => RAN.push([c.id, o.id]);
+  // A row's ⋯ button: its .rowact holds the buttons rowActions drew, each a data-cmd for its object.
+  const row = btns => ({ setAttribute() {}, getBoundingClientRect: () => ({ left: 0, right: 0, top: 0, bottom: 0 }),
+    closest: s => s === '.rowact' ? { querySelectorAll: q => q === '[data-cmd]' ? btns.map(([cmd, obj]) => ({ dataset: { cmd, obj } })) : [] } : null });
+  const items = () => [...menuEl.html.matchAll(/role="menuitem" type="button" data-cmd="([^"]+)"/g)].map(m => m[1]);
+""" + found.group(1) + "  menuEl.querySelector = () => ({ focus() {}, click() {} });\n" + body)
+
+    def test_the_menu_leaves_out_what_the_row_shows_and_keeps_the_rest(self):
+        out = self.run_menu("""openMenu('r1', row([['t.open', 'r1']])); R.primary = items(); closeMenu();
+  openMenu('r1', row([['t.open', 'r1'], ['t.snooze', 'r1']])); R.icons = items(); R.html = menuEl.html;
+  menuEl.listeners.keydown[0]({ key: 'z', preventDefault() {}, stopPropagation() {} }); R.ran = RAN;
+  openMenu('r1', row([['t.open', 'r2']])); R.other = items(); closeMenu();
+  openMenu('r1', null); R.none = items();""")
+        self.assertEqual(out["primary"], ["t.snooze", "t.copy"], "the primary button's command stayed in the menu")
+        self.assertEqual(out["icons"], ["t.copy"], "an icon button's command stayed in the menu")
+        self.assertIn('data-menu-open="r1"><span>Open details</span>', out["html"])
+        self.assertIn('data-menu-ask="r1"><span>Ask in chat</span>', out["html"])
+        # The key of a command the menu left out still runs it.
+        self.assertEqual(out["ran"], [["t.snooze", "r1"]])
+        # Only this row's own buttons count: another object's, or no row at all, leaves every command in.
+        self.assertEqual(out["other"], ["t.open", "t.snooze", "t.copy"])
+        self.assertEqual(out["none"], ["t.open", "t.snooze", "t.copy"])
+
+
 class TheViewPicker(unittest.TestCase):
     """sd:5641: a page's layout menu (Tasks' List, Board, Matrix; Writing's Board, Editor) is the shell's one viewPick."""
 
