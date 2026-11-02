@@ -346,7 +346,8 @@ sd last wrote and saw confirmed. A field a person changed is refused, listed in
 `yielded`, and named in one note on the item, with the value that hands it
 back. The title, `Stage` and `Priority` are written once, at create, with one
 body line, `Projected from sd:<n>. sd keeps Status current; edit anything else.`
-Everything else on the row is the team's.
+Everything else on the row is the team's. A property the database lacks, but
+the title, is not written, and the plan names it in `skipped`.
 
 `sd-research-kit project` queues one `notion-row` request per designated item
 whose row would change, as `sd-item-<n>.notion-row.json` in the same queue. Its

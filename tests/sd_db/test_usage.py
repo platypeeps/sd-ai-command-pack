@@ -174,6 +174,24 @@ class TheRead(UsageCase):
         self.assertEqual([(row["window_minutes"], row["used_percent"]) for row in found.meter], [(300, 70)])
         self.assertIn("capped (company): spent $5.00", self.sd_db("usage", "--month", "2026-09").stdout)
 
+    def test_a_row_on_no_bill_is_in_the_months_spend(self):
+        """pack sd:7219: a start session's row may name no bill. The bill list
+        leaves it out, so the month's total read it as nothing."""
+        self.month()
+        for usd, at in ((4.0, "2026-09-13T10:00:00+00:00"), (9.0, "2026-08-13T10:00:00+00:00")):
+            row = writes.record_cost(self.db, source="run", provider="claude", bill=None, role="author", usd=usd)
+            self.db.execute("UPDATE cost SET timestamp = ? WHERE id = ?", (at, row))
+        self.db.commit()
+        found = usage.read(self.db, month="2026-09")
+        self.assertEqual(found.spent, 6.5)
+        self.assertEqual(found.unbilled, 4.0)
+        self.assertEqual(found.document()["unbilled"], 4.0)
+        self.assertIsNone(usage.read(self.db, month="2026-07").unbilled)
+        # The verb binds the $3.00 orphan first, as it does for every month.
+        printed = self.sd_db("usage", "--month", "2026-09").stdout
+        self.assertIn("usage 2026-09: $9.50 spent", printed)
+        self.assertIn("  no bill: spent $4.00", printed)
+
     def test_the_projection_is_one_snapshot(self):
         """A `run` row committed by another connection between two of the
         read's SELECTs is in all of the projection or in none of it: the
