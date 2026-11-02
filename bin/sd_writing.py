@@ -30,6 +30,25 @@ CONTENT_ONLY = frozenset({"list", "import", "verify"})
 #: Review verbs that write only the piece's own report files, and the library function each needs (sd:3301).
 REVIEWS = {"adversarial": "adversarial_brief", "reconcile": "reconcile_companion"}
 
+#: Verbs that write one piece, so its designated mirror is queued again after them (pack sd:7243).
+MIRRORED = frozenset({"promote", "register", "stage", "metadata", "gate", "park", "adversarial", "reconcile"})
+
+
+def _mirror(connection: Any, item: int) -> None:
+    """Queue the piece's designated files whose text changed, as a brief add queues its brief (pack sd:7243).
+
+    Best effort: the verb's write is committed, so a failure here changes neither its exit nor its JSON. It is named
+    on stderr, and the next verb, or the Writing page's Mirror again, queues the piece.
+    """
+    try:
+        import sd_research_publish  # noqa: PLC0415 - the pack's `bin/`, beside this file
+
+        lines = sd_research_publish.enqueue_pieces(connection, {item})
+    except Exception as error:  # noqa: BLE001 - reported; the verb's result stands
+        lines = [f"mirror: piece not queued: {error or type(error).__name__}"]
+    for line in lines:
+        print(line, file=sys.stderr)
+
 
 def gate_bin() -> str:
     """The shared adversarial gate: `$ADVERSARIAL_GATE_BIN`, else the system checkout's copy.
@@ -179,6 +198,7 @@ def run(args: argparse.Namespace) -> int:
         who = getpass.getuser()
         revision = getattr(args, "if_revision", None)
         result: Any
+        item: Any = None
         if action == "list":
             result = writing.list_pieces(connection, repo, include_parked=args.all)
             if args.status:
@@ -195,7 +215,10 @@ def run(args: argparse.Namespace) -> int:
             result = writing.recover_cutover(connection, repo, who=who)
         elif action == "register":
             result = writing.import_piece(connection, repo, args.piece, path=args.path, who=who)
+            registered_row = result.get("item") if isinstance(result, dict) else None
+            item = registered_row.get("id") if isinstance(registered_row, dict) else None
         elif action == "promote":
+            item = args.item
             # A writing checkout is the target; from any other the library picks the one
             # repository that registers pieces and refuses several (sd:1994, R10-D6).
             try:
@@ -270,6 +293,8 @@ def run(args: argparse.Namespace) -> int:
                 print(f"{sd_db.repos.item_ref(entry['id'], entry.get('repo'))}  {entry['stage']}  {entry['title']}")
         else:
             print(json.dumps(result, ensure_ascii=False, indent=2))
+        if action in MIRRORED and item is not None:
+            _mirror(connection, item)
         return 1 if action == "verify" and not result["ok"] else 0
     except (sd_db.SdDbError, ValueError, OSError) as error:
         raise WorkRefusal(str(error)) from error
