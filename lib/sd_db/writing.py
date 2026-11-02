@@ -267,6 +267,39 @@ def piece_files(row) -> dict[str, dict | None]:
     return found
 
 
+#: The files a piece mirrors to Drive (pack sd:7243), by the stem its request is named with: the draft, then each report.
+MIRRORED = {"draft": "index.md", **REPORTS}
+
+
+def mirror_texts(row) -> tuple[dict[str, tuple[str, str]], list[str]]:
+    """Each present piece file's `(name, text)` by `MIRRORED` stem, from the registered checkout, and what was not read.
+
+    Never a linked worktree's (pack sd:7243): a mirror is the main checkout's copy, as a render's is. An absent file is
+    left out; one outside the repository or one that cannot be read is named, never read as absent. A missing index.md
+    raises, as `piece_files` does.
+    """
+    token = _CHECKOUT.set(None)
+    try:
+        index = _path(row["repo"], row["piece"], row["path"])
+        root = _disk(row["repo"])
+    finally:
+        _CHECKOUT.reset(token)
+    texts: dict[str, tuple[str, str]] = {}
+    problems: list[str] = []
+    for stem, name in MIRRORED.items():
+        candidate = index.with_name(name)
+        try:
+            if not candidate.resolve(strict=True).is_relative_to(root):
+                problems.append(f"{name} is outside the registered repository")
+                continue
+            texts[stem] = (name, candidate.read_text(encoding="utf-8", errors="replace"))
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            problems.append(f"{name} not read: {error.strerror or error}")
+    return texts, problems
+
+
 def piece_for_key(connection: sqlite3.Connection, repo: str, piece: str) -> sqlite3.Row | None:
     probe = sdpaths.keys(repo)
     return connection.execute(

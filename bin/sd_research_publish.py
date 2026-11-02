@@ -2308,8 +2308,11 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
     out = str(cfg.get("out", "")).strip()
     src = str(cfg.get("src", "")).strip()
     # A routine brief (sd:5102, `brief_docs`) is a row, not a file: it carries
-    # its text, and its source is the item.
+    # its text, and its source is the item. A writing piece's file (pack
+    # sd:7243, `piece_docs`) carries its text too, and names its own source,
+    # `sd:<item>/<file>`; it has no vault copy.
     brief = isinstance(cfg.get("content"), str)
+    piece = brief and isinstance(cfg.get("source"), str)
     request = {
         # The repository, not the checkout: this is what `sd-status`
         # resolves a row against and what a carried id is compared on.
@@ -2319,12 +2322,12 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
         "revision": rev,
         "document": out,
         "title": cfg.get("title", out),
-        "source": "sd:%s" % cfg.get("item") if brief else str(repo / src) if src else "",
+        "source": cfg["source"] if piece else "sd:%s" % cfg.get("item") if brief else str(repo / src) if src else "",
         # The pointer line's link, read from `origin` and never
         # composed by the drain; None where origin names no GitHub repo.
         "source_url": source_url(repo, src),
         "rendered": "" if brief else str(repo / DASHBOARD_DIR / (out + ".html")),
-        "markdown": str(vault / (out + ".md")) if vault else "",
+        "markdown": str(vault / (out + ".md")) if vault and not piece else "",
         # What the drain mirrors, read once here. The three paths
         # above say where it came from and where the copies sit;
         # none of them is what gets published. Joined here, once, for
@@ -2634,16 +2637,79 @@ def enqueue_briefs(connection: Any, items: set[int] | None = None) -> list[str]:
     unchanged brief is not queued again. A setting that cannot be read holds
     that repository's briefs, as it holds a render's queue.
     """
+    return enqueue_rows(connection, *brief_docs(connection, items), "brief")
+
+
+def piece_docs(
+    connection: Any, items: set[int] | None = None
+) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    """Each repository's DOCS entries for the files of the writing pieces
+    their items designate, and what was wrong (pack sd:7243).
+
+    A piece is designated on its item's `fields.publish`, as a brief is, and
+    one designation covers each file `writing.MIRRORED` names that is there.
+    An entry carries the file's text as `content`, so it takes the brief's
+    route through `mirror_request`, and `sd:<item>/<file>` as its `source`,
+    which tells drain step 5 that no research.conf.py records the copy.
+    """
+    import_sd_db()  # the caller holds a connection, so this is the one it has
+    from sd_db import writing  # noqa: PLC0415 - the checkout's `lib/`
+
+    docs: dict[str, list[dict[str, Any]]] = {}
+    problems: list[str] = []
+    rows = connection.execute(
+        "SELECT * FROM item WHERE kind = 'idea' AND piece IS NOT NULL ORDER BY id")
+    for row in rows:
+        if items is not None and row["id"] not in items:
+            continue
+        try:
+            fields = json.loads(row["fields"] or "{}")
+        except ValueError:
+            fields = None
+        designation = fields.get("publish") if isinstance(fields, dict) else None
+        if designation is None and isinstance(fields, dict):
+            continue
+        if not isinstance(designation, dict) or not row["repo"]:
+            problems.append("mirror: sd:%s: its fields.publish is not an object on "
+                            "a piece with a repository; not queued" % row["id"])
+            continue
+        try:
+            texts, unread = writing.mirror_texts(row)
+        except Exception as problem:  # a piece not read is named, never empty
+            problems.append("mirror: sd:%s: %s; not queued" % (row["id"], problem or type(problem).__name__))
+            continue
+        problems += ["mirror: sd:%s: %s; not queued" % (row["id"], why) for why in unread]
+        stem = row["piece"].replace("/", "-")
+        for part, (name, text) in texts.items():
+            entry: dict[str, Any] = {"out": "%s-%s" % (stem, part), "title": "%s · %s" % (row["title"], part),
+                                     "item": row["id"], "content": text,
+                                     "source": "sd:%s/%s" % (row["id"], name)}
+            entry.update({destination: dict(designation[destination]) for destination in ("notion", "drive")
+                          if isinstance(designation.get(destination), dict)})
+            docs.setdefault(row["repo"], []).append(entry)
+    return docs, problems
+
+
+def enqueue_pieces(connection: Any, items: set[int] | None = None) -> list[str]:
+    """Queue the files of every designated writing piece (`piece_docs`), as
+    `enqueue_briefs` queues briefs: only a file whose text changed is queued
+    again (pack sd:7243)."""
+    return enqueue_rows(connection, *piece_docs(connection, items), "piece")
+
+
+def enqueue_rows(connection: Any, docs: dict[str, list[dict[str, Any]]], reports: list[str],
+                 what: str) -> list[str]:
+    """Queue each repository's `docs` through `enqueue` with its channels
+    setting; a setting that cannot be read holds that repository's `what`s."""
     import_sd_db()  # the caller holds a connection, so this is the one it has
     from sd_db import channels, paths, repos  # noqa: PLC0415 - the checkout's `lib/`
 
-    docs, reports = brief_docs(connection, items)
     for repo, entries in docs.items():
         try:
             setting = channels.outbound(repos.repo_channels(connection, repo))
         except Exception as problem:  # unknown is not "no setting": none queued
-            reports.append("%s: %s: %s; no brief of it queued"
-                           % (HELD, repo, problem or type(problem).__name__))
+            reports.append("%s: %s: %s; no %s of it queued"
+                           % (HELD, repo, problem or type(problem).__name__, what))
             continue
         reports += enqueue(paths.expand(repo), entries, setting)
     return reports
