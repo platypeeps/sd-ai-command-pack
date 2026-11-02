@@ -303,5 +303,53 @@ class ChangesTheComparisonMustSee(unittest.TestCase):
         self.assertIn("changed: 1 since T", said)
 
 
+class TagsAreReadWithTheirQuotes(unittest.TestCase):
+    """Review on 62edc1739 (sd:7258): every regex that reads a tag or an attribute honours quotes."""
+
+    def setUp(self) -> None:
+        self.highlight = load_highlight()
+
+    def mark(self, page: str, baseline: str = "Old.\n", header: bool = False) -> tuple[str, int]:
+        marked, changed, _, _ = self.highlight.highlight(page, self.highlight.Baseline(baseline, header=header), "T",
+                                                         header=header)
+        return marked, changed
+
+    def test_a_quoted_greater_than_does_not_end_the_tag(self) -> None:
+        marked, changed = self.mark('<p title="x > y">New.</p>')
+        self.assertEqual(changed, 1)
+        self.assertIn(f'<p title="x > y" style="{MARK}">New.</p>', marked)
+        marked, changed = self.mark("<p title='x > y'>Old.</p>")
+        self.assertEqual(changed, 0)
+
+    def test_only_the_style_attribute_is_extended(self) -> None:
+        cases = (
+            ('<p data-style="a">New.</p>', f'<p data-style="a" style="{MARK}">New.</p>'),
+            ('<p style = "margin:0">New.</p>', f'<p style = "margin:0;{MARK}">New.</p>'),
+            ("<p style='margin:0;'>New.</p>", f"<p style='margin:0;{MARK}'>New.</p>"),
+            ("<p style=margin:0>New.</p>", f'<p style="margin:0;{MARK}">New.</p>'),
+            ('<p data-style="x" style="m:0">New.</p>', f'<p data-style="x" style="m:0;{MARK}">New.</p>'),
+            ("<p title=\"style='x'\">New.</p>", f"<p title=\"style='x'\" style=\"{MARK}\">New.</p>"),
+            ('<p STYLE="m:0">New.</p>', f'<p STYLE="m:0;{MARK}">New.</p>'),
+        )
+        for page, expected in cases:
+            with self.subTest(page=page):
+                self.assertIn(expected, self.mark(page)[0])
+
+    def test_text_ignores_quoted_brackets_and_comments(self) -> None:
+        text = self.highlight.html_text
+        self.assertEqual(text('<a title="a > b">x</a> <br title=">"/>y <!-- c > d --> z'), "x y z")
+        self.assertEqual(self.highlight.markdown_text('Text <span title="a > b">x</span>'), "Text x")
+
+    def test_a_body_tag_with_a_quoted_bracket_keeps_the_note_after_it(self) -> None:
+        marked, _ = self.mark('<html><body class="a>b"><p>New.</p></body></html>')
+        self.assertTrue(marked.startswith(f'<html><body class="a>b"><p style="{MARK}">'), marked[:120])
+
+    def test_skip_header_ends_at_a_real_rule_not_one_inside_an_attribute(self) -> None:
+        marked, changed = self.mark('<p title="<hr>">Head.</p>\n<p>New.</p>\n<hr />\n<p>Old.</p>', "Head2.\n\n---\n\nOld.\n",
+                                    header=True)
+        self.assertEqual(changed, 0)
+        self.assertIn(f'<p>New.</p>\n<p style="{MARK}"><strong>No changes since T', marked)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -52,8 +52,12 @@ UNIT = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "pre", "dt", 
 #: Every block tag: a unit's text runs from one of these to the next. Inline tags (a, code, br) do not cut it.
 BLOCK = UNIT | {"ul", "ol", "hr", "table", "thead", "tbody", "tfoot", "tr", "dl", "figure", "body", "html",
                 "section", "article", "main", "header", "footer"}
-TAG = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>")
-STYLE = re.compile(r"""\bstyle=(["'])(.*?)\1""", re.I | re.S)
+#: A tag's attributes, quote-aware: a `>` inside a quoted value does not end the tag.
+ATTRS = r"""(?:"[^"]*"|'[^']*'|[^'">])*"""
+#: A comment (no name) or a tag `(closing slash, name)`; every tag read in this file goes through it.
+TAG = re.compile(rf"<!--.*?-->|<(/?)([a-zA-Z][a-zA-Z0-9]*)\b{ATTRS}>", re.S)
+#: One attribute inside a tag: `(name, value as written, quotes kept)`.
+ATTR = re.compile(r"""([^\s"'>/=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+))?""")
 LINK = re.compile(r"\[((?:[^\[\]]|\[[^\]]*\])*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+\"[^\"]*\")?\)")
 IMAGE = re.compile(r"!\[[^\]]*\]\((?:[^()]|\([^)]*\))*\)")
 LEAD = re.compile(r"^\s*(?:#{1,6}\s+|>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s+)?")
@@ -73,10 +77,22 @@ def _collapse(text: str) -> str:
     return " ".join(text.split())
 
 
+def _name(tag: re.Match[str]) -> str:
+    """A tag's lower-case name; empty for a comment."""
+
+    return (tag.group(2) or "").lower()
+
+
+def _strip(fragment: str) -> str:
+    """`fragment` with tags and comments taken out and `<br>` a space; entities still escaped."""
+
+    return TAG.sub(lambda tag: " " if _name(tag) == "br" else "", fragment)
+
+
 def html_text(fragment: str) -> str:
     """A fragment's text: tags stripped, `<br>` a space, entities read. Literal characters stay."""
 
-    return _collapse(html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<br\b[^>]*>", " ", fragment, flags=re.I))))
+    return _collapse(html.unescape(_strip(fragment)))
 
 
 def markdown_text(line: str) -> str:
@@ -103,7 +119,7 @@ def markdown_text(line: str) -> str:
             text, count = pattern.subn(lambda m: m.group(m.lastindex or 1), text)
             if not count:
                 break
-    text = html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<br\b[^>]*>", " ", text, flags=re.I)))
+    text = html.unescape(_strip(text))
     text = re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], text)
     return _collapse(text)
 
@@ -222,18 +238,30 @@ class Baseline:
 def _marked(tag: str) -> str:
     """The opening tag `tag` with the highlight added to its style."""
 
-    found = STYLE.search(tag)
-    if not found:
-        return tag[:-1].rstrip("/ ") + f' style="{MARK}">'
-    style = found.group(2).rstrip().rstrip(";")
-    style = f"{style};{MARK}" if style else MARK
-    return tag[: found.start()] + f"style={found.group(1)}{style}{found.group(1)}" + tag[found.end():]
+    named = re.match(r"<[a-zA-Z0-9]+", tag)
+    for attr in ATTR.finditer(tag, named.end() if named else 1, len(tag) - 1):
+        if attr.group(1).lower() != "style":
+            continue
+        if attr.group(2) is None:  # a bare `style`
+            return tag[: attr.start()] + f'style="{MARK}"' + tag[attr.end():]
+        value = attr.group(2)
+        quote = value[0] if value[0] in "\"'" else '"'
+        style = value.strip(quote).rstrip().rstrip(";") if value[0] == quote else value.rstrip(";")
+        style = f"{style};{MARK}" if style else MARK
+        return tag[: attr.start(2)] + f"{quote}{style}{quote}" + tag[attr.end(2):]
+    return tag[:-1].rstrip("/ ") + f' style="{MARK}">'
+
+
+def _first(page: str, name: str) -> re.Match[str] | None:
+    """The page's first opening `<name>` tag, outside comments and other tags' attributes."""
+
+    return next((tag for tag in TAG.finditer(page) if _name(tag) == name and not tag.group(1)), None)
 
 
 def _header_end(page: str) -> int | None:
     """Where `--skip-header`'s header block ends: the page's first `<hr`, or None without one."""
 
-    rule = re.search(r"<hr\b", page, re.I)
+    rule = _first(page, "hr")
     return rule.start() if rule else None
 
 
@@ -265,7 +293,7 @@ def _units(page: str, start: int, tags: list[re.Match[str]]) -> list[tuple[int, 
         text = html_text(page[begin:end])
         if not text:
             continue
-        name = tag.group(2).lower() if tag is not None and not tag.group(1) else ""
+        name = _name(tag) if tag is not None and not tag.group(1) else ""
         if re.fullmatch(r"h[1-6]", name):
             section = text
         units.append((begin, end, tag if name in UNIT else None, section, text))
@@ -277,9 +305,9 @@ def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str,
 
     start = (_header_end(page) or 0) if header else 0
     if not start:
-        body = re.search(r"<body\b[^>]*>", page, re.I)
+        body = _first(page, "body")
         start = body.end() if body else 0
-    tags = [tag for tag in TAG.finditer(page, start) if tag.group(2).lower() in BLOCK]
+    tags = [tag for tag in TAG.finditer(page, start) if _name(tag) in BLOCK]
     units = _units(page, start, tags)
     # Whole matches first, then lines: which paragraph comes first must not decide what matches.
     found = [seen.match_whole(text) for _, _, _, _, text in units]
