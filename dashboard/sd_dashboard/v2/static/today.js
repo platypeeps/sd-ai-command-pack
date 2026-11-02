@@ -209,7 +209,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'diges
     return { id: r.id, type: r.group ? (r.id === 'group:briefs' ? 'brief group' : 'item group') : TYPE[r.kind] || r.kind, label: r.what,
              failed: r.kind === 'job' && !!r.retry, retry: r.retry, job: job && job[1], service: r.service,
              exit: r.exit, revision: r.revision, capability: r.capability, repo: pr ? pr[1] : r.repo, number: pr && +pr[2], seen: r.seen,
-             item: r.item, itemKind: r.item_kind, state: r.state, url: r.url, fieldsRead: r.fields_read, until: r.until,
+             item: r.item, itemKind: r.item_kind, state: r.state, url: r.url, fieldsRead: r.fields_read, until: r.until, login: r.login,
              repoPath: r.repo_path, laneRevision: r.lane_revision, head: r.expected_head, runnerMerge: r.runner_merge,
              members: r.members && r.members.map(m => ({ id: m.id, seen: m.seen, until: m.until, item: m.item })), group: r.id };
   }
@@ -506,8 +506,12 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'diges
       K.fix('work item', { item: o => o.item, report: o => o.itemKind === 'report', post: (o, path) => post(path, { revision: o.revision }) }),
       { id: 'today.item.open', on: 'work item', label: 'Open', does: 'Opens the item on Tasks.', key: 'o', icon: 'arrow-up-right', risk: 'safe', executes: false, primary: () => true,
         cli: o => `sd task show ${o.item}`, run: o => shell.openItem(o.item) },
+      // A problem report whose output shows an expired login (sd:6964): Fix opens its Credentials row, ahead of Acknowledge.
+      // Today starts no debug session on a report; one with no login cause keeps Acknowledge, and Fix stays on Reports.
+      { ...K.fix('report', { item: o => o.item, report: () => true, login: o => o.login, post: null,
+        when: o => !!o.login || 'no expired login in its log: Fix it from Reports' }), primary: o => !!o.login },
       // A problem report (sd:5921): Acknowledge posts the Reports page's route with the revision the read gave.
-      { id: 'today.report.ack', on: 'report', label: 'Acknowledge', does: 'Closes the report, not the fault: the next failure opens a new one.', key: 'a', icon: 'check', risk: 'safe', bulk: true, primary: () => true,
+      { id: 'today.report.ack', on: 'report', label: 'Acknowledge', does: 'Closes the report, not the fault: the next failure opens a new one.', key: 'a', icon: 'check', risk: 'safe', bulk: true, primary: o => !o.login,
         when: o => o.fieldsRead || `its fields cannot be read: sd reports acknowledge ${o.item}`,
         cli: o => `sd reports acknowledge ${o.item}`, sends: o => `POST /api/reports/${o.item}/acknowledge {revision}`,
         run: o => post(`/api/reports/${o.item}/acknowledge`, { revision: o.revision }).then(() => `Acknowledged · ${o.label}`) },
