@@ -33,8 +33,9 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
-__all__ = ["LEVELS", "classify", "shadow"]
+__all__ = ["LEVELS", "classify", "login", "shadow"]
 
 #: Jev's levels and the rule's, in order: the score is the index.
 LEVELS = ("transient", "probably transient", "unclear", "needs a person")
@@ -64,20 +65,40 @@ EXIT_RULES = {
     78: (3, "configuration error (exit 78)"),
 }
 
-#: Log signatures, a person's first: a run that met both needs a look.
-LOG_RULES = [(score, why, re.compile(pattern, re.IGNORECASE)) for score, why, pattern in (
-    (3, "disk full", r"no space left on device"),
+#: Log signatures, a person's first: a run that met both needs a look. The fourth field names an expired login's
+#: Health Credentials probe family, the row whose Sign in fixes it (sd:6964); `login` reads it. The login rows sit
+#: before the generic authentication rule, so a login's run names the login. Each pattern is a line a tool printed:
+#: claude's, workspace-mcp's and botocore's from job logs, and the one sdm's own binary holds for a signed-out user.
+LOG_RULES = [(score, why, re.compile(pattern, re.IGNORECASE), family) for score, why, pattern, family in (
+    (3, "disk full", r"no space left on device", None),
+    (3, "an expired Claude login", r"not logged in · please run /login|oauth refresh token is no longer valid"
+                                   r"|oauth session expired and could not be refreshed", "claude"),
+    (3, "an expired Google login", r"google authentication needed"
+                                   r"|workspace[-_]mcp\b[^\n]{0,40}\b(?:auth|oauth)\b[^\n]{0,20}\bexpired", "google"),
+    (3, "an expired AWS login", r"please reauthenticate using 'aws login'|token has expired and refresh failed"
+                                r"|createoauth2token operation: the refresh token has expired", "aws"),
+    (3, "an expired StrongDM login", r"listener did not load its internal state yet or the user is not logged in", "sdm"),
     (3, "an authentication failure", r"unauthori[sz]ed|authentication (?:failed|required)|invalid (?:x-)?api[ -]key"
                                       r"|token (?:has )?expired|expired token|please run /login|bad credentials"
-                                      r"|(?:HTTP|status)\D{0,12}\b40[13]\b"),
-    (3, "a missing command", r"command not found"),
-    (3, "permission denied", r"permission denied|operation not permitted"),
+                                      r"|(?:HTTP|status)\D{0,12}\b40[13]\b", None),
+    (3, "a missing command", r"command not found", None),
+    (3, "permission denied", r"permission denied|operation not permitted", None),
     (0, "a DNS failure", r"could not resolve host|temporary failure in name resolution|name or service not known"
-                         r"|nodename nor servname"),
-    (0, "a network failure", r"connection (?:refused|reset|timed out)|network is unreachable|operation timed out"),
+                         r"|nodename nor servname", None),
+    (0, "a network failure", r"connection (?:refused|reset|timed out)|network is unreachable|operation timed out",
+     None),
     (0, "an upstream service failure", r"too many requests|rate.?limit|overloaded|service unavailable|bad gateway"
-                                       r"|gateway time-?out|(?:HTTP|status)\D{0,12}\b(?:429|5\d\d)\b"),
+                                       r"|gateway time-?out|(?:HTTP|status)\D{0,12}\b(?:429|5\d\d)\b", None),
 )]
+
+#: The account a login line names: the Google address workspace-mcp quotes, or the profile an aws login line passes.
+#: A profile is the probe id's own spelling (sd:7153): its case kept, the whole quoted name, or an unquoted one up to
+#: a blank, quote or backtick, less a sentence's closing punctuation.
+ACCOUNTS = {"google": re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"),
+            "aws": re.compile(r"\baws (?:sso )?login\b[^\n]*?--profile[ =]"
+                              r"(?:'([^'\n]+)'|\"([^\"\n]+)\"|([^\s'\"`]+?)(?=[.,;:)]*(?:[\s'\"`]|$)))")}
+#: Health's text filter for a family's rows when the output names no account: each row's kind holds it.
+FAMILY_NAMES = {"google": "Google login", "aws": "AWS profile"}
 
 #: How much of the log's end is read; a run's own section is far shorter.
 TAIL_BYTES = 64 * 1024
@@ -110,10 +131,41 @@ def classify(job: dict, log: Path | None) -> dict:
         found = EXIT_RULES[code]
     else:
         text = last_run(log, job["name"])
-        found = next(((score, f"{why} in the last run's log") for score, why, pattern in LOG_RULES
+        found = next(((score, f"{why} in the last run's log") for score, why, pattern, _family in LOG_RULES
                       if pattern.search(text)), None)
     score, why = found or (2, "no rule matched" + (f" exit {code}" if code is not None else ""))
     return {"score": score, "class": LEVELS[score], "why": why}
+
+
+def login(text: str) -> dict | None:
+    """The expired login a job's output shows, as Health's Credentials row that signs it in again, or None (sd:6964).
+
+    The first `LOG_RULES` row that matches decides, so a run that failed on disk or on its own login first names that.
+    The row is `cred:<probe id>`, the id `sd_db.credentials` gives: `cred:claude` and `cred:sdm` are one row each; a
+    Google row needs the account and an AWS row the profile, read from a line the rule matched. With none, `row` is
+    None and `href` filters Credentials to the family's rows. `why` names the rule, never the log text.
+    """
+    for _score, why, pattern, family in LOG_RULES:
+        found = list(pattern.finditer(text or ""))
+        if not found:
+            continue
+        if family is None:
+            return None
+        account = None
+        if family in ACCOUNTS:
+            for match in found:
+                # The account after the match on its line first, then anywhere on that line.
+                start, end = text.rfind("\n", 0, match.start()) + 1, text.find("\n", match.end())
+                line = text[start:end if end >= 0 else len(text)]
+                named = ACCOUNTS[family].search(line, match.start() - start) or ACCOUNTS[family].search(line)
+                if named:
+                    # An address is one account in any case; a profile is case-sensitive in `~/.aws/config`.
+                    account = next(filter(None, named.groups())) if named.groups() else named.group(0).lower()
+                    break
+        row = f"cred:{family}" if family not in ACCOUNTS else f"cred:{family}:{account}" if account else None
+        query = {"area": "cred", **({"row": row} if row else {"q": FAMILY_NAMES[family]})}
+        return {"family": family, "account": account, "row": row, "why": why, "href": f"/health?{urlencode(query)}"}
+    return None
 
 
 _asked: set[tuple] = set()

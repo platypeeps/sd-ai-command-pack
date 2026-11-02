@@ -274,12 +274,12 @@ that checkout, and the task keeps the checkout it was filed in.
 A commit that states the trailer outside that block is refused by name rather
 than reported as carrying none. An item that belongs to no checkout has no
 default branch to verify a commit against, so `--delivered-by` on a
-`personal` item, or on a `followup` filed off every checkout, is refused for
+`followup` filed off every checkout is refused for
 that reason and the item closes without it. A `followup` filed in a
 registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
 on that second reason, and the item closes without it just the same.
-A row worked on its own branch, as `sd work register` records it,
+A row worked on its own branch, as the build records it,
 does not close plainly while no merge of that branch is recorded (sd:1990).
 Name the merge with `--delivered-by`, or say why no pull request is needed
 with `--reason`, which the transition records. A merge `sd-ship` recorded,
@@ -317,14 +317,9 @@ priorities, due dates and task status save directly to the database. GitHub
 issues are optional external references, with their last successful sync shown
 separately from local progress.
 
-Repository work uses `sd work register`, `sd work relink`, `sd work cancel`,
-and `sd work deliver`. `sd work register docs/work/<item>/prd.md` makes the row
-that owns a planning folder already on disk, reading its title and date from
-the file's own frontmatter.
-Run from a linked worktree, it files the row under the worktree's main checkout.
-The row's branch is the branch the work happens on — the checkout's own local
-branch when that is not the default, and otherwise nothing at all, never a
-remote-tracking name.
+Repository work uses `sd work relink`, `sd work cancel` and
+`sd work deliver`. A planning folder names its row with `item: sd:<id>`
+in its `design.md`; nothing files a `work` row any more (pack sd:7064).
 Delivery verifies a full commit and its delivery trailer against the default
 branch before recording completion. Cancelling work requires a reason and
 completes immediately in the database. Neither operation writes a status file

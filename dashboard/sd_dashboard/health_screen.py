@@ -825,9 +825,9 @@ def _aws_rows(found: tuple[str, dict] | None, *, now: str) -> tuple[list[dict], 
                  "detail": "set SD_AWS_READ='profile:region,region' in env.sh"}], {"at": stamp}
     moment = _when(now)
     found_rows = sorted((one for one in aws.get("resources") or [] if isinstance(one, dict)),
-                        key=lambda one: (str(one.get("region")), str(one.get("since"))))
+                        key=lambda one: (str(one.get("region")), str(one.get("since")), str(one.get("profile"))))
     facts = {**row["facts"], "Observed": stamp}
-    rows = [{**row, "id": f"aws:{one.get('region')}:{one.get('id')}", "state": "ok",
+    rows = [{**row, "id": f"aws:{one.get('profile')}:{one.get('region')}:{one.get('id')}", "state": "ok",
              "what": f"{one.get('type')} {one.get('name')}",
              "detail": f"{one.get('region')} · running {_age(one.get('since'), moment)}", "kind": "AWS · running",
              "facts": {"Region": str(one.get("region")), "Type": str(one.get("type")), "Profile": str(one.get("profile")),

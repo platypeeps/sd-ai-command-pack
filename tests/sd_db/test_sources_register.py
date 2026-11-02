@@ -166,6 +166,11 @@ class TheImport(RegisterCase):
             json.loads(row["fields"])["register_status"],
         )
 
+    def test_the_open_entries_land_as_tasks(self):
+        """`work` is retiring (pack sd:7064): an open entry is a task."""
+        run(self.connection, self.reader())
+        self.assertEqual({row["kind"] for row in self.items().values()}, {"task"})
+
     def test_the_row_names_the_repository_it_came_from(self):
         run(self.connection, self.reader())
         self.assertEqual(self.items()["O29"]["repo"], self.registered_path)

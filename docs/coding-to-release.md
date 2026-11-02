@@ -8,7 +8,7 @@ An agent runs the commands; the user owns scope, exceptions, and release permiss
 | Step | Command or surface | Owner | Exit condition |
 |---|---|---|---|
 | Inspect | `sd-status --json`; Git status; existing handoff | Coordinating agent | Scope, existing work, and blockers are understood. |
-| Plan when needed | `sd-plan` skill; `sd work register docs/work/<item>/prd.md` | User decides; agent records | Required decisions and acceptance checks are clear. Small changes need no plan artifact. |
+| Plan when needed | `sd-plan` skill | User decides; agent records | Required decisions and acceptance checks are clear. Small changes need no plan artifact. |
 | Isolate and implement | Git branch or worktree; editor; focused tests | Coding agent | Scoped changes and regression tests exist. Concurrent work remains untouched. |
 | Check readiness | `sd-review --scope branch --challenge --explain --json` | Pack inspects; agent handles approval | Local blockers are resolved before checks or dispatch. Runtime approval remains separate. |
 | Check | `sd-check --json`; repository `make check` | Repository checks, invoked by agent | Required checks pass. A partial test run does not replace the full gate. |

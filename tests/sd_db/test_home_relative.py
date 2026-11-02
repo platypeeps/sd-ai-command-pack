@@ -452,9 +452,11 @@ class TwoHomes(HomeCase):
         connection = connect(database, home=self.home)
         with connection:
             repos.add(connection, checkout, home=self.home)
-        self.registered = workflow.register_work_item(
-            connection, repo=str(checkout), path="docs/work/2026-09-24-an-item/prd.md",
-            title="an item", created_at="2026-09-24", who="fixture")
+        # The row `work register` filed until pack sd:7064 retired it.
+        key = repos.row_for(connection, str(checkout))["path"]
+        create_item(connection, kind="work", status="planning", title="an item", repo=str(checkout),
+                    path="docs/work/2026-09-24-an-item/prd.md", source="docs/work",
+                    external_id=f"{key}::docs/work/2026-09-24-an-item/prd.md")
         self.task = workflow.capture_task(connection, title="a task", repo=str(checkout), who="fixture")
         connection.close()
         # The second machine: another login, the same `~/repos` layout.
@@ -483,15 +485,6 @@ class TwoHomes(HomeCase):
                          {"an item", "a task"})
         plan = removal.plan_repo(c, here, with_items=True, home=self.other)
         self.assertNotIn("not registered", repr(plan))
-        second = self.checkout / "docs/work/2026-09-24-second/prd.md"
-        second.parent.mkdir(parents=True)
-        second.write_text("---\ntitle: second\ncreated: 2026-09-24\n---\n", encoding="utf-8")
-        made = workflow.register_work_item(
-            c, repo=here, path="docs/work/2026-09-24-second/prd.md", title="second",
-            created_at="2026-09-24", who="fixture")
-        row = c.execute("SELECT repo, external_id FROM item WHERE title = 'second'").fetchone()
-        self.assertEqual(tuple(row), ("~/repos/one", "~/repos/one::docs/work/2026-09-24-second/prd.md"))
-        self.assertTrue(made)
 
     def test_the_disk_path_is_the_one_under_this_home(self):
         row = self.connection.execute("SELECT repo, path FROM item WHERE title = 'an item'").fetchone()

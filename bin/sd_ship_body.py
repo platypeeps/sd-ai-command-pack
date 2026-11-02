@@ -223,7 +223,7 @@ _SECTION = re.compile(r"^ {0,3}#{1,2}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
 #: A column-zero `Refs:` line; the items it names stay open.
 _REFS = re.compile(r"^Refs[ \t]*:(.*)$", re.IGNORECASE)
 #: The kinds a merge closes (`close_items`) and the statuses it would close from.
-_CLOSABLE_KINDS = ("work", "task", "personal", "followup")
+_CLOSABLE_KINDS = ("work", "task", "followup")
 _OPEN_STATUSES = ("planning", "ready", "in_progress", "ready_to_send")
 
 

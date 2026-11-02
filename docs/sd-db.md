@@ -323,7 +323,7 @@ Each key is a kind; each value is the object the old `.github/` file held, or fo
 | `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
 | `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
 | `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids, and optional `url` and `title` (sd:5302) | none |
-| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: it merges by `merge_method` (sd:6790; under rebase, prepare folds `fixup!` commits, writes the trailers on the tip and force-pushes it with a lease), and `review.human` holds the merge until that many humans approve the head; `ci` `{provider: jenkins, url, job}` makes the merge wait for a green Jenkins build of the head (`{pr}` in `job` is the PR number), and an unreachable Jenkins holds it as `ci_unreachable`; `test` `{setup, env, teardown}` is the recipe `sd-check` runs around the checks: unset `env` names or a failed `setup` fail them unrun, and `teardown` runs after them; `release` `{verify}` is the chain the lane runs after a merge (`bin/sd_release.py`, sd:6881): it pushes the next semver tag from `commit_convention.release_types` (default `feat`, `fix`) on origin's main, then runs `verify` in a detached worktree at the tagged commit with `SD_RELEASE_TAG` and `SD_RELEASE_VERSION`; a policy that holds `push` at ask files one question on the item and waits for a ruling that starts with `go`, a freeze window holds the tag, and a failed `verify` reports and rolls nothing back; `deploy_repo`, `file` and `key` are refused until the deploy bump lands (sd:7014) | none |
+| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: it merges by `merge_method` (sd:6790; under rebase, prepare folds `fixup!` commits, writes the trailers on the tip and force-pushes it with a lease), and `review.human` holds the merge until that many humans approve the head; `ci` `{provider: jenkins, url, job}` makes the merge wait for a green Jenkins build of the head (`{pr}` in `job` is the PR number), and an unreachable Jenkins holds it as `ci_unreachable`; `test` `{setup, env, teardown}` is the recipe `sd-check` runs around the checks: unset `env` names or a failed `setup` fail them unrun, and `teardown` runs after them; `release` `{deploy_repo, file, key, verify}` is the chain the lane runs after a merge (`bin/sd_release.py`, sd:6881, sd:7014): it pushes the next semver tag from `commit_convention.release_types` (default `feat`, `fix`; an empty list releases nothing) on origin's main; with `deploy_repo`, `file` and `key`, declared together, it opens a PR in the deploy repository setting `key` in `file` to the version, in the deployed value's form, and merges it with `gh pr merge --match-head-commit` once the deploy repository's own policy gates pass (green checks, `review.human`, a Jenkins `ci`), staying at merge until GitHub reads it `MERGED`; then it runs `verify` in a detached worktree at the merged deploy commit, or at the tagged commit when no deploy is declared, with `SD_RELEASE_TAG` and `SD_RELEASE_VERSION`; each act a policy holds at ask files one question on the item and waits for a ruling that starts with `go`, a freeze window holds the tag and the merge, and a failed `verify` reports and rolls nothing back | none |
 
     bin/sd-db repo declare PATH                     # every kind, as JSON
     bin/sd-db repo declare PATH review              # one kind
@@ -342,7 +342,7 @@ The `.github/` files are no longer read.
     bin/sd-db repo freeze PATH off                  # lift it
 
 A freeze window is a `freeze` state row keyed by the repository's GitHub `owner/name`, not a declaration: it is short-lived (sd:6879).
-Inside a window the lane claims no entry, so every entry stays pending in order, `sd-ship merge` refuses with `freeze_window`, and the release chain holds its tag.
+Inside a window the lane claims no entry, so every entry stays pending in order, `sd-ship merge` refuses with `freeze_window`, and the release chain holds its tag and its deploy merge.
 
 ## `judgments`: what the judgment models cost, by stage
 
@@ -546,18 +546,16 @@ A list the library validates gets no CHECK: SQLite cannot alter one, so each new
 
 ## The item kinds, and the two words called `followup`
 
-`item.kind` is a closed list, guarded by a CHECK. Nine values:
+`item.kind` is a closed list, guarded by a CHECK. Seven values:
 
 | Kind | What it is |
 |---|---|
 | `work` | a change to a repository, planned under `docs/work/` |
 | `task` | a scoped piece of work in a repository |
 | `report` | a run report a scheduled job wrote |
-| `skill-review` | a review of a skill, filed by the catalogue |
 | `idea` | **a writing piece on the article ladder, and nothing else** |
 | `work-idea` | an idea about a repository or product, not yet planned work |
 | `personal-idea` | an idea about life, which does not enter the writing pipeline |
-| `personal` | a to-do, an errand, a chore; it belongs to no repository |
 | `followup` | something to come back to, filed as an item of its own |
 
 `idea` looks like the generic word and is not.
@@ -566,24 +564,26 @@ So a personal or a work idea has its own kind, not a stage on `idea`.
 
 `note.kind` is its own closed list of seven: `followup`, `decision`, `proposal`, `question`, `comment`, `exec` and `status_change`.
 Only `followup` is in both lists. Migration 032 (sd:3510) dropped the `proposal` and `dep` item kinds: neither had a producer or a row.
+Migration 046 (sd:7004) moved every `personal` and `skill-review` row to `task` and dropped both kinds.
+A to-do is a task in a repository; the catalogue files a skill review as a `task` whose `fields.skill_review.action` is `review` (`skills_catalog.is_review`).
 
 - A `followup` note hangs off an item and is resolved against it (`sd task note <item> --kind followup`).
   A `followup` item stands on its own (`sd task add --kind followup`).
   If it makes no sense with the parent deleted, it is a note.
 - A `proposal` is a note: `sd task note <item> --kind proposal` records one, and `reads.brief_notes` carries it into a brief.
 
-`task`, `personal` and `followup` items (`workflow.TASK_STATUS_KINDS`) share the five `TASK_STATUSES`:
+`task` and `followup` items (`workflow.TASK_STATUS_KINDS`) share the five `TASK_STATUSES`:
 `planning`, `ready`, `in_progress`, `blocked` and `done`.
 `work` keeps its delivery rules; `idea`, `work-idea`, `personal-idea` and `report` keep their own workflows.
 
 `workflow.edit_item` is the verb a person uses to change a row's kind.
-The target must be in the store's CHECK (`workflow.schema_kinds`) and in `workflow.HAND_KINDS`, the five `sd task add --kind` files.
-A `work`, `report` or `skill-review` row keeps its kind, because its producer owns it.
+The target must be in the store's CHECK (`workflow.schema_kinds`) and in `workflow.HAND_KINDS`, the four `sd task add --kind` files.
+A `work` or `report` row keeps its kind, because its producer owns it.
 So does an `idea` with a `piece`, and a row whose `fields` carry `contribution` or `skill_review` (`workflow.PRODUCED_FIELDS`).
 The edit writes a `comment` note, `Changed kind <old> -> <new> by <who>`, in the same transaction.
 A vault base row's kind is refused: `records` lists it by item kind `idea`.
 
-`work-idea`, `personal-idea` and `personal` (`workflow.REPO_LESS_KINDS`) are filed with no repository.
+`work-idea` and `personal-idea` (`workflow.REPO_LESS_KINDS`) are filed with no repository.
 Read them as a group with `reads.backlog_items(connection, repo=reads.NO_REPO)` or the dashboard's `/tasks?repo=no%20repo`.
 That is filing behaviour, not a constraint: `item.repo` has no per-kind CHECK, and `writes.create_item` takes a `repo` for any kind.
 

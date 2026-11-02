@@ -39,7 +39,7 @@ import threading
 import time
 import weakref
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import remote, tailnet
@@ -235,12 +235,14 @@ class Role:
     `holder` is the name `sd.hub_name` holds, `None` when unset; `reason`
     is one line a refusal can quote. Callers that act off this machine refuse
     on `elsewhere` and `unknown`; a write to its own database refuses on
-    `elsewhere` alone (`write_role`).
+    `elsewhere` alone (`write_role`). `observed` is the `time.monotonic`
+    reading of its oldest input, from which `Held` ages it; `None` is now.
     """
 
     state: str
     holder: str | None
     reason: str
+    observed: float | None = field(default=None, compare=False)
 
     @property
     def refuses(self) -> bool:
@@ -270,7 +272,9 @@ def role(connection, name=None) -> Role:
 
     `connection` is this machine's own database; `name` reads this node's
     tailnet name (`tailnet.this_name`; a failure stands for `NAME_SECONDS`). The setting
-    is read first, so a machine that never set it asks Tailscale nothing.
+    is read first, so a machine that never set it asks Tailscale nothing,
+    and read again once Tailscale answers, so the answer is no older than
+    Tailscale's (pack sd:7120). `observed` is its oldest input.
 
     Unset is `off`: a fleet that never named its hub runs as before, and
     `promote` refuses to move the role until the setting exists, so a
@@ -279,22 +283,39 @@ def role(connection, name=None) -> Role:
     """
     from . import writes
 
-    try:
+    def setting() -> tuple[float, str | None]:
+        read = time.monotonic()
         # A database older than the `state` table can hold no setting: never set, not unreadable.
         held = connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'state'").fetchone()
-        holder = writes.read_settings(connection, [HUB_NAME]).get(HUB_NAME) if held else None
+        return read, writes.read_settings(connection, [HUB_NAME]).get(HUB_NAME) if held else None
+
+    def unset(read: float) -> Role:
+        return Role("off", None, f"{HUB_NAME} is unset, so the fence is off; "
+                                 f"on the hub run `sd config set {HUB_NAME} <its tailnet name>`", read)
+
+    try:
+        read, holder = setting()
     except (SdDbError, sqlite3.Error, OSError) as error:
         return Role("unknown", None, f"{HUB_NAME} does not read: {error}")
     if not holder:
-        return Role("off", None, f"{HUB_NAME} is unset, so the fence is off; "
-                                 f"on the hub run `sd config set {HUB_NAME} <its tailnet name>`")
+        return unset(read)
     try:
         mine = (name or _this_name)()
     except tailnet.TailnetError as error:
-        return Role("unknown", holder, f"Tailscale does not name this node, so it cannot match {holder}: {error}")
+        # A failure `_this_name` holds was seen when it was cached.
+        failed = _name_failed[0] if _name_failed is not None and _name_failed[1] is error else read
+        return Role("unknown", holder, f"Tailscale does not name this node, so it cannot match {holder}: {error}",
+                    min(read, failed))
+    told = time.monotonic()
+    try:
+        read, holder = setting()
+    except (SdDbError, sqlite3.Error, OSError) as error:
+        return Role("unknown", None, f"{HUB_NAME} does not read: {error}")
+    if not holder:
+        return unset(read)
     if _matches(mine, holder):
-        return Role("holder", holder, f"this node is {mine}, the hub {HUB_NAME} names")
-    return Role("elsewhere", holder, f"{HUB_NAME} names {holder}, and this node is {mine}")
+        return Role("holder", holder, f"this node is {mine}, the hub {HUB_NAME} names", told)
+    return Role("elsewhere", holder, f"{HUB_NAME} names {holder}, and this node is {mine}", told)
 
 
 def role_at(path: Path, name=None) -> Role:
@@ -373,10 +394,11 @@ _FORBIDDEN_PRAGMAS = {
 }
 
 class Held:
-    """One fence answer and when it was asked (pack sd:7042).
+    """One fence answer and when it came (pack sd:7042).
 
     `get(ask, within)` returns the held answer while it is younger than
-    `within` seconds and the wall clock moved with the monotonic one;
+    `within` seconds, counted from its oldest input, and the wall clock
+    moved with the monotonic one since `ask` began;
     otherwise it calls `ask` and holds what it returns. One ask runs at a
     time. A caller that finds an answer young enough takes no lock, so a
     slow Tailscale stalls only the callers that need a new answer.
@@ -405,7 +427,14 @@ class Held:
                 return found
             ticks, wall = time.monotonic(), time.time()
             found = ask()
-            self._held = (ticks, wall, found)
+            # Aged from its oldest input (`Role.observed`), else from its
+            # arrival: from the call's start, an answer slower than `within`
+            # came stale, and the next write asked again under SQLite's
+            # write lock (pack sd:7120). The wall clock keeps the start, so
+            # a sleep during the call still reads as a jump.
+            observed = getattr(found, "observed", None)
+            since = time.monotonic() if observed is None else observed
+            self._held = (since, wall + (since - ticks), found)
             return found
 
 

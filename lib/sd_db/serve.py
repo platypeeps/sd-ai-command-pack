@@ -841,7 +841,7 @@ class Server(socketserver.ThreadingTCPServer):
         self.node = node
         self.idle_timeout = idle_timeout
         self.owners = Owners()
-        #: The last fence answer, a refusal or `None`; see `fence`.
+        #: The last fence answer, a `hub.Role`; see `fence`.
         self.fenced = hub.Held()
         super().__init__((LOOPBACK if node is None else str(node.address), port), Session)
 
@@ -849,11 +849,8 @@ class Server(socketserver.ThreadingTCPServer):
         """Why this machine no longer holds the hub role, or `None`: asked again past
         `within` seconds, `FENCE_SECONDS` by default, or once the wall clock jumped (a
         sleep). Unknown refuses. A frame with a held answer waits on no ask (sd:7042)."""
-        def ask() -> str | None:
-            found = hub.role_at(self.database)
-            return found.reason if found.refuses else None
-
-        return self.fenced.get(ask, FENCE_SECONDS if within is None else within)
+        found = self.fenced.get(lambda: hub.role_at(self.database), FENCE_SECONDS if within is None else within)
+        return found.reason if found.refuses else None
 
     def admit(self, peer, frame: dict, session: int = 0) -> None:
         """Refuse a session before anything opens, and before any SQL runs."""

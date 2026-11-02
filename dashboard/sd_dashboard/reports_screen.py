@@ -28,6 +28,7 @@ from pathlib import Path
 from sd_db import operations, reads, reporting
 from sd_db.errors import SdDbError
 
+from . import job_failures
 from .controls import form
 from .documents import _config_dir, pipe_lines
 from .management_screen import log_tail, unreadable
@@ -395,6 +396,8 @@ def _report(connection, row, revision, followups) -> dict:
         "repeats": {"count": repeats.get("count"), "last": repeats.get("last_ended")} if repeats else None,
         "body": text[-BODY_CHARS:], "cut": len(text) > BODY_CHARS,
         "followups": followups,
+        # sd:6964: an expired login in the job's output; Fix then opens its Credentials row.
+        "login": job_failures.login(text),
     }
 
 

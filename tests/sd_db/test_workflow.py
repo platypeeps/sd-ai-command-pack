@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -237,11 +238,8 @@ class StatusGuards(WorkflowCase):
         # sd:768: a followup item used to have no status control at all.
         self.assert_finishes_with_history("followup")
 
-    def test_personal_item_moves_from_planning_to_done_with_history(self):
-        self.assert_finishes_with_history("personal")
-
-    def test_followup_and_personal_offer_exactly_the_task_statuses(self):
-        for kind in ("followup", "personal"):
+    def test_followup_offers_exactly_the_task_statuses(self):
+        for kind in ("followup",):
             item = create_item(self.db, kind=kind, title=f"A {kind} item")
             with self.subTest(kind=kind):
                 self.assertEqual(allowed_statuses(self.db, item), list(TASK_STATUSES))
@@ -250,7 +248,7 @@ class StatusGuards(WorkflowCase):
 
     def test_a_done_task_status_item_reopens_to_planning_with_history(self):
         # sd:772: done is not terminal for these kinds; only work completion is.
-        for kind in ("task", "followup", "personal"):
+        for kind in ("task", "followup"):
             item = create_item(self.db, kind=kind, title=f"A {kind} item")
             change_status(self.db, item, "done", who="operator")
             with self.subTest(kind=kind):
@@ -260,8 +258,8 @@ class StatusGuards(WorkflowCase):
                 history = [n for n in reopened["notes"] if n["kind"] == "status_change"]
                 self.assertIn("done -> planning by operator", history[-1]["body"])
 
-    def test_a_stale_revision_on_a_followup_or_personal_item_leaves_its_status(self):
-        for kind in ("followup", "personal"):
+    def test_a_stale_revision_on_a_followup_item_leaves_its_status(self):
+        for kind in ("followup",):
             item = create_item(self.db, kind=kind, title=f"A {kind} item")
             seen = item_state(self.db, item)["revision"]
             finished = change_status(self.db, item, "done", who="operator", expected_revision=seen)
@@ -499,7 +497,7 @@ class Unparking(WorkflowCase):
 
     def test_any_kind_but_a_writing_piece_unparks(self):
         upsert_repo(self.db, "/repos/work")
-        for kind, columns in (("personal", {}), ("work", {"repo": "/repos/work"})):
+        for kind, columns in (("work-idea", {}), ("work", {"repo": "/repos/work"})):
             with self.subTest(kind=kind):
                 state = self.parked(kind=kind, **columns)
                 self.assertIsNone(edit_item(self.db, state["item"]["id"], {"parked_at": None},
@@ -584,24 +582,40 @@ class KindEditing(WorkflowCase):
         self.assertTrue(set(HAND_KINDS) <= set(schema_kinds(self.db)))
         self.assertIn("report", schema_kinds(self.db))
 
+    def test_every_kind_list_names_only_kinds_the_schema_allows(self):
+        """sd:7004: `personal` and `skill-review` left the CHECK, so no list
+        the library or the dashboard keys on may name either."""
+        from sd_db import priority_sweep, progress, runner, workflow
+
+        lists = {"HAND_KINDS": workflow.HAND_KINDS, "REPO_LESS_KINDS": workflow.REPO_LESS_KINDS,
+                 "DETAIL_KINDS": workflow.DETAIL_KINDS, "TASK_STATUS_KINDS": workflow.TASK_STATUS_KINDS,
+                 "RUNNABLE_KINDS": runner.RUNNABLE_KINDS, "priority_sweep.KINDS": priority_sweep.KINDS,
+                 "CANCELLABLE_TASK_KINDS": progress.CANCELLABLE_TASK_KINDS}
+        allowed = set(schema_kinds(self.db))
+        for name, kinds in lists.items():
+            with self.subTest(name=name):
+                self.assertEqual(set(kinds) - allowed, set())
+        self.assertEqual(HAND_KINDS, ("task", "followup", "work-idea", "personal-idea"))
+        self.assertEqual(REPO_LESS_KINDS, frozenset({"work-idea", "personal-idea"}))
+
     def test_a_legal_change_writes_kind_updated_at_and_a_note_naming_both_kinds_and_who(self):
         state = self.capture()
         item = state["item"]["id"]
         self.backdate(item)
         state = item_state(self.db, item)
-        edited = edit_item(self.db, item, {"kind": "personal"}, who="alex",
+        edited = edit_item(self.db, item, {"kind": "work-idea"}, who="alex",
                            expected_revision=state["revision"])
-        self.assertEqual(edited["item"]["kind"], "personal")
+        self.assertEqual(edited["item"]["kind"], "work-idea")
         self.assertNotEqual(edited["item"]["updated_at"], self.OLD)
         note = edited["notes"][-1]
         self.assertEqual((note["kind"], note["body"], note["session"]),
-                         ("comment", "Changed kind task -> personal by alex", "alex"))
+                         ("comment", "Changed kind task -> work-idea by alex", "alex"))
         # A row outside task and work is reclassified by the same verb, kind only.
         back = edit_item(self.db, item, {"kind": "task"}, who="alex")
         self.assertEqual(back["item"]["kind"], "task")
-        self.assertEqual(back["notes"][-1]["body"], "Changed kind personal -> task by alex")
+        self.assertEqual(back["notes"][-1]["body"], "Changed kind work-idea -> task by alex")
         with self.assertRaisesRegex(WorkflowError, "own editing workflow"):
-            edit_item(self.db, create_item(self.db, kind="personal", title="Errand"),
+            edit_item(self.db, create_item(self.db, kind="work-idea", title="Errand"),
                       {"kind": "task", "title": "Renamed"}, who="alex")
 
     def test_an_idea_without_a_piece_can_be_reclassified(self):
@@ -637,7 +651,7 @@ class KindEditing(WorkflowCase):
             with self.subTest(target=kind):
                 self.refused(item, {"kind": kind}, "own producer")
         upsert_repo(self.db, "/repos/work")
-        for kind in ("work", "report", "skill-review"):
+        for kind in ("work", "report"):
             source = create_item(self.db, kind=kind, title=kind,
                                  repo="/repos/work" if kind == "work" else None)
             with self.subTest(source=kind):
@@ -654,9 +668,10 @@ class KindEditing(WorkflowCase):
                 self.assertEqual(edited["notes"][-1]["body"],
                                  f"Changed kind task -> {kind} by alex\nUpdated repo by alex")
 
-    def test_the_repository_less_kinds_are_personal_and_the_two_ideas(self):
-        """sd:809. `followup` left the set; a followup is about one repository."""
-        self.assertEqual(REPO_LESS_KINDS, frozenset({"personal", "work-idea", "personal-idea"}))
+    def test_the_repository_less_kinds_are_the_two_ideas(self):
+        """sd:809. `followup` left the set; a followup is about one repository.
+        `personal` left with its kind (sd:7004)."""
+        self.assertEqual(REPO_LESS_KINDS, frozenset({"work-idea", "personal-idea"}))
         self.assertLess(REPO_LESS_KINDS, frozenset(HAND_KINDS))
 
     def test_a_queued_running_or_ending_assignment_blocks_a_kind_change(self):
@@ -664,7 +679,7 @@ class KindEditing(WorkflowCase):
             item = self.capture()["item"]["id"]
             create_assignment(self.db, item=item, role="author", status=status)
             with self.subTest(status=status):
-                self.refused(item, {"kind": "personal"}, f"{status} assignment")
+                self.refused(item, {"kind": "work-idea"}, f"{status} assignment")
 
     def test_a_contribution_task_keeps_its_kind_so_a_round_trip_cannot_skip_its_checks(self):
         """Review of #332, B1: `contributions._registered` reads only `kind='task'`.
@@ -674,7 +689,7 @@ class KindEditing(WorkflowCase):
         """
         pull = "https://github.com/o/r/pull/1"
         first = contributions.capture(self.db, title="A", changes={"pull_url": pull}, who="operator")["item"]["id"]
-        self.refused(first, {"kind": "personal"}, "contribution")
+        self.refused(first, {"kind": "work-idea"}, "contribution")
         with self.assertRaisesRegex(WorkflowError, "already belongs"):
             contributions.capture(self.db, title="B", changes={"pull_url": pull}, who="operator")
 
@@ -690,13 +705,13 @@ class KindEditing(WorkflowCase):
     def test_a_skill_review_task_keeps_its_kind(self):
         item = create_item(self.db, kind="task", title="Apply proposals",
                            fields={"skill_review": {"action": "apply"}})
-        self.refused(item, {"kind": "personal"}, "skill_review")
+        self.refused(item, {"kind": "work-idea"}, "skill_review")
 
     def test_unreadable_fields_refuse_a_kind_change(self):
         item = self.capture()["item"]["id"]
         self.db.execute("UPDATE item SET fields = 'not json' WHERE id = ?", (item,))
         self.db.commit()
-        self.refused(item, {"kind": "personal"}, "unreadable fields")
+        self.refused(item, {"kind": "work-idea"}, "unreadable fields")
 
     def test_schema_kinds_reads_the_check_this_store_carries(self):
         narrow = sqlite3.connect(":memory:")
@@ -721,7 +736,7 @@ class KindEditing(WorkflowCase):
         item = create_item(self.db, kind="idea", title="Side project", repo="/repos/one")
         # The clear rides only on a real reclassification.
         self.refused(item, {"kind": "idea", "repo": None}, "own editing workflow")
-        self.refused(item, {"kind": "personal", "repo": "/repos/one"}, "own editing workflow")
+        self.refused(item, {"kind": "work-idea", "repo": "/repos/one"}, "own editing workflow")
         edited = edit_item(self.db, item, {"kind": "personal-idea", "repo": None}, who="alex")
         self.assertEqual((edited["item"]["kind"], edited["item"]["repo"]), ("personal-idea", None))
         self.assertEqual(edited["notes"][-1]["body"],
@@ -756,10 +771,10 @@ class KindEditing(WorkflowCase):
         item = self.capture()["item"]["id"]
         before = item_state(self.db, item)
         with self.assertRaises(TypeError):
-            edit_item(self.db, item, {"kind": "personal"})
+            edit_item(self.db, item, {"kind": "work-idea"})
         self.assertEqual(item_state(self.db, item), before)
-        self.assertEqual(edit_item(self.db, item, {"kind": "personal"}, who="alex")["item"]["kind"],
-                         "personal")
+        self.assertEqual(edit_item(self.db, item, {"kind": "work-idea"}, who="alex")["item"]["kind"],
+                         "work-idea")
 
     def test_a_stale_revision_is_refused_and_a_current_one_applies(self):
         state = self.capture()
@@ -767,12 +782,12 @@ class KindEditing(WorkflowCase):
         edit_item(self.db, item, {"title": "Moved on"}, who="operator")
         before, counts = item_state(self.db, item), self.counts()
         with self.assertRaises(StaleItem):
-            edit_item(self.db, item, {"kind": "personal"}, who="operator",
+            edit_item(self.db, item, {"kind": "work-idea"}, who="operator",
                       expected_revision=state["revision"])
         self.assertEqual((item_state(self.db, item), self.counts()), (before, counts))
-        edited = edit_item(self.db, item, {"kind": "personal"}, who="operator",
+        edited = edit_item(self.db, item, {"kind": "work-idea"}, who="operator",
                            expected_revision=before["revision"])
-        self.assertEqual(edited["item"]["kind"], "personal")
+        self.assertEqual(edited["item"]["kind"], "work-idea")
 
 
 class FollowupRepository(WorkflowCase):
@@ -826,17 +841,17 @@ class FollowupRepository(WorkflowCase):
 
     def test_a_followup_with_a_repository_leaves_it_only_for_a_repository_less_kind(self):
         item = create_item(self.db, kind="followup", title="About one repository", repo="/repos/one")
-        self.refused(item, {"kind": "personal"}, "carries no repository")
+        self.refused(item, {"kind": "work-idea"}, "carries no repository")
         back = edit_item(self.db, item, {"kind": "task"}, who="alex")
         self.assertEqual((back["item"]["kind"], back["item"]["repo"]), ("task", "/repos/one"))
         again = edit_item(self.db, item, {"kind": "followup"}, who="alex")
-        personal = edit_item(self.db, item, {"kind": "personal", "repo": None}, who="alex",
+        idea = edit_item(self.db, item, {"kind": "work-idea", "repo": None}, who="alex",
                              expected_revision=again["revision"])
-        self.assertEqual((personal["item"]["kind"], personal["item"]["repo"]), ("personal", None))
+        self.assertEqual((idea["item"]["kind"], idea["item"]["repo"]), ("work-idea", None))
 
-    def test_a_personal_item_becomes_a_followup_before_it_takes_a_repository(self):
-        item = create_item(self.db, kind="personal", title="Turned out to be about a repository")
-        self.refused(item, {"kind": "followup", "repo": "/repos/one"}, "personal items use their own editing workflow")
+    def test_a_work_idea_becomes_a_followup_before_it_takes_a_repository(self):
+        item = create_item(self.db, kind="work-idea", title="Turned out to be about a repository")
+        self.refused(item, {"kind": "followup", "repo": "/repos/one"}, "work-idea items use their own editing workflow")
         followup = edit_item(self.db, item, {"kind": "followup"}, who="alex")
         moved = edit_item(self.db, item, {"repo": "/repos/one"}, who="alex", expected_revision=followup["revision"])
         self.assertEqual((moved["item"]["kind"], moved["item"]["repo"]), ("followup", "/repos/one"))
@@ -857,14 +872,14 @@ class FollowupRepository(WorkflowCase):
         # An equal submission writes nothing, as for a task.
         self.assertEqual(edit_item(self.db, item, {"body": "The finding is at line 12"}, who="alex"),
                          edited)
-        for kind in ("personal", "work"):
+        for kind in ("work-idea", "work"):
             if kind == "work":
                 upsert_repo(self.db, "/repos/work")
             other = create_item(self.db, kind=kind, title=f"A {kind}",
                                 repo="/repos/work" if kind == "work" else None)
             with self.subTest(kind=kind):
                 self.refused(other, {"body": "New text"},
-                             "own editing workflow" if kind == "personal" else "task and followup items")
+                             "own editing workflow" if kind == "work-idea" else "task and followup items")
 
 
 class TaskNotes(WorkflowCase):
@@ -1069,3 +1084,28 @@ class RefusalsNameActionsNotVerbs(unittest.TestCase):
 
         return [found.value for found in ast.walk(node)
                 if isinstance(found, ast.Constant) and isinstance(found.value, str)]
+
+
+class TheRetiredWorkProducers(unittest.TestCase):
+    """Nothing files a `work` row any more (pack sd:7064, slice 1).
+
+    The kind is retiring: migration 047 moves its rows to `task` and drops it
+    from the CHECK, so every producer goes first. A keyword argument or a
+    payload key naming the kind is what a producer writes; a reader compares,
+    which this does not match.
+    """
+
+    PRODUCER = re.compile(r"""\bkind=["']work["']|["']kind["']:\s*["']work["']""")
+
+    def test_no_producer_names_kind_work(self):
+        root = Path(__file__).resolve().parents[2]
+        sources = [*(root / "lib" / "sd_db").rglob("*.py"), *(root / "bin").iterdir(),
+                   *(root / "dashboard" / "sd_dashboard").rglob("*.py")]
+        offenders = []
+        for path in sorted(sources):
+            if not path.is_file() or path.suffix not in ("", ".py"):
+                continue
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if self.PRODUCER.search(line):
+                    offenders.append(f"{path.relative_to(root)}:{number}")
+        self.assertEqual(offenders, [])

@@ -47,10 +47,8 @@ from ..repos import (
     clone_lines,
     declarations,
     issues_policy,
-    item_ref,
     item_refs,
     registered,
-    registered_for,
     repo_channels,
     row_for,
     seed_clones,
@@ -68,12 +66,9 @@ from ..repos import (
 from ..repos import add as add_repo
 from ..repos import seed as seed_repos
 from ..schema import SCHEMA_VERSION
-from ..sources import docs_work, index_cache, issues, register
+from ..sources import index_cache, issues, register
 from ..sources import run as run_sitting
 from ..sources import verify as verify_source
-from ..sources.frontmatter import FrontmatterError
-from ..sources.frontmatter import read as read_frontmatter
-from ..workflow import WorkflowError, register_work_item
 from ..writes import OPEN_STATE_KINDS
 
 
@@ -1044,154 +1039,6 @@ def _repo_freeze(connection, rest: list[str]) -> int:
     return 0
 
 
-def command_work(argv: list[str]) -> int:
-    """`work register <docs/work/<item>/prd.md>`.
-
-    The row owns the item's status, and this makes the row for a new
-    folder, from what the folder and git already say.
-
-    It takes no repository argument. The repository is the one enclosing the
-    working directory (R10-D6), and the path is relative to it -- a row whose
-    path resolved against a checkout the caller was not standing in would name
-    a file nobody can read.
-    """
-    if len(argv) != 2 or argv[0] != "register":
-        print("sd-db work: expected `register <docs/work/<item>/prd.md>`", file=sys.stderr)
-        return 1
-    root = _repository_root()
-    relative = argv[1]
-    prd = (root / relative).resolve()
-    try:
-        prd.relative_to(root)
-    except ValueError:
-        print(f"sd-db work register: {relative} is outside {root}", file=sys.stderr)
-        return 1
-    if not prd.is_file():
-        print(f"sd-db work register: no file at {prd}", file=sys.stderr)
-        return 1
-    try:
-        front, _ = read_frontmatter(prd.read_text(encoding="utf-8"))
-    except (FrontmatterError, OSError, UnicodeDecodeError) as failure:
-        print(f"sd-db work register: {prd}: {failure}", file=sys.stderr)
-        return 1
-    title, created = front.get("title"), front.get("created")
-    if not title or not created:
-        print(
-            f"sd-db work register: {prd} needs `title:` and `created:` in its frontmatter",
-            file=sys.stderr,
-        )
-        return 1
-
-    branch = _working_branch(root)
-    commit = _last_commit(root, prd.relative_to(root).as_posix())
-    connection = _open_for_write()
-    try:
-        # The repository this checkout *is*, not the directory it sits in: a
-        # runner clone carries the same files at a different path, and
-        # resolving by path alone refuses every run the runner makes.
-        repo = registered_for(connection, str(root), _origin(root))
-        state = register_work_item(
-            connection, repo=repo, path=prd.relative_to(root).as_posix(),
-            title=str(title), created_at=str(created), branch=branch,
-            source_commit=commit, who=os.environ.get("SD_SESSION") or getpass.getuser(),
-        )
-    except WorkflowError as failure:
-        print(f"sd-db work register: {failure}", file=sys.stderr)
-        return 1
-    finally:
-        connection.close()
-    row = state["item"]
-    if not state["created"]:
-        print(f"sd-db: already registered as {item_ref(row['id'], row['repo'])} ({row['status']})")
-        return 0
-    print(f"sd-db: registered {item_ref(row['id'], row['repo'])} {row['title']!r} as {row['status']}")
-    if commit is None:
-        print("sd-db: the file is not committed yet, so the row records no source commit")
-    return 0
-
-
-def _working_branch(root: Path) -> str | None:
-    """The branch the row is to be worked on, or None when this checkout cannot name one.
-
-    `item.branch` is read one way everywhere: as the branch to do the work
-    on. `runner.py:_item` refuses a row without one, `sd work register` refuses
-    the remote default for it, `sd_plan.py` checks it out and pushes to it.
-    So what goes here is a local head, or nothing.
-
-    Until sd:462 this wrote `docs_work.default_branch(root)` -- `origin/main`,
-    a remote-tracking name that passes the runner's shape check and names no
-    head, so a row carrying it read as runnable everywhere and failed only
-    inside the clone. Sixty-five rows carried it. `default_branch` still means
-    what its docstring says, the branch a merge lands on, for the file source
-    that reads every branch of the remote; it was the wrong source for this
-    column, not a wrong function.
-
-    One case can name a working branch honestly: the checkout is on a local
-    branch that is not the default, as a runner clone on `plan/<slug>` is when
-    `sd-plan` registers the folder it just wrote. On the default, or detached,
-    the answer is NULL -- the state a task row starts in, and the one
-    `sd work register` exists to fill.
-    """
-    code, out, _ = docs_work._git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
-    current = out.strip() if code == 0 else ""
-    if not current:
-        return None
-    # `origin/main` -> `main`. When origin/HEAD is unreadable -- a repository
-    # without a remote -- `default_branch` can only guess `origin/main`, and
-    # the guess is widened to `main` and `master`, the two names the fleet's
-    # defaults go by and the pair `progress.py` accepts there. When it was
-    # read, the read name alone is the default: a local `main` in a repository
-    # whose default is `dev` is a working branch by this function's own
-    # definition, and the unconditional pair discarded it (sd:653). The read
-    # is `default_branch`'s own, so the two cannot disagree about which case
-    # this is; its return value alone cannot say, since a read `origin/main`
-    # and the guess are the same string.
-    _, _, default = docs_work.default_branch(root).partition("/")
-    code, out, _ = docs_work._git(
-        root, "for-each-ref", "--format=%(symref:short)", "refs/remotes/origin/HEAD"
-    )
-    read = code == 0 and bool(out.strip())
-    if current in ({default} if read else {default, "main", "master"}):
-        return None
-    return current
-
-
-def _origin(root: Path) -> str | None:
-    """This checkout's `origin` URL, or None when it has no remote at all."""
-    code, out, _ = docs_work._git(root, "remote", "get-url", "origin")
-    return (out.strip() or None) if code == 0 else None
-
-
-def _repository_root() -> Path:
-    code, out, err = docs_work._git(Path.cwd(), "rev-parse", "--show-toplevel")
-    if code != 0:
-        raise SdDbError(f"not inside a git repository: {(err or out).strip()}")
-    return Path(out.strip()).resolve()
-
-
-def _last_commit(root: Path, relative: str) -> str | None:
-    """The newest commit touching the file, or None while it is uncommitted.
-
-    Uncommitted includes edited: `log -1` reads history only, so a tracked
-    file with working-tree changes would be recorded against a commit that
-    does not carry the contents being registered. A git read that fails is
-    raised, not taken for uncommitted, or a broken checkout writes NULL.
-
-    It is read against `HEAD`, not against `origin/main`: a folder is registered while it is being written, on the branch that carries
-    it, and the default branch has not seen it yet. Uncommitted is the
-    ordinary case at that moment, which is why the column is nullable.
-    """
-    code, out, err = docs_work._git(root, "status", "--porcelain", "--", relative)
-    if code != 0:
-        raise SdDbError(f"cannot read the status of {relative}: {(err or out).strip()}")
-    if out.strip():
-        return None
-    code, out, err = docs_work._git(root, "log", "-1", "--format=%H", "--", relative)
-    if code != 0:
-        raise SdDbError(f"cannot read the history of {relative}: {(err or out).strip()}")
-    return out.strip() or None
-
-
 def _source(name: str, connection):
     if name == "vault":
         raise SdDbError("the vault import was removed (sd:4627): every plugin keeps its rows in the "
@@ -1415,7 +1262,6 @@ COMMANDS = {
     "item": command_item,
     "import": command_import,
     "verify": command_verify,
-    "work": command_work,
     "usage": command_usage,
     "judgments": command_judgments,
     "review": command_review,

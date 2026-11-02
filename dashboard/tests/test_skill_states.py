@@ -88,13 +88,15 @@ class SkillStates(BrowserSession):
         for name in ("sd-onpath", "sd-trial", "sd-contrib"):
             status, _, state = self.act(name, "review")
             self.assertEqual(status, 200, state)
-            self.assertEqual(state["item"]["kind"], "skill-review", name)
+            self.assertEqual(state["item"]["kind"], "task", name)
+            self.assertTrue(skills_catalog.is_review(state["item"]), name)
             self.assertEqual(state["item"]["title"], f"Review {name}")
             self.assertEqual(state["item"]["status"], "ready", name)
             self.assertNotIn("assignments", state, name)
         self.assertEqual(self.assignments(), 0)
         self.assertEqual(self.git("status", "--porcelain"), before_git)
-        self.assertEqual(self.connection.execute("SELECT count(*) FROM item WHERE kind='skill-review'").fetchone()[0], 3)
+        self.assertEqual(self.connection.execute("SELECT count(*) FROM item WHERE kind='task' "
+                                                 "AND json_extract(fields, '$.skill_review.action')='review'").fetchone()[0], 3)
 
     def test_the_item_page_offers_each_recorded_proposal_under_one_apply_form(self):
         item, _, proposals, _ = self.reviewed("sd-trial")

@@ -1116,43 +1116,45 @@ change('det-p', '1'); change('det-p', '1'); await flush();""", self.ECHO)
     ASKED = "window.shell.confirm = a => { OUT.asked = (OUT.asked || []).concat([[a.title, a.body, a.cli]]); return Promise.resolve(YES.shift()); };\n"
 
     def test_the_kind_field_changes_the_kind_and_a_repo_less_kind_confirms_clearing_the_repo(self):
-        """sd:6231: Task Details' Kind select writes what `sd task edit --kind` writes; a move to personal or an idea kind
+        """sd:6231: Task Details' Kind select writes what `sd task edit --kind` writes; a move to an idea kind
         clears the repo in the same edit, after a confirm that says so. A kind with a producer is off with the reason."""
         plan, ask, port = self.ids["plan"], self.ids["ask"], self.ids["port"]
         out = self.run_page(self.CHANGE + self.ASKED + f"""var YES = [false, true];
 open({plan}); await flush(); R.plan = ELS.details.html; open({port}); await flush(); R.port = ELS.details.html;
 open({ask}); await flush(); change('det-kind', 'task'); await flush(); R.askUndo = !!lastUndo(); await lastUndo().undo(); await flush();
-open({plan}); await flush(); change('det-kind', 'personal'); await flush(); R.declined = OUT.posts.length;
-change('det-kind', 'personal'); await flush(); R.kind = DOC.rows.find(r => r.id === {plan}).kind;""", self.KIND_ECHO)
+open({plan}); await flush(); change('det-kind', 'work-idea'); await flush(); R.declined = OUT.posts.length;
+change('det-kind', 'work-idea'); await flush(); R.kind = DOC.rows.find(r => r.id === {plan}).kind;""", self.KIND_ECHO)
+        # sd:7004: `personal` left the hand kinds; the select offers the four `workflow.HAND_KINDS`.
         self.assertRegex(out["R"]["plan"], r'<select id="det-kind" class="fld"><option value="task" selected>task</option>'
-                                           r'<option value="personal">personal</option><option value="followup">followup</option>'
+                                           r'<option value="followup">followup</option>'
                                            r'<option value="work-idea">work-idea</option><option value="personal-idea">personal-idea</option></select>')
+        self.assertEqual(workflow.HAND_KINDS, ("task", "followup", "work-idea", "personal-idea"))
         self.assertIn('<select id="det-kind" class="fld" disabled title="work items are owned by their producer; their kind cannot be changed here">'
                       '<option value="work" selected>work</option>', out["R"]["port"])
         bodies = [(p[0], {k: v for k, v in p[1].items() if k != "revision"}) for p in out["posts"]]
         self.assertEqual(bodies, [(f"/api/items/{ask}", {"kind": "task"}), (f"/api/items/{ask}", {"kind": "followup"}),
-                                  (f"/api/items/{plan}", {"kind": "personal", "repo": None})])
+                                  (f"/api/items/{plan}", {"kind": "work-idea", "repo": None})])
         self.assertTrue(out["R"]["askUndo"])
         self.assertEqual(out["R"]["declined"], 2, "a declined confirm wrote nothing")
         self.assertEqual(len(out["asked"]), 2)
         title, body, cli = out["asked"][0]
-        self.assertEqual(title, f"Kind → personal: #{plan}?")
+        self.assertEqual(title, f"Kind → work-idea: #{plan}?")
         self.assertIn("clears its repo", body)
-        self.assertEqual(cli, f"sd task edit {plan} --kind personal --no-repo")
+        self.assertEqual(cli, f"sd task edit {plan} --kind work-idea --no-repo")
         msgs = [t[0] for t in out["toasts"]]
         self.assertIn(f"#{ask} kind followup → task · sd task edit {ask} --kind task", msgs)
-        self.assertIn(f"#{plan} kind task → personal, repo cleared · sd task edit {plan} --kind personal --no-repo", msgs)
-        self.assertEqual(out["R"]["kind"], "personal")
+        self.assertIn(f"#{plan} kind task → work-idea, repo cleared · sd task edit {plan} --kind work-idea --no-repo", msgs)
+        self.assertEqual(out["R"]["kind"], "work-idea")
 
     def test_the_kind_changes_the_page_sends_are_ones_edit_item_takes(self):
         """sd:6231: the posts above, through `workflow.edit_item`: a followup becomes a task, and a task with a repo becomes
-        personal only with the repo cleared in the same edit, as the confirm says; its Undo, the kind alone, is taken too."""
+        a work-idea only with the repo cleared in the same edit, as the confirm says; its Undo, the kind alone, is taken too."""
         plan, ask = self.ids["plan"], self.ids["ask"]
         self.assertEqual(workflow.edit_item(self.connection, ask, {"kind": "task"}, who="test")["item"]["kind"], "task")
         with self.assertRaises(workflow.WorkflowError):
-            workflow.edit_item(self.connection, plan, {"kind": "personal"}, who="test")
-        state = workflow.edit_item(self.connection, plan, {"kind": "personal", "repo": None}, who="test")
-        self.assertEqual((state["item"]["kind"], state["item"]["repo"]), ("personal", None))
+            workflow.edit_item(self.connection, plan, {"kind": "work-idea"}, who="test")
+        state = workflow.edit_item(self.connection, plan, {"kind": "work-idea", "repo": None}, who="test")
+        self.assertEqual((state["item"]["kind"], state["item"]["repo"]), ("work-idea", None))
         self.assertEqual(workflow.edit_item(self.connection, plan, {"kind": "task"}, who="test")["item"]["kind"], "task")
 
     def test_the_published_section_links_each_url_under_its_documents_title(self):
