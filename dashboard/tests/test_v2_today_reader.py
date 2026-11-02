@@ -183,15 +183,16 @@ class TheList(ReaderCase):
              " ? { dataset: { [attr]: v } } : null } });\n")
 
     def test_today_sections_are_rail_views_and_a_lamp_shows_needs_you(self):
-        """Pack sd:7084: Needs you, In motion, Since yesterday, Timeline and Queues are views, each a view-<id> panel;
-        a lamp filters Needs you, so it shows that view. Pack sd:7218: In motion comes second; no key moved."""
+        """Pack sd:7084: Today's sections are views, each a view-<id> panel; a lamp filters Needs you, so it shows that
+        view. Pack sd:7218: what runs now comes second. Pack sd:7234: Queue folds Queues and In motion in and keeps q."""
         page = (V2 / "today.html").read_text(encoding="utf-8")
         views = re.findall(r"\{ id: '([a-z]+)', label: '([^']+)', key: '([a-z])'", TODAY_JS)
-        self.assertEqual(views, [("needs", "Needs you", "n"), ("motion", "In motion", "m"), ("digest", "Since yesterday", "y"),
-                                 ("timeline", "Timeline", "t"), ("queues", "Queues", "q")])
+        self.assertEqual(views, [("needs", "Needs you", "n"), ("queue", "Queue", "q"), ("digest", "Since yesterday", "y"),
+                                 ("timeline", "Timeline", "t")])
         for view, _, _ in views:
             self.assertIn(f'id="view-{view}"', page)
-        self.assertIn('href="#view=motion" id="lamp-sessions"', page)
+        self.assertIn('href="#view=queue" id="lamp-sessions"', page)
+        self.assertIn('href="#view=queue" id="lamp-gate"', page)
         self.assertIn("if (srcFilter) window.shell.view.show('needs');", TODAY_JS)
         self.assertNotIn("todayCount", TODAY_JS)
 

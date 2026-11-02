@@ -1,4 +1,4 @@
-"""Today at a glance: the spend line (sd:6031), the builder runs in In motion (sd:6003) and the day's digest (sd:6002).
+"""Today at a glance: the spend line (sd:6031), the builder runs (sd:6003) and the day's digest (sd:6002).
 
 Each is a part of `now_screen.document`, read on `/api/now` with the rest of Today, and drawn by `today.js`. A part whose
 read failed is its reason, never a zero or an empty list.
@@ -112,7 +112,7 @@ class TheBuilders(TodayCase):
         self.assertEqual(row["usd"], 0.42)
 
     def test_each_item_names_its_assignment_for_show_assignment(self):
-        # sd:6714: In motion's Details shows an item's builder; Show assignment names the member's assignment.
+        # sd:6714: a live item's Details shows its builder; Show assignment names the member's assignment.
         self.run_row("live", titles=("Port the page", "Fix the link"), created=ago(minutes=5), beat=ago(seconds=5))
         [row] = self.today()["builders"]["rows"]
         members = self.connection.execute("SELECT id, item FROM assignment WHERE scope = 'build' ORDER BY id").fetchall()
@@ -146,31 +146,6 @@ BUILDER = {"run": "live", "repo": "pack", "items": [{"item": 7, "title": "Port t
            "usd": 0.42}
 
 
-class TheBuilderRows(ReaderCase):
-    def test_in_motion_lists_each_builder_run_with_stage_start_and_eta(self):
-        self.doc["builders"] = {"rows": [BUILDER, {**BUILDER, "run": "old", "state": "stalled", "quiet": 600, "eta": None,
-                                                   "eta_why": "1 done run so far; an ETA needs 3"}], "error": ""}
-        out = self.run_page("R.builds = ELS.builds.html; R.hidden = ELS['builds-table'].hidden; R.tally = ELS['active-tally'].html;")
-        builds = out["R"]["builds"]
-        self.assertFalse(out["R"]["hidden"])
-        self.assertIn("#7 Port the page</a>", builds)
-        self.assertIn("<b>review</b>", builds)
-        self.assertIn("pack · opus · $0.42 so far", builds)
-        self.assertIn('<time datetime="2026-09-06T12:20:00Z">', builds)
-        self.assertIn('title="stalled: no beat for 10m"', builds)
-        self.assertIn("1 done run so far; an ETA needs 3", builds)
-        self.assertIn("<span>2 builders</span>", out["R"]["tally"])
-
-    def test_no_open_run_hides_the_table_and_a_failed_read_says_so(self):
-        self.doc["builders"] = {"rows": [], "error": ""}
-        none = self.run_page("R.hidden = ELS['builds-table'].hidden;")
-        self.assertTrue(none["R"]["hidden"])
-        self.doc["builders"] = {"rows": [], "error": "no such column: step"}
-        out = self.run_page("R.builds = ELS.builds.html; R.hidden = ELS['builds-table'].hidden;")
-        self.assertFalse(out["R"]["hidden"])
-        self.assertIn("Builder runs could not be read: no such column: step", out["R"]["builds"])
-
-
 class TheQueues(TodayCase):
     def test_the_queues_are_sd_todays_ready_build_and_lane_rows(self):
         """Pack sd:6946: one Queues panel, read as `sd today` reads it."""
@@ -195,30 +170,9 @@ QUEUED = [{"queue": "ready", "id": 7, "repo": "~/repos/pack", "title": "Port the
            "detail": "-", "since": "2026-09-06T11:30:00Z", "place": 2}]
 
 
-class TheQueueRows(ReaderCase):
-    def test_the_queues_panel_lists_each_queue_with_a_chip_per_repo(self):
-        self.doc["queues"] = {"rows": QUEUED, "error": ""}
-        out = self.run_page("R.rows = ELS.queues.html; R.chips = ELS['queues-repos'].html; "
-                            "R.tally = ELS['queues-tally'].html;")
-        rows = out["R"]["rows"]
-        self.assertIn("#7 Port the page</a>", rows)
-        self.assertIn("<b>build</b> · blocked", rows)
-        self.assertIn("3 review rounds left blockers", rows)
-        self.assertIn("<b>lane</b> · pending · position 2", rows)
-        self.assertIn('data-qrepo="~/repos/system"', out["R"]["chips"])
-        # pack sd:7084: no All chip; none pressed shows every repo.
-        self.assertNotIn('data-qrepo=""', out["R"]["chips"])
-        self.assertIn("<span>1 ready</span>", out["R"]["tally"])
-
-    def test_a_failed_queues_read_says_so(self):
-        self.doc["queues"] = {"rows": [], "error": "database is locked"}
-        out = self.run_page("R.rows = ELS.queues.html;")
-        self.assertIn("The queues could not be read: database is locked", out["R"]["rows"])
-
-
 class RowDetails(ReaderCase):
-    """sd:6714: a plain click on an In motion row, a builder row or a day-track mark draws its Details, as a Needs you
-    row's does; the item link still opens a new tab on a modifier click."""
+    """sd:6714: a plain click on a Queue view row (a live item, a build run) or a day-track mark draws its Details, as a
+    Needs you row's does; the item link still opens a new tab on a modifier click. Pack sd:7234 folded In motion into Queue."""
 
     SESSION = {"item": 7, "title": "Port the page", "status": "in_progress", "kind": "lane", "session": "Lane queue",
                "started": "2026-09-06T11:30:00Z", "elapsed": "30m", "seconds": 1800, "via": "lane entry", "verified": True,
@@ -239,9 +193,9 @@ class RowDetails(ReaderCase):
     def click(self, table, sel, ident, link="null"):
         return self.CLICK % (table, sel, ident, link)
 
-    def test_an_in_motion_row_shows_the_item_its_sessions_lane_and_builder(self):
-        out = self.run_page(self.click("active", "tr[data-id]", "live:7", "{ href: '/tasks?row=7' }")
-                            + " R.details = ELS.details.html; R.row = location.search; R.active = ELS.active.html;"
+    def test_a_live_row_shows_the_item_its_sessions_lane_and_builder(self):
+        out = self.run_page(self.click("queue", "tr[data-id]", "live:7", "{ href: '/tasks?row=7' }")
+                            + " R.details = ELS.details.html; R.row = location.search;"
                             " R.cmds = REG.filter(c => c.on === 'live item').map(c => [c.id, C.offWhy(c, C.get('live:7'))]);")
         details = out["R"]["details"]
         self.assertTrue(out["R"]["prevented"], "a plain click on the item link selects instead of leaving the page")
@@ -249,16 +203,15 @@ class RowDetails(ReaderCase):
         for text in ("Port the page", "Lane queue", "lane entry", "30m", "pack: next, position 2", "<b>review</b>", "#41"):
             self.assertIn(text, details)
         self.assertEqual(dict(out["R"]["cmds"]), {"today.live.open": "", "today.live.assignment": "", "live item.fix": ""})
-        self.assertIn('data-id="live:7"', out["R"]["active"])
 
     def test_a_modifier_click_on_the_item_link_leaves_it_to_the_browser(self):
-        click = self.click("active", "tr[data-id]", "live:7", "{ href: '/tasks?row=7' }").replace("prevented: false,", "metaKey: true,")
+        click = self.click("queue", "tr[data-id]", "live:7", "{ href: '/tasks?row=7' }").replace("prevented: false,", "metaKey: true,")
         out = self.run_page("R.before = ELS.details.html;" + click + " R.after = ELS.details.html;")
         self.assertNotIn("prevented", out["R"])
         self.assertEqual(out["R"]["before"], out["R"]["after"])
 
     def test_a_builder_row_and_each_day_track_mark_show_their_details(self):
-        out = self.run_page(self.click("builds", "tr[data-id]", "run:live") + " R.builder = ELS.details.html;"
+        out = self.run_page(self.click("queue", "tr[data-id]", "run:live") + " R.builder = ELS.details.html;"
                             + self.click("track-rows", "tr[data-id]", "landed:5") + " R.landed = ELS.details.html;"
                             + self.click("track-plot", "[data-id]", "job:gone:3") + " R.gone = ELS.details.html;"
                             + self.click("track-plot", "[data-id]", "live:7") + " R.live = ELS.details.html;"
@@ -271,7 +224,7 @@ class RowDetails(ReaderCase):
         self.assertIn("nightly-sync failed with exit 7", out["R"]["job"])
         self.assertEqual(out["R"]["sel"], ["job:nightly-sync:7"])
 
-    def test_the_address_keeps_an_in_motion_selection(self):
+    def test_the_address_keeps_a_live_selection(self):
         out = self.run_page("R.details = ELS.details.html; R.row = location.search;", search="?row=live%3A7")
         self.assertIn("pack: next, position 2", out["R"]["details"])
         self.assertEqual(out["R"]["row"], "?row=live%3A7")
@@ -280,8 +233,8 @@ class RowDetails(ReaderCase):
 SHA = "a" * 40
 
 
-class InMotionFacts(TodayCase):
-    """sd:6714: each In motion session row carries what its Details and Fix need: the item's revision and kind, and its
+class LiveFacts(TodayCase):
+    """sd:6714: each live session row carries what its Details and Fix need: the item's revision and kind, and its
     place in a lane."""
 
     def test_a_session_row_carries_its_items_revision_kind_and_lane_place(self):

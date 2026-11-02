@@ -398,7 +398,8 @@ class HerdrReader(ScreenCase):
 
 
 class TodayDraws(ScreenCase):
-    """today.js draws Working now from the document, under JavaScriptCore with the Today stand-in (`test_v2_today_reader`)."""
+    """today.js draws the live items in its Queue view (pack sd:7234), under JavaScriptCore with the Today stand-in
+    (`test_v2_today_reader`)."""
 
     run_page = test_v2_today_reader.TheReader.run_page
 
@@ -423,48 +424,47 @@ class TodayDraws(ScreenCase):
                                        ready(41, "/repos/gamma"),
                                        {**ready(51, "/repos/alpha"), "queue": "build", "status": "queued"}], "error": ""}
 
-    #: A click on In motion's Live | Live + next segment.
-    MODE = ("const mode = v => ELS['motion-filters'].listeners.click[0]({ target: { closest: s => s === '[data-f=\"motion\"]'"
-            " ? { dataset: { f: 'motion', v } } : null } });\n")
+    #: The Queue view's first show (pack sd:7234), which folded In motion in; its other reads answer 404 here.
+    SHOW = ("document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: 'queue', first: true } }));\n"
+            "await flush(); await flush();\n"
+            "const open = k => ELS.queue.listeners.click[0]({ target: { closest: s => s === 'tr.repo' ? { dataset: { repo: k } } : null } });\n"
+            "const press = v => ELS['queue-filters'].listeners.click[0]({ target: { closest: s => s === 'button[data-f=\"qshow\"]'"
+            " ? { dataset: { v } } : null } });\n"
+            "const repos = () => [...ELS.queue.html.matchAll(/<tr class=\"repo\" data-repo=\"([^\"]*)\"/g)].map(m => m[1]);\n")
+    AFTER = "\nANSWER = p => p === '/api/now' ? [200, DOC0] : [404, { error: 'not served here' }];\n"
+
+    def draw(self, body):
+        return self.run_page(self.SHOW + body, after=self.AFTER)
 
     def test_rows_from_two_repos_form_two_groups_and_a_no_repo_row_lands_in_unassociated_last(self):
-        # pack sd:7222: one band per repo, which the shell's table grammar folds; the rows keep their order inside it.
+        # pack sd:7222, now the Queue view's: one parent row per repo; an item with no repo is Unassociated, last.
         self.grouped()
-        html = self.run_page("R.active = ELS.active.html;")["R"]["active"]
-        bands = ['<tr class="band" data-band="/repos/alpha"><th colspan="5" scope="rowgroup">alpha · 1</th></tr>',
-                 '<tr class="band" data-band="/repos/beta"><th colspan="5" scope="rowgroup">beta · 1</th></tr>',
-                 '<tr class="band" data-band="unassociated"><th colspan="5" scope="rowgroup">Unassociated · 1</th></tr>']
-        at = [html.find(b) for b in bands]
-        self.assertNotIn(-1, at, html)
-        self.assertEqual(at, sorted(at), "Unassociated is not the last group")
-        self.assertLess(at[0], html.find('data-item="7"'))
-        self.assertLess(at[1], html.find('data-item="9"'))
-        self.assertLess(at[2], html.find('data-item="11"'))
+        out = self.draw("R.repos = repos(); open('alpha'); R.alpha = ELS.queue.html; open(''); R.none = ELS.queue.html;")
+        self.assertEqual(out["R"]["repos"], ["alpha", "beta", ""])
+        self.assertIn('data-type="working" data-item="7"', out["R"]["alpha"])
+        self.assertNotIn('data-item="9"', out["R"]["alpha"])
+        self.assertIn("Unassociated", out["R"]["none"])
+        self.assertIn('data-type="working" data-item="11"', out["R"]["none"])
 
-    def test_live_plus_next_adds_each_repos_ready_items_that_live_hides(self):
-        # pack sd:7222: Live + next adds each repo's ready items from the Queues rows, at most 3, in their order; a repo with
-        # only ready items gets its group too. Live, the start, shows none.
+    def test_suggested_adds_each_repos_ready_items_that_the_default_hides(self):
+        # pack sd:7222's Live + next is the Suggested filter: each repo's ready items, at most 3, in their order; a repo
+        # with only ready items gets its row too. Off, the start, shows none.
         self.grouped()
-        out = self.run_page(self.MODE + """R.live = ELS.active.html; R.bar = ELS['motion-filters'].html;
-mode('next'); await flush(); R.next = ELS.active.html; R.tally = ELS['active-tally'].html; mode('live'); await flush(); R.back = ELS.active.html;""")
+        out = self.draw("R.before = repos(); press('suggested'); R.after = repos(); R.bar = ELS['queue-filters'].html;"
+                        " open('beta'); R.beta = ELS.queue.html; open('alpha'); R.alpha = ELS.queue.html;")
         r = out["R"]
-        self.assertIn('data-f="motion" data-v="live" aria-pressed="true"', r["bar"])
-        self.assertIn("Live + next", r["bar"])
-        self.assertNotIn("#21 Ready 21", r["live"])
-        self.assertIn("#21 Ready 21", r["next"])
-        self.assertEqual([f"#{n} Ready {n}" in r["next"] for n in (31, 32, 33, 34)], [True, True, True, False])
-        self.assertNotIn("#51 Ready 51", r["next"], "a build-queue row is no suggested next item")
-        self.assertIn('<tr class="band" data-band="/repos/gamma"><th colspan="5" scope="rowgroup">gamma · 1 next</th></tr>', r["next"])
-        self.assertLess(r["next"].find('data-band="/repos/beta"'), r["next"].find("#31 Ready 31"))
-        self.assertLess(r["next"].find("#31 Ready 31"), r["next"].find('data-band="/repos/gamma"'))
-        self.assertIn("5 next", r["tally"])
-        self.assertNotIn("#21 Ready 21", r["back"])
+        self.assertEqual(r["before"], ["alpha", "beta", ""])
+        self.assertEqual(r["after"], ["alpha", "beta", "gamma", ""])
+        self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="true"', r["bar"])
+        self.assertEqual([f"#{n} Ready {n}" in r["beta"] for n in (31, 32, 33, 34)], [True, True, True, False])
+        self.assertIn("#21 Ready 21", r["alpha"])
+        self.assertNotIn("#51 Ready 51", r["alpha"], "a build-queue row is no suggested item")
 
-    def test_next_items_that_could_not_be_read_say_so(self):
+    def test_ready_items_that_could_not_be_read_say_so(self):
         self.grouped()
         self.doc["queues"] = {"rows": [], "error": "database is locked"}
-        out = self.run_page(self.MODE + "mode('next'); await flush(); R.next = ELS.active.html;")
-        self.assertIn("Next items could not be read: database is locked", out["R"]["next"])
+        out = self.draw("press('suggested'); R.note = ELS['queue-note'].textContent;")
+        self.assertIn("Ready items not read: database is locked", out["R"]["note"])
 
     def test_an_items_sessions_are_one_row_and_an_unread_source_is_said(self):
         self.doc["active"] = {"rows": [self.session(7, "worktree", "Worktree wt-7"),
@@ -472,18 +472,16 @@ mode('next'); await flush(); R.next = ELS.active.html; R.tally = ELS['active-tal
                                        self.session(9, "lane", "Lane queue (pending)", elapsed="5m")],
                               "sources": {"fleet": "", "lane": "", "launch": "", "herdr": "herdr agent list gave no answer in 5 s"},
                               "error": ""}
-        out = self.run_page("R.active = ELS.active.html; R.tally = ELS['active-tally'].html; "
-                            "R.note = ELS['active-note'].textContent; R.hidden = ELS['active-note'].hidden;")
-        self.assertEqual(2, out["R"]["active"].count("<tr data-item="))
-        self.assertIn('href="/tasks?row=7"', out["R"]["active"])
-        self.assertIn("Worktree wt-7 · 3h 0m", out["R"]["active"])
-        self.assertIn("▨", out["R"]["active"])
-        self.assertIn("2 items live", out["R"]["tally"])
-        self.assertEqual("herdr agents not read: herdr agent list gave no answer in 5 s", out["R"]["note"])
+        out = self.draw("open(''); R.html = ELS.queue.html; R.note = ELS['queue-note'].textContent; R.hidden = ELS['queue-note'].hidden;")
+        self.assertEqual(2, out["R"]["html"].count('<tr class="child" data-type="working" data-item='))
+        self.assertIn('href="/tasks?row=7"', out["R"]["html"])
+        self.assertIn("Worktree wt-7", out["R"]["html"])
+        self.assertIn("▨", out["R"]["html"])
+        self.assertIn("herdr agents not read: herdr agent list gave no answer in 5 s", out["R"]["note"])
         self.assertFalse(out["R"]["hidden"])
 
     def test_sessions_that_could_not_be_read_say_so_and_are_not_an_empty_list(self):
         self.doc["active"] = {"rows": [], "sources": {}, "error": "database is locked"}
-        out = self.run_page("R.active = ELS.active.html;")
-        self.assertIn("Sessions could not be read: database is locked", out["R"]["active"])
-        self.assertNotIn("No open item", out["R"]["active"])
+        out = self.draw("R.html = ELS.queue.html; R.note = ELS['queue-note'].textContent;")
+        self.assertIn("Sessions not read: database is locked", out["R"]["note"])
+        self.assertNotIn("Nothing is working", out["R"]["html"])

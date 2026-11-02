@@ -176,7 +176,8 @@ class TheGroups(ReportsCase):
 
     def test_a_late_item_with_a_live_session_is_in_motion_only(self):
         """sd:5954: a past-due item in progress with a live session was in Needs you, in the past-due group's bulk
-        snooze, and in In motion. A live session puts it in In motion only, late or not, urgent or not."""
+        snooze, and in In motion, now the Queue view's live rows (pack sd:7234). A live session puts it there only, late
+        or not, urgent or not."""
         rows = now_screen.work_needs([work(1, state="in_progress", due="2026-08-01", recurring=True),
                                       work(2, state="in_progress", due="2026-08-01", recurring=True),
                                       work(3, state="in_progress", due="2026-07-01", priority=1),
