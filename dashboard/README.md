@@ -132,7 +132,7 @@ A `/v2/` address that names a page or an asset answers 301 with its new one (`/v
 `/today`, `/v2/static/<file>` to `/ui/<file>`); any other `/v2/` path is a 404.
 One map, built from the page registry and served as `/ui/sections.js`, says
 where each rail section goes: `SECTIONS` for ported pages, `CLASSIC` for the
-old screen an unported section opens (tagged "classic" on the rail), and
+server-drawn screen a section opens (Operations, drawn as any other section), and
 `SCREENS` for old screens without a section, which the palette lists under
 Classic screens. `./dashboard.sh pages` prints that map, one line per section
 or screen; a section in none of the three, such as Notes or HOA, has no old

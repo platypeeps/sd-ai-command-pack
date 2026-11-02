@@ -1,8 +1,9 @@
 // v2 shell: grouped rail, right pane (Details | Chat), help popovers, palette, toast, keys.
 // Build port (dashboard): the design source's products/system/designs/v2/shell.js at d82daa1 (sd:2124; first ported
 // at a3861c9 for sd:2110). The reference carries the build hooks below; the build adds only what is marked "build (sd:2163)".
-// build (sd:2163): /ui/sections.js sets window.SHELL_CLASSIC, the old screen each unported section opens (a "classic"
-// tag on the rail), and window.SHELL_SCREENS, old screens without a section, which the palette offers.
+// build (sd:2163): /ui/sections.js sets window.SHELL_CLASSIC, the server-drawn screen a section opens (Operations, pack
+// sd:7266; the rail draws it as any other section), and window.SHELL_SCREENS, old screens without a section, which the
+// palette offers.
 // Markup (sd:2127, from the build's sd:2110 port): every string of markup is html`…` from markup.js, which escapes each
 // value put in it; put() is the only way in. rowActions, bar, time and ICON return html`…` for a page to compose.
 // Help text renders <b> and <code> only, without attributes.
@@ -76,7 +77,6 @@
   }
   // places:end
   const hrefOf = name => PAGES[name] || CLASSIC[name];
-  const classic = name => !PAGES[name] && !!CLASSIC[name];
   const body = document.body;
   const page = body.dataset.page;
   // Rail badges: data/counts.js (window.SHELL_COUNTS) is generated from every page's window.PAGE_ATTENTION.
@@ -100,7 +100,7 @@
     <nav aria-label="Sections" id="sections">${GROUPS.map(([g, items]) => html`
       <div><span class="label">${g}</span><ul>${items.map(([name, icon, key]) => {
         const href = hrefOf(name) || '#';
-        return html`<li><a href="${href}" data-section="${name}"${name === page ? html` aria-current="page"` : ''}${hrefOf(name) ? '' : html` data-unbuilt`}${classic(name) ? html` data-classic` : ''}>${ICON(icon)}<span class="nm">${name}</span>${classic(name) ? html`<span class="classic">classic<span class="sr"> screen</span></span>` : ''}${badge(counts[name])}${key ? html`<kbd>g ${key}</kbd>` : ''}</a></li>`;
+        return html`<li><a href="${href}" data-section="${name}"${name === page ? html` aria-current="page"` : ''}${hrefOf(name) ? '' : html` data-unbuilt`}>${ICON(icon)}<span class="nm">${name}</span>${badge(counts[name])}${key ? html`<kbd>g ${key}</kbd>` : ''}</a></li>`;
       })}</ul></div>`)}
     </nav>
     <div class="foot">
@@ -1159,7 +1159,7 @@
       }${extra.length ? [grp('This page'), extra.map((c, i) => html`<li role="option" data-cmd="${i}">${ICON(c.icon || 'play')}<span>${c.label}</span>${c.key ? html`<kbd>${c.key}</kbd>` : ''}</li>`)] : ''
       }${VIEW_LIST.length > 1 ? [grp('Views'), VIEW_LIST.map(v => html`<li role="option" data-pview="${v.id}">${ICON('layout-dashboard')}<span>View: ${v.label}</span><kbd>v ${viewKey(v)}</kbd></li>`)] : ''
       }${grp('Anywhere')}<li role="option" data-capture>${ICON('plus')}<span>Capture a task, followup or note</span><kbd>n</kbd></li><li role="option" data-chat>${ICON('message-square')}<span>Ask in chat</span><kbd>c</kbd></li>${
-      GROUPS.flatMap(([, items]) => items).map(([n, icon, k]) => html`<li role="option" data-go="${n}">${ICON(icon)}<span>Go to ${n}${classic(n) ? ' (classic)' : ''}</span>${k ? html`<kbd>g ${k}</kbd>` : ''}</li>`)}${
+      GROUPS.flatMap(([, items]) => items).map(([n, icon, k]) => html`<li role="option" data-go="${n}">${ICON(icon)}<span>Go to ${n}</span>${k ? html`<kbd>g ${k}</kbd>` : ''}</li>`)}${
       Object.keys(SCREENS).length ? [grp('Classic screens'), Object.entries(SCREENS).map(([n, href]) => html`<li role="option" data-href="${href}">${ICON('arrow-up-right')}<span>Open ${n}</span><code>${href}</code></li>`)] : ''}${
       whyGroup(palIn.value.trim())}`);
     opts = [...palList.querySelectorAll('[role="option"]')];

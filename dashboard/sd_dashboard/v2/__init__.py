@@ -51,9 +51,9 @@ STATIC = HERE / "static"
 PAGES = {route: entry.html for entry in registry.PAGES for route in entry.routes}
 
 #: The shell's map: a registered section opens its page's first route. A section in neither map has no old screen and
-#: still says it is not built. CLASSIC holds the sections that open an old screen, marked "classic" on the rail: Operations
-#: (pack sd:7266), operations_screen's server-drawn areas, whose views `/ui/operations.js` declares. The shell reads both
-#: beside the others as /ui/sections.js.
+#: still says it is not built. CLASSIC holds the sections that open a server-drawn screen: Operations (pack sd:7266),
+#: operations_screen's areas, whose views `/ui/operations.js` declares. The rail draws it as any other section, with no
+#: tag. The shell reads both beside the others as /ui/sections.js.
 SECTIONS = {entry.section: entry.routes[0] for entry in registry.PAGES}
 CLASSIC: dict[str, str] = {"Operations": "/operations"}
 #: Old screens with no rail section of their own; the palette offers them under "Classic screens". Protection belongs to

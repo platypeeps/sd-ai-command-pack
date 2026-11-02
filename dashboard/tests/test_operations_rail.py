@@ -18,7 +18,8 @@ from unittest.mock import patch
 
 from sd_dashboard import operations_screen, v2
 from support import ScreenCase
-from test_v2_today import OSASCRIPT
+from test_v2_today import MARKUP_JS, OSASCRIPT
+from test_v2_today import STAND_IN as MARKUP_STAND_IN
 
 STATIC = Path(v2.__file__).resolve().parent / "static"
 SHELL_JS = (STATIC / "shell.js").read_text(encoding="utf-8")
@@ -37,6 +38,25 @@ class TheRail(unittest.TestCase):
         keys = re.findall(r"\['[A-Za-z ]+', '[a-z0-9-]+', '([a-z])'\]", GROUPS)
         self.assertEqual(keys.count(key), 1, f"g {key} is another section's key")
         self.assertEqual(v2.CLASSIC.get("Operations") or v2.SECTIONS.get("Operations"), "/operations")
+
+    def test_the_operations_entry_is_drawn_as_a_standard_section(self):
+        """The operator asked for the standard setup: no "classic" tag, and its g u hint shows, on every page."""
+        maps = "\n".join(re.findall(r"^  const (?:hrefOf|classic) = .*;$", SHELL_JS, re.M))
+        item = re.search(r"\$\{items\.map\((\(\[name, icon, key\]\) => \{\n.*?\n      \})\)\}</ul>", SHELL_JS, re.S)
+        self.assertIsNotNone(item, "shell.js has no rail item template")
+        script = (MARKUP_STAND_IN + MARKUP_JS + """
+const { html } = window.markup;
+const ICON = n => html`<svg class="i"><use href="#i-${n}"/></svg>`, badge = () => html``, counts = {};
+const PAGES = {}, CLASSIC = { Operations: '/operations' }, page = 'Today';
+""" + maps + "\nconst draw = " + item.group(1) + ";\nJSON.stringify(String(draw(['Operations', 'gauge', 'u'])))")
+        result = subprocess.run([OSASCRIPT, "-l", "JavaScript", "-e", script], capture_output=True, text=True, timeout=60,
+                                check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        drawn = json.loads(result.stdout)
+        self.assertIn('<a href="/operations" data-section="Operations">', drawn)
+        self.assertIn("<kbd>g u</kbd>", drawn)
+        self.assertNotIn("classic", drawn)
+        self.assertNotIn("[data-classic]", (STATIC / "shell.css").read_text(encoding="utf-8"))
 
     def test_the_palette_no_longer_lists_the_areas_on_their_own(self):
         self.assertEqual([href for href in v2.SCREENS.values() if href.startswith("/operations")], [])
