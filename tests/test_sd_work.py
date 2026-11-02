@@ -32,13 +32,22 @@ from tests.clean_env import clean_environment  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def scratch_environment(home: Path) -> dict[str, str]:
+    """This process's environment under a scratch `HOME`, without the caller's `CLAUDE_PID`.
+
+    `sd today` nudges a session begun before today (sd:6955), so a child that inherited the pid of a
+    Claude session started yesterday printed one more line after local midnight (sd:7154).
+    """
+    return {**{key: value for key, value in os.environ.items() if key != "CLAUDE_PID"}, "HOME": str(home)}
+
+
 class TaskCLI(unittest.TestCase):
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
         self.home = Path(scratch.name)
         sd_db.initialise(home=self.home)
-        self.environment = {**os.environ, "HOME": str(self.home)}
+        self.environment = scratch_environment(self.home)
         # The library keys a checkout under `$HOME` as `~/...` (sd:1439), so the
         # rows this process writes and the ones the CLI writes agree only when
         # both read the scratch home.
@@ -1461,7 +1470,7 @@ class WorkRegister(unittest.TestCase):
         self.addCleanup(scratch.cleanup)
         self.home = Path(scratch.name)
         sd_db.initialise(home=self.home)
-        self.environment = {**os.environ, "HOME": str(self.home)}
+        self.environment = scratch_environment(self.home)
         # The library keys a checkout under `$HOME` as `~/...` (sd:1439), so the
         # rows this process writes and the ones the CLI writes agree only when
         # both read the scratch home.
