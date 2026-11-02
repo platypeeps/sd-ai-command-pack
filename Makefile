@@ -558,9 +558,13 @@ gate-env:
 # that pins it.
 # repo-sync lives in the `system` checkout; SYSTEM_REPO names it when it is not
 # ~/repos/system. The dashboard moved to this checkout (pack sd:5987).
+# The lane ends the target at 600 s, so the refresh waits on the lanes alone,
+# not on gates run by hand, and at most 420 s, as system's post-merge does
+# (system sd:5799). Without them its drain waited up to 45 minutes on gates and
+# other lanes, and the lane killed it at 600 s with nothing moved (sd:7209).
 SYSTEM_REPO ?= $(HOME)/repos/system
 
 post-merge:
 	@if git symbolic-ref -q HEAD >/dev/null 2>&1; then echo "post-merge: $(CURDIR) is on a branch, so refresh will not install it; pin it: git -C $(CURDIR) switch --detach && make post-merge" >&2; exit 1; fi
-	sh "$(SYSTEM_REPO)/local-repo-sync/repo-sync.sh" refresh "$(CURDIR)"
+	REPO_SYNC_LANES_ONLY=1 REPO_SYNC_DRAIN_WAIT=420 sh "$(SYSTEM_REPO)/local-repo-sync/repo-sync.sh" refresh "$(CURDIR)"
 	sh "$(CURDIR)/dashboard/dashboard.sh" health
