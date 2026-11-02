@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -1083,3 +1084,28 @@ class RefusalsNameActionsNotVerbs(unittest.TestCase):
 
         return [found.value for found in ast.walk(node)
                 if isinstance(found, ast.Constant) and isinstance(found.value, str)]
+
+
+class TheRetiredWorkProducers(unittest.TestCase):
+    """Nothing files a `work` row any more (pack sd:7064, slice 1).
+
+    The kind is retiring: migration 047 moves its rows to `task` and drops it
+    from the CHECK, so every producer goes first. A keyword argument or a
+    payload key naming the kind is what a producer writes; a reader compares,
+    which this does not match.
+    """
+
+    PRODUCER = re.compile(r"""\bkind=["']work["']|["']kind["']:\s*["']work["']""")
+
+    def test_no_producer_names_kind_work(self):
+        root = Path(__file__).resolve().parents[2]
+        sources = [*(root / "lib" / "sd_db").rglob("*.py"), *(root / "bin").iterdir(),
+                   *(root / "dashboard" / "sd_dashboard").rglob("*.py")]
+        offenders = []
+        for path in sorted(sources):
+            if not path.is_file() or path.suffix not in ("", ".py"):
+                continue
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if self.PRODUCER.search(line):
+                    offenders.append(f"{path.relative_to(root)}:{number}")
+        self.assertEqual(offenders, [])

@@ -1640,7 +1640,7 @@ UNSHIELDED = {
     "test_sd_skill_use.py": 2,
     "test_sd_store.py": 1,
     "test_sd_suggest.py": 2,
-    "test_sd_work.py": 13,
+    "test_sd_work.py": 8,
     "test_sd_work_contributions.py": 5,
     "test_sd_workflow_state.py": 1,
     "test_sd_writing.py": 1,

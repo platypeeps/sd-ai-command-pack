@@ -105,8 +105,8 @@ def item_for(connection, sd_db, root, item_dir):
 
     The resolver is `sd_lib`'s, so a writer and the dashboard key an item the
     same way: `registered_base` resolves the checkout to the registered
-    repository the way `sd work register` does -- by path, else by origin,
-    so a runner clone reads the row it registered (sd:981) -- and
+    repository through `sd_db.repos.registered_for` -- by path, else by
+    origin, so a runner clone reads the row its checkout owns (sd:981) -- and
     `item_for_artifact` reads it back by that base and the relative path.
     The `item_by_external` fallback below is for a library without
     `item_for_artifact`; one that old has no `registered_for` either, and

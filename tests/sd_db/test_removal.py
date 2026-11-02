@@ -1052,7 +1052,7 @@ class ImportedSources(Store):
                 # A sixth importer without a `SOURCE` constant fails here, by name.
                 self.assertTrue(hasattr(module, "SOURCE"), f"{module_file.name} has a Reader and no SOURCE")
                 declared.add(module.SOURCE)
-        # `docs/work` lost its Reader (sd:3231), and `sd work register` still files its rows.
+        # `docs/work` lost its Reader (sd:3231), and its rows stay until migration 047 (pack sd:7064).
         declared.add(sd_db.sources.docs_work.SOURCE)
         state = reporting.ingest(self.db, job="probe", run_id="r1", started=STAMP, ended=STAMP, exit_code=1,
                                  text="failed\n", source_path="test")

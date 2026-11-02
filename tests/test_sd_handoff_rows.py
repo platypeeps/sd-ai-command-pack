@@ -577,9 +577,9 @@ class TheWriter(RowCase):
 class TheRowIsFoundFromAClone(RowCase):
     """sd:981. `item_for` keyed the row by the checkout it ran in.
 
-    `sd work register` resolves a checkout to the registered repository by
-    its origin, so a runner clone can register a folder; `item_for` keyed by
-    `main_worktree_root` and could not read the row that clone had made.
+    `sd_db.repos.registered_for` resolves a checkout to the registered
+    repository by its origin; `item_for` keyed by `main_worktree_root` and
+    could not read a row filed from a runner clone.
     Both now go through `sd_lib.registered_base`.
     """
 
