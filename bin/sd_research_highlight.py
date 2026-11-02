@@ -15,6 +15,8 @@ cell or code block, and any text outside those, such as a list item's tail after
 its nested list. One note, highlighted the same way, says "Changed since
 <time>": the count, how many earlier units no longer appear (reworded or
 removed), and the sections of both. With neither it says "No changes since".
+The previous push's note is not compared: the baseline's first paragraph in
+the note's exact shape, or, under `--skip-header`, part of the header block.
 
 Everything is compared unless the caller passes `--skip-header`: then what
 comes before the first `<hr` of the page, and before the first rule of the
@@ -66,8 +68,11 @@ ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"^\s*\|.*\|\s*$")
 RULE = re.compile(r"^\s*(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
-#: The note's own text, read back from the previous push: never a paragraph of the document.
-NOTE = re.compile(r"^(Changed since|No changes since) ")
+#: The note a previous push wrote, as Drive reads it back, in `_note`'s exact shape. "Changed since"
+#: may lose its bold; the short "No changes since" keeps it, as a real sentence can read the same.
+NOTE = re.compile(r"(\*\*|)Changed since .+?\1: (?:\d+ paragraphs?, highlighted below(?:; |\. )|(?=\d+ earlier))"
+                  r"(?:\d+ earlier paragraphs? no longer appears?, reworded or removed\. )?Sections: .*\."
+                  r"|\*\*No changes since .+?\*\*\.")
 #: Markdown's emphasis pairs, strong first: each keeps its text.
 EMPHASIS = (re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"), re.compile(r"\*(?=\S)(.+?)(?<=\S)\*"),
             re.compile(r"(?<![\w\\])_(?=\S)(.+?)(?<=\S)_(?!\w)"))
@@ -141,8 +146,7 @@ class Baseline:
         self.whole: dict[str, list[int]] = {}
         self.lines: dict[str, list[int]] = {}
         rows = markdown.splitlines()
-        if header:
-            rows = self._after_header(rows)
+        rows = self._after_header(rows) if header else self._after_note(rows)
         section, fence = "Opening", None
         run: list[str] = []
         code: list[str] = []
@@ -189,8 +193,23 @@ class Baseline:
                 return rows[index + 1:]
         return rows
 
+    @staticmethod
+    def _after_note(rows: list[str]) -> list[str]:
+        """The rows after a previous note, which opens the body when there is no header block.
+
+        Only the first paragraph, and only in the note's exact shape: a paragraph of the document
+        that starts "Changed since" is compared like any other. Under `--skip-header` the note ends
+        the header block and is skipped with it.
+        """
+
+        first = next((index for index, row in enumerate(rows) if row.strip()), len(rows))
+        end = next((index for index in range(first, len(rows)) if not rows[index].strip()), len(rows))
+        if first < end and NOTE.fullmatch(_collapse(" ".join(rows[first:end]))):
+            return rows[end:]
+        return rows
+
     def _add(self, text: str, section: str, lines: list[str]) -> None:
-        if not text or NOTE.match(text):
+        if not text:
             return
         index = len(self.units)
         parts = [line for line in lines if line] if len(lines) > 1 else [text]

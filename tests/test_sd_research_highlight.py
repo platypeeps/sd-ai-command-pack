@@ -273,6 +273,30 @@ class ChangesTheComparisonMustSee(unittest.TestCase):
         self.assertEqual(said, "changed: 0 since T\n")
         self.assertIn("No changes since T", page)
 
+    def test_a_paragraph_that_starts_like_the_note_is_compared(self) -> None:
+        """Review on 62edc1739: only the generated note, at its own position, is left out."""
+        said, _ = self.check("Keep.\n\nChanged since the migration, latency fell.\n", "<p>Keep.</p>\n")
+        self.assertEqual(said, "changed: 0 since T\ngone: 1\nsections: Opening\n")
+        said, _ = self.check("Keep.\n\n**Changed since T0**: 1 paragraph, highlighted below. Sections: Opening.\n",
+                             "<p>Keep.</p>\n")
+        self.assertEqual(said, "changed: 0 since T\ngone: 1\nsections: Opening\n")
+        said, _ = self.check("No changes since the merger.\n\nKeep.\n", "<p>Keep.</p>\n")
+        self.assertEqual(said, "changed: 0 since T\ngone: 1\nsections: Opening\n")
+
+    def test_every_note_the_verb_writes_reads_back_as_the_note(self) -> None:
+        module = load_highlight()
+        for changed, gone, sections in ((1, 0, ["A"]), (2, 0, ["A", "B"]), (0, 1, ["A"]), (1, 3, ["A"]), (0, 0, [])):
+            note = module._note(changed, gone, sections, "T0").replace("<strong>", "**").replace("</strong>", "**")
+            with self.subTest(note=note):
+                self.assertTrue(module.NOTE.fullmatch(note))
+
+    def test_the_previous_no_changes_note_wrapped_is_not_a_gone_paragraph(self) -> None:
+        said, _ = self.check("**No changes since\nT0**.\n\nSame.\n", "<p>Same.</p>\n")
+        self.assertEqual(said, "changed: 0 since T\n")
+        said, _ = self.check("Changed since T0: 1 paragraph, highlighted below. Sections: A; B.\n\nSame.\n",
+                             "<p>Same.</p>\n")
+        self.assertEqual(said, "changed: 0 since T\n")
+
     def test_text_before_an_ordinary_rule_is_compared(self) -> None:
         """Lane round 2: a guessed header block hid an edited opening above a plain `---`."""
         said, page = self.check("Old opening.\n\n---\n\nSame.\n", "<p>New opening.</p>\n<hr />\n<p>Same.</p>\n")
