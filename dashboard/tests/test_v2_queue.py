@@ -1159,6 +1159,39 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         # Every row has its type in words: no row is told by its colour alone.
         self.assertEqual(len(re.findall(r'<tr class="child"', out["R"]["html"])) + 1, len(found))
 
+    @staticmethod
+    def repo_detail(html, key):
+        """The detail cell of repo `key`'s parent row: its extra classes, its other attributes and its contents."""
+        found = re.search(rf'<tr class="repo" data-repo="{key}".*?<td class="detail([^"]*)"([^>]*)>(.*?)</td>', html, re.S)
+        return found.group(1, 2, 3)
+
+    def test_each_repo_row_counts_merging_next_and_blocked_in_three_boxes(self):
+        # pack sd:7272: the lane ledger's three boxes (#1768 removed them) stand in the parent row's detail cell, in place
+        # of the text tally: merging, next, blocked, from every row of the repo, so a filter hides no count. A box is lit
+        # only when its count is not zero; blocked is the warning lamp; the label says all three in words.
+        out = self.run_view("R.closed = ELS.queue.html; press('ended'); press('suggested'); open('system');"
+                            " R.open = ELS.queue.html; R.tally = ELS['queue-tally'].html;")
+        system = ' aria-label="1 merging, 2 next, 2 blocked"', \
+            '<span class="pip on">1</span><span class="pip on">2</span><span class="pip warn">2</span>'
+        alpha = ' aria-label="0 merging, 0 next, 0 blocked"', '<span class="pip">0</span>' * 3
+        for html in (out["R"]["closed"], out["R"]["open"]):
+            self.assertEqual(self.repo_detail(html, "system"), (" pipe", *system))
+            self.assertEqual(self.repo_detail(html, "alpha"), (" pipe", *alpha))
+        self.assertNotIn("working", self.repo_detail(out["R"]["closed"], "system")[2], "the text tally is gone")
+        self.assertRegex(out["R"]["tally"], r"<span>\d+ working</span>", "the page's tally stays")
+
+    def test_a_lane_that_was_not_read_counts_nothing_and_says_so(self):
+        # A failed read is not zero (sd:7272): a repo whose lane was not read says so in place of its boxes.
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["problems"] = [{"repo": "/repos/alpha", "error": "no checkout on this machine"}]
+        read = self.run_view("R.html = ELS.queue.html;", answers={"/api/queue": [200, lanes]})["R"]["html"]
+        self.assertIn('<span class="pip warn">2</span>', self.repo_detail(read, "system")[2])
+        self.assertEqual(self.repo_detail(read, "alpha")[1:], ("", '<span class="g-unknown" aria-hidden="true">▨</span> lane not read'))
+        unread = self.run_view("R.html = ELS.queue.html;", answers={"/api/queue": [502, {"error": "down"}]})["R"]["html"]
+        for key in ("system", "alpha"):
+            self.assertNotIn("pip", self.repo_detail(unread, key)[2], key)
+            self.assertIn("lane not read", self.repo_detail(unread, key)[2], key)
+
     def test_suggested_adds_three_ready_items_per_repo_and_a_repo_that_has_only_those(self):
         out = self.run_view("R.before = repos(); press('suggested'); open('system'); R.after = repos(); R.kids = kids();"
                             " R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;")
