@@ -267,9 +267,13 @@ def piece_files(row) -> dict[str, dict | None]:
     return found
 
 
-def read_report(row, gate: str, limit: int) -> str | None:
-    """Up to `limit` + 1 characters of the piece's report for `gate`, a REPORTS key, so a caller can tell a cut; None for
-    one absent or outside the repository. Any other read failure raises: it is not a missing file."""
+def read_report(connection: sqlite3.Connection, item: int, gate: str, limit: int) -> str | None:
+    """Up to `limit` + 1 characters of piece `item`'s report for `gate`, a REPORTS key, so a caller can tell a cut; None
+    for one absent or outside the repository. A non-piece raises WorkflowError; any other read failure raises OSError:
+    neither is a missing file."""
+    row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
+    if row is None or row["kind"] != "idea" or not row["piece"]:
+        raise WorkflowError(f"item {item} is not a writing piece")
     candidate = _path(row["repo"], row["piece"], row["path"]).with_name(REPORTS[gate])
     try:
         if not candidate.resolve(strict=True).is_relative_to(_disk(row["repo"])):

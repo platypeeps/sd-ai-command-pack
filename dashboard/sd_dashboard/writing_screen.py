@@ -47,11 +47,8 @@ def report(connection, path: str):
     """One piece report, read only: `{item, name, text, cut}`, or a 404 that names the missing file or the non-piece."""
     item, gate = re.fullmatch(REPORT, path).groups()
     item, name = int(item), writing.REPORTS[gate]
-    row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
-    if row is None or row["kind"] != "idea" or not row["piece"]:
-        return 404, {"error": f"#{item} is not a writing piece."}
     try:
-        text = writing.read_report(row, gate, REPORT_CHARS)
+        text = writing.read_report(connection, item, gate, REPORT_CHARS)
     except WorkflowError as error:
         return 404, {"error": f"#{item}: {error}"}
     except OSError as error:  # a failed read is not a missing file: it says its cause
