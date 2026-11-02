@@ -34,16 +34,16 @@ class TrackersArea(ScreenCase):
         return re.findall(r'<td class="tracker-reference">(?:<a [^>]*>)?([^<]+)', page)
 
     def test_the_area_renders_inside_the_v2_shell(self):
-        """sd:3586 PR 2: Trackers is a v2 shell page under Today, whose Pull requests rows open it; the rest stay classic."""
+        """sd:3586 PR 2 drew Trackers inside the v2 shell; pack sd:7266 made it a view of Fleet's Operations."""
         page = self.trackers(view="prs")
-        self.assertIn('<body data-page="Today" data-scope="today">', page)
+        self.assertIn('<body data-page="Operations" data-scope="operations">', page)
         self.assertIn('<div class="shell"><main id="main" class="classic">', page)
         for asset in ("tokens.css", "shell.css", "classic.css", "shell.js"):
             self.assertRegex(page, rf'"/ui/{re.escape(asset)}\?v=[0-9a-f]{{16}}"', asset)
         self.assertNotIn("/static/dashboard.css", page)
         self.assertNotIn('class="nav"', page)
         self.assertEqual(page.count("<h1>"), 1)
-        self.assertIn('<nav class="view-toggle" aria-label="Operations areas">', page)
+        self.assertNotIn('aria-label="Operations areas"', page)
         self.assertEqual(self.references(page), ["acme/widgets#4321"])
 
     def test_a_github_row_shows_its_number_and_a_jira_row_its_key(self):
@@ -62,11 +62,9 @@ class TrackersArea(ScreenCase):
         self.assertEqual(self.references(issues), ["LOG-1234"])
         self.assertNotIn(">LOG</a>", issues)
 
-    def test_the_area_is_in_the_navigation_and_prs_is_the_default_view(self):
+    def test_the_area_is_the_shown_view_and_prs_is_the_default_view(self):
         page = self.trackers()
-        navigation = re.search(r'<nav[^>]*aria-label="Operations areas"[^>]*>(.*?)</nav>', page).group(1)
-        self.assertIn('href="/operations?area=trackers"', navigation)
-        self.assertIn(">Trackers</a>", navigation)
+        self.assertRegex(page, r'<div id="view-trackers"><section')
         self.assertEqual(self.references(page), ["acme/widgets#4321"])
         self.assertEqual(self.references(self.trackers(view="nonsense")), ["acme/widgets#4321"])
 

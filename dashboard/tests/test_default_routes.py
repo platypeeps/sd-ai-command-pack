@@ -120,9 +120,8 @@ class TheDefault(BrowserSession):
                          {"SHELL_PAGES": v2.SECTIONS, "SHELL_CLASSIC": v2.CLASSIC, "SHELL_SCREENS": v2.SCREENS,
                           "SHELL_COUNTS": {"pages": {}}, "SHELL_REALMS": []})
         reachable = set(v2.CLASSIC.values()) | set(v2.SCREENS.values())
-        for required in ("/operations?area=usage", "/operations?area=services", "/operations?area=resources",
-                         "/operations?area=trackers", "/operations?area=sessions", "/protection",
-                         "/classic/contributions"):
+        # The Operations areas are the views of the rail's Operations entry (pack sd:7266).
+        for required in ("/operations", "/protection", "/classic/contributions"):
             self.assertIn(required, reachable)
         # A ported section is never also classic, and no page script names a section's address.
         self.assertEqual(set(v2.SECTIONS) & set(v2.CLASSIC), set())
