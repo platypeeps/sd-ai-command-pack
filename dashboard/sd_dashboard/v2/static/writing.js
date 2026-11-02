@@ -169,9 +169,7 @@ addEventListener('DOMContentLoaded', () => {
       </div>
       ${grillPane(p)}
       <h3>Act</h3>${C.bar(String(p.id))}
-      <div class="actions"><button class="btn quiet sm" type="button" id="open-ed">${ICON('pen-line')}Open in editor</button></div>
       <p class="foot">Observed ${utc(D.read)} from the workflow database and the piece files in <code>${p.repo}/${p.folder}/${p.piece}/</code>.</p>`);
-    el.querySelector('#open-ed')?.addEventListener('click', () => setView('editor'));
   }
 
   // pack sd:6700: the first open grill question, with a button per option or a box for words.
@@ -209,7 +207,7 @@ addEventListener('DOMContentLoaded', () => {
       <div class="editor">
         <div class="draft">
           <p class="path">${p.repo}/${p.folder}/${p.piece}/index.md · ## Draft</p>
-          <article class="page" aria-label="Draft">${p.draft.length ? html`<div id="draft-text" role="textbox" aria-multiline="true" aria-label="Draft text, #${p.id}" aria-readonly="true" tabindex="0">${p.draft.map(x => html`<p>${x.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')}</p>`)}</div><p class="more">First ${markup.plural(p.draft.length, 'paragraph')} of ${p.words.toLocaleString()} words. Edit the draft in its file.</p>` : html`<p class="more">No draft yet. <code>sdw-research</code> comes first, then <code>sdw-draft</code>.</p>`}</article>
+          <article class="page" aria-label="Draft">${p.draft.length ? html`<div id="draft-text" role="textbox" aria-multiline="true" aria-label="Draft text, #${p.id}" aria-readonly="true" tabindex="0">${p.draft.map(x => html`<p>${x.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')}</p>`)}</div><p class="more">${p.draft_cut ? `The first ${markup.plural(p.draft.length, 'paragraph')} of ${p.words.toLocaleString()} words; the rest stays in the file.` : `The whole draft, ${p.words.toLocaleString()} words. Edit it in its file.`}</p>` : html`<p class="more">No draft yet. <code>sdw-research</code> comes first, then <code>sdw-draft</code>.</p>`}</article>
         </div>
         <aside class="evidence" aria-label="Evidence">
           <div class="seg" role="group" aria-label="Evidence file">${[['research', 'Research'], ['factcheck', 'Fact-check'], ['adversarial', 'Adversarial']].map(([k, n]) => html`<button type="button" data-ev="${k}" aria-pressed="${String(evTab === k)}">${n}</button>`)}</div>
@@ -283,6 +281,11 @@ addEventListener('DOMContentLoaded', () => {
       when: o => { const P = publishState(P_(o)); return P.ok || P.why.join(' '); },
       consequence: () => 'Publishes to the destinations in sd-plugin.json; the canonical destination comes first. The publication claim records the URL. It posts outside, so the dashboard sends nothing: copy the two lines.',
       run: o => `Copy the two lines to publish #${P_(o).id}; publishing posts outside, so the dashboard does not run them` },
+    // pack sd:7242: the row menu's and the palette's way to the draft; Details show it in their bar. The editor is the answer.
+    { id: 'piece.draft', on: 'piece', label: 'Show draft', does: 'Selects the piece and opens its whole draft in the read-only editor.', key: 'd', icon: 'file-text', risk: 'safe',
+      cli: o => `no CLI: the draft is the ## Draft section of ${P_(o).repo}/${P_(o).folder}/${P_(o).piece}/index.md`,
+      when: o => { const p = P_(o); return !p ? 'not listed' : p.draft.length ? true : 'no draft yet'; },
+      run: o => { select(o.id); setView('editor'); return null; } },
     // pack sd:6700: Grill writes the piece's questions as notes; Details walks them; Apply answers edits the draft to follow them.
     window.commands.grill('piece', 'ask', { item: o => P_(o).id, post: fixPost,
       ready: o => { const p = P_(o); return !p ? 'not listed' : !p.words ? 'no draft to grill yet' : asked(p) || true; } }),

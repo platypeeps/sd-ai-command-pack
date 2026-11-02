@@ -5,8 +5,11 @@ per stage with four gate lamps per piece, a focused editor and the strip of
 gate counts. `GET /api/writing` (`writing_screen.document`) gives every
 piece, parked ones too: its stage, gate problems, next and correction stages
 and publication claims from `writing.piece_state`, each file's size from
-`writing.piece_files`, and the opening of its draft. The repository goes out
-by its folder name only. Stage asks first and posts
+`writing.piece_files`, and its draft up to `DRAFT_CHARS`, cut at a paragraph
+and marked `draft_cut` past that. The repository goes out by its folder name
+only. Show draft (pack sd:7242), on each piece's row menu, the palette and
+Details, selects the piece and opens its draft in the read-only editor.
+Stage asks first and posts
 `POST /api/items/<id>/stage` with the piece's revision; it has no Undo,
 because going back is a correction. Correct asks for a reason and posts the
 same route with `correct`. Park and Revive post `/park` and `/revive` and

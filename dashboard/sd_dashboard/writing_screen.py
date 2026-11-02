@@ -1,7 +1,7 @@
 """Writing pieces: `document` feeds /api/writing (sd:2125); the old screen was retired in sd:3402.
 
-`document` is each piece's stage, gates and next moves as `writing.piece_state` gives them, its files' sizes, and the
-opening of its draft. The repository goes out by its folder name only, so no local path leaves. Its `attention` is the
+`document` is each piece's stage, gates and next moves as `writing.piece_state` gives them, its files' sizes, and its
+draft up to `DRAFT_CHARS` (pack sd:7242). The repository goes out by its folder name only, so no local path leaves. Its `attention` is the
 page's rail badge (sd:3446, `_attention`). Each piece's `realm` is `places.realm_of` of its repo, the rule Tasks' Realm
 filter uses (sd:5064). Its `grill` is its open question notes and the count of its rulings (pack sd:6700): Details
 walks the questions, and Apply answers waits until none is open.
@@ -16,15 +16,22 @@ from .decisions import RULING, parse
 from .markup import href
 from .places import realm_of, realms
 
-#: Draft paragraphs the editor shows; the rest stay in the file.
-PARAGRAPHS = 6
+#: Draft characters a piece carries to the editor, whole paragraphs only: the longest draft measured 2026-11-02 held
+#: 19,347 bytes and all 28 held 310,061, so a draft past this is cut and says so (pack sd:7242).
+DRAFT_CHARS = 64_000
 
 
-def _draft(document: str | None) -> tuple[list[str], int]:
-    """The draft's first paragraphs and its word count, from the text after `## Draft`."""
+def _draft(document: str | None) -> tuple[list[str], bool, int]:
+    """The draft's paragraphs up to DRAFT_CHARS, whether that cut any, and its word count, from the text after `## Draft`."""
     prose = document.split("## Draft", 1)[1] if document and "## Draft" in document else ""
     paragraphs = [" ".join(block.split()) for block in prose.split("\n\n") if block.strip() and not block.lstrip().startswith("#")]
-    return paragraphs[:PARAGRAPHS], len(prose.split())
+    kept, size = [], 0
+    for paragraph in paragraphs:
+        size += len(paragraph)
+        if size > DRAFT_CHARS:
+            break
+        kept.append(paragraph)
+    return kept, len(kept) < len(paragraphs), len(prose.split())
 
 
 def document(connection, *, now):
@@ -39,7 +46,7 @@ def document(connection, *, now):
             files = writing.piece_files(row)
         except (OSError, WorkflowError):
             files = {}
-        draft, words = _draft(state["document"])
+        draft, cut, words = _draft(state["document"])
         gates = state["gates"]
         claims = state.get("publications") or []
         live = next((claim for claim in reversed(claims) if claim["url"]), None)
@@ -51,7 +58,7 @@ def document(connection, *, now):
             "ready_recorded": bool(row["ready_digest"]) and row["ready_digest"] == gates["digest"],
             "publication": {"claim": live["id"], "url": live["url"], "phase": live["phase"], "href": href(live["url"])} if live else None,
             "next": state["available_stages"], "corrections": state["correction_stages"],
-            "files": files, "draft": draft, "words": words, "grill": _grill(full["notes"]),
+            "files": files, "draft": draft, "draft_cut": cut, "words": words, "grill": _grill(full["notes"]),
             # pack sd:6977: adversarial.md against the draft by its digest stamp; Apply review shows only when current.
             "adversarial": gates.get("companions", {}).get("adversarial"),
         })

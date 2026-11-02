@@ -98,6 +98,18 @@ class TheDocument(Pieces):
         # A parked piece is listed, and it has no moves until it is revived.
         self.assertEqual((by[self.ids["parked"]]["parked"], by[self.ids["parked"]]["next"]), (True, []))
 
+    def test_each_piece_carries_its_whole_draft_up_to_a_bound(self):
+        """pack sd:7242: Show draft opens the whole `## Draft`, not its first 6 paragraphs; a draft past DRAFT_CHARS is cut
+        at a paragraph and says so, so one long file cannot swell /api/writing."""
+        index = self.root / "content" / "2026" / "fixture" / "index.md"
+        paragraphs = [f"Paragraph {n} of the fixture draft." for n in range(1, 10)]
+        index.write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\n" + "\n\n".join(paragraphs) + "\n")
+        piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
+        self.assertEqual((piece["draft"], piece["draft_cut"]), (paragraphs, False))
+        with mock.patch.object(writing_screen, "DRAFT_CHARS", 3 * len(paragraphs[0])):
+            piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
+        self.assertEqual((piece["draft"], piece["draft_cut"], piece["words"]), (paragraphs[:3], True, 54))
+
     def test_a_published_piece_carries_its_claims_url_and_a_link_only_for_http(self):
         # sd:3465: the writing claim URL becomes a link; an address in another scheme stays text.
         claim = "INSERT INTO publication_claim (id, item, payload, state, created_at, updated_at) VALUES (?, ?, '{}', ?, ?, ?)"
@@ -197,7 +209,7 @@ def piece(id, title, stage, **fields):
              "owner": "row", "ready_recorded": False, "publication": None, "next": [], "corrections": [],
              "files": {"index.md": {"bytes": 4096, "mtime": "2026-09-20T10:00:00Z"}, "research.md": {"bytes": 2048, "mtime": "2026-09-19T10:00:00Z"},
                        "fact-check.md": {"bytes": 1024, "mtime": "2026-09-19T10:00:00Z"}, "adversarial.md": {"bytes": 1024, "mtime": "2026-09-19T10:00:00Z"}},
-             "draft": ["First paragraph.", "Second paragraph."], "words": 1200, "grill": {"open": [], "answered": 0},
+             "draft": ["First paragraph.", "Second paragraph."], "draft_cut": False, "words": 1200, "grill": {"open": [], "answered": 0},
              "adversarial": {"state": "stale", "detail": "reconciled with 0123456789ab, draft is now ba9876543210"}}
     entry.update(fields)
     return entry
@@ -236,6 +248,7 @@ COMMANDS = [
     ["piece.revive", "Revive", "v", "undo", True],
     ["piece.readiness", "Readiness", "r", "safe", False],
     ["piece.publish", "Publish", "u", "confirm", False],
+    ["piece.draft", "Show draft", "d", "safe", False],
     ["piece.grill", "Grill", None, "safe", False],
     ["piece.apply-answers", "Apply answers", None, "safe", False],
     ["piece.review", "Refresh review", None, "safe", False],
@@ -548,6 +561,25 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         self.assertNotIn("contenteditable", editor)
         self.assertIn("writing-pack/content/2026/three-budgets/index.md", editor)
         self.assertIn("Read only", editor)
+
+    def test_show_draft_selects_the_piece_and_opens_its_whole_draft_in_the_editor(self):
+        """pack sd:7242: Show draft is a row and palette command; it selects the piece, opens the editor and says whether
+        the editor shows the whole draft. Details offer it through the command bar, not a button of their own."""
+        out = self.run_page("R.icon = cmd('piece.draft').icon; R.off = cmd('piece.draft').when(C.get('12'));"
+                            " shellRun(cmd('piece.draft'), C.get('12')); await flush();")
+        editor = out["html"]["view-editor"]
+        self.assertEqual((out["R"]["icon"], out["R"]["off"]), ("file-text", True))
+        self.assertIn("#12 Gated Review", editor)
+        self.assertIn("<p>First paragraph.</p><p>Second paragraph.</p>", editor)
+        self.assertIn("The whole draft, 1,200 words. Edit it in its file.", editor)
+        self.assertEqual(out["urls"][-1], {"view": "editor"})
+        self.assertFalse(any("Show draft" in t[0] for t in out["toasts"]), "Show draft toasted; the editor is its answer")
+        self.assertNotIn('id="open-ed"', out["html"]["details"])
+        cut = "DOC.pieces[1].draft_cut = true;\n"
+        out = self.run_page("shellRun(cmd('piece.draft'), C.get('12')); await flush();", prelude=cut)
+        self.assertIn("The first 2 paragraphs of 1,200 words; the rest stays in the file.", out["html"]["view-editor"])
+        out = self.run_page("R.off = cmd('piece.draft').when(C.get('11'));", prelude="DOC.pieces[0].draft = []; DOC.pieces[0].words = 0;\n")
+        self.assertEqual(out["R"]["off"], "no draft yet")
 
     def test_the_details_link_the_claims_url(self):
         # sd:3465: "Already published" named the claim only; the Details now link where it went, http and https only.
