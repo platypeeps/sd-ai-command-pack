@@ -142,7 +142,9 @@ def _layout(markdown: str) -> str:
 def highlight_args(argv: list[str]) -> tuple[str, str, Path, Path] | None:
     """`(previous, since, in, out)`, or None after printing the usage."""
 
-    previous, since, paths, rest = None, "the last push", [], list(argv)
+    previous: str | None = None
+    since, rest = "the last push", list(argv)
+    paths: list[str] = []
     while rest:
         word = rest.pop(0)
         if word in ("--previous", "--since") and rest:
