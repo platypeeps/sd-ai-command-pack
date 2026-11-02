@@ -610,7 +610,7 @@ const colOf = field => field === 'runner-merge' ? 'runner_merge' : 'managed';
 
 // ---------- Commands (products/system/commands.md) ----------
 // build (sd:2485): one object per drawn row, for shell.read to put and to retire once a read stops listing it. The ship
-// lane's assignment and ready rows moved to Queue's Assignments view (pack sd:7115). Process and live-worktree rows take no command; their objects
+// lane's assignment rows moved to Queue's Overview (pack sd:7115, sd:7217). Process and live-worktree rows take no command; their objects
 // let a selection or a ?row= link survive a read. A pending proposal is the page's own and stays until it is withdrawn.
 function objects() {
   const out = ALL.map(r => ({ id: `repo:${r.path}`, type: 'repo', label: r.name, path: r.path, row: r }));

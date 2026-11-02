@@ -4,8 +4,8 @@ row's Re-queue and a running row's Release post /api/queue/move, which runs `sd-
 The Builds panel (pack sd:6095) reads /api/queue/builds (`builds.panel`), with ?show=all the ended runs too (pack
 sd:6834); a blocked or cancelled run's Retry posts
 /api/queue/builds/retry, and its Send to builder posts the same route with a `finding` (pack sd:6020); a running
-build's Cancel posts the assignment cancel route that exists. The Assignments view (pack sd:7115) reads
-/api/queue/runner (`queue_screen.runner`): the live assignments and the items at ready_to_send."""
+build's Cancel posts the assignment cancel route that exists. Overview's runner assignments (pack sd:7115, sd:7217)
+read /api/queue/runner (`queue_screen.runner`): the queued and running assignments."""
 
 from __future__ import annotations
 

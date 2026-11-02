@@ -15,6 +15,8 @@ carries the revision, head or claim the page showed, and the verb checks it
 again under the queue's lock, so a stale write is refused (409). A failure
 that is not a refusal answers 502 with an unknown outcome, and the page reads
 the lane again. The full rules are in `queue_screen`'s docstring.
-The Assignments view (pack sd:7115) reads `GET /api/queue/runner`
-(`queue_screen.runner`): the runner's queued and running assignments and the
-items waiting at `ready_to_send`.
+Overview lists the runner's queued and running assignments under Builds,
+from `GET /api/queue/runner` (`queue_screen.runner`, pack sd:7115). Pack
+sd:7217 retired their own Assignments view: its Waiting on you list repeated
+Writing's pieces at `ready_to_send`. An old `#view=assignments` link opens
+Overview.

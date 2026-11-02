@@ -1106,8 +1106,8 @@ class TheScript(Lane, ScreenCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         out = json.loads(result.stdout)
         self.assertIsNone(out["error"])
-        # The Builds panel (pack sd:6095) and the Assignments view (pack sd:7115) read beside the lanes on each load; their
-        # own tests read them, the lane tests do not.
+        # The Builds panel (pack sd:6095) and Overview's runner assignments (pack sd:7217) read beside the lanes on each
+        # load; their own tests read them, the lane tests do not.
         out["gets"] = [path for path in out.get("gets", []) if path.split("?")[0] not in ("/api/queue/builds", "/api/queue/runner")]
         return out
 
@@ -1274,36 +1274,47 @@ window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : [40
 await window.PAGE_AGAIN.run(); await flush(); await flush();
 R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key]); R.times = ELS.times.html; R.ended = ELS.ended.html;""",
                             shell=VIEW_SHELL)
-        self.assertEqual(out["R"]["views"], [["overview", "Overview", "o"], ["ended", "Ended builds", "e"], ["times", "Last 7 days", "l"],
-                                             ["assignments", "Assignments", "a"]])
+        self.assertEqual(out["R"]["views"], [["overview", "Overview", "o"], ["ended", "Ended builds", "e"], ["times", "Last 7 days", "l"]])
         self.assertIn("Last 7 days</h2>", out["R"]["times"])
         self.assertTrue(out["R"]["ended"].startswith('<ul class="qrows ended">'), out["R"]["ended"])
         self.assertEqual((out["counts"]["overview"], out["counts"]["ended"]), (7, 1))
 
     RUNNER = {"live": [{"id": 41, "item": 7, "title": "Port the page", "repo": "~/repos/sd", "role": "merge", "provider": "claude",
-                        "status": "running", "lane": "hub", "queued_at": NOW, "started": NOW, "ended": None}],
-              "ready": [{"id": 9, "title": "Ready to send", "repo": "~/repos/sd"}]}
+                        "status": "running", "lane": "hub", "queued_at": NOW, "started": NOW, "ended": None}]}
 
-    def test_the_assignments_view_lists_the_runner_assignments_and_the_items_ready_to_send(self):
-        """Pack sd:7115: Management's Ship lane folded into Queue: the runner's live assignments and the items waiting at
-        ready_to_send are Queue's Assignments rail view, read from /api/queue/runner; its rail entry counts the live ones."""
-        page = (V2 / "queue.html").read_text(encoding="utf-8")
-        self.assertLess(page.index('id="view-assignments"'), page.index('id="assignments"'))
-        out = self.run_page(f"""const B = {json.dumps(self.BUILDS)}, A = {json.dumps(self.RUNNER)};
-window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : p === '/api/queue/runner' ? [200, A] : [404, {{ error: 'no' }}];
+    def runner_page(self, runner):
+        return self.run_page(f"""const B = {json.dumps(self.BUILDS)}, A = {json.dumps(runner)};
+window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : p === '/api/queue/runner' ? A : [404, {{ error: 'no' }}];
 await window.PAGE_AGAIN.run(); await flush(); await flush();
-R.views = window.PAGE_VIEWS.map(v => v.id); R.asg = ELS.assignments.html;""", shell=VIEW_SHELL)
-        self.assertEqual(out["R"]["views"], ["overview", "ended", "times", "assignments"])
-        asg = out["R"]["asg"]
-        self.assertIn("#41 Port the page", asg)
-        self.assertIn("merge · running", asg)
-        self.assertIn('data-copy="sd assignments get 41"', asg)
-        self.assertIn("#9 Ready to send", asg)
-        self.assertEqual(out["counts"]["assignments"], 1)
+R.views = window.PAGE_VIEWS.map(v => v.id); R.runner = ELS.runner.html;""", shell=VIEW_SHELL)
 
-    def test_the_runner_route_reads_the_live_assignments_and_the_ready_items(self):
+    def test_overview_lists_a_live_runner_assignment_and_no_assignments_view_is_left(self):
+        """Pack sd:7217 retires sd:7115's Assignments view: its Waiting on you repeated Writing's ready pieces. The runner's
+        live assignments are a small section of Overview, under Builds, each with Show assignment and Open item; none live
+        draws nothing. An old #view=assignments names no view, so the shell opens the page's first, Overview."""
+        page = (V2 / "queue.html").read_text(encoding="utf-8")
+        self.assertNotIn("view-assignments", page)
+        self.assertLess(page.index('id="view-overview"'), page.index('id="builds"'))
+        self.assertLess(page.index('id="builds"'), page.index('id="runner"'))
+        self.assertLess(page.index('id="runner"'), page.index('id="lanes"'))
+        out = self.runner_page([200, self.RUNNER])
+        self.assertEqual(out["R"]["views"], ["overview", "ended", "times"])
+        self.assertNotIn("assignments", out["counts"])
+        live = out["R"]["runner"]
+        self.assertIn("Runner assignments", live)
+        self.assertIn("#41 Port the page", live)
+        self.assertIn("merge · running", live)
+        self.assertIn('data-copy="sd assignments get 41"', live)
+        self.assertRegex(live, r'<a class="btn quiet sm" href="[^"]*7[^"]*">Open item</a>')
+        self.assertNotIn("Waiting on you", live)
+        self.assertEqual(self.runner_page([200, {"live": []}])["R"]["runner"], "")
+        self.assertIn("▨ The runner assignments were not read: down.", self.runner_page([502, {"error": "down"}])["R"]["runner"])
+
+    def test_the_runner_route_reads_the_live_assignments_alone(self):
+        """Pack sd:7217: Overview reads the route; the items at ready_to_send are Writing's to show, not Queue's."""
         from sd_dashboard.v2.pages import queue as queue_page
         self.assertIn("/api/queue/runner", [api.path for api in queue_page.PAGE.api])
+        self.assertNotIn("ready_to_send", queue_page.__doc__)
 
     def test_adversarial_review_on_a_lane_row_posts_its_worktree_and_item(self):
         """sd:5064: a lane row with a recorded worktree asks for {kind: change, target, item}; Details follow the run."""
@@ -1523,7 +1534,7 @@ R.det = ELS.adv.html;""")
         self.assertEqual(out["R"]["idle"], "Idle, quiet: 1 lane.")
         # The line under the title counts the managed repositories; the rail entries carry the counts (pack sd:7084).
         self.assertIn("2 managed repositories · read", out["R"]["subhead"])
-        self.assertEqual(sorted(out["counts"]), ["assignments", "ended", "overview", "times"])
+        self.assertEqual(sorted(out["counts"]), ["ended", "overview", "times"])
 
     def test_only_next_rows_carry_controls_and_the_ends_are_off(self):
         lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]

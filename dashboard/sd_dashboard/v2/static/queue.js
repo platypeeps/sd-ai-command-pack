@@ -21,10 +21,10 @@
 // chips, as pack sd:6016's tabs were: Personal, then the dashboard.realms realms (SHELL_REALMS). None picked shows every
 // realm; ?realm=work,personal keeps a pick. A lane's realm is its checkout's (places.realm_of). A lane whose realm is
 // unknown (no readable realm list) or that was not read shows under every pick: a chip never hides what the page cannot
-// place. Each chip counts its active rows. Assignments (pack sd:7115, Management's Ship lane folded in): the runner's
-// queued and running assignments and the items waiting at ready_to_send, read from /api/queue/runner.
+// place. Each chip counts its active rows. Runner assignments (pack sd:7115, Management's Ship lane folded in): the
+// runner's queued and running assignments, read from /api/queue/runner, under Builds on Overview (pack sd:7217).
 window.PAGE_VIEWS = [{ id: 'overview', label: 'Overview', key: 'o' }, { id: 'ended', label: 'Ended builds', key: 'e' },
-  { id: 'times', label: 'Last 7 days', key: 'l' }, { id: 'assignments', label: 'Assignments', key: 'a' }];
+  { id: 'times', label: 'Last 7 days', key: 'l' }];
 const QUEUE_REALMS = [{ id: 'personal', label: 'Personal' },
   ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'all'].includes(r.id)).map(r => ({ id: r.id, label: r.label }))];
 (() => {
@@ -176,17 +176,14 @@ const QUEUE_REALMS = [{ id: 'personal', label: 'Personal' },
     put($('builds'), html`${head}${note}${BUILT.runs.length ? html`<ul class="qrows builds">${BUILT.runs.map(buildRow)}</ul>` : html`<p class="idle">No build runs now. Build on Tasks queues one.</p>`}`);
     put($('ended'), BUILT.recent.length ? html`<ul class="qrows ended">${BUILT.recent.map(endedRow)}</ul>` : html`<p class="idle">No build run has ended.</p>`);
   }
-  // Assignments (pack sd:7115): RUNNER is /api/queue/runner's document, RUNNER_ERR why it was not read. A row copies
-  // `sd assignments get`; a ready item opens in Tasks.
+  // Runner assignments (pack sd:7115; on Overview, pack sd:7217): RUNNER is /api/queue/runner's document, RUNNER_ERR
+  // why it was not read. A row copies `sd assignments get` and opens its item in Tasks; none live draws nothing.
   let RUNNER = null, RUNNER_ERR = '';
   const asgRepo = r => (r.repo || 'no repo').replace(/^~\/repos\//, '');
-  const asgRow = a => html`<li class="qrow" data-state="${a.status}"><span class="g g-queued" aria-hidden="true">◌</span><span class="st">${a.status.toUpperCase()}</span><span class="s"><span>#${String(a.id)} ${a.title || a.role}</span><small>${asgRepo(a)} · ${a.role} · ${a.status} · since ${at(a.started || a.queued_at)}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Assignment ${String(a.id)}"><button class="btn quiet sm" type="button" data-copy="sd assignments get ${String(a.id)}" aria-label="Copy the command that shows assignment ${String(a.id)}">Show assignment</button></div></span></li>`;
-  const readyRow = t => html`<li class="qrow" data-state="ready"><span class="g g-queued" aria-hidden="true">◌</span><span class="st">READY</span><span class="s"><span>#${String(t.id)} ${t.title}</span><small>${asgRepo(t)} · ready_to_send · not a lane candidate</small></span><span class="ends"><div class="ctl" role="group" aria-label="Item ${String(t.id)}"><a class="btn quiet sm" href="${window.shell.itemHref(t.id)}">Open item</a></div></span></li>`;
+  const asgRow = a => html`<li class="qrow" data-state="${a.status}"><span class="g g-queued" aria-hidden="true">◌</span><span class="st">${a.status.toUpperCase()}</span><span class="s"><span>#${String(a.id)} ${a.title || a.role}</span><small>${asgRepo(a)} · ${a.role} · ${a.status} · since ${at(a.started || a.queued_at)}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Assignment ${String(a.id)}"><button class="btn quiet sm" type="button" data-copy="sd assignments get ${String(a.id)}" aria-label="Copy the command that shows assignment ${String(a.id)}">Show assignment</button>${a.item ? html`<a class="btn quiet sm" href="${window.shell.itemHref(a.item)}">Open item</a>` : ''}</div></span></li>`;
   function drawRunner() {
-    window.shell.view.count('assignments', RUNNER ? RUNNER.live.length : null);
-    if (!RUNNER) { put($('assignments'), html`<p class="fail" role="alert">▨ The runner assignments were not read: ${RUNNER_ERR || 'no answer yet'}.</p>`); return; }
-    put($('assignments'), html`<h2 class="times-h">Runner assignments</h2>${RUNNER.live.length ? html`<ul class="qrows">${RUNNER.live.map(asgRow)}</ul>` : html`<p class="idle">Nothing queued or running.</p>`}
-      <h2 class="times-h">Waiting on you</h2>${RUNNER.ready.length ? html`<ul class="qrows">${RUNNER.ready.map(readyRow)}</ul>` : html`<p class="idle">No item waits at ready_to_send.</p>`}`);
+    if (!RUNNER) { put($('runner'), html`<p class="fail" role="alert">▨ The runner assignments were not read: ${RUNNER_ERR || 'no answer yet'}.</p>`); return; }
+    put($('runner'), RUNNER.live.length ? html`<h2 class="times-h">Runner assignments</h2><ul class="qrows">${RUNNER.live.map(asgRow)}</ul>` : html``);
   }
   async function loadRunner() {
     try { RUNNER = await window.shell.getJSON('/api/queue/runner'); RUNNER_ERR = ''; }
