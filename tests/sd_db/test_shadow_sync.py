@@ -1893,6 +1893,35 @@ class TheRevisit(SyncCase):
                                  [f"repos/{self.REPO}/pulls/{number}"], hours)
         self.assertEqual(self.states()[stored][0], "closed")
 
+    def test_a_stale_shadow_row_goes_before_older_contributions(self):
+        """Sd:7265. A shadow row has no other read that closes it; a
+        contribution's own queue read refreshes it. On the hub 1,750 older
+        contribution observations held every slot, and merged pulls read
+        open on Trackers for weeks. A deferred shadow row still goes before
+        a fresh contribution, and after every fresh shadow row."""
+        from sd_db import shadow_sync
+
+        failing = self.stored(1, last_seen="2026-08-10T00:00:00+00:00")
+        merged = self.stored(2, last_seen="2026-08-11T00:00:00+00:00")
+        for number in (3, 4):
+            self.observed(f"https://github.com/{self.REPO}/pull/{number}",
+                          observed_at=f"2026-08-0{number}T00:00:00Z")
+
+        def read(path):
+            number = int(path.rsplit("/", 1)[1])
+            if number == 1:
+                return 404, {"message": "Not Found"}
+            return pull(number, **({"state": "closed", "merged": True} if number == 2 else {}))
+
+        with patch.object(shadow_sync, "REVISIT_LIMIT", 1):
+            for hours, number in ((0, 1), (1, 2), (2, 1), (3, 1)):
+                runner = QueryGh(lambda query: [], read=read)
+                sync(self.connection, now=self.now + timedelta(hours=hours), runner=runner,
+                     contribution_client=Offline())
+                self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/{number}"], hours)
+        self.assertEqual(self.states()[merged][0], "merged")
+        self.assertEqual(self.states()[failing][0], "open")
+
     def test_a_fold_into_a_live_key_keeps_that_key_state(self):
         """The search already observed the pull under its new url: its state wins, the old key is a tombstone."""
         from sd_db import contributions
