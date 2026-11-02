@@ -6,7 +6,7 @@ baseline is that copy: the Doc's current text, read back with workspace-mcp
 `get_doc_as_markdown` (`comment_mode: none`) just before the update, so a
 reviewer's own edits count as already seen.
 
-    sd-research-kit highlight --previous <baseline.md> [--since <time>] <in> <out.html>
+    sd-research-kit highlight --previous <baseline.md> [--since <time>] [--skip-header] <in> <out.html>
 
 `<in>` is the HTML about to be uploaded, or Markdown (`.md`), which is laid out
 as HTML first, as a mirror's `content` is. Each unit whose text is not in the
@@ -16,11 +16,11 @@ its nested list. One note, highlighted the same way, says "Changed since
 <time>": the count, how many earlier units no longer appear (reworded or
 removed), and the sections of both. With neither it says "No changes since".
 
-A review copy's header block (title, repository, push time) is never compared,
-since its push time changes every push: in HTML input, what comes before a first
-`<hr` that no heading and at most five units precede, and in the baseline what
-comes before the matching rule. The note goes at its end; otherwise it opens the
-body.
+Everything is compared unless the caller passes `--skip-header`: then what
+comes before the first `<hr` of the page, and before the first rule of the
+baseline, is a header block (a review copy's title, repository and push time,
+which changes every push), and the note goes at its end. A page with no `<hr` is
+refused under that flag. Otherwise the note opens the body.
 
 A unit is unchanged when its text, tags stripped and whitespace collapsed,
 equals an unmatched unit of the baseline with Markdown syntax taken away: links
@@ -45,7 +45,7 @@ import sys
 from pathlib import Path
 
 MARK = "background-color:#fff2a8"
-USAGE = "usage: sd-research-kit highlight --previous <baseline.md> [--since <time>] <in> <out.html>"
+USAGE = "usage: sd-research-kit highlight --previous <baseline.md> [--since <time>] [--skip-header] <in> <out.html>"
 #: Tags that hold a unit's text; a changed one gets the mark on its opening tag.
 UNIT = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "pre", "dt", "dd", "caption",
         "figcaption", "blockquote", "div"}
@@ -64,8 +64,6 @@ RULE = re.compile(r"^\s*(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 #: The note's own text, read back from the previous push: never a paragraph of the document.
 NOTE = re.compile(r"^(Changed since|No changes since) ")
-#: A header block holds the review copy's title, repository and push lines; more units than this is a body.
-HEADER_UNITS = 5
 #: Markdown's emphasis pairs, strong first: each keeps its text.
 EMPHASIS = (re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"), re.compile(r"\*(?=\S)(.+?)(?<=\S)\*"),
             re.compile(r"(?<![\w\\])_(?=\S)(.+?)(?<=\S)_(?!\w)"))
@@ -168,16 +166,11 @@ class Baseline:
 
     @staticmethod
     def _after_header(rows: list[str]) -> list[str]:
-        """The rows after a header block: a rule before any heading, after a few blocks at most."""
+        """The rows after the first rule: what `--skip-header` leaves out of the baseline."""
 
-        blocks = 0
         for index, row in enumerate(rows):
-            if HEADING.match(row):
-                return rows
             if RULE.match(row):
-                return rows[index + 1:] if blocks <= HEADER_UNITS else rows
-            if row.strip() and (index == 0 or not rows[index - 1].strip()):
-                blocks += 1
+                return rows[index + 1:]
         return rows
 
     def _add(self, text: str, section: str, lines: list[str]) -> None:
@@ -237,14 +230,11 @@ def _marked(tag: str) -> str:
     return tag[: found.start()] + f"style={found.group(1)}{style}{found.group(1)}" + tag[found.end():]
 
 
-def _header_end(page: str) -> int:
-    """Where a review copy's header block ends: its first `<hr`, if no heading and few units precede it."""
+def _header_end(page: str) -> int | None:
+    """Where `--skip-header`'s header block ends: the page's first `<hr`, or None without one."""
 
     rule = re.search(r"<hr\b", page, re.I)
-    if not rule or re.search(r"<h[1-6]\b", page[:rule.start()], re.I):
-        return 0
-    units = len(re.findall(r"<(?:p|li|td|th|pre|div)\b", page[:rule.start()], re.I))
-    return rule.start() if units <= HEADER_UNITS else 0
+    return rule.start() if rule else None
 
 
 def _note(changed: int, gone: int, sections: list[str], since: str) -> str:
@@ -285,7 +275,7 @@ def _units(page: str, start: int, tags: list[re.Match[str]]) -> list[tuple[int, 
 def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str, int, int, list[str]]:
     """`page` marked, with its note: the count changed, the count gone, and the sections of both."""
 
-    start = _header_end(page) if header else 0
+    start = (_header_end(page) or 0) if header else 0
     if not start:
         body = re.search(r"<body\b[^>]*>", page, re.I)
         start = body.end() if body else 0
@@ -325,15 +315,18 @@ def _layout(markdown: str) -> str:
     return md.markdown(markdown, extensions=["tables", "fenced_code", "sane_lists"])
 
 
-def highlight_args(argv: list[str]) -> tuple[str, str, Path, Path] | None:
-    """`(previous, since, in, out)`, or None after printing the usage."""
+def highlight_args(argv: list[str]) -> tuple[str, str, Path, Path, bool] | None:
+    """`(previous, since, in, out, skip_header)`, or None after printing the usage."""
 
     previous: str | None = None
     since, rest = "the last push", list(argv)
     paths: list[str] = []
+    skip_header = False
     while rest:
         word = rest.pop(0)
-        if word in ("--previous", "--since") and rest:
+        if word == "--skip-header":
+            skip_header = True
+        elif word in ("--previous", "--since") and rest:
             value = rest.pop(0)
             previous, since = (value, since) if word == "--previous" else (previous, value)
         elif word.startswith("-"):
@@ -345,7 +338,7 @@ def highlight_args(argv: list[str]) -> tuple[str, str, Path, Path] | None:
     if previous is None or len(paths) != 2:
         print(USAGE, file=sys.stderr)
         return None
-    return previous, since, Path(paths[0]), Path(paths[1])
+    return previous, since, Path(paths[0]), Path(paths[1]), skip_header
 
 
 def is_markdown(path: Path) -> bool:
@@ -356,7 +349,7 @@ def highlight_main(argv: list[str]) -> int:
     parsed = highlight_args(argv)
     if parsed is None:
         return 2
-    previous, since, source, target = parsed
+    previous, since, source, target, skip_header = parsed
     try:
         before = Path(previous).read_text(encoding="utf-8")
         page = source.read_text(encoding="utf-8")
@@ -364,13 +357,16 @@ def highlight_main(argv: list[str]) -> int:
         print(f"sd-research-kit highlight: {error}", file=sys.stderr)
         return 2
     markdown_in = is_markdown(source)
-    seen = Baseline(before, header=not markdown_in)
+    seen = Baseline(before, header=skip_header)
     if not before.strip():
         print(f"sd-research-kit highlight: {previous} is empty: a first push has nothing to compare; "
               "upload without highlight", file=sys.stderr)
         return 2
     page = _layout(page) if markdown_in else page
-    marked, changed, gone, sections = highlight(page, seen, since, header=not markdown_in)
+    if skip_header and _header_end(page) is None:
+        print(f"sd-research-kit highlight: --skip-header: no <hr> in {source} ends a header block", file=sys.stderr)
+        return 2
+    marked, changed, gone, sections = highlight(page, seen, since, header=skip_header)
     try:
         target.write_text(marked, encoding="utf-8")
     except OSError as error:

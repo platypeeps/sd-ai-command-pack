@@ -67,7 +67,8 @@ acts on the files it names. There is no repo argument.
   upload <request> <upload_url> <authorization>             (queue)
   project [--plan <request> --live <file>|--missing] [--writing <request>]
                                                             (queue)
-  highlight --previous <baseline.md> [--since <time>] <in> <out.html>
+  highlight --previous <baseline.md> [--since <time>] [--skip-header]
+            <in> <out.html>
                   mark what changed since a Google Doc's read-back copy
 
 Exit codes: 0 done; 1 a check failed or the verb is unknown; 2 bad arguments,

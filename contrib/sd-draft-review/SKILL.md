@@ -45,7 +45,8 @@ Change marks belong to this review copy alone. `sd-publish-drive` imports a clea
    - First push: `import_to_google_doc` per document with `user_google_email`, `folder_id`, `file_name` (the title, or `Research — <title>`), `file_path`, and `source_format: "html"`.
    - Re-push: mark what changed first, then `update_drive_file` with the recorded `file_id`, the marked file's `file_path`, and `source_format: "html"`. Say in the report that comment anchors detach, and that revision history keeps the old body.
      Per document, read the current Doc with `get_doc_as_markdown` (`comment_mode: "none"`) into `<scratch dir>/<name>.previous.md`, then run
-     `sd-research-kit highlight --previous <scratch dir>/<name>.previous.md --since "<push time>" <scratch dir>/<name>.html <attachments>/<name>.html`.
+     `sd-research-kit highlight --previous <scratch dir>/<name>.previous.md --since "<push time>" --skip-header <scratch dir>/<name>.html <attachments>/<name>.html`.
+     `--skip-header` leaves the header block above the first rule uncompared, since its push time changes every push; no other caller passes it.
      `<push time>` is the `pushed` time in that copy's header. Changed paragraphs, list items, headings, table cells and code blocks get a yellow background. One note under the header gives the count, how many earlier paragraphs no longer appear, and their sections; `No changes since` when neither.
      Reviewer edits are in that read-back, so they count as already seen. A failed read or a refusal stops the re-push: an unknown baseline would mark nothing or everything.
      A first push imports unmarked: it has nothing to compare against.

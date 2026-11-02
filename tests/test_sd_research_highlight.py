@@ -63,7 +63,7 @@ class HighlightFixtureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         self.out = self.tmp / "out.html"
-        self.done = run_kit("--previous", str(FIXTURES / "baseline.md"), "--since", "2026-11-02 12:04 MST",
+        self.done = run_kit("--previous", str(FIXTURES / "baseline.md"), "--since", "2026-11-02 12:04 MST", "--skip-header",
                             str(FIXTURES / "new.html"), str(self.out))
         self.assertEqual(self.done.returncode, 0, self.done.stderr)
         self.page = self.out.read_text(encoding="utf-8")
@@ -272,6 +272,30 @@ class ChangesTheComparisonMustSee(unittest.TestCase):
                                 "<p>Same.</p>\n")
         self.assertEqual(said, "changed: 0 since T\n")
         self.assertIn("No changes since T", page)
+
+    def test_text_before_an_ordinary_rule_is_compared(self) -> None:
+        """Lane round 2: a guessed header block hid an edited opening above a plain `---`."""
+        said, page = self.check("Old opening.\n\n---\n\nSame.\n", "<p>New opening.</p>\n<hr />\n<p>Same.</p>\n")
+        self.assertEqual(said, "changed: 1 since T\ngone: 1\nsections: Opening\n")
+        self.assertIn(f'<p style="{MARK}">New opening.</p>', page)
+
+    def test_skip_header_leaves_what_precedes_the_first_rule_uncompared(self) -> None:
+        (self.tmp / "b.md").write_text("Pushed 09:00.\n\n---\n\nSame.\n", encoding="utf-8")
+        (self.tmp / "in.html").write_text("<p>Pushed 10:00.</p>\n<hr />\n<p>Same.</p>\n", encoding="utf-8")
+        done = run_kit("--previous", str(self.tmp / "b.md"), "--since", "T", "--skip-header",
+                       str(self.tmp / "in.html"), str(self.tmp / "out.html"))
+        self.assertEqual((done.returncode, done.stdout), (0, "changed: 0 since T\n"))
+        page = (self.tmp / "out.html").read_text(encoding="utf-8")
+        self.assertIn(f'<p>Pushed 10:00.</p>\n<p style="{MARK}"><strong>No changes since T</strong>.</p>\n<hr />', page)
+
+    def test_skip_header_without_a_rule_is_refused(self) -> None:
+        (self.tmp / "b.md").write_text("Same.\n", encoding="utf-8")
+        (self.tmp / "in.html").write_text("<p>Same.</p>\n", encoding="utf-8")
+        out = self.tmp / "out.html"
+        done = run_kit("--previous", str(self.tmp / "b.md"), "--skip-header", str(self.tmp / "in.html"), str(out))
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("--skip-header: no <hr", done.stderr)
+        self.assertFalse(out.exists())
 
     def test_a_rule_after_a_heading_is_not_a_header_block(self) -> None:
         said, _ = self.check("## Plan\n\nOriginal.\n\n---\n\nSame.\n",
