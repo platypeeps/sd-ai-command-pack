@@ -1253,6 +1253,51 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["R"]["before"], 0, "Build posts nothing before the dialog's Build")
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/tasks/build", {"items": [item], "revisions": {str(item): "c" * 64}}]])
 
+    # pack sd:7271 (#40961): All items adds the repo's other open items, read from /api/tasks only while it is on. Each
+    # is an item row as a suggested one is, and its act is the one Tasks' list row offers: the move to its next status.
+    def open_items(self):
+        from sd_dashboard import tasks_screen
+        from sd_db import workflow
+        made = {}
+        for title, status in (("Held up", "blocked"), ("Half done", "in_progress"), ("Finished", "done")):
+            made[status] = self.item(title, kind="task", priority=2, repo=str(self.checkout))
+            workflow.change_status(self.connection, made[status], status, who="test", reason="test")
+        answers = {"/api/tasks": [200, tasks_screen.document(self.connection, now=NOW)]}
+        for n in made.values():
+            answers[f"/api/tasks/{n}"] = [200, tasks_screen.details(self.connection, n, now=NOW)]
+        return made, answers
+
+    def test_all_items_adds_the_repos_other_open_items_read_from_tasks_only_while_on(self):
+        made, answers = self.open_items()
+        out = self.run_view("R.before = OUT.gets.slice(); press('open'); await flush(); await flush(); open('system');"
+                            " R.kids = kids(); R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;", answers=answers)
+        self.assertNotIn("/api/tasks", out["R"]["before"], "off, the view reads no tasks")
+        self.assertIn("/api/tasks", out["gets"])
+        self.assertEqual(out["urls"], [{"show": "open"}])
+        self.assertIn('data-f="qshow" data-v="open" aria-pressed="true"', out["R"]["filters"])
+        self.assertIn("All items", out["R"]["filters"])
+        for status in ("blocked", "in_progress"):
+            n = made[status]
+            self.assertIn(f'data-type="open" data-item="{n}" data-id="{n}" aria-selected=', out["R"]["html"])
+        self.assertNotIn("Finished", out["R"]["html"], "a done item is not open")
+        self.assertIn("open", out["R"]["kids"])
+        kept = self.run_view("open('system'); R.kids = kids();", search="?show=open", answers=answers)
+        self.assertIn("open", kept["R"]["kids"])
+
+    def test_an_open_row_selects_into_task_details_and_offers_its_next_status_move(self):
+        made, answers = self.open_items()
+        for status, move in (("blocked", "item.status.ready"), ("in_progress", "item.status.done")):
+            n = made[status]
+            out = self.run_view(self.PICK.replace("ID", str(n))
+                                + f" const o = C.get('{n}'), on = REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true));"
+                                " R.primary = (on.find(c => c.primary && c.primary(o)) || {}).id;",
+                                search="?show=open", answers=answers)
+            self.assertIn(f'<i data-acts="{n}"></i>', out["R"]["html"], "the row's act cell draws its commands")
+            self.assertEqual(out["R"]["row"], f"?show=open&row={n}")
+            self.assertIn(f"/api/tasks/{n}", out["gets"])
+            self.assertIn('id="det-status"', out["R"]["details"])
+            self.assertEqual(out["R"]["primary"], move, status)
+
     def test_a_next_row_moves_with_the_lanes_revision(self):
         out = self.run_view(f"open('system'); act('button[data-act]', {{ repo: {json.dumps(str(self.checkout))}, item: '12', act: 'up' }});"
                             " await flush(); await flush(); R.said = ELS['queue-said'].textContent;")

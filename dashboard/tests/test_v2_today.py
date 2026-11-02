@@ -206,7 +206,7 @@ class TheAssets(BrowserSession):
         captions = [" ".join(Parsed(m.group(1)).text) if (m := re.search(r"<caption>(.*?)</caption>", t, re.S)) else None
                     for t in tables]
         self.assertEqual(captions, [
-            "One row per repo; open one for its working, merging, next, blocked, suggested and ended rows."])
+            "One row per repo; open one for its working, merging, next, blocked, suggested, open and ended rows."])
 
 class TheShellPort(BrowserSession):
     def test_the_shell_builds_nothing_the_policy_refuses(self):
