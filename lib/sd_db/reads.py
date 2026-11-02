@@ -1261,7 +1261,11 @@ class Usage:
     nothing; `meter` is the latest `meter` row per provider and window in
     the month, the two gauges of a `plan` bill. `days` is the month's length
     and `today` the day of the month `now` falls on, None when `now` is in
-    another month, which is what the projection needs.
+    another month, which is what the projection needs. `unbilled` is the
+    month's `run` and `bound` dollars on rows naming no listed bill (a start
+    session's row may name none), None when the month has no such row;
+    `spent` is the bills' spend and it, so no reader counts those dollars as
+    nothing (pack sd:7219).
     """
 
     month: str
@@ -1273,6 +1277,7 @@ class Usage:
     meter: tuple[dict, ...]
     spent: float
     held: float
+    unbilled: float | None = None
 
     def document(self) -> dict:
         """The plain shape both faces serialise; the JSON is the same bytes."""
@@ -1281,6 +1286,7 @@ class Usage:
             "bills": [asdict(bill) for bill in self.bills],
             "roles": list(self.roles), "bound": list(self.bound),
             "meter": list(self.meter), "spent": self.spent, "held": self.held,
+            "unbilled": self.unbilled,
         }
 
 
@@ -1366,6 +1372,13 @@ def _usage_reads(
         "GROUP BY bill, day ORDER BY bill, day", (month,)):
         points = burn.setdefault(row["bill"], [])
         points.append((int(row["day"]), round((points[-1][1] if points else 0.0) + float(row["usd"]), 6)))
+    # `cost_by_bill` joins rows to a listed bill, so a row naming none is
+    # read here; its dollars are in `spent`, as the bills' are (pack sd:7219).
+    loose, loose_usd = connection.execute(
+        "SELECT COUNT(*), COALESCE(SUM(usd), 0.0) FROM cost WHERE source IN ('run', 'bound') "
+        "AND substr(timestamp, 1, 7) = ? AND (bill IS NULL OR bill NOT IN (SELECT name FROM bill))",
+        (month,)).fetchone()
+    unbilled = round(float(loose_usd), 6) if loose else None
     bills = []
     for row in cost_by_bill(connection, now=f"{month}-01T00:00:00Z", caps=caps):
         cap = row["cap_usd_month"]
@@ -1402,7 +1415,8 @@ def _usage_reads(
         month=month, days=days, today=today, bills=tuple(bills),
         roles=tuple(dict(row) for row in roles), bound=tuple(dict(row) for row in bound),
         meter=tuple(dict(row) for row in meter),
-        spent=round(sum(bill.spent for bill in bills), 6), held=round(sum(bill.held for bill in bills), 6),
+        spent=round(sum(bill.spent for bill in bills) + (unbilled or 0.0), 6),
+        held=round(sum(bill.held for bill in bills), 6), unbilled=unbilled,
     )
 
 

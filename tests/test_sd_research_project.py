@@ -379,7 +379,6 @@ class PlanTests(Projection):
         self.status(self.experiment, "in_progress")
         self.project()
         cases = {
-            "removed": lambda live: live["schema"].pop("Status"),
             "retyped": lambda live: live["schema"].update(Status={"type": "rich_text"}),
             "option removed": lambda live: live["schema"]["Status"]["options"].remove("Blocked"),
         }
@@ -706,15 +705,37 @@ class PlanTests(Projection):
                                                     Experiment=linked(url(ROW), url(OTHER))))
         self.assertEqual(planned["yielded"], ["Experiment"])
 
-    def test_a_live_row_lacking_status_names_it(self) -> None:
-        self.created()
+    def test_a_database_lacking_status_skips_it_and_names_it(self) -> None:
+        """The team's experiments database has no `Status` (sd:7246): the plan writes the rest, names the gap."""
+        self.queued()
+        live = self.live()
+        del live["schema"]["Status"]
+        planned = self.planned(self.experiment, live)
+        self.assertEqual((planned["action"], planned["properties"], planned["skipped"]),
+                         ("create", {"Experiment": "An experiment", "Stage": "Scoping"}, ["Status"]))
+        self.assertEqual(self.deliver(self.experiment)[0], 0)
+        self.assertEqual(self.held(self.experiment)["written"], {})
         self.status(self.experiment, "done")
         self.project()
-        live = self.live(row=ROW, Status="Todo")
-        del live["schema"]["Status"]
+        live = self.live(row=ROW)
+        del live["schema"]["Status"], live["row"]["properties"]["Status"]
+        planned = self.planned(self.experiment, live)
+        self.assertEqual((planned["action"], planned["properties"], planned["yielded"], planned["skipped"]),
+                         ("update", {}, [], ["Status"]))
+        self.assertEqual(self.deliver(self.experiment)[0], 0)
+        self.status(self.experiment, "in_progress")
+        self.project()
+        planned = self.planned(self.experiment, self.live(row=ROW))
+        self.assertEqual((planned["properties"], planned["skipped"]), ({"Status": "In Progress"}, []))
+
+    def test_a_database_lacking_its_title_refuses_naming_it(self) -> None:
+        self.queued()
+        live = self.live()
+        del live["schema"]["Experiment"]
         status, said = self.plan(self.experiment, live)
-        self.assertEqual(status, 1)
-        self.assertIn("Status:", said)
+        self.assertEqual(status, 1, said)
+        self.assertIn("Experiment: the experiments database has no such property", said)
+        self.assertNotIn("creating", self.held(self.experiment))
 
     def test_a_request_under_another_items_name_refuses(self) -> None:
         self.queued()
