@@ -91,17 +91,19 @@
 
     <section id="view-motion" aria-labelledby="motion-h" hidden>
       <div class="sec-head">
-        <h2 id="motion-h">In motion <button class="help" type="button" aria-label="Help: In motion" data-help="&lt;b&gt;Open items with a live session.&lt;/b&gt; First the headless builder runs: each one's items, stage (building, review, lane), start and ETA, the median of past runs. Then each session: a worktree, a lane entry, a running &lt;code&gt;sd-*&lt;/code&gt; command or a herdr agent, each tied to its item by a lane entry, a branch name, &lt;code&gt;--item&lt;/code&gt;, &lt;code&gt;-C&lt;/code&gt; or a Fix note. Longest-running first. What landed today is on Queue.">
+        <h2 id="motion-h">In motion <button class="help" type="button" aria-label="Help: In motion" data-help="&lt;b&gt;Open items with a live session.&lt;/b&gt; First the headless builder runs: each one's items, stage (building, review, lane), start and ETA, the median of past runs. Then each session: a worktree, a lane entry, a running &lt;code&gt;sd-*&lt;/code&gt; command or a herdr agent, each tied to its item by a lane entry, a branch name, &lt;code&gt;--item&lt;/code&gt;, &lt;code&gt;-C&lt;/code&gt; or a Fix note. Grouped by repo, longest-running first; an item with no repo is Unassociated. Live + next adds each repo's next ready items, at most three. What landed today is on Queue.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="active-tally"></p>
       </div>
+      <!-- pack sd:7222: Live | Live + next leads the filter row; the sessions table's column filter joins it. -->
+      <div class="filters toolbar-2" id="motion-filters" role="group" aria-label="Filters"></div>
       <table class="ledger active builds" id="builds-table" aria-label="Builder runs" hidden>
         <caption>Headless build runs: items, stage, start, ETA from past runs, model and cost.</caption>
         <thead id="builds-head"></thead>
         <tbody id="builds"></tbody>
       </table>
-      <table class="ledger active" aria-labelledby="motion-h">
-        <caption>Open items with a live worktree, lane entry, sd-* command or herdr agent, longest-running first.</caption>
+      <table class="ledger active" aria-labelledby="motion-h" data-toolbar="motion-filters">
+        <caption>Open items with a live worktree, lane entry, sd-* command or herdr agent, grouped by repo, longest-running first.</caption>
         <thead id="active-head"></thead>
         <tbody id="active"><tr class="empty"><td colspan="5">Reading sessions…</td></tr></tbody>
       </table>

@@ -37,13 +37,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
   // The intents (sd:5921): views over the one list, not tabs. Each says which rows it keeps.
   const INTENTS = [['fix', 'Fix', r => r.band === 'broken'], ['reply', 'Reply', r => ['reports', 'mail', 'pulls'].includes(r.lamp)],
     ['ship', 'Ship', r => r.kind === 'lane' || r.id === 'group:ready' || r.state === 'ready_to_send'], ['read', 'Read', r => r.source === 'briefs']];
-  const SHOWN = 5; // a group's members, and In motion's items, before "N more"
+  const SHOWN = 5; // a group's members before "N more"
   const { html, put } = window.markup;
   const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
   let DOC = null, NEEDS = [], ALL = new Map(), OTHER = new Map(), SNOOZED = [], ACTIVE = null, srcFilter = null, intent = null, query = '', picked = [];
   const OPEN = new Set(), FULL = new Set(); // the groups opened, and the ones showing every member
-  let motionAll = false;
+  let motionMode = 'live'; // In motion's Live | Live + next (pack sd:7222)
   const $ = id => document.getElementById(id);
   const row = () => new URLSearchParams(location.search).get('row'); // the selected row
   const low = s => String(s || '').toLowerCase();
@@ -275,26 +275,45 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
     window.snooze.draw($('snoozed'), SNOOZED);
   }
 
-  // In motion (sd:3466, sd:5921): the document's `active`, one row per open item, its sessions in the row, longest-running
-  // first; the first five, then "N more". A click shows the item in Details (sd:6714). A launch herdr could not confirm is ▨, not ●;
-  // a source that was not read is said under the table, never an empty list. The tally counts the lanes; Queue has the rest.
+  // In motion (sd:3466, sd:5921): the document's `active`, one row per open item, its sessions in the row. pack sd:7222:
+  // grouped by repo, one band per repo that the shell's table grammar folds, in the order of each repo's longest-running
+  // item; an item with no repo is Unassociated, last. Live + next adds each repo's next ready items: the Queues rows'
+  // first three per repo (sd_db.today.queues, priority first), and a group for a repo that has only those. A click shows
+  // the item in Details (sd:6714). A launch herdr could not confirm is ▨, not ●; a source that was not read is said under
+  // the table, never an empty list. The tally counts the lanes; Queue has the rest.
   const SOURCE = { fleet: 'worktrees and processes', lane: 'lane entries', launch: 'Fix notes', herdr: 'herdr agents' };
   const clock = iso => new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const NEXT = 3;
   function motion() {
     const a = ACTIVE || { rows: [], sources: {}, error: 'the document carried no sessions' }, rows = a.rows || [], L = DOC.lane || {};
+    const Q = DOC.queues || { rows: [], error: 'the document carried no queues' }, withNext = motionMode === 'next';
+    put($('motion-filters'), window.shell.list.fseg('motion', 'Shown', [['live', 'Live'], ['next', 'Live + next']]
+      .map(([v, label]) => ({ v, label, pressed: motionMode === v }))));
     const items = [];
-    rows.forEach(r => { const last = items[items.length - 1]; if (last && last.item === r.item) last.rows.push(r); else items.push({ item: r.item, title: r.title, rows: [r] }); });
-    const shown = motionAll ? items : items.slice(0, SHOWN), more = items.length - shown.length;
-    put($('active'), a.error ? html`<tr class="empty"><td colspan="5">Sessions could not be read: ${a.error}. Read again tries again.</td></tr>`
-      : items.length ? html`${shown.map(it => { const sure = it.rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = it.rows[0]; return html`<tr data-item="${it.item}" data-id="live:${it.item}" aria-selected="${String(row() === `live:${it.item}`)}">
+    rows.forEach(r => { const last = items[items.length - 1]; if (last && last.item === r.item) last.rows.push(r); else items.push({ item: r.item, title: r.title, repo: r.repo || null, rows: [r] }); });
+    const groups = new Map(), group = repo => { if (!groups.has(repo)) groups.set(repo, { repo, live: [], next: [] }); return groups.get(repo); };
+    items.forEach(it => group(it.repo).live.push(it));
+    if (withNext) Q.rows.filter(r => r.queue === 'ready' && !items.some(it => it.item === r.id))
+      .forEach(r => { const g = group(r.repo || null); if (g.next.length < NEXT) g.next.push(r); });
+    const order = [...groups.values()].sort((x, y) => (x.repo === null) - (y.repo === null)), nexts = order.reduce((n, g) => n + g.next.length, 0);
+    const band = g => html`<tr class="band" data-band="${g.repo || 'unassociated'}"><th colspan="5" scope="rowgroup">${g.repo ? g.repo.split('/').pop() : 'Unassociated'} · ${
+      [g.live.length ? String(g.live.length) : '', g.next.length ? `${g.next.length} next` : ''].filter(Boolean).join(' · ')}</th></tr>`;
+    const live = it => { const sure = it.rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = it.rows[0]; return html`<tr data-item="${it.item}" data-id="live:${it.item}" aria-selected="${String(row() === `live:${it.item}`)}">
         <td class="g g-${s}" title="${sure ? 'live' : 'a launch not confirmed: herdr was not read'}">${GLYPH[s]}</td>
         <td class="what"><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></td>
         <td class="detail"><ul class="sessions">${it.rows.map(r => html`<li>${r.verified ? '' : html`<span class="g-unknown" title="not confirmed">${GLYPH.unknown} </span>`}${r.session}${r.elapsed ? html` · ${r.elapsed}` : ''}<span class="via">${r.via}</span></li>`)}</ul></td>
         <td class="when">${top.started ? html`<time datetime="${top.started}" title="${top.started.slice(11, 16)} UTC">${clock(top.started)}</time>` : 'not known'}</td>
-        <td class="num">${top.elapsed || 'not known'}</td></tr>`; })}${more ? html`<tr class="more"><td></td><td colspan="4"><button type="button" class="linkbtn" id="motion-more">${more} more: ${items.slice(SHOWN, SHOWN + 3).map(it => `sd:${it.item}`).join(', ')}${more > 3 ? ' …' : ''}</button></td></tr>` : ''}`
-      : html`<tr class="empty"><td colspan="5">No open item has a live session.</td></tr>`);
+        <td class="num">${top.elapsed || 'not known'}</td></tr>`; };
+    const next = r => html`<tr data-item="${r.id}" class="next"><td class="g g-queued" title="ready: a suggested next item">${GLYPH.queued}</td>
+        <td class="what"><a href="${window.shell.itemHref(r.id)}">#${r.id} ${r.title}</a></td>
+        <td class="detail">next · ready${r.detail && r.detail !== '-' ? ` · ${r.detail}` : ''}</td><td class="when">not started</td>
+        <td class="num">${r.since ? age(r.since) : 'not known'}</td></tr>`;
+    const unread = withNext && Q.error ? html`<tr class="empty"><td colspan="5">Next items could not be read: ${Q.error}. Read again tries again.</td></tr>` : '';
+    put($('active'), a.error ? html`<tr class="empty"><td colspan="5">Sessions could not be read: ${a.error}. Read again tries again.</td></tr>${unread}`
+      : order.length ? html`${order.map(g => html`${band(g)}${g.live.map(live)}${g.next.map(next)}`)}${unread}`
+      : html`<tr class="empty"><td colspan="5">No open item has a live session${withNext && !Q.error ? ', and no repo has a ready item' : ''}.</td></tr>${unread}`);
     const dark = Object.entries(a.sources || {}).filter(([, why]) => why), B = builds();
-    put($('active-tally'), html`${B.rows.length ? html`<span>${plural(B.rows.length, 'builder')}</span>` : ''}<span>${plural(items.length, 'item')} live</span><span>${L.merging ?? 0} merging</span><span>${L.landed ?? 0} landed today in ${plural(L.landed_lanes ?? 0, 'lane')}</span><a href="/queue?show=all">Queue</a>${dark.length ? html`<span class="g-caution">▲ ${dark.length} not read</span>` : ''}`);
+    put($('active-tally'), html`${B.rows.length ? html`<span>${plural(B.rows.length, 'builder')}</span>` : ''}<span>${plural(items.length, 'item')} live</span>${withNext ? html`<span>${nexts} next</span>` : ''}<span>${L.merging ?? 0} merging</span><span>${L.landed ?? 0} landed today in ${plural(L.landed_lanes ?? 0, 'lane')}</span><a href="/queue?show=all">Queue</a>${dark.length ? html`<span class="g-caution">▲ ${dark.length} not read</span>` : ''}`);
     const note = $('active-note');
     note.hidden = !dark.length;
     note.textContent = dark.map(([k, why]) => `${SOURCE[k] || k} not read: ${why}`).join(' · ');
@@ -587,7 +606,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
       if (a) e.preventDefault();
       select(t.dataset.id, true);
     };
-    $('active').addEventListener('click', e => { if (e.target.closest('#motion-more')) { motionAll = true; return motion(); } pickRow('tr[data-id]')(e); });
+    $('active').addEventListener('click', pickRow('tr[data-id]'));
+    $('motion-filters').addEventListener('click', e => { const b = e.target.closest('[data-f="motion"]'); if (b && b.dataset.v !== motionMode) { motionMode = b.dataset.v; motion(); } });
     $('builds').addEventListener('click', pickRow('tr[data-id]'));
     $('track-rows').addEventListener('click', pickRow('tr[data-id]'));
     $('track-plot').addEventListener('click', pickRow('[data-id]'));
