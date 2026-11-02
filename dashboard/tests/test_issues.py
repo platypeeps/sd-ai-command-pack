@@ -646,10 +646,11 @@ class TheGitHubPage(ScreenCase):
         self.assertEqual(out["again"], 1)
 
     def test_github_puts_refresh_in_each_section_heads_tools_and_its_line_under_it(self):
-        """Pack sd:7084: a view's actions sit in its section head's tools; the line under the head says what it did."""
+        """Pack sd:7084: a view's actions sit in its section head's tools; the line under the head says what it did. Pack
+        sd:7214: the tally is the head's own item, beside .tools, so Refresh ends the row."""
         html = (V2 / "github.html").read_text(encoding="utf-8")
         for view, tally in (("pulls", "github-tally"), ("issues", "issues-tally"), ("intake", "intake-tally")):
-            self.assertIn(f'<div class="tools"><p class="tally" id="{tally}"></p><span id="{view}-sync"></span></div>', html)
+            self.assertIn(f'<p class="tally" id="{tally}"></p>\n          <div class="tools"><span id="{view}-sync"></span></div>', html)
             self.assertIn(f'<p class="why" id="{view}-said"></p>', html)
         self.assertIn('id="intake-filters"', html)
 
