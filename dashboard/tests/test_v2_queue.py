@@ -1207,6 +1207,52 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["R"]["row"], "?row=live%3A40")
         self.assertEqual(sorted(out["R"]["cmds"]), ["live item.fix", "today.live.assignment", "today.live.open"])
 
+    # pack sd:7271: a suggested row is an item row: a click selects it (?row=<id>), its Details are the Tasks page's
+    # (task-details.js, from /api/tasks/<id>), and its act is Tasks' Build, which reads the plan before it queues.
+    def suggested(self):
+        from sd_dashboard import tasks_screen
+        from sd_db import workflow
+        item = self.item("Ship the pickup", kind="task", priority=2, repo=str(self.checkout))
+        workflow.change_status(self.connection, item, "ready", who="test")
+        self.doc["queues"]["rows"] = [{"queue": "ready", "id": item, "repo": "~/repos/example/system", "title": "Ship the pickup",
+                                       "status": "ready", "detail": "P2", "since": NOW}] + self.READY
+        return item, {f"/api/tasks/{item}": [200, tasks_screen.details(self.connection, item, now=NOW)]}
+
+    PICK = ("C.rowActions = id => mk`<i data-acts=\"${id}\"></i>`; open('system'); R.html = ELS.queue.html;"
+            " ELS.queue.listeners.click[0]({ target: { closest: s => s === 'tr[data-id]' ? { dataset: { id: 'ID' } } : null } });"
+            " await flush(); await flush(); R.details = ELS.details.html; R.row = location.search;")
+
+    def test_a_suggested_row_selects_and_shows_the_items_task_details(self):
+        item, answers = self.suggested()
+        out = self.run_view(self.PICK.replace("ID", str(item)), search="?show=suggested", answers=answers)
+        self.assertIn(f'data-type="suggested" data-item="{item}" data-id="{item}" aria-selected=', out["R"]["html"])
+        self.assertEqual(out["R"]["row"], f"?show=suggested&row={item}")
+        self.assertIn(f"/api/tasks/{item}", out["gets"])
+        # The Tasks page's Details: its editable fields, read from the item route.
+        self.assertIn('id="det-title" class="fld" value="Ship the pickup"', out["R"]["details"])
+        self.assertIn('id="det-status"', out["R"]["details"])
+
+    def test_a_suggested_row_acts_with_build_and_build_reads_the_plan_first(self):
+        item, answers = self.suggested()
+        plan = {"read": NOW, "budget_minutes": 60, "refused": [], "room": {"machine": 4, "why": "", "cap": 6, "repo_cap": 3},
+                "bundles": [{"repo": str(self.checkout), "name": "system", "room": 2, "model": "opus", "branch": "build/sd-1",
+                             "items": [{"id": item, "title": "Ship the pickup", "revision": "c" * 64}]}]}
+        answers[f"/api/tasks/build/plan?items={item}"] = [200, plan]
+        answers["/api/tasks/build"] = [200, {"queued": [{"id": 9, "item": item, "status": "queued"}], "kickstart": {"ok": True}}]
+        out = self.run_view(self.PICK.replace("ID", str(item))
+                            + f" const o = C.get('{item}'), on = REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true));"
+                            " R.live = on.map(c => c.id); R.primary = (on.find(c => c.primary && c.primary(o)) || {}).id;"
+                            " shellRun(cmd('item.build'), o); await flush();"
+                            " const D = MADE.find(e => /id=\"build-h\"/.test(e.html || '')); R.shown = D ? D.html : null; R.before = OUT.posts.length;"
+                            " if (D) { D.returnValue = 'build'; D.onclose(); await flush(); }",
+                            search="?show=suggested", answers=answers)
+        self.assertIn(f'<i data-acts="{item}"></i>', out["R"]["html"], "the row's act cell draws its commands")
+        self.assertIn("item.build", out["R"]["live"])
+        self.assertEqual(out["R"]["primary"], "item.build")
+        self.assertIn(f"<code>#{item}</code> Ship the pickup", out["R"]["shown"])
+        self.assertEqual(out["R"]["before"], 0, "Build posts nothing before the dialog's Build")
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/tasks/build", {"items": [item], "revisions": {str(item): "c" * 64}}]])
+
     def test_a_next_row_moves_with_the_lanes_revision(self):
         out = self.run_view(f"open('system'); act('button[data-act]', {{ repo: {json.dumps(str(self.checkout))}, item: '12', act: 'up' }});"
                             " await flush(); await flush(); R.said = ELS['queue-said'].textContent;")

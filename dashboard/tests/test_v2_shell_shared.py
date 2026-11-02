@@ -629,8 +629,9 @@ class EveryDialogHasAClose(unittest.TestCase):
                 if not self.X.search(m.group(0)) or len(cancels) != 1:
                     wrong.append(f"{name}: {m.group(0)[:100]}")
         self.assertEqual(wrong, [])
-        # Confirm and capture, Start next, Build, Writing's correction, the three Tasks prompts and Quick notes.
-        self.assertEqual(sorted(forms), sorted(["shell.js"] * 2 + ["tasks.js"] * 2 + ["writing.js", "notes.html"] + ["task-details.js"] * 3))
+        # Confirm and capture, Start next, Build (commands.js, Tasks' and Today's, pack sd:7271), Writing's correction, the
+        # three Tasks prompts and Quick notes.
+        self.assertEqual(sorted(forms), sorted(["shell.js"] * 2 + ["tasks.js", "commands.js", "writing.js", "notes.html"] + ["task-details.js"] * 3))
         # The key sheet is the shell's one dialog without a form; its Close is the Cancel the X presses.
         keys = re.search(r"put\(keys, html`(.*?)`\);", SHELL_JS, re.S).group(1)
         self.assertRegex(keys, self.X)
@@ -638,7 +639,7 @@ class EveryDialogHasAClose(unittest.TestCase):
 
     def test_every_file_that_opens_a_dialog_is_swept(self):
         opens = {name for name, text in self.SOURCES.items() if re.search(r"showModal\(|createElement\('dialog'\)|<dialog\b", text)}
-        self.assertEqual(opens, {"shell.js", "tasks.js", "writing.js", "notes.html", "notes.js", "task-details.js"})
+        self.assertEqual(opens, {"shell.js", "tasks.js", "commands.js", "writing.js", "notes.html", "notes.js", "task-details.js"})
 
     def test_the_x_presses_the_dialogs_cancel_and_closes_nothing_itself(self):
         block = re.search(r"// dlgx:start\n(.*?)// dlgx:end", SHELL_JS, re.S)
