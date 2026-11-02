@@ -2001,6 +2001,22 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
         self.assertIn("unknown repository 'nope'; known: app, lib, fleet", refused.stderr)
         self.assertEqual(refused.stdout, "")
 
+    def test_today_all_lists_every_row_of_a_capped_section(self):
+        """pack sd:6959: the text view caps a section at five rows; `--all` prints them all and no `more` line."""
+        for number in range(8):
+            self.task(f"Unscheduled {number}")
+        env = {**self.environment, "COLUMNS": "120"}
+        capped = self.call("today", env=env).stdout
+        self.assertIn("Unscheduled (8)", capped)
+        self.assertIn("… 3 more", capped)
+        text = self.call("today", "--all", env=env).stdout
+        self.assertEqual(len(re.findall(r"Unscheduled \d", text)), 8)
+        self.assertNotIn(" more", text)
+        scoped = self.call("today", "--all", "--only", "fleet", env=env).stdout
+        self.assertEqual(len(re.findall(r"Unscheduled \d", scoped)), 8)
+        self.assertEqual(json.loads(self.call("today", "--all", "--json").stdout),
+                         json.loads(self.call("today", "--json").stdout))
+
 
 if __name__ == "__main__":
     unittest.main()

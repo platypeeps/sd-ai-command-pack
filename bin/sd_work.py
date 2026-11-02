@@ -641,7 +641,7 @@ def _today_gate() -> Any:
     return sd_gate_slots.machine_snapshot(dict(os.environ))
 
 
-def _print_today(connection: Any, repos: list[str | None] | None) -> None:
+def _print_today(connection: Any, repos: list[str | None] | None, *, show_all: bool = False) -> None:
     """`sd today` as text: `sd_db.today.sections` in the one layout `sd_views` gives it and `sd-status` (sd:5098)."""
     import shutil
 
@@ -653,7 +653,7 @@ def _print_today(connection: Any, repos: list[str | None] | None) -> None:
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
     found = today.sections(connection, repos=repos, now=now.strftime("%Y-%m-%dT%H:%M:%SZ"), gate=_today_gate())
     width = shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns
-    print(sd_views.render_sections(found, now=now, width=width), end="")
+    print(sd_views.render_sections(found, now=now, width=width, show_all=show_all), end="")
     line = _session_age_line(os.environ)
     if line:
         print(line)
@@ -1374,7 +1374,7 @@ def run_today(args: argparse.Namespace) -> int:
 
             _emit(today.work(connection, repos=keep), machine=True)
         else:
-            _print_today(connection, keep)
+            _print_today(connection, keep, show_all=args.all)
         return 0
     except sd_db.SdDbError as error:
         raise WorkRefusal(str(error)) from error
@@ -1715,6 +1715,8 @@ def register(groups: Any, store: Any) -> None:
     today.add_argument("--only", action="append", metavar="NAME",
                        help="keep only this repository's rows, by short name (system), or fleet for items in "
                             "none; repeat for more; every section and count follows")
+    today.add_argument("--all", action="store_true",
+                       help="print every row of every section, not five and `… N more` (text view only)")
     today.set_defaults(handler=run_today)
 
     items = store.add_parser("items", help="workspace items from the shared database")
