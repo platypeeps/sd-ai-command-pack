@@ -193,7 +193,7 @@ The dashboard does the same: Management, the repository's page, `lane_host`, Mov
 Both refuse an unregistered path and a name outside `[a-z0-9-]+`.
 A move sets every clone row of the remote, so clones never disagree.
 The queue lives in the hub database, so pending entries follow a move and nothing is copied.
-The dashboard Queue page lists each managed lane with its host; Release there ends a stuck claim.
+Today's Queue view on the dashboard lists each managed lane with its host; Release there ends a stuck claim.
 
 A move holds the ship lock of the machine that hosts the lane, from before its read to after its commit.
 Every ship takes that lock, so a held lock proves no ship runs.

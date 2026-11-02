@@ -55,7 +55,7 @@
   // item:end
   const GROUPS = [
     // build (sd:5781): the Now group by job: Today what wants you, Decide what waits on a ruling (Decisions, Scoring), then Briefs and Queue.
-    ['Now',       [['Today', 'sunrise', 't'], ['Decide', 'list-checks', 'l'], ['Briefs', 'inbox', 'i'], ['Queue', 'git-merge', 'u']]],
+    ['Now',       [['Today', 'sunrise', 't'], ['Decide', 'list-checks', 'l'], ['Briefs', 'inbox', 'i']]],
     ['Work',      [['Tasks', 'list-todo', 'k'], ['GitHub', 'git-branch', 'b'], ['Writing', 'pen-line', 'w'], ['Research', 'flask-conical', 'r'], ['Contributions', 'git-pull-request', 'c']]],
     ['Knowledge', [['Documents', 'file-text', 'd'], ['Notes', 'notebook-pen', 'n'], ['Watches', 'eye', 'y'], ['Studio', 'mic', 'z']]],
     ['Places',    [['HOA', 'droplets', 'h'], ['Home', 'house', 'o']]],

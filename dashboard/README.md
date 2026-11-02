@@ -59,12 +59,13 @@ and the reason, never an empty list. Nothing is stored and nothing on Now
 writes; there is no dismiss.
 
 Today is one page with no tabs (sd:5921, the system checkout's `system/docs/work/2026-10-23-today-queue/design.md`):
-- The annunciator: Jobs, Lane, Reports, Pulls, Mail and Repos filter Needs you; Sessions opens In motion; Gate opens Queue.
+- The annunciator: Jobs, Lane, Reports, Pulls, Mail and Repos filter Needs you; Sessions and Gate open the Queue view.
 - The day track: the last 24 hours as marks (landed, failed jobs, new briefs, sessions), with a key linked to Tasks.
 - **Needs you**: every row that asks for an act, ranked broken, look, queued. The work items and briefs fold into group
   rows ("114 items past due" with Triage and Snooze all 1w; "4 new briefs" with Mark all seen). The rail badge counts
   this list's broken rows, else its look rows.
-- **In motion**: the open items with a live session, and the lane's merging and landed counts.
+- **Queue** (pack sd:7234): one row per repo that opens to its working, merging, next and blocked rows, and with its
+  filters on, its suggested ready items and ended runs. It took Queue's Overview, Today's Queues and In motion.
 
 Decisions are on **Decide** and GitHub on **GitHub**; an old `#view=` address opens its new home with its query.
 `sd today` prints the sections the Status tab showed.
@@ -200,10 +201,11 @@ Acknowledgement leaves notification delivery history and local task status separ
 **Settings** at `/settings` holds the Fleet keys first (sd:3989): `sd.fleet_owners` and `sd.copilot_review`, read with `sd config list sd --json` and set with `sd config set`.
 Then what each browser keeps for the dashboard (sd:3438): the theme and the sections width; the rail's right edge also drags the width (sd:3445), and both stay in browser storage.
 
-**Queue** at `/queue` shows each managed repository's `sd-ship lane` queue (sd:2585), with the host that runs it.
-The queue lives in the hub database, so a lane hosted on another machine shows too, folder or not (sd:3284); lanes with no row share one Idle line.
+Today's **Queue** view shows each managed repository's `sd-ship lane` queue (sd:2585), with the host that runs it.
+It was the Queue page until pack sd:7234; `/queue` answers 301 to `/today#view=queue`.
+The queue lives in the hub database, so a lane hosted on another machine shows too, folder or not (sd:3284); a repo with no row is not drawn.
 The page reads each lane in-process with the pack's own `sd_lane`, the read `lane list` makes, and runs `lane list` only where that read could differ (sd:TBD).
-The header shows load5 with its 1- and 15-minute neighbours, and the gate slots in use against `sd gate status`'s cap.
+Today's Gate lamp shows the gate slots in use and the load.
 Each item is one row: merging (step, holder host, claim age, lease end; a passed lease lights caution), next (order, gate, head), building, blocked (status, step, the reason's first line, who acts), cancelled (when, head), or landed today (pull request, merge commit).
 Blocked and cancelled entries show for three days; older ones drop off.
 Metrics' Lane times view (pack sd:7233, Queue's Last 7 days until then) shows each lane's median wait (enqueue to claim), median gate time (the speculative gate plus prepare) and slowest entry, enqueue to end, read from the entries' history rows (pack sd:6006).

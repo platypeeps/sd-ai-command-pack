@@ -386,7 +386,7 @@ Workers:
   Keep a group near 300 changed lines. Name every grouped row in the pull request. Where goldens exist, bless them once per bundle.
   A change that moves state in steps still gets its own pull request.
   Add a bundle's shadow columns in one schema migration, not one per feature (pack sd:6358).
-  Bundling comes before parallel lanes: revisit them only when the Queue page's median wait (pack sd:6006) passes 1 hour.
+  Bundling comes before parallel lanes: revisit them only when Metrics' Lane times median wait (pack sd:6006) passes 1 hour.
 - **Repository work uses the existing `ready` status (pack sd:6000).** A second status would split one queue in two.
   A ruling with a clear spec moves its item to `ready`: nothing is left to ask before a build.
   The lane brief and "pick up open items" take `ready` items first: a builder can finish them without a question.
