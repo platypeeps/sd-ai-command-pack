@@ -8,18 +8,26 @@ header shape answers its status and bytes.
 
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
+import subprocess
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
 from unittest import mock
 
-from sd_dashboard import studio
+from sd_dashboard import studio, v2
 from support import ScreenCase
+from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
+from test_v2_tasks import SHELL, STAND_IN
+from test_v2_today import OSASCRIPT
 from test_workflow_actions import BrowserSession
+
+STATIC = Path(v2.__file__).resolve().parent / "static"
 
 #: 1000 bytes of ASCII, so a slice of it says which bytes came back.
 MEDIA = bytes(48 + i % 10 for i in range(1000))
@@ -47,6 +55,9 @@ def fixture(base: Path) -> tuple[Path, Path]:
     outside.mkdir(parents=True)
     (outside / "secret.png").write_bytes(b"outside")
     (cat / "previews").symlink_to(outside, target_is_directory=True)
+    # A file in a root that links out of it: to the project folder, and out of the repository.
+    (cat / "candidates" / "link.png").symlink_to(cat / "stray.png")
+    (cat / "candidates" / "out.png").symlink_to(outside / "secret.png")
     (cat / "project.json").write_text(json.dumps({
         "kind": "shirt", "title": "Cat shirt", "brief": "A cat on a shirt.", "item": "sd:42",
         "roots": {"candidates": "candidates", "media": "media", "previews": "previews", "print": "../escape", "poster": "candidates"},
@@ -98,6 +109,12 @@ class TheProjects(ScreenCase):
         self.assertEqual([f["path"] for f in roots["candidates"]["files"]], ["shirts/cat/candidates/one.png"])
         self.assertEqual([(f["name"], f["type"], f["ranged"], f["bytes"]) for f in roots["media"]["files"]],
                          [("clip.mp4", "video", True, 1000), ("take.wav", "audio", True, 1000)])
+
+    def test_a_root_with_more_than_files_lists_the_first_and_says_it_was_cut(self):
+        with mock.patch.object(studio, "FILES", 1):
+            roots = {r["role"]: r for r in self.read()["projects"][0]["roots"]}
+        self.assertEqual(([f["name"] for f in roots["media"]["files"]], roots["media"]["cut"]), (["clip.mp4"], True))
+        self.assertEqual(([f["name"] for f in roots["candidates"]["files"]], roots["candidates"]["cut"]), (["one.png"], False))
 
     def test_a_repository_outside_repo_root_or_unregistered_lists_nothing(self):
         other = Path(self.tmp.name) / "elsewhere"
@@ -192,6 +209,37 @@ class TheServer(BrowserSession):
                 self.assertEqual(headers["Content-Security-Policy"], studio.POLICY)
         self.assertEqual(self.fetch("/studio/files/art/shirts/cat/candidates/one.png")[1]["Content-Type"], "image/png")
 
+    def run_page(self, doc, body):
+        """studio.js under JavaScriptCore against the stand-in shell, `/api/studio` answering `doc`; `R` as `body` left it."""
+        script = (STAND_IN + "location.origin = 'http://dash.example.test';\n" + (STATIC / "markup.js").read_text(encoding="utf-8")
+                  + "\nconst mk = window.markup.html;\n" + SHELL + READ_SHELL
+                  + f"\nANSWER = p => p === '/api/studio' ? [200, {json.dumps(doc)}] : [404, {{}}];\n"
+                  + (STATIC / "studio.js").read_text(encoding="utf-8")
+                  + "\nvar R = {};\n(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
+                  + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
+                  + "function run() { OUT.R = R; return JSON.stringify(OUT); }\n")
+        result = subprocess.run([OSASCRIPT, "-l", "JavaScript", "-e", script], capture_output=True, text=True, timeout=60, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertIsNone(out["error"])
+        return out
+
+    def test_every_gallery_file_the_page_links_answers_200_and_a_bad_file_lists_with_its_error(self):
+        """The design's criteria: the links are the ones studio.js draws in Details, not the API's paths."""
+        doc = json.loads(self.fetch("/api/studio")[2])
+        out = self.run_page(doc, "R.rows = ELS.rows.html; window.PAGE_LIST.select('art/shirts/cat'); R.details = ELS.details.html;")
+        rows, details = out["R"]["rows"], out["R"]["details"]
+        self.assertIn('title="project.json does not parse:', rows)
+        self.assertIn("<button type=\"button\">broken</button>", rows)
+        links = sorted({html.unescape(u) for u in re.findall(r'(?:src|href)="(/studio/files/[^"]*)"', details)})
+        self.assertEqual(links, ["/studio/files/art/shirts/cat/candidates/one.png", "/studio/files/art/shirts/cat/media/clip.mp4",
+                                 "/studio/files/art/shirts/cat/media/take.wav"])
+        self.assertIn('<video controls preload="metadata" src="/studio/files/art/shirts/cat/media/clip.mp4">', details)
+        self.assertIn('<audio controls preload="metadata" src="/studio/files/art/shirts/cat/media/take.wav">', details)
+        for link in links:
+            with self.subTest(link=link):
+                self.assertEqual(self.fetch(link)[0], 200)
+
     def test_a_range_on_an_mp4_answers_206_with_its_bytes(self):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=0-99")
         self.assertEqual((status, headers["Content-Range"], headers["Accept-Ranges"], body), (206, "bytes 0-99/1000", "bytes", MEDIA[:100]))
@@ -210,6 +258,7 @@ class TheServer(BrowserSession):
 
     def test_a_path_outside_its_roots_answers_404(self):
         for tail in ("art/shirts/cat/stray.png", "art/shirts/cat/previews/secret.png", "art/shirts/cat/candidates/.hidden.png",
+                     "art/shirts/cat/candidates/link.png", "art/shirts/cat/candidates/out.png",
                      "art/shirts/cat/candidates/notes.md", "art/shirts/cat/candidates/../stray.png",
                      "art/shirts/cat/candidates/%2e%2e/stray.png", "art/shirts/cat/project.json", "missing/a.png", "art"):
             with self.subTest(tail=tail):
