@@ -335,9 +335,9 @@ def _standing(connection, command, values, *, expected_catalog, screen, path, ho
 def standing_refusal(connection, command, values, *, expected_catalog, screen="item", path=None, home=None, require_queue=False):
     """The refusal `prepare` will make for every row alike, or None.
 
-    A batch that sets a row up before it asks -- `sd_plan.py` gives the row a
-    branch with `sd work register`, which writes a decision note and bumps the
-    item's revision -- asks this once and skips the setup when it answers.
+    A batch that sets a row up before it asks -- one that gives the row a
+    branch writes a decision note and bumps the item's revision -- asks this
+    once and skips the setup when it answers.
     Without it a refusal that stands for a hundred nights costs a hundred
     notes and a hundred revisions on a row that was never queued: first a
     pending restore (sd:786), then a `plan-item` entry the palette registers

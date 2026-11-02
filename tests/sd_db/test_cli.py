@@ -38,7 +38,7 @@ class CliCase(unittest.TestCase):
         self.home = Path(self.tmp.name)
         (self.home / ".local/share/sd").mkdir(parents=True)
 
-    def sd_db(self, *args, expect=0, cwd=None, unset=(), **extra):
+    def sd_db(self, *args, expect=0, unset=(), **extra):
         environment = dict(os.environ)
         environment["HOME"] = str(self.home)
         environment.pop("PYTHONPATH", None)
@@ -53,10 +53,6 @@ class CliCase(unittest.TestCase):
         environment.pop("XDG_STATE_HOME", None)
         completed = subprocess.run(
             [sys.executable, str(ENTRYPOINT), *args], capture_output=True, text=True, input="",
-            # `work register` takes no repository argument: the checkout is
-            # the one enclosing the working directory, so a test of it has to
-            # be able to say where it is standing.
-            cwd=None if cwd is None else str(cwd),
             env={**environment, "PYTHONPATH": str(PACKAGE_ROOT), **extra},
         )
         self.assertEqual(completed.returncode, expect, completed.stdout + completed.stderr)
@@ -543,6 +539,11 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.sd_db("repo", "add", str(self.checkout))
         completed = self.sd_db("repo", "list", "--manged", expect=1)
         self.assertIn("--manged", completed.stderr)
+
+    def test_work_register_is_gone(self):
+        """No verb files a `work` row (pack sd:7064); `sd task add` files a task."""
+        completed = self.sd_db("work", "register", "docs/work/x/prd.md", expect=1)
+        self.assertIn("Usage: sd-db", completed.stdout + completed.stderr)
 
     def test_an_unknown_source_names_the_sources(self):
         completed = self.sd_db("import", "nowhere", expect=1)

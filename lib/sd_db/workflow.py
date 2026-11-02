@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import pathlib
 import re
 import sqlite3
 from datetime import date
@@ -50,8 +49,8 @@ USER_FIELDS = frozenset({"title", "body", "priority", "due", "repo", "kind"})
 RECURRENCE_FIELDS = frozenset({"recurrence", "recurrence_anchor", "recurrence_lead"})
 
 #: `branch`, which `edit_item` only clears (sd:2818): a stale name has no
-#: other way out. Setting one stays with `sd work register`,
-#: which checks it against git. Outside `USER_FIELDS` for the same reason as
+#: other way out. Setting one stays with the build that works the row
+#: (`build.py`). Outside `USER_FIELDS` for the same reason as
 #: `RECURRENCE_FIELDS`.
 BRANCH_FIELDS = frozenset({"branch"})
 
@@ -63,10 +62,10 @@ PARK_FIELDS = frozenset({"parked_at"})
 
 #: The item kinds a person may set by hand: the five the pack's `sd task add`
 #: files (`ADD_KINDS`, `bin/sd_work.py`), for the reason that list gives. Each
-#: other kind in `item.kind`'s CHECK has a producer -- `work` the work lane,
-#: `report` the job that ran, `skill-review` the catalogue -- or is `idea`,
-#: which `writing.list_pieces` reads as a draft article only when it carries
-#: a `piece`. A hand edit that made one would be a second way to make that row,
+#: other kind in `item.kind`'s CHECK has a producer -- `report` the job that
+#: ran, `skill-review` the catalogue -- or is `idea`, which
+#: `writing.list_pieces` reads as a draft article only when it carries a
+#: `piece`, or is `work`, which is retiring and has none (pack sd:7064). A hand edit that made one would be a second way to make that row,
 #: and a hand edit that unmade one would take a row away from its producer.
 HAND_KINDS = ("task", "personal", "followup", "work-idea", "personal-idea")
 
@@ -450,87 +449,6 @@ def capture_task(
         return item_state(connection, item)
 
 
-def register_work_item(
-    connection: sqlite3.Connection, *, repo: str, path: str, title: str,
-    created_at: str, branch: str | None = None, source_commit: str | None = None,
-    who: str,
-) -> dict:
-    """Register a `docs/work` folder that exists on disk as the row that owns it.
-
-    The row owns the item's status (sd:3015), and this is how a new folder
-    gets one; without it the folder has no readable status at all, which is
-    what `sd-status` reports as `status-unreadable`.
-
-    It is deliberately narrow. It creates one
-    row for one folder out of what the folder and git already say, and decides
-    nothing: the title and date come from the frontmatter, the commit from the
-    checkout, the status is always `planning`, because an item nobody has
-    started is what a new folder is.
-
-    `branch` is the branch the work is done on -- the one meaning every reader
-    of the column has (`runner.py:_item`, `sd work register`, `sd_plan.py`) --
-    and it is None unless the caller can name a local head. It is never the
-    remote default: `origin/main` passes the runner's shape check and names no
-    branch, which is how 65 rows came to read as runnable and fail only inside
-    the clone (sd:462). NULL is the honest state, and `sd work register` is what
-    fills it.
-
-    Registering twice is not an error. The caller that wants to know writes
-    the `created` key; the unique index on `(source, external_id)` is what
-    makes the second call safe rather than this check.
-    """
-    who = _text(who, "who")
-    repo = _text(repo, "repo")
-    path = _text(path, "path")
-    title = _text(title, "title")
-    created_at = _text(created_at, "created_at")
-
-    owner = repos.row_for(connection, repo)
-    if owner is None:
-        raise WorkflowError(f"repository {repo!r} is not registered; `bin/sd-db repo add` first")
-    # The key the row holds, so `external_id` is built from it and a second
-    # machine builds the same one (sd:1439).
-    repo = owner["path"]
-
-    parts = tuple(pathlib.PurePosixPath(path).parts)
-    if path.startswith("/") or ".." in parts:
-        raise WorkflowError("path must be relative to the repository, without `..`")
-    # Exactly four components, because that is what the readers enumerate:
-    # `docs/work/<item>/prd.md`, one star. `docs/work/a/nested/prd.md` would
-    # file a row no reader matches to a folder.
-    if len(parts) != 4 or parts[:2] != ("docs", "work") or parts[-1] != "prd.md":
-        raise WorkflowError("path must be docs/work/<item>/prd.md, the file the readers key on")
-
-    try:
-        parsed = date.fromisoformat(created_at)
-    except (ValueError, TypeError):
-        raise WorkflowError("created_at must be a valid YYYY-MM-DD date") from None
-    if parsed.isoformat() != created_at:
-        raise WorkflowError("created_at must be a valid YYYY-MM-DD date")
-
-    external_id = f"{repo}::{path}"
-    with transaction(connection):
-        existing = connection.execute(
-            "SELECT id FROM item WHERE source = 'docs/work' AND external_id = ?",
-            (external_id,),
-        ).fetchone()
-        if existing is not None:
-            return {**item_state(connection, existing["id"]), "created": False}
-        # A relink moves `path` and keeps `external_id`, so the folder may
-        # already belong to a row under another key (sd:3512). Imported here:
-        # `progress` imports this module.
-        from .progress import item_for_artifact
-        linked = item_for_artifact(connection, repo, path)
-        if linked is not None:
-            return {**item_state(connection, linked["id"]), "created": False}
-        item = create_item(
-            connection, kind="work", status="planning", title=title, repo=repo,
-            branch=branch, path=path, source="docs/work", external_id=external_id,
-            source_commit=source_commit, created_at=created_at, session=who,
-        )
-        return {**item_state(connection, item), "created": True}
-
-
 def edit_item(
     connection: sqlite3.Connection, item: int, changes: dict, *,
     who: str, expected_revision: str | None = None,
@@ -673,7 +591,7 @@ DELIVERED_AT = re.compile(r"delivered at ([0-9a-f]{40,64})\b")
 def _refuse_unlanded_branch(state: dict, item: int) -> None:
     """Refuse a reasonless close of a row worked on its own branch (sd:1990, sd:2570).
 
-    `sd work register` records the branch an item is worked on.
+    The build records the branch an item is worked on (`build.py`).
     Three such items were closed while their branches had no pull request,
     and the pack's `sd task status` now refuses that; the rule lives here so
     the dashboard's status write keeps it too. A recorded merge (the `Code

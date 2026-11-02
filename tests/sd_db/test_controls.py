@@ -656,7 +656,7 @@ class NoVerbNamesItsOperatorForTheCaller(unittest.TestCase):
     It refuses three shapes of the same thing: a default on the parameter; a
     fallback in the body (`who = who or "user"`); and a literal `"user"` handed
     to a `who=` argument, including one hidden as the default of a lookup
-    (`os.environ.get("SD_SESSION", "user")`, which `sd-db work register` used).
+    (`os.environ.get("SD_SESSION", "user")`, which the retired `sd-db work register` used).
     Every function is read, private helpers and nested ones included: a
     default on `_import_piece` writes the same row as one on `import_piece`.
     """

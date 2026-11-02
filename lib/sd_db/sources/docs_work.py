@@ -2,10 +2,10 @@
 
 The importer that read `docs/work/*/prd.md` into `item` rows, and the retire
 that handed status to the rows, are gone (sd:3231): the pack reads every
-item's status from its row (sd:3015), and `sd work register` makes the row
-for a new folder. `SOURCE` is the `item.source` those rows carry. `_git`,
-`_read` and `default_branch` serve `register`, `recovery`, `sd work register`
-and the pack's `sd_work.REGISTER_NEEDS`.
+item's status from its row (sd:3015). `sd work register`, which made the row
+for a new `prd.md` folder, is gone too (pack sd:7064): a folder names its row
+with `item: sd:<id>`. `SOURCE` is the `item.source` the older rows carry.
+`_git`, `_read` and `default_branch` serve `register` and `recovery`.
 """
 
 from __future__ import annotations

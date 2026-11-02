@@ -710,7 +710,7 @@ def check_branch_lines(
     """Rule 2's advisory: an active item's `branch:` line against its row.
 
     The row's `branch` column is the copy
-    `sd work register` records and `sd-status` prints; the
+    the build records and `sd-status` prints; the
     frontmatter line is a second copy nothing reconciled (sd:1476). Many
     items still say `branch: main`, so a disagreement is a note, never a
     failure. An item with no line has nothing to disagree with, and an

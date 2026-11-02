@@ -1164,11 +1164,10 @@ def registered_base(root: pathlib.Path | str, sd_db: Any, connection: Any) -> st
 
     Rows are keyed by the registered path, and a runner clone is never at
     that path: it carries the same files under `/Volumes/sd-work/...` with
-    the same `origin`. `sd work register` already resolves such a checkout
-    to the registered repository through `sd_db.repos.registered_for` --
-    the path when the path is itself registered, else the origin, else the
-    checkout itself -- so a clone could register a folder and then not read
-    the row it made (sd:981). This is the one resolver the readers share;
+    the same `origin`. `sd_db.repos.registered_for` resolves such a checkout
+    to the registered repository -- the path when the path is itself
+    registered, else the origin, else the checkout itself -- so a clone reads
+    the row its checkout owns (sd:981). This is the one resolver the readers share;
     the rule stays the library's, and the pack does not restate it.
 
     The main worktree root first, the library second: a linked worktree of
@@ -1729,7 +1728,7 @@ class Rows:
     def branch(self, item_dir: pathlib.Path) -> str | None:
         """The row's `branch` column, `""` for none, `None` when no row answers.
 
-        The column is what `sd work register` writes and what
+        The column is what the build writes (`sd_db.build`) and what
         `sd-status` and the dashboard print. The frontmatter `branch:` line is
         a second copy nothing reconciles (sd:1382), so the branch is read from
         the row as the status is.
