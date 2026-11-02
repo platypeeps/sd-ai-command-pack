@@ -1900,10 +1900,12 @@ R.observed = document.body.dataset.observed;""")
     def test_a_lamp_shows_its_area_only_and_a_state_chip_narrows_the_rows(self):
         click = "{el}.listeners.click[0]({{ target: {{ closest: s => s === '{sel}' ? {{ id: '', dataset: {data} }} : null }} }});"
         # Credentials is in Jobs: its lamp opens that view with Credentials alone; pressed again it shows the whole view.
+        # State starts on warning, caution and unknown (sd:7207): taking out the first two leaves unknown alone.
         out = self.run_page(click.format(el="ELS.annunciator", sel="button.cell", data="{ area: 'cred' }") + "await flush();"
                             + "R.cred = BODY().html; R.note = BODY().html; R.address = OUT.address;"
                             + click.format(el="ELS.annunciator", sel="button.cell", data="{ area: 'cred' }")
-                            + click.format(el="PANEL()", sel="[data-f]", data="{ f: 'state', v: 'unknown' }")
+                            + click.format(el="PANEL()", sel="[data-f]", data="{ f: 'state', v: 'warning' }")
+                            + click.format(el="PANEL()", sel="[data-f]", data="{ f: 'state', v: 'caution' }")
                             + "R.unknown = BODY().html;")
         cred, unknown = out["R"]["cred"], out["R"]["unknown"]
         self.assertEqual(re.findall(r'<section class="area" id="a-(\w+)"', cred), ["cred"])
@@ -1921,8 +1923,10 @@ R.observed = document.body.dataset.observed;""")
 
     def test_an_areas_title_line_counts_its_rows_while_a_filter_hides_some_and_the_bar_holds_no_count(self):
         """sd:5504: Activity's bar on Health; the count moved from the bar's end to each area's title line (sd:5281)."""
+        # State starts on warning, caution and unknown (sd:7207): taking out warning and unknown leaves caution alone.
         out = self.run_page("R.before = BODY().html;"
-                            "PANEL().listeners.click[0]({ target: { closest: s => s === '[data-f]' ? { dataset: { f: 'state', v: 'caution' } } : null } });"
+                            "PANEL().listeners.click[0]({ target: { closest: s => s === '[data-f]' ? { dataset: { f: 'state', v: 'warning' } } : null } });"
+                            "PANEL().listeners.click[0]({ target: { closest: s => s === '[data-f]' ? { dataset: { f: 'state', v: 'unknown' } } : null } });"
                             "R.after = BODY().html;")
         def tallies(h):
             return re.findall(r'<p class="tally"><span>(\d+ of \d+ rows?)</span>', h)
@@ -2487,16 +2491,44 @@ R.cur = window.shell.view.current();""", doc)
         self.assertIn("/api/health/machine", out["gets"])
         self.assertEqual(out["sel"], [], "the Machine read cleared the Checkouts selection")
 
-    def test_show_findings_hides_the_ok_rows_and_says_so_and_show_all_lists_them(self):
-        out = self.run_page("""R.findings = BODY().html; R.filters = BODY().html;
-PANEL().listeners.click[0]({ target: { closest: s => s === '[data-f]' ? { dataset: { f: 'show', v: 'all' } } : null } });
-R.all = BODY().html;""", view="machine")
-        findings, every = out["R"]["findings"], out["R"]["all"]
-        ok = [i for i in re.findall(r'data-id="([^"]+)"', every) if i not in re.findall(r'data-id="([^"]+)"', findings)]
-        self.assertTrue(ok)
-        self.assertRegex(findings, r'<p class="quiet">[^<]*\d+ ok or queued rows? not shown: Show all lists')
+    def test_state_starts_on_the_problem_states_and_none_pressed_lists_every_row(self):
+        """sd:7207: Show has no all. State starts on warning, caution and unknown, so the ok and queued rows wait and each
+        area says how many; with no State pressed every row shows. Clear all goes back to the start."""
+        doc = self.run_doc()
+        state = {row["id"]: row["state"] for area in doc["areas"] for row in area["rows"]}
+        out = self.run_page(r"""R.start = BODY().html;
+const click = (f, v) => PANEL().listeners.click[0]({ target: { closest: s => s === '[data-f]' ? { dataset: { f, v } } : null } });
+[...BODY().html.matchAll(/data-f="state" data-v="(\w+)" aria-pressed="true"/g)].forEach(m => click('state', m[1]));
+R.none = BODY().html;
+PANEL().listeners.click[0]({ target: { closest: s => s === '[data-fclear]' ? {} : null } }); R.cleared = BODY().html;""",
+                            doc=doc, view="machine")
+        R = out["R"]
+        ids = {name: re.findall(r'<tr data-id="([^"]+)"', R[name]) for name in ("start", "none", "cleared")}
+        pressed = {name: re.findall(r'data-f="state" data-v="(\w+)" aria-pressed="true"', R[name]) for name in ("start", "none", "cleared")}
+        self.assertEqual(pressed["start"], ["warning", "caution", "unknown"])
+        self.assertTrue(ids["start"])
+        self.assertEqual({state[i] for i in ids["start"]} - {"warning", "caution", "unknown"}, set(), "the start shows an ok row")
+        self.assertRegex(R["start"], r'<p class="quiet">[^<]*\d+ ok or queued rows? not shown: press ok or queued in State to list')
+        self.assertNotIn('data-f="show" data-v="all"', R["start"])
+        self.assertRegex(R["start"], r'data-f="show" data-v="findings" aria-pressed="true"')
+        # No State pressed: every row, the ok and queued ones too, and no line says a row is hidden.
+        self.assertEqual(pressed["none"], [])
+        self.assertTrue({"ok", "queued"} & {state[i] for i in ids["none"]}, "no State pressed still hid the ok and queued rows")
+        self.assertLess(set(ids["start"]), set(ids["none"]))
+        self.assertNotIn('class="quiet"', R["none"])
+        self.assertIn("data-fclear>Clear all</button>", R["none"])
+        self.assertEqual((ids["cleared"], pressed["cleared"]), (ids["start"], pressed["start"]))
+
+    def test_an_old_show_all_link_opens_with_no_state_pressed(self):
+        """sd:7207: ?show=all named the option this replaced; the link opens on every row, and ?state= still narrows."""
+        every = self.run_page("R.b = BODY().html;", view="machine", search="?show=all")["R"]["b"]
+        self.assertEqual(re.findall(r'data-f="state" data-v="(\w+)" aria-pressed="true"', every), [])
+        self.assertRegex(every, r'data-f="show" data-v="findings" aria-pressed="true"')
         self.assertNotIn('class="quiet"', every)
-        self.assertIn('data-f="show" data-v="findings" aria-pressed="true"', out["R"]["filters"])
+        ok = self.run_page("R.b = BODY().html;", view="machine", search="?state=ok")["R"]["b"]
+        self.assertEqual(re.findall(r'data-f="state" data-v="(\w+)" aria-pressed="true"', ok), ["ok"])
+        empty = self.run_page("R.b = BODY().html;", view="machine", search="?state=")["R"]["b"]
+        self.assertEqual(re.findall(r'<tr data-id="([^"]+)"', empty), re.findall(r'<tr data-id="([^"]+)"', every))
 
     def test_the_script_adds_no_sink_and_no_inline_style(self):
         self.assertNotIn("innerHTML", HEALTH_JS)

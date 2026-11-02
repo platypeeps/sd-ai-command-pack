@@ -200,7 +200,7 @@ class EveryCommandSaysWhatItDoes(unittest.TestCase):
     def test_a_command_marked_menu_false_stays_off_the_row_menu_but_keeps_its_key(self):
         # sd:6687: the ⋯ menu skips `menu: false`; its key, in the menu too, still runs it.
         menu = block("openMenu")
-        self.assertIn("const on = live(o).filter(c => c.menu !== false);", menu)
+        self.assertIn("const on = live(o).filter(c => c.menu !== false && !shown.has(c.id));", menu)
         self.assertIn("const c = menuObj && live(menuObj).find(x => x.key === e.key);", SHELL)
 
     def test_the_row_menu_shows_does_as_the_items_second_line(self):

@@ -583,7 +583,7 @@ class OneLayoutOnEveryPage(unittest.TestCase):
             with self.subTest(name):
                 self.assertFalse({"chips", "vseg", "fseg"} & set(heads.seen))
         places = (STATIC / "places.js").read_text(encoding="utf-8")
-        self.assertIn('<div class="filters toolbar-2">${window.shell.aside.seg(\'issues-hidden\'', places)
+        self.assertIn('<div class="filters toolbar-2" id="place-issues-filters">${window.shell.aside.seg(\'issues-hidden\'', places)
 
 
 class EveryFoldControlIsALink(unittest.TestCase):
@@ -673,6 +673,40 @@ class TheBulkBar(unittest.TestCase):
 """ + found.group(0) + "  renderBulk(); R.html = bulk.html;")
         self.assertIn("<b>2</b> selected", out["html"])
         self.assertIn('data-bulk="t.hide">Hide</button>', out["html"])
+
+
+class TheRowMenu(unittest.TestCase):
+    """sd:7206: the ⋯ menu leaves out a command its row already shows as a button; the menu's key still runs it."""
+
+    def run_menu(self, body):
+        found = re.search(r"^  // menu:start\n(.*?)^  // menu:end$", SHELL_JS, re.S | re.M)
+        self.assertIsNotNone(found, "shell.js has no menu:start ... menu:end block")
+        return run_js("""var innerHeight = 900, body = document.body, put = window.markup.put, RAN = [];
+  const OBJ = new Map([['r1', { id: 'r1', label: 'Row one' }]]);
+  const CMDS = [{ id: 't.open', label: 'Open', icon: 'eye', key: 'o', primary: () => true },
+    { id: 't.snooze', label: 'Snooze', icon: 'clock', key: 'z' }, { id: 't.copy', label: 'Copy', key: 'y' }];
+  const live = () => CMDS, doesOf = c => `${c.label} it`, shownCli = () => '', run = (c, o) => RAN.push([c.id, o.id]);
+  // A row's ⋯ button: its .rowact holds the buttons rowActions drew, each a data-cmd for its object.
+  const row = btns => ({ setAttribute() {}, getBoundingClientRect: () => ({ left: 0, right: 0, top: 0, bottom: 0 }),
+    closest: s => s === '.rowact' ? { querySelectorAll: q => q === '[data-cmd]' ? btns.map(([cmd, obj]) => ({ dataset: { cmd, obj } })) : [] } : null });
+  const items = () => [...menuEl.html.matchAll(/role="menuitem" type="button" data-cmd="([^"]+)"/g)].map(m => m[1]);
+""" + found.group(1) + "  menuEl.querySelector = () => ({ focus() {}, click() {} });\n" + body)
+
+    def test_the_menu_leaves_out_what_the_row_shows_and_keeps_the_rest(self):
+        out = self.run_menu("""openMenu('r1', row([['t.open', 'r1']])); R.primary = items(); closeMenu();
+  openMenu('r1', row([['t.open', 'r1'], ['t.snooze', 'r1']])); R.icons = items(); R.html = menuEl.html;
+  menuEl.listeners.keydown[0]({ key: 'z', preventDefault() {}, stopPropagation() {} }); R.ran = RAN;
+  openMenu('r1', row([['t.open', 'r2']])); R.other = items(); closeMenu();
+  openMenu('r1', null); R.none = items();""")
+        self.assertEqual(out["primary"], ["t.snooze", "t.copy"], "the primary button's command stayed in the menu")
+        self.assertEqual(out["icons"], ["t.copy"], "an icon button's command stayed in the menu")
+        self.assertIn('data-menu-open="r1"><span>Open details</span>', out["html"])
+        self.assertIn('data-menu-ask="r1"><span>Ask in chat</span>', out["html"])
+        # The key of a command the menu left out still runs it.
+        self.assertEqual(out["ran"], [["t.snooze", "r1"]])
+        # Only this row's own buttons count: another object's, or no row at all, leaves every command in.
+        self.assertEqual(out["other"], ["t.open", "t.snooze", "t.copy"])
+        self.assertEqual(out["none"], ["t.open", "t.snooze", "t.copy"])
 
 
 class TheViewPicker(unittest.TestCase):
@@ -1608,12 +1642,13 @@ class TheViewSwitch(unittest.TestCase):
     """The view switch, cut out of shell.js: one declaration, window.PAGE_VIEWS, draws the rail's sub-entries, the one
     switch (pack sd:7084)."""
 
-    def run_view(self, body, hash="", host=False, store=None):
+    def run_view(self, body, hash="", host=False, store=None, before=""):
         block = re.search(r"^  // view:start\n(.*?)^  // view:end$", SHELL_JS, re.S | re.M)
         self.assertIsNotNone(block, "shell.js has no view:start block")
         stand_in = (VIEW_STAND_IN.replace("HASH", json.dumps(hash)).replace("WITH_HOST", json.dumps(host))
                     .replace("KEPT_STORE", json.dumps({} if store is None else store or None)))
-        script = (stand_in + block.group(1) + r"""
+        # `before` runs ahead of the block: a page's own listeners, registered before shell.js's.
+        script = (stand_in + before + "\n" + block.group(1) + r"""
 var R = {};
 const shown = () => Object.values(PANELS).filter(p => !p.hidden).map(p => p.id);
 const RAIL = () => LI.children.length ? LI.children[0].children.map(li => li.children[0]) : [];
@@ -1651,6 +1686,18 @@ function run() { OUT.R = R; OUT.STORE = STORE; return JSON.stringify(OUT); }
         self.assertEqual((r["cur"], r["li"], r["back"], r["cur2"], r["again"]), ("cadence", True, False, "cadence", True))
         # A panel's own display (Today's grid) would beat the hidden attribute without this rule.
         self.assertIn('main [id^="view-"][hidden]', SHELL_CSS)
+
+    def test_none_shows_no_view_until_the_next_show_even_of_the_last_one(self):
+        # pack sd:7216: Tasks' ?realm=all lists every realm at once, so no rail entry is current. A page calls none() in
+        # its DOMContentLoaded listener, before the shell's start, which then fires no view; the next show(), even of the
+        # view shown before, shows it and fires shell:view.
+        out = self.run_view("R.cur = view.current(); R.links = RAIL().map(a => a.getAttribute('aria-current'));"
+                            " R.back = view.show('reports'); R.cur2 = view.current(); R.links2 = RAIL().map(a => a.getAttribute('aria-current'));",
+                            host=True, before="document.addEventListener('DOMContentLoaded', () => view.none());")
+        r = out["R"]
+        self.assertEqual((r["cur"], r["links"]), (None, [None, None, None]))
+        self.assertEqual((r["back"], r["cur2"], r["links2"]), (True, "reports", ["true", None, None]))
+        self.assertEqual(out["events"], [{"id": "reports", "first": True, "api": None}])
 
     def test_storage_that_throws_is_no_view(self):
         # sd:5753: keep: false went with the last views that set it (Designs' and Contributions' Hidden); a stored id no page

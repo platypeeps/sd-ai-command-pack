@@ -32,7 +32,8 @@
   const act = id => html`<td class="act">${window.shell.commands.rowActions(id)}</td>`, ACT = [html`<span class="sr">Actions</span>`];
   const unknown = why => html`<p class="state-unknown"><b>▨ Not read.</b> ${why}</p>`;
   const day = s => String(s || '').slice(0, 10);
-  const table = (head, rows, empty) => html`<table class="ledger place-rows"><thead><tr>${head.map(([label, cls = '']) => html`<th scope="col" class="${cls}">${label}</th>`)}</tr></thead>
+  // pack sd:7210: the table names its view's Open | All row (draw) as its toolbar, so the column filter joins that row.
+  const table = (view, head, rows, empty) => html`<table class="ledger place-rows" data-toolbar="${view}-filters"><thead><tr>${head.map(([label, cls = '']) => html`<th scope="col" class="${cls}">${label}</th>`)}</tr></thead>
     <tbody>${rows.length ? rows : html`<tr class="empty"><td colspan="${head.length}">${empty}</td></tr>`}</tbody></table>`;
 
   // sd:6162, sd:6164: a realm place's Overview tile (place_tiles.py): its link, whether it answers, and a button per
@@ -92,9 +93,9 @@
     issuesHid ??= window.shell.aside.mode('issues-hidden');
     const hidden = doc.issues.filter(r => r.hidden).length, rows = doc.issues.filter(r => window.shell.aside.shows(issuesHid, r.hidden));
     const notes = [doc.issues_reason && `Not every issue was read: ${doc.issues_reason}.`, doc.issues_store?.reason && `Hide is off: ${doc.issues_store.reason}.`].filter(Boolean);
-    return html`<div class="place-issues-head"><h3>Issues</h3><div class="filters toolbar-2">${window.shell.aside.seg('issues-hidden', 'Hidden', issuesHid, { open: doc.issues.length - hidden, aside: hidden })}</div><p class="note">The realm's open GitHub and Jira issues assigned to you or filed by you, as GitHub's Your issues lists them.</p></div>
+    return html`<div class="place-issues-head"><h3>Issues</h3><div class="filters toolbar-2" id="place-issues-filters">${window.shell.aside.seg('issues-hidden', 'Hidden', issuesHid, { open: doc.issues.length - hidden, aside: hidden })}</div><p class="note">The realm's open GitHub and Jira issues assigned to you or filed by you, as GitHub's Your issues lists them.</p></div>
       ${notes.map(n => html`<p class="note">${n}</p>`)}
-      <table class="ledger place-issues"><thead><tr><th scope="col">Source</th><th scope="col">Issue</th><th scope="col">Title</th><th scope="col" class="hide-sm">Repo</th><th scope="col" class="hide-sm">Why</th></tr></thead>
+      <table class="ledger place-issues" data-toolbar="place-issues-filters"><thead><tr><th scope="col">Source</th><th scope="col">Issue</th><th scope="col">Title</th><th scope="col" class="hide-sm">Repo</th><th scope="col" class="hide-sm">Why</th></tr></thead>
       <tbody>${rows.length ? rows.map(r => html`<tr${r.hidden ? html` class="hidden-row"` : ''}><td class="src">${r.tracker}</td>
         <td class="ref">${r.url ? html`<a href="${r.url}" target="_blank" rel="noopener">${r.ref}</a>` : r.ref}</td>
         <td class="what">${r.title}${r.hidden ? html` <span class="note">(hidden)</span>` : ''}</td><td class="hide-sm">${r.repo}</td><td class="hide-sm">${r.reason || '—'}</td></tr>`)
@@ -106,20 +107,20 @@
   const DRAW = {
     overview: (doc, rows) => [rows.length ? html`<ul class="place-tiles">${rows.map(tileHTML)}</ul>` : '', ''],
     // sd:5635: a task row is selected in place; Details is the Tasks page's (task-details.js), with a link to Tasks.
-    tasks: (doc, rows) => [html`${table([['ID', 'num'], ['What'], ['Kind', 'hide-sm'], ['Status'], ['Due', 'hide-sm'], ACT],
+    tasks: (doc, rows) => [html`${table('tasks', [['ID', 'num'], ['What'], ['Kind', 'hide-sm'], ['Status'], ['Due', 'hide-sm'], ACT],
       rows.map(r => html`<tr data-id="${r.id}" aria-selected="${String(String(r.id) === sel.tasks)}"><td class="ref num">sd:${r.id}</td><td class="what"><button type="button">${r.title}</button></td>
         <td class="hide-sm">${r.kind}</td><td>${r.status}</td><td class="hide-sm due">${day(r.due) || '—'}</td>${act(String(r.id))}</tr>`),
       rows.length || !doc.done?.length ? $('view-tasks')?.dataset.empty || 'No open item without a repo.'
         : `No open item. All lists the ${plural(doc.done.length, 'item')} done this week.`)}${issuesHTML(doc)}`, ''],
     // sd:5620: a brief row is selected in place; Details is the Briefs page's (brief-details.js), with a link to Briefs.
-    briefs: (doc, rows) => [table([['Day'], ['Brief'], ['Words', 'num hide-sm'], ['Lead', 'hide-sm'], ACT],
+    briefs: (doc, rows) => [table('briefs', [['Day'], ['Brief'], ['Words', 'num hide-sm'], ['Lead', 'hide-sm'], ACT],
       rows.map(r => html`<tr data-id="${r.id}" aria-selected="${String(r.id === sel.briefs)}"><td class="when">${r.day}</td><td class="what"><button type="button">${r.subj}</button></td>
         <td class="num hide-sm">${r.words}</td><td class="lead hide-sm">${r.lead}</td>${act(r.id)}</tr>`),
       rows.length || !doc.rows.length ? 'No brief is filed for this place.' : `No unseen brief. All lists the ${plural(doc.rows.length, 'seen brief')}.`), ''],
     // sd:5636: a report row is selected in place too; Details is the Reports page's (report-details.js), with a link to Reports.
     reports: (doc, rows) => {
       const state = r => r.status === 'done' ? 'ok' : r.attention ? 'warning' : 'queued';
-      return [table([[html`<span class="sr">State</span>`], ['Job'], ['Report'], ['Status', 'hide-sm'], ['When'], ACT],
+      return [table('reports', [[html`<span class="sr">State</span>`], ['Job'], ['Report'], ['Status', 'hide-sm'], ['When'], ACT],
         rows.map(r => html`<tr data-id="r${r.id}" aria-selected="${String('r' + r.id === sel.reports)}"><td class="g ${state(r)}"><span aria-hidden="true">${GLYPH[state(r)]}</span><span class="sr">${state(r)}</span></td>
           <td class="job">${r.job}</td><td class="what"><button type="button">${r.title}</button></td><td class="hide-sm">${r.status}</td><td class="when">${day(r.at)}</td>${act('r' + r.id)}</tr>`),
         rows.length || !doc.rows.length ? `No report from ${doc.jobs.join(', ')} among the newest ${doc.limit}.`
@@ -272,7 +273,8 @@
     const doc = RAW[view], box = $(`${view}-rows`), tally = $(`${view}-tally`), open = OPEN[view];
     const every = view === 'tasks' ? [...doc.rows, ...doc.done || []] : doc.rows, rows = !open || SHOW[view] === 'all' ? every : every.filter(open);
     const seg = (v, word, n) => ({ v, pressed: SHOW[view] === v, title: `${word}: ${n}`, label: html`${word} <span class="n">${String(n)}</span>` });
-    const bar = open ? html`<div class="filters">${window.shell.list.fbar(window.shell.list.fseg(view, 'Shown', [seg('open', 'Open', every.filter(open).length), seg('all', 'All', every.length)]))}</div>` : '';
+    // pack sd:7210: one filter row, as HOA's Tasks: Open | All, then the table's column filter. No .fbar: it takes the row's width.
+    const bar = open ? html`<div class="filters toolbar-2" id="${view}-filters" role="group" aria-label="Filters">${window.shell.list.fseg(view, 'Shown', [seg('open', 'Open', every.filter(open).length), seg('all', 'All', every.length)])}</div>` : '';
     const [body, count] = DRAW[view](doc, rows);
     put(box, html`${doc.reason ? html`<p class="note">${doc.reason}</p>` : ''}${bar}${body}`);
     put(tally, count ? html`<span>${count}</span>` : html``);

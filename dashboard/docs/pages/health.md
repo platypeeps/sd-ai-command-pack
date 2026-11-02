@@ -32,11 +32,13 @@ read shows no count. With no view named the page opens the view an `?area=`
 value names, else Checkouts. A lamp of another view opens that view with its
 area alone. The filters are Activity's bar (sd:5504): Show and State as
 segments, Area as a pick, the picked areas and the query as tokens, then Clear
-all; an area's title line counts its rows while a filter hides some. Show
-findings (the default) leaves out ok and queued rows and
-says how many; Show all (`?show=all`) lists them; Show ignored (`?show=ignored`)
-lists the ignored rows instead of the areas. A finding's detail is one line
-in the table; Details carries the row in full.
+all; an area's title line counts its rows while a filter hides some. State
+starts on warning, caution and unknown, so each area leaves out its ok and
+queued rows and says how many; with no State pressed every row shows, and
+Clear all returns State to its start (sd:7207). A State other than the start
+goes in `?state=`; an old `?show=all` link opens with no State pressed. Show
+ignored (`?show=ignored`) lists the ignored rows instead of the areas. A
+finding's detail is one line in the table; Details carries the row in full.
 
 Dependencies, Security and Credentials read rows nightly jobs stored; the page
 calls no service and reads no credential.

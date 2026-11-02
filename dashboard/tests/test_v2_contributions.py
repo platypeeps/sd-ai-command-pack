@@ -784,6 +784,22 @@ R.code = 1; shellRun(post, ext); await flush(); R.code = 0; shellRun(post, ext);
           : path === '/api/shadow/sync' ? [202, { running: true }] : path === '/api/shadow/state' ? (n++ ? [200, %s] : [200, { running: true }])
           : [404, { error: 'no answer' }]; })()""" % json.dumps(finished))
 
+    def test_rerun_collector_heads_the_open_view_and_its_button_runs_the_sync(self):
+        """sd:7211: Re-run collector heads the Open view, as Clean all safe heads Health's Checkouts: the collector's row
+        actions in the Open head, Hidden too, so it needs no Collector pick first. Its button runs collector.sync."""
+        rows = r"""C.rowActions = id => { const o = C.get(id), p = o && REG.find(c => c.on === o.type && c.primary?.(o));
+  return mk`<span class="rowact">${p ? mk`<button data-cmd="${p.id}" data-obj="${id}">${p.label}</button>` : ''}<button data-menu-for="${id}">more</button></span>`; };
+"""
+        done = {"running": False, "error": None, "trackers": []}
+        out = self.run_page(f"""R.open = ELS.tally.html; {self.SHOW_HIDDEN} R.hidden = ELS.tally.html;
+const [, id, obj] = /data-cmd="([^"]+)" data-obj="([^"]+)"/.exec(R.open) || [];
+R.ran = [id, obj]; if (id) {{ shellRun(cmd(id), C.get(obj)); await flush(); }}""", answer=self.sync_answer(done), extra=rows)
+        for head in ("open", "hidden"):
+            self.assertIn('<button data-cmd="collector.sync" data-obj="collector">Re-run collector</button>', out["R"][head], head)
+        self.assertEqual(out["R"]["ran"], ["collector.sync", "collector"])
+        self.assertEqual(out["posts"], [["/api/shadow/sync", {}, 64]])
+        self.assertEqual(out["gets"][-1], "/api/contributions/page", "the page did not read again when the sync ended")
+
     def test_rerun_collector_starts_the_servers_sync_and_reads_the_page_again_when_it_ends(self):
         # sd:2207: the route runs sd shadow sync in a server thread; the page asks until it ends, then reads again. A quiet
         # success says nothing more, and an unconfigured Jira is not a problem.
@@ -1099,7 +1115,7 @@ const BUTTONS = box => { if (box.parsedFrom === box.html) return box.buttons; bo
       focus() { document.activeElement = b; OUT.focused.push(ds); } };
     found.push(b); }
   return box.buttons = found; };
-['rows', 'filed-rows', 'details', 'annunciator'].forEach(id => { const box = document.getElementById(id);
+['rows', 'filed-rows', 'details', 'annunciator', 'tally'].forEach(id => { const box = document.getElementById(id);
   box.querySelectorAll = sel => sel === 'button' ? BUTTONS(box) : []; box.contains = a => !!a && a.box === box && a.html === box.html; });
 const live = id => { const o = C.get(id); return REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true)); };
 C.rowActions = id => { const p = live(id).find(c => c.primary?.(C.get(id)));

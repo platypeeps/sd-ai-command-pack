@@ -81,6 +81,15 @@ class Join(ScreenCase):
         self.assertEqual(f"-C {self.wt}/a", found["rows"][2]["via"])
         self.assertEqual("Lane prepare on hub", found["rows"][1]["session"])
 
+    def test_each_row_carries_its_items_repo(self):
+        # pack sd:7222: In motion groups its rows by repo, read from the item already read here; none is None.
+        item = self.item("repo work", status="in_progress", repo=self.repo("/repos/alpha"))
+        bare = self.item("no repo work", status="in_progress")
+        lane(self.connection, item, worktree=f"{self.wt}/a")
+        lane(self.connection, bare, worktree=f"{self.wt}/b")
+        found = self.read()
+        self.assertEqual({(item, "/repos/alpha"), (bare, None)}, {(row["item"], row["repo"]) for row in found["rows"]})
+
     def test_a_branch_number_ties_a_worktree_and_an_item_flag_ties_a_process(self):
         branch_item = self.item("by branch")
         flag_item = self.item("by flag")
@@ -397,9 +406,65 @@ class TodayDraws(ScreenCase):
         super().setUp()
         self.doc = now_screen.document(self.connection, now=NOW, jobs=JobsBackend(self.tmp.name), fleet=fleet_document)
 
-    def session(self, item, kind, session, *, verified=True, started="2026-09-06T09:00:00Z", elapsed="3h 0m"):
+    def session(self, item, kind, session, *, verified=True, started="2026-09-06T09:00:00Z", elapsed="3h 0m", repo=None):
         return {"item": item, "title": f"Item {item}", "status": "in_progress", "kind": kind, "session": session,
-                "started": started, "elapsed": elapsed, "seconds": 10800, "via": f"via {kind}", "verified": verified}
+                "started": started, "elapsed": elapsed, "seconds": 10800, "via": f"via {kind}", "verified": verified, "repo": repo}
+
+    def grouped(self):
+        """Live rows in two repos and one with none, and ready items: one in alpha, four in beta, one in a third repo."""
+        self.doc["active"] = {"rows": [self.session(7, "worktree", "Worktree wt-7", repo="/repos/alpha"),
+                                       self.session(11, "lane", "Lane queue (pending)", repo=None),
+                                       self.session(9, "lane", "Lane queue (running)", repo="/repos/beta")],
+                              "sources": {}, "error": ""}
+        def ready(n, repo):
+            return {"queue": "ready", "id": n, "repo": repo, "title": f"Ready {n}", "status": "ready",
+                    "detail": "P2", "since": "2026-09-06T08:00:00Z"}
+        self.doc["queues"] = {"rows": [ready(21, "/repos/alpha"), *[ready(n, "/repos/beta") for n in (31, 32, 33, 34)],
+                                       ready(41, "/repos/gamma"),
+                                       {**ready(51, "/repos/alpha"), "queue": "build", "status": "queued"}], "error": ""}
+
+    #: A click on In motion's Live | Live + next segment.
+    MODE = ("const mode = v => ELS['motion-filters'].listeners.click[0]({ target: { closest: s => s === '[data-f=\"motion\"]'"
+            " ? { dataset: { f: 'motion', v } } : null } });\n")
+
+    def test_rows_from_two_repos_form_two_groups_and_a_no_repo_row_lands_in_unassociated_last(self):
+        # pack sd:7222: one band per repo, which the shell's table grammar folds; the rows keep their order inside it.
+        self.grouped()
+        html = self.run_page("R.active = ELS.active.html;")["R"]["active"]
+        bands = ['<tr class="band" data-band="/repos/alpha"><th colspan="5" scope="rowgroup">alpha · 1</th></tr>',
+                 '<tr class="band" data-band="/repos/beta"><th colspan="5" scope="rowgroup">beta · 1</th></tr>',
+                 '<tr class="band" data-band="unassociated"><th colspan="5" scope="rowgroup">Unassociated · 1</th></tr>']
+        at = [html.find(b) for b in bands]
+        self.assertNotIn(-1, at, html)
+        self.assertEqual(at, sorted(at), "Unassociated is not the last group")
+        self.assertLess(at[0], html.find('data-item="7"'))
+        self.assertLess(at[1], html.find('data-item="9"'))
+        self.assertLess(at[2], html.find('data-item="11"'))
+
+    def test_live_plus_next_adds_each_repos_ready_items_that_live_hides(self):
+        # pack sd:7222: Live + next adds each repo's ready items from the Queues rows, at most 3, in their order; a repo with
+        # only ready items gets its group too. Live, the start, shows none.
+        self.grouped()
+        out = self.run_page(self.MODE + """R.live = ELS.active.html; R.bar = ELS['motion-filters'].html;
+mode('next'); await flush(); R.next = ELS.active.html; R.tally = ELS['active-tally'].html; mode('live'); await flush(); R.back = ELS.active.html;""")
+        r = out["R"]
+        self.assertIn('data-f="motion" data-v="live" aria-pressed="true"', r["bar"])
+        self.assertIn("Live + next", r["bar"])
+        self.assertNotIn("#21 Ready 21", r["live"])
+        self.assertIn("#21 Ready 21", r["next"])
+        self.assertEqual([f"#{n} Ready {n}" in r["next"] for n in (31, 32, 33, 34)], [True, True, True, False])
+        self.assertNotIn("#51 Ready 51", r["next"], "a build-queue row is no suggested next item")
+        self.assertIn('<tr class="band" data-band="/repos/gamma"><th colspan="5" scope="rowgroup">gamma · 1 next</th></tr>', r["next"])
+        self.assertLess(r["next"].find('data-band="/repos/beta"'), r["next"].find("#31 Ready 31"))
+        self.assertLess(r["next"].find("#31 Ready 31"), r["next"].find('data-band="/repos/gamma"'))
+        self.assertIn("5 next", r["tally"])
+        self.assertNotIn("#21 Ready 21", r["back"])
+
+    def test_next_items_that_could_not_be_read_say_so(self):
+        self.grouped()
+        self.doc["queues"] = {"rows": [], "error": "database is locked"}
+        out = self.run_page(self.MODE + "mode('next'); await flush(); R.next = ELS.active.html;")
+        self.assertIn("Next items could not be read: database is locked", out["R"]["next"])
 
     def test_an_items_sessions_are_one_row_and_an_unread_source_is_said(self):
         self.doc["active"] = {"rows": [self.session(7, "worktree", "Worktree wt-7"),
