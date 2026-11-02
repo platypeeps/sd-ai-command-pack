@@ -212,6 +212,27 @@ request names the same container, as step 4's carried id; another scope, space
 or folder publishes afresh there, and a page or file the designation names
 wins.
 
+### A writing piece is designated on its item
+
+A writing piece (`sd writing`) has no `research.conf.py` entry either, so its
+item holds the designation, in the same `fields.publish` keys a brief takes
+(pack sd:7243). One designation covers each of the piece's files that exists:
+the draft `index.md`, `research.md`, `fact-check.md` and `adversarial.md`. Each
+is its own document, `<year>-<slug>-<stem>` with stem `draft`, `research`,
+`fact-check` or `adversarial`, titled `<piece title> · <stem>`. The request
+carries the file's text, read from the registered checkout and never a linked
+worktree's, as `content`, the piece's item as `item`, and `sd:<item>/<file>`
+as its `source`. It names no vault copy.
+
+A piece has no render, so the `sd writing` verbs that write one (`promote`,
+`register`, `stage`, `metadata`, `gate`, `park`, `adversarial`, `reconcile`)
+queue it after their write, and so does the Writing page's Mirror to Drive. Only
+a file whose text changed is queued again. The queueing never fails the verb.
+Step 5 and the carried URL work as for a brief. Do not designate a piece into
+the folder `sdw.drive_publishing_folder` names: that is the blog's publishing
+gate, and a draft there reads as cleared for publication. The page writes
+`drive: {}`, the default `Briefs/<repo>`.
+
 ### A repo's channels setting
 
 A repo may name the channels it uses, and a folder for each, on its `repo` row
@@ -601,7 +622,8 @@ Draining is six steps per request, and the order matters:
    `file=` for Drive. In a research repo that designation is a key on the
    document's `research.conf.py` entry, and it is what the *next render* reads
    — step 4 only carries the id as far as the current request. A routine
-   brief's request (`source` `sd:<item>`) skips this step: step 6 records the
+   brief's request (`source` `sd:<item>`) and a writing piece's file's
+   (`source` `sd:<item>/<file>`) skip this step: step 6 records the
    URL and its container, and the next render carries it into that container.
 
    A designation written as the bare `True` shorthand is amended into the dict
