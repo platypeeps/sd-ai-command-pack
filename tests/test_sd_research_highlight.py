@@ -249,6 +249,24 @@ class ChangesTheComparisonMustSee(unittest.TestCase):
         self.assertIn("changed: 1 since T", said)
         self.assertIn(f'<span style="{MARK}">Tail added</span>', page)
 
+    def test_a_line_match_leaves_the_rest_of_its_paragraph_unmatched(self) -> None:
+        """Round 2: a line of a single-newline run matched, and the deleted line beside it vanished."""
+        said, page = self.check("One.\nTwo.\n", "<p>One.</p>\n")
+        self.assertEqual(said, "changed: 0 since T\ngone: 1\nsections: Opening\n")
+        self.assertNotIn("No changes since", page)
+
+    def test_a_whole_match_uses_up_its_lines(self) -> None:
+        """Round 2: the run matched whole, then one of its lines matched again, hiding a duplicate."""
+        said, _ = self.check("One.\nTwo.\n", "<p>One. Two.</p>\n<p>One.</p>\n")
+        self.assertIn("changed: 1 since T", said)
+        self.assertNotIn("gone:", said)
+
+    def test_matching_does_not_depend_on_order(self) -> None:
+        said, page = self.check("One.\nTwo.\n", "<p>One.</p>\n<p>One. Two.</p>\n")
+        self.assertIn("changed: 1 since T", said)
+        self.assertNotIn("gone:", said)
+        self.assertIn(f'<p style="{MARK}">One.</p>\n<p>One. Two.</p>', page)
+
     def test_the_previous_note_read_back_is_not_a_gone_paragraph(self) -> None:
         said, page = self.check("**Changed since T0**: 1 paragraph, highlighted below. Sections: Opening.\n\nSame.\n",
                                 "<p>Same.</p>\n")

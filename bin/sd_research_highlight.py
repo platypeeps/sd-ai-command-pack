@@ -114,15 +114,18 @@ class Baseline:
     """The previous copy's units, each matched at most once.
 
     A unit is a heading, a list item, a table cell, a fenced block, or a run of plain lines (one
-    paragraph, however Drive wrapped it). Each line of a run is also kept, since Drive may end a
-    paragraph at a single newline; a match through a line accounts for its run.
+    paragraph, however Drive wrapped it). Drive may also end a paragraph at a single newline, so a
+    run's lines can match one by one. Each unit is one multiset of lines: a whole match takes every
+    line and needs all of them left, and a line match takes that line alone, so what no match took
+    stays unmatched and counts as gone.
     """
 
     def __init__(self, markdown: str, header: bool) -> None:
         self.units: list[tuple[str, str]] = []  # (text, section)
+        self.left: list[list[str]] = []  # each unit's lines no match has taken
+        self.full: list[int] = []  # how many lines each unit started with
         self.whole: dict[str, list[int]] = {}
         self.lines: dict[str, list[int]] = {}
-        self.used: set[int] = set()
         rows = markdown.splitlines()
         if header:
             rows = self._after_header(rows)
@@ -181,28 +184,46 @@ class Baseline:
         if not text or NOTE.match(text):
             return
         index = len(self.units)
+        parts = [line for line in lines if line] if len(lines) > 1 else [text]
         self.units.append((text, section))
+        self.left.append(parts)
+        self.full.append(len(parts))
         self.whole.setdefault(text, []).append(index)
-        for line in lines:
-            if line and line != text:  # a one-line run is its whole
-                self.lines.setdefault(line, []).append(index)
+        for line in set(parts) - {text}:
+            self.lines.setdefault(line, []).append(index)
 
     def __bool__(self) -> bool:
         return bool(self.units)
 
-    def match_unit(self, text: str) -> bool:
-        """Whether `text` is in the previous copy and not yet matched; a match uses that unit up."""
+    def match_whole(self, text: str) -> bool:
+        """Take a unit whose whole text is `text` and that no match has touched."""
 
-        for table in (self.whole, self.lines):
-            if table.get(text):
-                self.used.add(table[text].pop(0))
+        for index in self.whole.get(text, []):
+            if self.left[index] and self.full[index] == len(self.left[index]):
+                self.left[index] = []
+                return True
+        return False
+
+    def match_line(self, text: str) -> bool:
+        """Take one line `text` from a run that still holds it."""
+
+        for index in self.lines.get(text, []):
+            if text in self.left[index]:
+                self.left[index].remove(text)
                 return True
         return False
 
     def unmatched(self) -> list[tuple[str, str]]:
-        """The units no part of the new copy matched: reworded or removed."""
+        """What no match took, reworded or removed: an untouched unit once, else each line left."""
 
-        return [unit for index, unit in enumerate(self.units) if index not in self.used]
+        gone = []
+        for index, (text, section) in enumerate(self.units):
+            left = self.left[index]
+            if left and len(left) == self.full[index]:
+                gone.append((text, section))
+            else:
+                gone += [(line, section) for line in left]
+        return gone
 
 
 def _marked(tag: str) -> str:
@@ -243,15 +264,11 @@ def _note(changed: int, gone: int, sections: list[str], since: str) -> str:
     return note
 
 
-def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str, int, int, list[str]]:
-    """`page` marked, with its note: the count changed, the count gone, and the sections of both."""
+def _units(page: str, start: int, tags: list[re.Match[str]]) -> list[tuple[int, int, re.Match[str] | None, str, str]]:
+    """Each text segment between block tags: `(begin, end, unit tag or None, section, text)`."""
 
-    start = _header_end(page) if header else 0
-    if not start:
-        body = re.search(r"<body\b[^>]*>", page, re.I)
-        start = body.end() if body else 0
-    tags = [tag for tag in TAG.finditer(page, start) if tag.group(2).lower() in BLOCK]
-    out, at, section, changed, sections = [], start, "Opening", 0, []
+    units: list[tuple[int, int, re.Match[str] | None, str, str]] = []
+    section = "Opening"
     bounds = [(start, None)] + [(tag.end(), tag) for tag in tags]
     for index, (begin, tag) in enumerate(bounds):
         end = tags[index].start() if index < len(tags) else len(page)
@@ -261,12 +278,30 @@ def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str,
         name = tag.group(2).lower() if tag is not None and not tag.group(1) else ""
         if re.fullmatch(r"h[1-6]", name):
             section = text
-        if seen.match_unit(text):
+        units.append((begin, end, tag if name in UNIT else None, section, text))
+    return units
+
+
+def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str, int, int, list[str]]:
+    """`page` marked, with its note: the count changed, the count gone, and the sections of both."""
+
+    start = _header_end(page) if header else 0
+    if not start:
+        body = re.search(r"<body\b[^>]*>", page, re.I)
+        start = body.end() if body else 0
+    tags = [tag for tag in TAG.finditer(page, start) if tag.group(2).lower() in BLOCK]
+    units = _units(page, start, tags)
+    # Whole matches first, then lines: which paragraph comes first must not decide what matches.
+    found = [seen.match_whole(text) for _, _, _, _, text in units]
+    found = [hit or seen.match_line(text) for hit, (_, _, _, _, text) in zip(found, units, strict=True)]
+    out, at, changed, sections = [], start, 0, []
+    for hit, (begin, end, tag, section, _) in zip(found, units, strict=True):
+        if hit:
             continue
         changed += 1
         if section not in sections:
             sections.append(section)
-        if name in UNIT and tag is not None:
+        if tag is not None:
             out += [page[at:tag.start()], _marked(tag.group(0))]
             at = tag.end()
         else:  # text outside any unit tag, such as a list item's tail after its nested list
