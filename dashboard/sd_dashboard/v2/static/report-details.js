@@ -116,7 +116,7 @@
       // with the library's reason, for a report an open followup holds or whose fields cannot be read.
       // The design's risk, 'undo': reporting.reopen moves the report back to the status it was acknowledged from (sd:2395). It
       // was 'confirm' while sd-db had no verb that reopens a report (operator ruling, sd:2121).
-      { id: 'report.ack', on: 'report', label: 'Acknowledge', does: 'Marks the report done; Undo puts it back.', key: 'a', icon: 'check', risk: 'undo', journal: o => o.n, bulk: true, primary: o => o.open, executes: true,
+      { id: 'report.ack', on: 'report', label: 'Acknowledge', does: 'Marks the report done; Undo puts it back.', key: 'a', icon: 'check', risk: 'undo', journal: o => o.n, bulk: true, primary: o => o.open && !o.source.login, executes: true,
         when: o => !o.open ? 'already acknowledged' : !o.source.fields_read ? `its fields cannot be read: sd reports acknowledge ${o.n} finishes it`
           : o.source.followups.length ? `an open followup holds it: sd note resolve ${o.source.followups[0]}` : true,
         fields: () => [{ name: 'reason', label: 'Reason (optional)', placeholder: 'why it can close', help: 'Written on the report as a comment just before it is acknowledged. Leave it empty for none.' }],
@@ -132,8 +132,9 @@
         run: o => shell.openItem(o.n) },
       log('report'), task('report'),
       // Fix (sd:3456): the shared declaration (commands.js), on a report: a debug session for it, with the report's revision.
-      window.commands.fix('report', { item: o => o.n, report: () => true, when: o => !o.open ? 'already acknowledged' : true,
-        post: (o, path) => write(path, { revision: o.source.revision }) }),
+      // sd:6964: a report whose output shows an expired login opens that login's Credentials row instead, and leads the bar.
+      { ...window.commands.fix('report', { item: o => o.n, report: () => true, login: o => o.source.login, when: o => !o.open ? 'already acknowledged' : true,
+        post: (o, path) => write(path, { revision: o.source.revision }) }), primary: o => o.open && !!o.source.login },
       // Retry (commands.js): it posts /api/jobs/<name>/retry with the job's revision; operations.inventory's capability is the
       // off reason (sd:2118).
       { ...window.commands.retry({ job: o => ({ name: o.job, service: o.service, failed: o.failed, exit: o.exit, capability: o.caps.retry }),

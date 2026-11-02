@@ -75,6 +75,70 @@ class Classify(ScreenCase):
         self.assertNotIn("secret", json.dumps(found))
         self.assertNotIn("private-log-line", json.dumps(found))
 
+    def test_an_expired_login_names_the_login_not_only_the_failure(self):
+        # sd:6964: the login rows sit before the generic authentication rule.
+        found = job_failures.classify(failed(), self.log("Not logged in · Please run /login\nFAILED rc=1\n"))
+        self.assertEqual(found, {"score": 3, "class": "needs a person", "why": "an expired Claude login in the last run's log"})
+
+
+class Login(ScreenCase):
+    """sd:6964: an expired login in a job's output is the Health Credentials row whose Sign in fixes it.
+
+    Each line is one a tool printed in the operator's job logs, its account made an example, except where a test says."""
+
+    def row(self, text):
+        found = job_failures.login(text)
+        return found and (found["family"], found["row"], found["href"])
+
+    def test_workspace_mcp_names_the_google_account_it_needs(self):
+        line = ("Error calling tool 'search_gmail_messages': **ACTION REQUIRED: Google Authentication Needed for Google Gmail "
+                "for 'Ops@Example.test'**\\n\\n1. Open this URL in your browser")
+        self.assertEqual(self.row(line), ("google", "cred:google:ops@example.test",
+                                          "/health?area=cred&row=cred%3Agoogle%3Aops%40example.test"))
+
+    def test_a_job_that_says_it_in_its_own_words_finds_the_account_on_a_later_line(self):
+        # cold-outreach-triage, sd:6951: the first match names no account, the RESULT line does.
+        text = ("Triage did not run. The Gmail search returned \"ACTION REQUIRED: Google Authentication Needed\" for the "
+                "work account.\nRESULT: unavailable, workspace-mcp Gmail auth expired for ops@example.test\n")
+        self.assertEqual(self.row(text)[1], "cred:google:ops@example.test")
+        self.assertEqual(self.row("- google_workspace_mcp OAuth expired for `me@example.test`.")[1], "cred:google:me@example.test")
+
+    def test_a_google_login_with_no_account_filters_credentials_to_the_google_rows(self):
+        self.assertEqual(self.row("`search_gmail_messages` returned \"Google Authentication Needed\"."),
+                         ("google", None, "/health?area=cred&q=Google+login"))
+
+    def test_claude_signed_out_is_the_claude_row(self):
+        for line in ("Not logged in · Please run /login",
+                     "[ERROR] API auth_error: OAuth refresh token is no longer valid; run /login to re-authenticate",
+                     "Failed to authenticate: OAuth session expired and could not be refreshed"):
+            with self.subTest(line=line):
+                self.assertEqual(self.row(line), ("claude", "cred:claude", "/health?area=cred&row=cred%3Aclaude"))
+
+    def test_an_aws_login_names_its_profile_when_the_line_does(self):
+        botocore = ("botocore.exceptions.LoginRefreshRequired: Your session has expired or credentials have changed. "
+                    "Please reauthenticate using 'aws login'.")
+        self.assertEqual(self.row(botocore), ("aws", None, "/health?area=cred&q=AWS+profile"))
+        self.assertEqual(self.row("botocore.errorfactory.AccessDeniedException: An error occurred (AccessDeniedException) "
+                                  "when calling the CreateOAuth2Token operation: The refresh token has expired")[0], "aws")
+        # Not from a log: botocore's SSO message beside the line that signs the profile in, as a wrapper prints both.
+        self.assertEqual(self.row("Error when retrieving token from sso: Token has expired and refresh failed; "
+                                  "run aws sso login --profile dev-ro")[1], "cred:aws:dev-ro")
+
+    def test_strongdm_signed_out_is_the_sdm_row(self):
+        # The text sdm's own binary holds; no job log has caught it yet.
+        line = "the strongDM listener did not load its internal state yet or the user is not logged in."
+        self.assertEqual(self.row(line), ("sdm", "cred:sdm", "/health?area=cred&row=cred%3Asdm"))
+
+    def test_no_login_cause_is_none(self):
+        for text in ("HTTP 401 Unauthorized", "mirror failed", "", "  ok      .local/bin/sdm-login",
+                     "No space left on device\nNot logged in · Please run /login"):
+            with self.subTest(text=text):
+                self.assertIsNone(job_failures.login(text))
+
+    def test_the_reason_names_the_rule_never_the_account(self):
+        found = job_failures.login("workspace-mcp Gmail auth expired for ops@example.test")
+        self.assertEqual(found["why"], "an expired Google login")
+
 
 class NowRows(ScreenCase):
     def fleet(self, area):

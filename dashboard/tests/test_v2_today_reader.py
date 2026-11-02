@@ -431,6 +431,33 @@ shellRun(cmd('work item.fix'), C.get('item:{self.task}')); await flush();""")
         self.assertEqual(out["toasts"][-1]["msg"], f"Fix started · #{self.task} · builder session in herdr pane w9:p1")
         self.assertEqual(out["gets"], ["/api/now", "/api/now"])
 
+    def test_fix_on_a_report_with_an_expired_login_opens_its_credentials_row(self):
+        """sd:6964: a job alert whose log shows claude signed out gets Fix, first, to Health > Credentials' claude row;
+        a report with no login cause keeps Acknowledge first, and Fix is off there."""
+        from sd_db import reporting
+
+        def report(job, text):
+            return reporting.ingest(self.connection, job=job, run_id="r1", started="2026-09-06T09:00:00Z",
+                                    ended="2026-09-06T09:01:00Z", exit_code=1, text=text, source_path="/tmp/x.log",
+                                    attention=True, attention_basis="job exited 1")["item"]["id"]
+        login = report("blog-idea-accept", "[blog-idea-accept] 2026-09-28T12:01:09-0600 agent: claude\n"
+                                           "Not logged in · Please run /login\n[blog-idea-accept] FAILED rc=1\n")
+        plain = report("nas-full-copy", "mirror failed\n")
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.doc = now_screen.document(self.connection, now=NOW, jobs=JobsBackend(root.name, jobs=[]),
+                                       fleet=lambda area: fleet_document(area, repos=[]))
+        out = self.run_page(f"""const fix = cmd('report.fix'), ack = cmd('today.report.ack'), o = C.get('report:{login}'), p = C.get('report:{plain}');
+R.primary = [fix.primary(o), ack.primary(o), fix.primary(p), ack.primary(p)]; R.off = fix.when(p);
+// The stand-in's href only reads; this one records where the page goes.
+location = {{ search: location.search, set href(u) {{ R.href = u; }}, get href() {{ return R.href; }} }};
+shellRun(fix, o); await flush();""")
+        self.assertEqual(out["R"]["href"], "/health?area=cred&row=cred%3Aclaude")
+        self.assertEqual(out["toasts"][-1]["msg"], "Health opens on claude")
+        self.assertEqual((out["posts"], out["confirms"]), ([], []))
+        self.assertEqual(out["R"]["primary"], [True, False, False, True])
+        self.assertEqual(out["R"]["off"], "no expired login in its log: Fix it from Reports")
+
     def test_a_stale_fix_reads_now_again_and_says_why(self):
         out = self.run_page("""ANSWER = (path, body) => path.endsWith('/fix') ? [409, { error: 'item changed; reload it before applying this change', reload: true }] : [200, DOC0];
 shellRun(cmd('work item.fix'), C.get('item:""" + str(self.task) + """')); await flush();""")
