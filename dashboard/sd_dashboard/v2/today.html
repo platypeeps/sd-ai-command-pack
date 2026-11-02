@@ -6,14 +6,15 @@
   Since yesterday (sd:6002, now_screen.digest): merged per repo with the PRs folded, failed with why and fix, questions.
   The day track: the last 24 hours as marks (landed, failed jobs, briefs, sessions), a table of them and a key to Tasks.
   Under it the spend line (sd:6031): spent in the last 24 hours and each of the last 7, from the cost table; Metrics has the rest.
-  The annunciator: Jobs, Lane, Reports, Pulls, Mail and Repos filter Needs you to their rows; Sessions opens In motion and
-  Gate opens Queue. Each number counts the rows its filter shows.
+  The annunciator: Jobs, Lane, Reports, Pulls, Mail and Repos filter Needs you to their rows; Sessions and Gate open the
+  Queue view. Each number counts the rows its filter shows.
   Needs you: the document's `needs`, every fact that asks for an act, ranked in the bands, with group rows for the work items
   and briefs. The rail badge counts its rows (now_screen._attention). One selection: ?row=, a group row too.
-  In motion: each open item's live sessions (active_sessions.document), grouped by repo, longest-running first; the tally counts the lanes.
-  Above them the builder runs (sd:6003, now_screen.builders): each open build run's items, stage, start and ETA.
+  Queue (pack sd:7234): one row per repo that opens to its working rows (live sessions from active_sessions.document, build
+  runs, runner assignments), its lane's merging, next and blocked entries, and with the filters on its suggested ready items
+  and ended runs. It reads /api/queue, /api/queue/builds?show=all and /api/queue/runner when it first shows.
   Snooze (sd:1896): /ui/snooze.js; a row's Snooze or Unsnooze posts /api/snooze, and Today reads again.
-  The old views' addresses (#view=now|work|inbox|status) land here; Decisions moved to Decide and GitHub to GitHub (sd:5781).
+  The old views' addresses (#view=now|work|inbox|status) land here, #view=queues and #view=motion on Queue; Decisions moved to Decide and GitHub to GitHub (sd:5781).
 -->
 <html lang="en">
 <head>
@@ -49,8 +50,8 @@
       <li><button class="cell" type="button" data-src="pulls" data-state="unknown" aria-pressed="false"><span class="lbl">Pulls<svg class="i" aria-hidden="true"><use href="#i-git-pull-request"/></svg></span><span class="val">reading…</span></button></li>
       <li><button class="cell" type="button" data-src="mail" data-state="unknown" aria-pressed="false"><span class="lbl">Mail<svg class="i" aria-hidden="true"><use href="#i-mail"/></svg></span><span class="val">reading…</span></button></li>
       <li><button class="cell" type="button" data-src="repos" data-state="unknown" aria-pressed="false"><span class="lbl">Repos<svg class="i" aria-hidden="true"><use href="#i-hard-drive-download"/></svg></span><span class="val">reading…</span></button></li>
-      <li><a class="cell" href="#view=motion" id="lamp-sessions" data-state="unknown"><span class="lbl">Sessions<svg class="i" aria-hidden="true"><use href="#i-bot"/></svg></span><span class="val">reading…</span></a></li>
-      <li><a class="cell" href="/queue" id="lamp-gate" data-state="unknown"><span class="lbl">Gate<svg class="i" aria-hidden="true"><use href="#i-gauge"/></svg></span><span class="val">reading…</span></a></li>
+      <li><a class="cell" href="#view=queue" id="lamp-sessions" data-state="unknown"><span class="lbl">Sessions<svg class="i" aria-hidden="true"><use href="#i-bot"/></svg></span><span class="val">reading…</span></a></li>
+      <li><a class="cell" href="#view=queue" id="lamp-gate" data-state="unknown"><span class="lbl">Gate<svg class="i" aria-hidden="true"><use href="#i-gauge"/></svg></span><span class="val">reading…</span></a></li>
     </ul></annunciator-strip>
 
     <!-- The toolbar standard (sd:5281): the shell's Shapeshift bar (sd:5539) over every view; its text filters Needs you. -->
@@ -89,38 +90,20 @@
       <p class="foot" id="foot">Waiting elsewhere: <a href="/decide">Decide</a> holds the decisions and review questions, <a href="/health">Health</a> the findings. <code>sd today</code> prints the full status.</p>
     </section>
 
-    <section id="view-motion" aria-labelledby="motion-h" hidden>
+    <section id="view-queue" aria-labelledby="queue-h" hidden>
       <div class="sec-head">
-        <h2 id="motion-h">In motion <button class="help" type="button" aria-label="Help: In motion" data-help="&lt;b&gt;Open items with a live session.&lt;/b&gt; First the headless builder runs: each one's items, stage (building, review, lane), start and ETA, the median of past runs. Then each session: a worktree, a lane entry, a running &lt;code&gt;sd-*&lt;/code&gt; command or a herdr agent, each tied to its item by a lane entry, a branch name, &lt;code&gt;--item&lt;/code&gt;, &lt;code&gt;-C&lt;/code&gt; or a Fix note. Grouped by repo, longest-running first; an item with no repo is Unassociated. Live + next adds each repo's next ready items, at most three. What landed today is on Queue.">
+        <h2 id="queue-h">Queue <button class="help" type="button" aria-label="Help: Queue" data-help="&lt;b&gt;What runs and what waits, one row per repo.&lt;/b&gt; A click opens a repo and closes the one that was open. Its rows, in order: working (live sessions, build runs, runner assignments), merging, next and blocked (the lane entries, with the lane's own actions), suggested (up to three ready items, highest priority first) and ended (ended build runs, cancelled and landed entries). The marker on the left names each row's type; its glyph is the row's state, and a repo's glyph is its worst row's. Suggested and Ended builds are off until you press them.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
-        <p class="tally" id="active-tally"></p>
+        <p class="tally" id="queue-tally"></p>
       </div>
-      <!-- pack sd:7222: Live | Live + next leads the filter row; the sessions table's column filter joins it. -->
-      <div class="filters toolbar-2" id="motion-filters" role="group" aria-label="Filters"></div>
-      <table class="ledger active builds" id="builds-table" aria-label="Builder runs" hidden>
-        <caption>Headless build runs: items, stage, start, ETA from past runs, model and cost.</caption>
-        <thead id="builds-head"></thead>
-        <tbody id="builds"></tbody>
+      <div class="filters toolbar-2" id="queue-filters" role="group" aria-label="Filters"></div>
+      <p class="filtered" id="queue-said" role="status" hidden></p>
+      <table class="ledger active queue" aria-labelledby="queue-h" data-tgrid="off">
+        <caption>One row per repo; open one for its working, merging, next, blocked, suggested and ended rows.</caption>
+        <thead><tr><th class="mk">Type</th><th>What</th><th>Detail</th><th class="num">Age</th><th class="act"><span class="sr">Actions</span></th></tr></thead>
+        <tbody id="queue"><tr class="empty"><td colspan="5">Reading the queue…</td></tr></tbody>
       </table>
-      <table class="ledger active" aria-labelledby="motion-h" data-toolbar="motion-filters">
-        <caption>Open items with a live worktree, lane entry, sd-* command or herdr agent, grouped by repo, longest-running first.</caption>
-        <thead id="active-head"></thead>
-        <tbody id="active"><tr class="empty"><td colspan="5">Reading sessions…</td></tr></tbody>
-      </table>
-      <p class="filtered" id="active-note" hidden></p>
-    </section>
-
-    <section id="view-queues" aria-labelledby="queues-h" hidden>
-      <div class="sec-head">
-        <h2 id="queues-h">Queues <button class="help" type="button" aria-label="Help: Queues" data-help="&lt;b&gt;What waits to be built and landed.&lt;/b&gt; Ready items, highest priority first, then the build queue (queued, running, blocked) and the merge lane (position, state, the step a stopped entry stopped at). A repo chip shows one repo. &lt;code&gt;sd today&lt;/code&gt; prints the same table. A failed or blocked entry also sends one push.">
-          <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
-        <p class="tally" id="queues-tally"></p>
-      </div>
-      <div class="filters toolbar-2"><div class="intents" id="queues-repos" role="group" aria-label="Show one repo"></div></div>
-      <table class="ledger active" aria-labelledby="queues-h">
-        <thead><tr><th class="g"><span class="sr">State</span></th><th>What</th><th>Queue · detail</th><th class="num">Age</th></tr></thead>
-        <tbody id="queues"><tr class="empty"><td colspan="4">Reading the queues…</td></tr></tbody>
-      </table>
+      <p class="filtered" id="queue-note" hidden></p>
     </section>
   </main>
 

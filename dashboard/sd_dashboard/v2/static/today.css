@@ -106,11 +106,11 @@
 .intents .chip:disabled { opacity: 0.5; cursor: default; }
 .needs tr.band th { padding: var(--space-sm) var(--space-xs) var(--space-2xs); text-align: left; font: 600 var(--text-2xs)/1 var(--font-label); letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-muted); border-bottom: var(--rule-hair) solid var(--color-rule); }
 .needs .what { min-width: 0; overflow-wrap: anywhere; }
-.needs .what .disc { all: unset; float: left; display: grid; place-items: center; width: 1.25rem; height: 1.25rem; margin-right: var(--space-3xs); cursor: pointer; color: var(--color-muted); vertical-align: -0.2em; }
-.needs .what .disc + .pick { display: flow-root; } /* beside the floated chevron, wrapping in its own box */
-.needs .what .disc .i { transition: transform var(--dur-fast) var(--ease-out); }
-.needs .what .disc[aria-expanded="true"] .i { transform: rotate(90deg); }
-.needs .what .disc:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+.needs .what .disc, .queue .what .disc { all: unset; float: left; display: grid; place-items: center; width: 1.25rem; height: 1.25rem; margin-right: var(--space-3xs); cursor: pointer; color: var(--color-muted); vertical-align: -0.2em; }
+.needs .what .disc + .pick, .queue .what .disc + .pick { display: flow-root; } /* beside the floated chevron, wrapping in its own box */
+.needs .what .disc .i, .queue .what .disc .i { transition: transform var(--dur-fast) var(--ease-out); }
+.needs .what .disc[aria-expanded="true"] .i, .queue .what .disc[aria-expanded="true"] .i { transform: rotate(90deg); }
+.needs .what .disc:focus-visible, .queue .what .disc:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
 .needs tr.member .what { padding-left: var(--space-lg); font-weight: 400; }
 .needs tr.more td { padding-block: var(--space-2xs); font-size: var(--text-xs); color: var(--color-muted); }
 .needs .age, .ledger.active .num { white-space: nowrap; font: 400 var(--text-xs)/1 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
@@ -118,21 +118,19 @@
 .foot { margin: var(--space-sm) 0 0; font-size: var(--text-xs); color: var(--color-muted); }
 .foot a { color: var(--color-ink-2); }
 .foot a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
-#active-tally a { color: var(--color-ink-2); }
-@media (pointer: coarse) { #active-tally a { display: inline-flex; align-items: center; min-height: var(--row-touch); } .active .what a { display: flex; align-items: center; min-height: var(--row-touch); } }
-@media (pointer: coarse) { .needs .what .disc { width: var(--row-touch); height: var(--row-touch); } .needs tr.more .linkbtn, .foot a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
-@media (prefers-reduced-motion: reduce) { .needs .what .disc .i { transition: none; } }
+@media (pointer: coarse) { .active .what a { display: flex; align-items: center; min-height: var(--row-touch); } }
+@media (pointer: coarse) { .needs .what .disc, .queue .what .disc { width: var(--row-touch); height: var(--row-touch); } .needs tr.more .linkbtn, .foot a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
+@media (prefers-reduced-motion: reduce) { .needs .what .disc .i, .queue .what .disc .i { transition: none; } }
 @media (max-width: 899px) {
   .needs tbody tr { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "g what age" ". detail detail" ". src act"; }
   .needs tbody tr.band, .needs tbody tr.more { display: block; }
   .needs .age { grid-area: age; } .needs .src { align-self: center; }
 }
 
-/* Working now (sd:3466): one row per open item, its live sessions listed in the Session cell. A row click shows the item
- * in Details (sd:6714), as a Needs you row's does, so the row takes the ledger's hover and selection.
+/* A live row (sd:3466), now the Queue view's: its sessions listed in the Detail cell. A row click shows the item in
+ * Details (sd:6714), as a Needs you row's does, so the row takes the ledger's hover and selection.
  * Hallmark · component: session row · genre: modern-minimal · theme: design.md instrument panel
  * states: default · hover · focus (the title link) · selected; unconfirmed is ▨ with a title, not colour alone. */
-section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
 .active tbody tr[data-id] { cursor: pointer; }
 .active td { vertical-align: top; height: auto; padding-block: var(--space-xs); }
 .active .what { width: 36%; min-width: 0; overflow-wrap: anywhere; }
@@ -142,23 +140,41 @@ section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
 .active .detail { min-width: 0; overflow-wrap: anywhere; }
 .active .sessions { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-2xs); }
 .active .via { display: block; color: var(--color-muted); }
-.active .when, .active .num { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
-.active .num { text-align: right; }
-/* The builder runs (sd:6003): the session rows' parts above them; the stage leads its cell. No new tokens.
- * states: default · hover (the item links) · focus · running ● · stalled ▲ · held outcome ■ · not read (one line) */
-.builds { margin-bottom: var(--space-sm); }
-/* Each In motion table says in one line what it holds (pack sd:6975), muted as the Reports and Health captions. */
+.active .num { white-space: nowrap; text-align: right; font: 400 var(--text-xs)/1.35 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
+/* The table says in one line what it holds (pack sd:6975), muted as the Reports and Health captions. */
 .active caption { text-align: left; padding: 0 0 var(--space-xs); font: 400 var(--text-xs)/1.4 var(--font-ui); color: var(--color-muted); }
-.builds .detail b { font-weight: 500; color: var(--color-ink); }
+
+/* Queue (pack sd:7234): one row per repo that opens in place to its typed rows, one open at a time.
+ * Hallmark · component: queue ledger · genre: modern-minimal · theme: design.md instrument panel
+ * states: default · hover · focus (chevron, repo name, links, buttons) · open (the chevron's turn, aria-expanded) ·
+ * selected (a child row) · disabled (every write while one runs) · held (muted) · not read (one ▨ line under the table).
+ * The marker is the state glyph and the row's type in words; colour only repeats the glyph. No new tokens. */
+.queue .mk { width: 8rem; white-space: nowrap; font: 500 var(--text-2xs)/1.35 var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-2); }
+.queue .mk > span[aria-hidden] { display: inline-block; width: 1rem; margin-right: var(--space-2xs); text-align: center; font: 400 var(--text-xs)/1 var(--font-data); }
+.queue tr.child .mk { padding-left: var(--space-lg); }
+.queue tr.repo { cursor: pointer; }
+.queue tr.repo .mk { color: var(--color-ink); }
+.queue tr.repo .what { font: 600 var(--text-sm)/1.3 var(--font-data); }
+.queue tr.repo .what small { display: block; font: 400 var(--text-2xs)/1.3 var(--font-data); color: var(--color-muted); }
+.queue .what .pick { all: unset; cursor: pointer; overflow-wrap: anywhere; }
+.queue .what .pick:hover { text-decoration: underline; }
+.queue .what .pick:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+.queue .what code { font: 500 var(--text-xs)/1.2 var(--font-data); }
+.queue .detail { font: 400 var(--text-xs)/1.4 var(--font-data); color: var(--color-ink-2); }
+.queue .detail b { font-weight: 500; color: var(--color-ink); }
+.queue tr[data-held] .what, .queue tr[data-held] .detail { color: var(--color-muted); }
+.queue .act { text-align: right; white-space: nowrap; }
+.queue .act .ctl { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3xs); vertical-align: middle; }
+.queue .act .ctl .btn .i { margin-right: 0; }
+@media (pointer: coarse) { .queue .act .btn, .queue .what .pick { min-height: var(--row-touch); min-width: var(--row-touch); } }
 @media (max-width: 899px) {
-  .active tbody tr { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "g what num" ". detail detail" ". when when"; }
-  .active .what { grid-area: what; width: auto; } .active .detail { grid-area: detail; } .active .when { grid-area: when; } .active .num { grid-area: num; }
-  /* A builder run's .num is a sentence (its ETA reason), not a count: under the title it wraps, rather than taking the
-   * row's width and leaving the title one word per line (pack sd:6017). */
-  .builds tbody tr { grid-template-areas: "g what what" ". detail detail" ". when when" ". num num"; }
-  .ledger.builds .num { white-space: normal; text-align: left; }
-  /* The no-sessions row is one cell: in the grid it fell into the 2rem first column, a word a line. */
-  .active tbody tr.empty { display: block; }
+  .queue tbody tr { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "mk num" "what what" "detail detail" "act act"; }
+  .queue .mk { grid-area: mk; width: auto; } .queue .what { grid-area: what; width: auto; } .queue .detail { grid-area: detail; }
+  .queue .num { grid-area: num; } .queue .act { grid-area: act; text-align: left; white-space: normal; }
+  .queue .act .ctl { justify-content: flex-start; }
+  .queue tr.child .mk { padding-left: var(--space-xs); }
+  .queue tbody tr.empty { display: block; }
+  .queue tbody td:empty { display: none; } /* a repo row's blank age and actions take no line */
 }
 
 /* Status's parts and rows (sd:5099), kept for GitHub's Pull requests, which links this sheet; the Status view itself went

@@ -1,6 +1,6 @@
 // Today v2 (sd:2110): the page script. It loads before shell.js, which reads what it declares.
-// pack sd:7084: the annunciator heads the page; the rail switches Needs you, In motion, Since yesterday, Timeline and
-// Queues, each a view-<id> panel, all from /api/now (now_screen.document). A lamp that filters Needs you shows that view.
+// pack sd:7084: the annunciator heads the page; the rail switches Needs you, Queue, Since yesterday and Timeline, each
+// a view-<id> panel, from /api/now (now_screen.document); Queue reads the lane and build documents too (pack sd:7234). A lamp that filters Needs you shows that view.
 // Needs you is the document's `needs`: every fact that asks for an act, ranked in the bands, a kind of many rows folded into
 // one group row. A group opens in place to its first rows, then "N more". A lamp or an intent shows only its rows; the
 // Shapeshift bar's text filters the same list. The badge is the read's own (now_screen._attention), the tally's count.
@@ -14,12 +14,14 @@
   const moved = { decisions: '/decide#view=decisions', github: '/github#view=pulls', issues: '/github#view=issues' }[was];
   if (moved) location.replace(moved.replace('#', `${location.search}#`));
   else if (['now', 'work', 'inbox', 'status'].includes(was)) history.replaceState(null, '', `/today${location.search}`);
+  // pack sd:7234: Queues and In motion are the Queue view now.
+  else if (was === 'queues' || was === 'motion') history.replaceState(null, '', `/today${location.search}#view=queue`);
 }
 // moved:end
 window.PAGE_FILTER = { '': 'Needs you' };
-// pack sd:7218: In motion comes second, after Needs you: what runs now before what changed; the keys stay.
-window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motion', label: 'In motion', key: 'm' },
-  { id: 'digest', label: 'Since yesterday', key: 'y' }, { id: 'timeline', label: 'Timeline', key: 't' }, { id: 'queues', label: 'Queues', key: 'q' }];
+// pack sd:7218: what runs now comes second, after Needs you; pack sd:7234: the Queue view holds it, In motion folded in.
+window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue', label: 'Queue', key: 'q' },
+  { id: 'digest', label: 'Since yesterday', key: 'y' }, { id: 'timeline', label: 'Timeline', key: 't' }];
 (() => {
   // The rail's map (built sections, and the old screen each unported one opens) is /ui/sections.js, loaded before this.
   // Capture (n) and the field's task mode file through the shell's default capture (sd:3520): POST /api/items.
@@ -29,7 +31,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
   const GLYPH = { warning: '■', caution: '▲', queued: '◌', ok: '●', unknown: '▨' };
   // Each source's label, icon, and the page that shows it in full, with that page's name (sd:3402).
   const SRC = { jobs: ['Jobs', 'activity', '/management', 'Management'], prs: ['Pull requests', 'git-pull-request', '/operations?area=trackers', 'Trackers'], sessions: ['Sessions', 'bot', '/operations?area=sessions', 'Operations'], repos: ['Repos', 'hard-drive-download', '/management', 'Management'],
-    lane: ['Lane', 'git-merge', '/queue', 'Queue'], reports: ['Reports', 'file-text', '/reports', 'Reports'], mail: ['Mail', 'mail', '', ''], tasks: ['Tasks', 'list-checks', '/tasks', 'Tasks'], briefs: ['Briefs', 'book-open', '/briefs', 'Briefs'] };
+    lane: ['Lane', 'git-merge', '/today#view=queue', 'Queue'], reports: ['Reports', 'file-text', '/reports', 'Reports'], mail: ['Mail', 'mail', '', ''], tasks: ['Tasks', 'list-checks', '/tasks', 'Tasks'], briefs: ['Briefs', 'book-open', '/briefs', 'Briefs'] };
   const TYPE = { job: 'job', pr: 'pull request', ahead: 'repo', dirty: 'repo', pinned: 'repo', worktree: 'sessions', dark: 'collector', item: 'work item',
     report: 'report', mail: 'mail thread', lane: 'lane entry', brief: 'brief', group: 'group' };
   const KIND = { job: 'Job', pr: 'Pull request', ahead: 'Repo', dirty: 'Repo', pinned: 'Repo', worktree: 'Sessions', dark: 'Collector', item: 'Work item',
@@ -43,7 +45,6 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
 
   let DOC = null, NEEDS = [], ALL = new Map(), OTHER = new Map(), SNOOZED = [], ACTIVE = null, srcFilter = null, intent = null, query = '', picked = [];
   const OPEN = new Set(), FULL = new Set(); // the groups opened, and the ones showing every member
-  let motionMode = 'live'; // In motion's Live | Live + next (pack sd:7222)
   const $ = id => document.getElementById(id);
   const row = () => new URLSearchParams(location.search).get('row'); // the selected row
   const low = s => String(s || '').toLowerCase();
@@ -81,7 +82,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
     $('details').setAttribute('data-swap', ''); requestAnimationFrame(() => $('details').removeAttribute('data-swap'));
     if (open) shell.openPane('tab-details');
   }
-  const listed = id => ALL.has(id) || OTHER.has(id);
+  const listed = id => ALL.has(id) || OTHER.has(id) || QOTHER.has(id);
   const day = iso => String(iso || '').slice(0, 10), hm = iso => String(iso || '').slice(11, 16);
 
   function details(r) {
@@ -102,7 +103,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
     if (r.kind === 'lane') return html`${head}<h2><a href="${shell.itemHref(r.item)}">sd:${r.item} ${r.title}</a></h2>
       <dl><dt>Repo</dt><dd>${r.repo}</dd><dt>Why</dt><dd>${r.detail}</dd><dt>Head</dt><dd>${(r.expected_head || '').slice(0, 12) || 'not recorded'}</dd>
         <dt>Ended</dt><dd>${r.at || 'not recorded'}</dd><dt>Merge</dt><dd>${r.runner_merge}</dd></dl>
-      <p><a href="/queue">Open the lane in Queue</a></p>${act}`;
+      <p><a href="#view=queue">Open the lane in Queue</a></p>${act}`;
     if (r.kind === 'brief') return html`${head}<h2>${r.subj}</h2>
       <dl><dt>Day</dt><dd>${r.day}</dd><dt>Series</dt><dd>${r.src}</dd><dt>Words</dt><dd>${r.words}</dd></dl>
       <h3>Body · first lines</h3><div class="mailbody">${r.lead || ''}</div>${act}`;
@@ -114,13 +115,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
       ${SRC[r.source]?.[2] ? html`<p><a href="${SRC[r.source][2]}">Open ${SRC[r.source][0]} in ${SRC[r.source][3]}</a></p>` : ''}${act}`;
   }
   function select(id, open) {
-    const r = ALL.get(id), o = OTHER.get(id);
+    const r = ALL.get(id), o = OTHER.get(id) || QOTHER.get(id);
     if (!r) return o && pick(id, o.draw, open);
     pick(id, () => details(r), open);
     shell.suggest([`Why is ${r.what.split(' ')[0]} on this list?`, 'What else changed around this time?', 'Rank what I should do in the next hour']);
   }
 
-  // The rows outside Needs you (sd:6714): In motion's items, the builder runs and the day track's marks. A click selects
+  // The rows outside Needs you (sd:6714): the Queue view's live items and build runs and the day track's marks. A click selects
   // each as a Needs you row: its object for the shell's commands and how its Details draw. A job or brief mark whose row
   // left Needs you (snoozed, seen, or cleared by a later read) says so in Details.
   const markId = m => m.lane === 'landed' ? `landed:${m.item}` : m.lane === 'live' ? `live:${m.item}` : m.id;
@@ -142,7 +143,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
   }
   function liveDetails(item, rows, b, n) {
     const sure = rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = rows[0];
-    return html`<p class="kind"><span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span> In motion · ${sure ? 'live' : 'a launch not confirmed'}</p>
+    return html`<p class="kind"><span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span> Live · ${sure ? 'live' : 'a launch not confirmed'}</p>
       <h2><a href="${shell.itemHref(item)}">#${item} ${top.title}</a></h2>
       <dl><dt>Status</dt><dd>${top.status}</dd><dt>Lane</dt><dd>${top.lane || 'not in a lane'}</dd>
         ${b ? html`<dt>Builder</dt><dd><b>${b.stage}</b> · step ${b.step} · ${b.state}</dd><dt>ETA</dt><dd>${b.eta ? clock(b.eta) : 'not known'} · ${b.eta_why}</dd><dt>Assignment</dt><dd>#${String(n)}</dd>`
@@ -157,7 +158,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
       <dl><dt>Run</dt><dd>${b.run}</dd><dt>Stage</dt><dd>${b.stage} · step ${b.step}</dd><dt>Started</dt><dd>${clock(b.started)} · ${b.elapsed} ago</dd>
         <dt>ETA</dt><dd>${b.eta ? clock(b.eta) : 'not known'} · ${b.eta_why}</dd><dt>Model</dt><dd>${b.model || 'not recorded'}</dd><dt>Spent</dt><dd>${usd(b.usd)}</dd></dl>
       <h3>Items</h3><ul class="members">${b.items.map(it => html`<li><a href="${shell.itemHref(it.item)}">#${it.item} ${it.title}</a>${it.assignment ? html`<span class="via">assignment #${String(it.assignment)}</span>` : ''}</li>`)}</ul>
-      <p><a href="/queue">Open the builds in Queue</a></p>`;
+      <p><a href="#view=queue">Open the builds in Queue</a></p>`;
   }
   function landedDetails(m) {
     return html`<p class="kind"><span class="g-ok" aria-hidden="true">${GLYPH.ok}</span> Landed · ok</p>
@@ -218,7 +219,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
   // The selected row, and the picked ones, marked again on the rows a redraw made.
   function mark(id) {
     $('rows').querySelectorAll('tr[data-id]').forEach(tr => { tr.setAttribute('aria-selected', tr.dataset.id === id); tr.toggleAttribute('data-picked', picked.includes(tr.dataset.id)); });
-    ['active', 'builds', 'track-rows'].forEach(t => $(t).querySelectorAll('tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', tr.dataset.id === id)));
+    ['queue', 'track-rows'].forEach(t => $(t).querySelectorAll('tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', tr.dataset.id === id)));
   }
   const BAND_NAME = { broken: 'Broken', look: 'Look', queued: 'Queued' };
   function line(r, member) {
@@ -267,94 +268,284 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
     const unread = [['Work', DOC.work_error], ['Briefs', DOC.briefs_error]].filter(([, why]) => why);
     $('unread').hidden = !unread.length;
     $('unread').textContent = unread.map(([k, why]) => `${k} could not be read: ${why}. Read again tries again.`).join(' ');
-    motion();
-    queues();
+    queueView();
+    if (QV.seen) loadQueue();
     digest();
     dayTrack();
     spendLine();
     window.snooze.draw($('snoozed'), SNOOZED);
   }
 
-  // In motion (sd:3466, sd:5921): the document's `active`, one row per open item, its sessions in the row. pack sd:7222:
-  // grouped by repo, one band per repo that the shell's table grammar folds, in the order of each repo's longest-running
-  // item; an item with no repo is Unassociated, last. Live + next adds each repo's next ready items: the Queues rows'
-  // first three per repo (sd_db.today.queues, priority first), and a group for a repo that has only those. A click shows
-  // the item in Details (sd:6714). A launch herdr could not confirm is ▨, not ●; a source that was not read is said under
-  // the table, never an empty list. The tally counts the lanes; Queue has the rest.
+  // The live items' sources (sd:3466), named when one was not read; a build run's state in its Details (sd:6003).
   const SOURCE = { fleet: 'worktrees and processes', lane: 'lane entries', launch: 'Fix notes', herdr: 'herdr agents' };
   const clock = iso => new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-  const NEXT = 3;
-  function motion() {
-    const a = ACTIVE || { rows: [], sources: {}, error: 'the document carried no sessions' }, rows = a.rows || [], L = DOC.lane || {};
-    const Q = DOC.queues || { rows: [], error: 'the document carried no queues' }, withNext = motionMode === 'next';
-    put($('motion-filters'), window.shell.list.fseg('motion', 'Shown', [['live', 'Live'], ['next', 'Live + next']]
-      .map(([v, label]) => ({ v, label, pressed: motionMode === v }))));
-    const items = [];
-    rows.forEach(r => { const last = items[items.length - 1]; if (last && last.item === r.item) last.rows.push(r); else items.push({ item: r.item, title: r.title, repo: r.repo || null, rows: [r] }); });
-    const groups = new Map(), group = repo => { if (!groups.has(repo)) groups.set(repo, { repo, live: [], next: [] }); return groups.get(repo); };
-    items.forEach(it => group(it.repo).live.push(it));
-    if (withNext) Q.rows.filter(r => r.queue === 'ready' && !items.some(it => it.item === r.id))
-      .forEach(r => { const g = group(r.repo || null); if (g.next.length < NEXT) g.next.push(r); });
-    const order = [...groups.values()].sort((x, y) => (x.repo === null) - (y.repo === null)), nexts = order.reduce((n, g) => n + g.next.length, 0);
-    const band = g => html`<tr class="band" data-band="${g.repo || 'unassociated'}"><th colspan="5" scope="rowgroup">${g.repo ? g.repo.split('/').pop() : 'Unassociated'} · ${
-      [g.live.length ? String(g.live.length) : '', g.next.length ? `${g.next.length} next` : ''].filter(Boolean).join(' · ')}</th></tr>`;
-    const live = it => { const sure = it.rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = it.rows[0]; return html`<tr data-item="${it.item}" data-id="live:${it.item}" aria-selected="${String(row() === `live:${it.item}`)}">
-        <td class="g g-${s}" title="${sure ? 'live' : 'a launch not confirmed: herdr was not read'}">${GLYPH[s]}</td>
-        <td class="what"><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></td>
-        <td class="detail"><ul class="sessions">${it.rows.map(r => html`<li>${r.verified ? '' : html`<span class="g-unknown" title="not confirmed">${GLYPH.unknown} </span>`}${r.session}${r.elapsed ? html` · ${r.elapsed}` : ''}<span class="via">${r.via}</span></li>`)}</ul></td>
-        <td class="when">${top.started ? html`<time datetime="${top.started}" title="${top.started.slice(11, 16)} UTC">${clock(top.started)}</time>` : 'not known'}</td>
-        <td class="num">${top.elapsed || 'not known'}</td></tr>`; };
-    const next = r => html`<tr data-item="${r.id}" class="next"><td class="g g-queued" title="ready: a suggested next item">${GLYPH.queued}</td>
-        <td class="what"><a href="${window.shell.itemHref(r.id)}">#${r.id} ${r.title}</a></td>
-        <td class="detail">next · ready${r.detail && r.detail !== '-' ? ` · ${r.detail}` : ''}</td><td class="when">not started</td>
-        <td class="num">${r.since ? age(r.since) : 'not known'}</td></tr>`;
-    const unread = withNext && Q.error ? html`<tr class="empty"><td colspan="5">Next items could not be read: ${Q.error}. Read again tries again.</td></tr>` : '';
-    put($('active'), a.error ? html`<tr class="empty"><td colspan="5">Sessions could not be read: ${a.error}. Read again tries again.</td></tr>${unread}`
-      : order.length ? html`${order.map(g => html`${band(g)}${g.live.map(live)}${g.next.map(next)}`)}${unread}`
-      : html`<tr class="empty"><td colspan="5">No open item has a live session${withNext && !Q.error ? ', and no repo has a ready item' : ''}.</td></tr>${unread}`);
-    const dark = Object.entries(a.sources || {}).filter(([, why]) => why), B = builds();
-    put($('active-tally'), html`${B.rows.length ? html`<span>${plural(B.rows.length, 'builder')}</span>` : ''}<span>${plural(items.length, 'item')} live</span>${withNext ? html`<span>${nexts} next</span>` : ''}<span>${L.merging ?? 0} merging</span><span>${L.landed ?? 0} landed today in ${plural(L.landed_lanes ?? 0, 'lane')}</span><a href="/queue?show=all">Queue</a>${dark.length ? html`<span class="g-caution">▲ ${dark.length} not read</span>` : ''}`);
-    const note = $('active-note');
-    note.hidden = !dark.length;
-    note.textContent = dark.map(([k, why]) => `${SOURCE[k] || k} not read: ${why}`).join(' · ');
-  }
-
-  // The builder runs (sd:6003): the document's `builders`, each open headless build run above the sessions, with its
-  // items, stage, start and ETA (the median of past runs, or why there is none). Its state is the run row's: running ●,
-  // stalled ▲ (no supervisor beat), an outcome it holds ■. None open hides the table; a read that failed says so.
   const BSTATE = { running: 'ok', stalled: 'caution' };
-  function builds() {
-    const B = DOC.builders || { rows: [], error: 'the document carried no builder runs' };
-    $('builds-table').hidden = !B.rows.length && !B.error;
-    put($('builds'), B.error ? html`<tr class="empty"><td colspan="5">Builder runs could not be read: ${B.error}. Read again tries again.</td></tr>`
-      : html`${B.rows.map(b => { const s = BSTATE[b.state] || 'warning'; return html`<tr data-run="${b.run}" data-id="run:${b.run}" aria-selected="${String(row() === `run:${b.run}`)}">
-        <td class="g g-${s}" title="${b.state === 'stalled' ? `stalled: no beat for ${Math.round(b.quiet / 60)}m` : b.state}">${GLYPH[s]}</td>
-        <td class="what"><ul class="sessions">${b.items.map(it => html`<li><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></li>`)}</ul><span class="via">${b.repo} · ${b.model || 'model not recorded'} · ${usd(b.usd)} so far</span></td>
-        <td class="detail"><b>${b.stage}</b><span class="via">step ${b.step} · ${b.state}</span></td>
-        <td class="when"><time datetime="${b.started}" title="${b.started.slice(11, 16)} UTC">${clock(b.started)}</time><span class="via">${b.elapsed} ago</span></td>
-        <td class="num" title="${b.eta_why}">${b.eta ? html`<time datetime="${b.eta}">${clock(b.eta)}</time>` : 'not known'}<span class="via">${b.eta ? 'ETA' : b.eta_why}</span></td></tr>`; })}`);
-    return B;
-  }
 
-  // Queues (pack sd:6946): the document's `queues`, ready items, the build queue and the merge lane in one table, as
-  // `sd today` prints it, with one chip per repo. A failed or blocked row is ■, a running one ●, a waiting one ◌.
-  // A read that failed says so, never an empty queue.
-  const QSTATE = { failed: 'warning', blocked: 'warning', skipped: 'warning', running: 'ok' };
-  let qRepo = null;
-  function queues() {
-    const Q = DOC.queues || { rows: [], error: 'the document carried no queues' };
-    const repos = [...new Set(Q.rows.map(r => r.repo || 'fleet'))].sort();
-    if (!repos.includes(qRepo)) qRepo = null;
-    put($('queues-repos'), repos.length > 1 ? html`${repos.map(r => html`<button class="chip" type="button" data-qrepo="${r}" aria-pressed="${String(qRepo === r)}">${r.split('/').pop()} <b>${Q.rows.filter(x => (x.repo || 'fleet') === r).length}</b></button>`)}` : html``);
-    const rows = Q.rows.filter(r => !qRepo || (r.repo || 'fleet') === qRepo), n = q => rows.filter(r => r.queue === q).length;
-    put($('queues-tally'), html`<span>${n('ready')} ready</span><span>${plural(n('build'), 'build')}</span><span>${n('lane')} in the lane</span><a href="/queue">Queue</a>`);
-    put($('queues'), Q.error ? html`<tr class="empty"><td colspan="4">The queues could not be read: ${Q.error}. Read again tries again.</td></tr>`
-      : rows.length ? html`${rows.map(r => { const s = QSTATE[r.status] || 'queued'; return html`<tr data-item="${r.id}">
-        <td class="g g-${s}" title="${r.status}">${GLYPH[s]}</td>
-        <td class="what"><a href="${window.shell.itemHref(r.id)}">#${r.id} ${r.title}</a><span class="via">${r.repo || 'fleet'}</span></td>
-        <td class="detail"><b>${r.queue}</b> · ${r.status}${r.place ? ` · position ${r.place}` : ''}<span class="via">${r.detail}</span></td>
-        <td class="num">${r.since ? age(r.since) : 'not known'}</td></tr>`; })}`
-      : html`<tr class="empty"><td colspan="4">Nothing is ready, building or in the lane.</td></tr>`);
+  // Queue (pack sd:7234): Queue's Overview, Today's Queues and In motion in one view. One parent row per repo; a click opens
+  // its child rows under it and closes the row that was open, and a click on the open row closes it. The children, in order:
+  // working (the live items of `active`, the build runs of /api/queue/builds, a builder's gate in the lane and the runner's
+  // assignments no run holds), merging, next and blocked (the lane entries of /api/queue), suggested (the repo's ready items
+  // from `queues`, at most three, as pack sd:7222's Live + next reads them) and ended (ended build runs, and the cancelled
+  // and landed lane entries). Each row's marker is its state glyph and its type in words; the parent's glyph is its worst
+  // child's. Suggested and Ended builds are off by default; on, a repo with only those rows shows too; ?show= keeps them.
+  // The lane's writes are Queue's (sd:2585): up, down, top, hold, release and cancel post /api/queue/move with the lane's
+  // revision; the server runs sd-ship lane move|hold|release|cancel|retry and refuses a stale revision. Cancel asks first
+  // (sd:3012). A cancelled row offers Re-queue (sd:3398) when the installed pack's retry takes a cancelled entry
+  // (QV.lanes.requeue, pack sd:3389): it posts `requeue` with the head the row showed, and `lane retry --expected-head`
+  // refuses a moved branch, a newer entry or a merged head. A running row with a claim offers Release (sd:3337): it asks
+  // first, naming the holder, claim age and what the pack does at that step, then posts `reclaim` with the claim the row
+  // showed, so a claim that moved on releases nothing. A blocked row offers Retry and, on a runner_merge=manual repo,
+  // Approve, only when the installed pack's retry takes --expected-head (QV.lanes.retry); Approve asks first: it grants
+  // the merge, which nothing takes back. A build run's Cancel asks first and posts the assignment cancel route; an ended
+  // blocked or cancelled bundle's Retry and Send to builder post /api/queue/builds/retry (pack sd:6020). The view reads its
+  // three documents when it first shows and on each Today read after; a source that was not read is said under the table.
+  const QTYPES = ['working', 'merging', 'next', 'blocked', 'suggested', 'ended'], QSHOW = ['suggested', 'ended'], NEXT = 3;
+  const QV = { lanes: null, lanesErr: '', built: null, builtErr: '', runner: null, runnerErr: '', seen: false, busy: false };
+  const QOTHER = new Map(); // the lane entries, selectable as Today's other rows are
+  const qShow = new Set();
+  let qOpen = null, qSaid = null; // the one open repo; the last write's result
+  // ponytail: the repo's folder name keys its row; two checkouts of one name share a row.
+  const repoKey = p => p ? String(p).replace(/\/+$/, '').split('/').pop() : '';
+  const HM = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const at = s => s ? HM.format(new Date(s)) : 'not recorded';
+  const dur = s => s == null ? 'not recorded' : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`;
+  const WORD = { ok: 'running', caution: 'look', warning: 'needs you', queued: 'waiting', unknown: 'not known' };
+  const marker = (s, type) => html`<td class="mk"><span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span><span class="sr">${WORD[s]} · </span>${type}</td>`;
+  const sb = (act, r, label, aria, extra = '') => html`<button class="btn quiet sm" type="button" data-act="${act}" data-item="${String(r.item)}" data-repo="${r.lane}" aria-label="${aria}"${extra}${QV.busy ? html` disabled` : ''}>${label}</button>`;
+  function controls(r, last) {
+    const off = on => on ? html` disabled` : '';
+    return html`<div class="ctl" role="group" aria-label="Order of sd:${String(r.item)}">${sb('up', r, I('arrow-up'), `Move up sd:${r.item}`, off(r.position === 1))}${sb('down', r, I('arrow-down'), `Move down sd:${r.item}`, off(r.position === last))}${sb('top', r, 'Top', `Move sd:${r.item} to the top`, off(r.position === 1))}${sb(r.held ? 'release' : 'hold', r, r.held ? 'Release' : 'Hold', `${r.held ? 'Release' : 'Hold'} sd:${r.item}`)}${sb('cancel', r, 'Cancel…', `Cancel sd:${r.item} in this lane`)}</div>`;
+  }
+  const again = (r, manual) => !QV.lanes.retry ? '' : html`<div class="ctl" role="group" aria-label="Unblock sd:${String(r.item)}">${sb('retry', r, 'Retry', `Retry sd:${r.item}: queue it again at the same head`, html` data-head="${r.expected_head}"`)}${manual ? sb('approve', r, 'Approve…', `Approve sd:${r.item}: queue it again with the merge granted`, html` data-head="${r.expected_head}"`) : ''}</div>`;
+  const back = r => !QV.lanes.requeue ? '' : html`<div class="ctl" role="group" aria-label="Cancel of sd:${String(r.item)}">${sb('requeue', r, 'Re-queue', `Re-queue sd:${r.item} at head ${r.head}`, html` data-head="${r.expected_head}"`)}</div>`;
+  const free = r => !r.claim ? '' : html`<div class="ctl" role="group" aria-label="Claim of sd:${String(r.item)}">${sb('reclaim', r, 'Release…', `Release sd:${r.item} from ${r.host || 'its holder'}`, html` data-claim="${r.claim}"`)}</div>`;
+  // Each lane state's glyph, type and fact line. A cancelled or landed entry is an ended row.
+  const ENTRY = {
+    merging: r => [r.lease_passed ? 'caution' : 'ok', 'merging', html`<b>${r.step || 'step not recorded'}</b> on <b>${r.host || 'host not recorded'}</b> · claimed ${r.claim_age == null ? 'at a time not recorded' : `${dur(r.claim_age)} ago`} · ${r.lease_until ? `lease ${r.lease_passed ? 'passed' : 'to'} ${at(r.lease_until)}` : 'lease not recorded'} · head ${r.head || 'not recorded'}`],
+    next: r => [r.held ? 'caution' : 'queued', 'next', html`${r.held ? 'held' : 'position'} ${r.position} · gate <b>${r.gate}</b>${r.gate_summary ? ` (${r.gate_summary})` : ''} · head ${r.head || 'not recorded'}${r.held ? ' · skipped until released' : ''}`],
+    building: r => [{ running: 'ok', pass: 'ok', fail: 'warning' }[r.gate] || 'unknown', 'working', html`gate <b>${r.gate}</b>${r.summary ? ` · ${r.summary}` : ''}${r.head ? ` · head ${r.head}` : ''} · log changed ${at(new Date(r.changed * 1000).toISOString())}`],
+    blocked: r => ['warning', 'blocked', html`<b>${r.who} acts</b> · ${r.status}${r.step ? ` at ${r.step}` : ''} · ${r.reason} · head ${r.head || 'not recorded'}`],
+    cancelled: r => ['queued', 'ended', html`cancelled at ${at(r.finished)} · head ${r.head || 'not recorded'}${QV.lanes.requeue ? '' : ` · Re-queue off: ${QV.lanes.requeue_off || 'not known whether the pack takes it'}`}`],
+    landed: r => ['ok', 'ended', html`landed · ${r.pr ? `PR #${r.pr}` : 'PR not named'} · merge ${r.commit || 'not recorded'} · ${at(r.finished)}`],
+  };
+  const entryId = (l, r) => `entry:${l.path}:${r.item}`;
+  // The PNGs the lane drew of the row's changed dashboard pages (sd:6728), or why it drew none.
+  const shots = r => r.shots ? html` · screenshots ${r.shots.map((f, i) => html`${i ? ', ' : ''}<a href="${f.url}" target="_blank" rel="noopener">${f.name}</a>`)}`
+    : r.shots_warning ? html` · screenshots not drawn: ${r.shots_warning}` : '';
+  function entryRow(l, r) {
+    const [s, type, facts] = ENTRY[r.state](r), last = l.rows.filter(x => x.state === 'next').length, e = { ...r, lane: l.path };
+    const ctl = r.state === 'next' ? controls(e, last) : r.state === 'blocked' ? again(e, l.runner_merge === 'manual') : r.state === 'cancelled' ? back(e) : r.state === 'merging' ? free(e) : '';
+    const id = r.state === 'building' ? null : entryId(l, r);
+    return [type, s, html`<tr class="child" data-type="${type}"${id ? html` data-id="${id}" aria-selected="${String(row() === id)}"` : ''}${r.held ? html` data-held=""` : ''}>${marker(s, type)}
+      <td class="what">${r.state === 'building' ? html`<code>${r.builder}</code>` : html`<a href="${shell.itemHref(r.item)}">#${r.item} ${r.title}</a>`}</td>
+      <td class="detail">${facts}${shots(r)}</td><td class="num">${r.state === 'next' ? `#${r.position}` : ''}</td>
+      <td class="act">${ctl}${id ? shell.commands.rowActions(id) : ''}</td></tr>`];
+  }
+  // A build run's state (pack sd:6095): working; waiting on me (held, or an open question asks); stalled (the log has not
+  // grown for 15 min); lost (no supervisor beat for 3 min, which the dispatcher's next reap settles).
+  const RUNSTATE = { working: 'ok', waiting: 'warning', stalled: 'caution', lost: 'unknown' };
+  const names = r => r.items.length ? html`${r.items.map((m, i) => html`${i ? '; ' : ''}<a href="${shell.itemHref(m.item)}">#${m.item} ${m.title}</a>`)}` : 'no items recorded';
+  const bb = (act, r, label, aria, off) => html`<button class="btn quiet sm" type="button" data-build="${act}" data-run="${r.run}" aria-label="${aria}"${off ? html` disabled title="${off}"` : QV.busy ? html` disabled` : ''}>${label}</button>`;
+  // Open PR (pack sd:6020 ruling #31553): the pull request `sd-ship` opened for the row's branch; none shows nothing.
+  const prLink = r => r.pull ? html`<a class="btn quiet sm" href="${r.pull}" target="_blank" rel="noopener noreferrer" aria-label="Open the pull request of run ${r.run} on GitHub">Open PR</a>` : '';
+  const logBtn = r => r.log ? html`<button class="btn quiet sm" type="button" data-copy="${`tail -f ${shell.shq(r.log)}`}" aria-label="Copy the command that follows the log of run ${r.run}">Log</button>` : '';
+  const asgBtn = n => html`<button class="btn quiet sm" type="button" data-copy="sd assignments get ${String(n)}" aria-label="Copy the command that shows assignment ${String(n)}">Show assignment</button>`;
+  function runRow(r) {
+    const s = RUNSTATE[r.state] || 'unknown', id = `run:${r.run}`;
+    return ['working', s, html`<tr class="child" data-type="working" data-run="${r.run}" data-id="${id}" aria-selected="${String(row() === id)}">${marker(s, 'working')}
+      <td class="what">${names(r)}</td>
+      <td class="detail"><b>${r.state}</b> · build ${r.run} · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${r.quiet == null ? 'no output yet' : `output ${dur(r.quiet)} ago`} · ${usd(r.usd || 0)} so far${r.why ? ` · ${r.why}` : ''}</td>
+      <td class="num">${dur(r.elapsed)}</td>
+      <td class="act"><div class="ctl" role="group" aria-label="Run ${r.run}">${bb('cancel', r, 'Cancel…', `Cancel build run ${r.run}`, r.cancel.allowed ? '' : r.cancel.reason || 'cancel is off')}${prLink(r)}${logBtn(r)}</div></td></tr>`];
+  }
+  // A blocked or cancelled bundle keeps its worktree: Retry queues it again at once; Send to builder asks for a finding,
+  // notes it on each item and queues it again, so the next builder resumes that worktree with it.
+  function endedRun(r) {
+    const s = r.outcome === 'done' ? 'ok' : r.retry.bundle === 'blocked' ? 'warning' : 'queued', off = r.retry.allowed ? '' : r.retry.reason;
+    return ['ended', s, html`<tr class="child" data-type="ended" data-run="${r.run}">${marker(s, 'ended')}
+      <td class="what">${names(r)}</td>
+      <td class="detail"><b>${r.retry.bundle === 'blocked' ? 'blocked' : r.outcome || 'ended'}</b> · build ${r.run} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd || 0)}${r.detail ? ` · ${r.detail}` : ''}</td>
+      <td class="num"></td>
+      <td class="act"><div class="ctl" role="group" aria-label="Run ${r.run}">${['blocked', 'cancelled'].includes(r.retry.bundle) ? html`${bb('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, off)}${bb('send', r, 'Send to builder…', `Send a finding to the builder of run ${r.run}`, off)}` : ''}${asgBtn(r.assignment)}${prLink(r)}${logBtn(r)}</div></td></tr>`];
+  }
+  // Runner assignments (pack sd:7115, sd:7217): the queued and running ones no open build run holds.
+  const asgRow = a => ['working', a.status === 'running' ? 'ok' : 'queued', html`<tr class="child" data-type="working">${marker(a.status === 'running' ? 'ok' : 'queued', 'working')}
+    <td class="what">${a.item ? html`<a href="${shell.itemHref(a.item)}">#${a.item} ${a.title || a.role}</a>` : a.title || a.role}</td>
+    <td class="detail"><b>${a.status}</b> · assignment ${String(a.id)} · ${a.role} · since ${at(a.started || a.queued_at)}</td><td class="num"></td>
+    <td class="act"><div class="ctl" role="group" aria-label="Assignment ${String(a.id)}">${asgBtn(a.id)}</div></td></tr>`];
+  // A live item (In motion's sources: worktrees and processes, herdr agents, Fix notes, lane-less sessions): its sessions in
+  // the row, Open item, Show assignment and Fix in its actions, and its Details on a click (sd:6714).
+  function liveRow(item, rows) {
+    const sure = rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = rows[0], id = `live:${item}`;
+    return ['working', s, html`<tr class="child" data-type="working" data-item="${item}" data-id="${id}" aria-selected="${String(row() === id)}">${marker(s, 'working')}
+      <td class="what"><a href="${shell.itemHref(item)}">#${item} ${top.title}</a></td>
+      <td class="detail"><ul class="sessions">${rows.map(r => html`<li>${r.verified ? '' : html`<span class="g-unknown" title="not confirmed">${GLYPH.unknown} </span>`}${r.session}<span class="via">${r.via}</span></li>`)}</ul></td>
+      <td class="num">${top.elapsed || 'not known'}</td><td class="act">${shell.commands.rowActions(id)}</td></tr>`];
+  }
+  const suggestRow = r => ['suggested', 'queued', html`<tr class="child" data-type="suggested" data-item="${r.id}">${marker('queued', 'suggested')}
+    <td class="what"><a href="${shell.itemHref(r.id)}">#${r.id} ${r.title}</a></td>
+    <td class="detail">ready${r.detail && r.detail !== '-' ? ` · ${r.detail}` : ''}</td><td class="num">${r.since ? age(r.since) : ''}</td><td class="act"></td></tr>`];
+  // Each repo's children, from the four reads; a repo with no row is not drawn.
+  function qGroups() {
+    const G = new Map(), add = (repo, [type, s, tr]) => {
+      const k = repoKey(repo);
+      if (!G.has(k)) G.set(k, { key: k, host: '', rows: [] });
+      G.get(k).rows.push({ type, s, tr });
+    };
+    const live = new Map();
+    ((ACTIVE || {}).rows || []).forEach(r => { if (!live.has(r.item)) live.set(r.item, []); live.get(r.item).push(r); });
+    live.forEach((rows, item) => add(rows[0].repo, liveRow(item, rows)));
+    const B = QV.built && !QV.built.error ? QV.built : { runs: [], recent: [] }, held = new Set();
+    B.runs.forEach(r => { r.items.forEach(m => held.add(m.assignment)); add(r.repo, runRow(r)); });
+    ((QV.runner || {}).live || []).filter(a => !held.has(a.id)).forEach(a => add(a.repo, asgRow(a)));
+    (QV.lanes ? QV.lanes.lanes : []).forEach(l => { l.rows.forEach(r => add(l.path, entryRow(l, r)));
+      if (G.has(repoKey(l.path))) G.get(repoKey(l.path)).host = l.host; });
+    const Q = DOC.queues || { rows: [] }, counted = {};
+    Q.rows.filter(r => r.queue === 'ready' && !live.has(r.id)).forEach(r => {
+      const k = repoKey(r.repo); counted[k] = (counted[k] || 0) + 1; if (counted[k] <= NEXT) add(r.repo, suggestRow(r)); });
+    B.recent.forEach(r => add(r.repo, endedRun(r)));
+    const RANK = { warning: 0, caution: 1, unknown: 2, ok: 3, queued: 4 };
+    return [...G.values()].map(g => {
+      const shown = g.rows.filter(c => !QSHOW.includes(c.type) || qShow.has(c.type)).sort((a, b) => QTYPES.indexOf(a.type) - QTYPES.indexOf(b.type));
+      return { ...g, shown, s: shown.reduce((w, c) => RANK[c.s] < RANK[w] ? c.s : w, 'queued') };
+    }).filter(g => g.shown.length).sort((a, b) => (a.key === '') - (b.key === '') || RANK[a.s] - RANK[b.s] || a.key.localeCompare(b.key));
+  }
+  const tally = rows => QTYPES.map(t => [t, rows.filter(c => c.type === t).length]).filter(([, n]) => n);
+  function queueView() {
+    const unread = [];
+    if (!QV.seen) return;
+    if (!DOC) { put($('queue'), html`<tr class="empty"><td colspan="5">The queue could not be read: ${failed}. Read again tries again.</td></tr>`); return; }
+    if (!QV.lanes) unread.push(`Lanes not read: ${QV.lanesErr || 'no answer yet'}`);
+    else QV.lanes.problems.forEach(p => unread.push(`${p.repo}: lane not read. ${p.error}`));
+    if (!QV.built || QV.built.error) unread.push(`Build runs not read: ${QV.built ? QV.built.error : QV.builtErr || 'no answer yet'}`);
+    if (!QV.runner) unread.push(`Runner assignments not read: ${QV.runnerErr || 'no answer yet'}`);
+    Object.entries((ACTIVE || {}).sources || {}).filter(([, why]) => why).forEach(([k, why]) => unread.push(`${SOURCE[k] || k} not read: ${why}`));
+    if (ACTIVE && ACTIVE.error) unread.push(`Sessions not read: ${ACTIVE.error}`);
+    if (qShow.has('suggested') && (DOC.queues || {}).error) unread.push(`Ready items not read: ${DOC.queues.error}`);
+    const groups = qGroups(), every = groups.flatMap(g => g.rows), active = every.filter(c => !QSHOW.includes(c.type)).length;
+    if (!groups.some(g => g.key === qOpen)) qOpen = null;
+    put($('queue-filters'), shell.list.fseg('qshow', 'Show', [['suggested', 'Suggested'], ['ended', 'Ended builds']].map(([v, label]) =>
+      ({ v, pressed: qShow.has(v), label: html`${label} <span class="n">${String(every.filter(c => c.type === v).length)}</span>` }))));
+    put($('queue-tally'), html`${tally(every.filter(c => !QSHOW.includes(c.type))).map(([t, n]) => html`<span>${n} ${t}</span>`)}`);
+    const said = $('queue-said'); said.hidden = !qSaid; said.textContent = qSaid ? qSaid.text : ''; said.setAttribute('role', qSaid && !qSaid.ok ? 'alert' : 'status');
+    const parent = g => { const on = qOpen === g.key, name = g.key || 'Unassociated';
+      return html`<tr class="repo" data-repo="${g.key}" aria-expanded="${String(on)}">${marker(g.s, 'repo')}
+        <td class="what"><button type="button" class="disc" data-open="${g.key}" aria-expanded="${String(on)}" aria-label="${on ? 'Close' : 'Open'} ${name}">${I('chevron-right')}</button><button type="button" class="pick" data-open="${g.key}">${name}</button>${g.host ? html`<small>lane on ${g.host}</small>` : ''}</td>
+        <td class="detail">${tally(g.shown).map(([t, n], i) => html`${i ? ' · ' : ''}${n} ${t}`)}</td><td class="num"></td><td class="act"></td></tr>`; };
+    put($('queue'), groups.length ? html`${groups.map(g => html`${parent(g)}${qOpen === g.key ? g.shown.map(c => c.tr) : ''}`)}`
+      : html`<tr class="empty"><td colspan="5">${unread.length ? 'No row in what was read; the line under the table names what was not.'
+        : `Nothing is working, merging, next or blocked${qShow.size ? ', and no row matches the filters' : ''}.`}</td></tr>`);
+    const note = $('queue-note'); note.hidden = !unread.length; note.textContent = unread.map(u => `▨ ${u}`).join(' · ');
+    shell.view.count('queue', active);
+  }
+  async function loadQueue() {
+    QV.seen = true;
+    const get = path => shell.getJSON(path).then(doc => [doc, ''], err => [null, err.message]);
+    const [[l, le], [b, be], [r, re]] = await Promise.all(['/api/queue', '/api/queue/builds?show=all', '/api/queue/runner'].map(get));
+    Object.assign(QV, { lanes: l, lanesErr: le, built: b, builtErr: be, runner: r, runnerErr: re });
+    QOTHER.clear();
+    (l ? l.lanes : []).forEach(lane => lane.rows.filter(x => x.state !== 'building').forEach(x => {
+      const id = entryId(lane, x);
+      shell.commands.put({ id, type: 'entry', label: `sd:${x.item}`, item: x.item, worktree: x.worktree, repo: lane.repo });
+      QOTHER.set(id, { draw: () => entryDetails(lane, x) });
+    }));
+    queueView();
+  }
+  function entryDetails(l, r) {
+    const [s, type, facts] = ENTRY[r.state](r);
+    return html`<p class="kind"><span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span> Lane entry · ${type}</p>
+      <h2><a href="${shell.itemHref(r.item)}">#${r.item} ${r.title}</a></h2>
+      <dl><dt>Repo</dt><dd>${l.repo}</dd><dt>Lane</dt><dd>${l.lane}</dd><dt>State</dt><dd>${r.state}</dd><dt>Facts</dt><dd>${facts}</dd></dl>
+      <h3>Act</h3>${shell.commands.bar(entryId(l, r))}<div id="adv"></div>`;
+  }
+  // The last entry a review started for shows its run under its Details; commands.js reads the run every 10 s until it settles.
+  document.addEventListener('adversarial:run', e => {
+    const adv = document.getElementById('adv');
+    if (adv && e.detail.key.startsWith('change:')) put(adv, html`${window.commands.reviewPane('change', e.detail.key.slice('change:'.length))}`);
+  });
+
+  const DONE = { up: 'moved up', down: 'moved down', top: 'moved to the top', hold: 'held', release: 'released', cancel: 'cancelled',
+    retry: 'queued again', approve: 'approved and queued again', requeue: 're-queued', reclaim: 'released from its holder' };
+  // Cancel, Approve and Release are the writes no verb undoes; each dialog names the entry and the command it runs.
+  function grant(l, item, head) {
+    const r = l.rows.find(x => x.state === 'blocked' && x.item === item);
+    return shell.confirm({ title: `Approve sd:${item}${r && r.title ? ` · ${r.title}` : ''} in ${l.repo}?`,
+      body: `The entry is queued again at head ${head.slice(0, 12)}, and the runner may merge it to the default branch. A merge is not taken back.`,
+      cli: `sd-ship -C ${shell.shq(l.path)} lane retry ${item} --expected-head ${head} --manual`, ok: 'Approve merge', keep: 'Leave it blocked' });
+  }
+  function sure(l, item) {
+    const r = l.rows.find(x => x.state === 'next' && x.item === item);
+    return shell.confirm({ title: `Cancel sd:${item}${r && r.title ? ` · ${r.title}` : ''} in ${l.repo}?`,
+      body: `The entry leaves the queue and the runner never ships it. ${QV.lanes.requeue
+        ? 'Re-queue on its cancelled row puts it back, last, while its branch stays at this head.'
+        : 'To ship it later, enqueue it again from its worktree.'}`,
+      cli: `sd-ship -C ${shell.shq(l.path)} lane cancel ${item}`, ok: 'Cancel entry', keep: 'Keep it queued' });
+  }
+  // Release names what the pack's reclaim does at the step the row showed; the claim binds it to that step.
+  function letGo(l, item, claim) {
+    const r = l.rows.find(x => x.state === 'merging' && x.item === item && x.claim === claim) || {};
+    const host = r.host || 'a host not recorded', ago = r.claim_age == null ? 'at a time not recorded' : `${dur(r.claim_age)} ago`;
+    const outcome = r.step === 'prepare'
+      ? 'The entry goes back to pending at its place and runs again; its third reclaim fails it instead.'
+      : 'The entry fails with the release as its reason. A merge it already started may still land, so read its pull request before you enqueue it again.';
+    return shell.confirm({ title: `Release sd:${item}${r.title ? ` · ${r.title}` : ''} from ${host}?`,
+      body: `${host} claimed it ${ago}, at ${r.step || 'a step not recorded'}. ${outcome} The holder's next queue write is refused. If the entry moved on since this read, nothing is released. sd-ship refuses the release when the holder runs alive on this machine.`,
+      cli: `sd-ship -C ${shell.shq(l.path)} lane cancel ${item} --expected-claim ${shell.shq(claim)}`, ok: 'Release entry', keep: 'Keep it running' });
+  }
+  async function laneAct(b) {
+    const l = QV.lanes && QV.lanes.lanes.find(x => x.path === b.dataset.repo);
+    if (!l || QV.busy) return;
+    const item = Number(b.dataset.item), action = b.dataset.act, head = b.dataset.head || '', claim = b.dataset.claim || '';
+    if (action === 'cancel' && !(await sure(l, item))) return;
+    if (action === 'reclaim' && !(await letGo(l, item, claim))) return;
+    if (action === 'approve' && !(await grant(l, item, head))) return;
+    QV.busy = true; queueView();
+    try {
+      const body = { repo: l.path, item, action, revision: l.revision };
+      if (action === 'retry' || action === 'approve' || action === 'requeue') body.head = head;
+      if (action === 'reclaim') body.claim = claim;
+      const out = await shell.post('/api/queue/move', body);
+      const order = out.pending ? ` Order now: ${out.pending.map(n => `sd:${n}`).join(', ')}.` : '';
+      qSaid = { ok: true, text: `${l.repo}: sd:${item} ${DONE[action]}.${order} ${out.edits || ''}` };
+    } catch (err) {
+      // Only a 4xx wrote nothing (queue_screen.move); a 502, another status or no answer may follow a landed write (sd:3339).
+      const why = String(err.message).replace(/([^.!?])$/, '$1.');
+      qSaid = { ok: false, text: err.status >= 400 && err.status < 500
+        ? `${l.repo}: sd:${item} not ${DONE[action]}: ${why}${err.stale ? '' : ' The queue is unchanged.'}`
+        : `${l.repo}: not known whether sd:${item} was ${DONE[action]}: ${why} The lane was read again; check sd:${item} there before you act again.` };
+    }
+    QV.busy = false;
+    await loadQueue();
+  }
+  async function buildAct(b) {
+    if (QV.busy || !QV.built || QV.built.error) return;
+    const act = b.dataset.build, r = QV.built.runs.concat(QV.built.recent).find(x => x.run === b.dataset.run);
+    if (!r) return;
+    const what = r.items.map(m => `sd:${m.item}`).join(', ');
+    if (act === 'cancel' && !(await shell.confirm({ title: `Cancel build run ${r.run} (${what})?`,
+      body: `The supervisor stops the ${r.step} step at its next beat, keeps the worktree, ends the bundle cancelled and moves ${r.items.length > 1 ? 'its items' : 'the item'} back to ready. Nothing is enqueued.`,
+      cli: `sd assignments cancel ${r.cancel.assignment} --if-revision ${r.cancel.revision}`, ok: 'Cancel build', keep: 'Keep it running' }))) return;
+    let finding = '';
+    if (act === 'send') {
+      const { yes, values } = await shell.ask({ title: `Send to builder: run ${r.run} (${what})?`, ok: 'Send', keep: 'Cancel', danger: false,
+        body: `The finding goes on ${r.items.length > 1 ? 'each item' : 'the item'} as a note, and the bundle queues again. Its next builder resumes ${r.worktree || 'the same worktree'} on its branch and fixes the finding first.`,
+        fields: [{ name: 'finding', label: 'Finding', required: true, placeholder: 'What the builder should fix' }] });
+      finding = (values && values.finding || '').trim();
+      if (!yes || !finding) return;
+    }
+    const done = act === 'cancel' ? 'cancelled' : act === 'send' ? 'sent to the builder' : 'retried';
+    QV.busy = true; queueView();
+    try {
+      if (act === 'cancel') await shell.post(`/api/assignments/${r.cancel.assignment}/cancel`, { revision: r.cancel.revision });
+      else await shell.post('/api/queue/builds/retry', { assignment: r.retry.assignment, revision: r.retry.revision, ...(finding ? { finding } : {}) });
+      qSaid = { ok: true, text: act === 'cancel' ? `Run ${r.run} (${what}): cancel requested; it stops at its next beat.`
+        : act === 'send' ? `${what} sent to the builder with your finding.` : `${what} queued again for build.` };
+    } catch (err) {
+      qSaid = { ok: false, text: err.status >= 400 && err.status < 500 ? `Run ${r.run} not ${done}: ${err.message}`
+        : `Not known whether run ${r.run} was ${done}: ${err.message} Read the view before you act again.` };
+    }
+    QV.busy = false;
+    await loadQueue();
   }
 
   // The day track (sd:5921): the document's `track`, the last 24 hours as marks in four lanes, each linked to its row, with
@@ -387,7 +578,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
       : html`<p class="why">Nothing landed, failed, was filed or ran in the last 24 hours.</p>`);
     const K2 = T.key;
     put($('flowkey'), html`<li><a href="/tasks?view=list&amp;status=done&amp;age=0&amp;realm=all">Landed 24h</a></li><li><b>${K2.landed}</b></li>
-      <li><a href="/queue">Landing</a></li><li><b>${K2.landing}</b></li>
+      <li><a href="#view=queue">Landing</a></li><li><b>${K2.landing}</b></li>
       <li><a href="/tasks?view=list&amp;due=week&amp;realm=all">Due this week</a></li><li><b>${K2.due_week}</b></li>
       <li><a href="/tasks?view=list&amp;status=blocked&amp;realm=all">Blocked</a></li><li><b>${K2.blocked}</b></li>`);
     $('track-table').hidden = !marks.length;
@@ -432,7 +623,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
     put($('details'), html`<p class="why">${!DOC ? 'Nothing is selected: Today could not be read.' : NEEDS.length ? 'No row matches the filter, so nothing is selected. Esc clears it.' : 'Nothing is selected: nothing needs you.'}</p>`);
   }
   const reconcile = () => shell.reconcile({ rows: $('rows').querySelectorAll('tr[data-id]'), current: row(),
-    keep: id => OTHER.has(id), select: id => select(id, false), clear: unselect });
+    keep: id => OTHER.has(id) || QOTHER.has(id), select: id => select(id, false), clear: unselect });
   function applyFilter() { needsTable(); reconcile(); }
 
   // ---------- Reading (build, sd:2483): shell.read reads /api/now ----------
@@ -455,9 +646,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
     document.querySelectorAll('#annunciator .cell:not(.clock)').forEach(cell => { cell.dataset.state = 'unknown'; cell.title = 'Today could not be read'; put(cell.querySelector('.val'), html`<span class="ph">not read</span>`); });
     put($('tally'), html``); put($('intents'), html``);
     put($('rows'), html`<tr class="empty"><td colspan="6">Needs you could not be read: ${failed}</td></tr>`);
-    put($('active'), html`<tr class="empty"><td colspan="5">Sessions could not be read: ${failed}. Read again tries again.</td></tr>`);
-    put($('active-tally'), html``); $('builds-table').hidden = true;
-    $('active-note').hidden = true; $('unread').hidden = true;
+    queueView();
+    $('unread').hidden = true;
     put($('track-plot'), html`<p class="why">The day track was not read: ${failed}.</p>`); put($('flowkey'), html``); $('track-table').hidden = true;
     put($('spend'), html`Spend not read: ${failed}.`);
     put($('digest'), html`<p class="why">The digest was not read: ${failed}.</p>`);
@@ -513,6 +703,9 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
     const lane = action => o => post('/api/queue/move', { repo: o.repoPath, item: o.item, action, revision: o.laneRevision, head: o.head });
     const go = (href, said) => () => { location.href = href; return said; };
     C.register(
+      // Each lane entry is a command object (sd:5064): its menu offers Adversarial review of the worktree the lane recorded.
+      K.adversarialReview('entry', { payload: o => ({ kind: 'change', target: o.worktree, item: o.item }),
+        when: o => !!o.worktree || 'the lane recorded no worktree for this entry' }),
       session('collector', o => !prs(o) || 'Re-run collector fixes the pull request collector'),
       session('repo'),
       session('sessions'),
@@ -548,8 +741,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
         consequence: o => `The entry is queued again at head ${String(o.head).slice(0, 12)}, and the runner may merge it to the default branch. A merge is not taken back.`,
         cli: o => `sd-ship -C ${o.repoPath} lane retry ${o.item} --expected-head ${o.head} --manual`, sends: () => 'POST /api/queue/move {action: approve}',
         when: o => o.runnerMerge === 'manual' || 'this repo merges without a grant (runner_merge auto)', run: o => lane('approve')(o).then(() => `Approved · sd:${o.item}`) },
-      { id: 'today.lane.queue', on: 'lane entry', label: 'Open in Queue', does: 'Opens the lane on Queue, where Cancel is.', key: 'q', risk: 'safe', executes: false,
-        cli: o => `sd-ship -C ${o.repoPath} lane list`, run: go('/queue', 'Queue opens') },
+      { id: 'today.lane.queue', on: 'lane entry', label: 'Open in Queue', does: 'Opens its repo in the Queue view, where Cancel is.', key: 'q', risk: 'safe', executes: false,
+        cli: o => `sd-ship -C ${o.repoPath} lane list`, run: o => { qOpen = repoKey(o.repoPath); shell.view.show('queue'); queueView(); return 'Queue opens'; } },
       // A new brief: Seen is the Today snooze held until the brief changes (sd:5752), the mark the place pages read too.
       { id: 'today.brief.seen', on: 'brief', label: 'Seen', does: 'Hides the brief from Today until its text grows.', key: 's', icon: 'eye', risk: 'safe', bulk: true, primary: () => true,
         cli: () => 'no sd verb: the dashboard writes the snooze (POST /api/snooze)',
@@ -567,7 +760,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
         askFirst: o => o.members.length > BULK, consequence: o => `Writes ${o.members.length} snoozes, one per member; each member comes back on its own after a week or by Unsnooze.`,
         cli: () => 'no sd verb: the dashboard writes one snooze per member (POST /api/snooze)',
         run: o => each(o, m => ({ page: 'today', row: m.id, until: week(), seen: m.seen })).then(() => `Snoozed ${o.members.length} for a week · ${o.label}`) },
-      // In motion and the day track (sd:6714): an item in motion opens, shows its builder's assignment, or gets a Fix
+      // The Queue view and the day track (sd:6714): a live item opens, shows its builder's assignment, or gets a Fix
       // session, posted with the revision the read gave; a landed item opens.
       { id: 'today.live.open', on: 'live item', label: 'Open item', does: 'Opens the item on Tasks.', key: 'o', icon: 'arrow-up-right', risk: 'safe', executes: false, primary: () => true,
         cli: o => `sd task show ${o.item}`, run: o => shell.openItem(o.item) },
@@ -594,11 +787,24 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
       if (more) { FULL.add(more.dataset.more); return needsTable(); }
       const tr = e.target.closest('tr[data-id]'); if (tr) select(tr.dataset.id, true);
     });
-    $('queues-repos').addEventListener('click', e => {
-      const c = e.target.closest('[data-qrepo]'); if (!c) return;
-      qRepo = c.dataset.qrepo && c.dataset.qrepo !== qRepo ? c.dataset.qrepo : null; queues();
+    // Queue (pack sd:7234): a write button acts; a repo row's name, chevron or the rest of its row opens it and closes the
+    // one that was open, and a click on the open one closes it; a child row selects into Details.
+    $('queue').addEventListener('click', e => {
+      if (e.target.closest('.rowact')) return;
+      const w = e.target.closest('button[data-act]'); if (w) { if (!w.disabled) laneAct(w); return; }
+      const b = e.target.closest('button[data-build]'); if (b) { if (!b.disabled) buildAct(b); return; }
+      const p = e.target.closest('tr.repo'); if (p && !e.target.closest('a, [data-copy]')) { qOpen = qOpen === p.dataset.repo ? null : p.dataset.repo; return queueView(); }
+      pickRow('tr[data-id]')(e);
     });
-    // sd:6714: a plain click on a row of In motion, the builder runs or the day track selects it, as a Needs you row's
+    $('queue-filters').addEventListener('click', e => {
+      const b = e.target.closest('button[data-f="qshow"]'); if (!b) return;
+      if (!qShow.delete(b.dataset.v)) qShow.add(b.dataset.v);
+      shell.url(qShow.size ? { show: QSHOW.filter(v => qShow.has(v)).join(',') } : {}); queueView();
+    });
+    (new URLSearchParams(location.search).get('show') || '').split(',').filter(v => QSHOW.includes(v)).forEach(v => qShow.add(v));
+    document.addEventListener('shell:view', e => { if (e.detail.id === 'queue' && !QV.seen) loadQueue(); });
+    if (typeof setInterval === 'function') setInterval(() => { if (QV.seen && !document.hidden && !QV.busy && shell.view.current() === 'queue') loadQueue(); }, 30000);
+    // sd:6714: a plain click on a row of the Queue view or the day track selects it, as a Needs you row's
     // does, its link included; a modifier click leaves the link to the browser, so it opens a new tab.
     const pickRow = sel => e => {
       const a = e.target.closest('a'); if (a && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
@@ -606,9 +812,6 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
       if (a) e.preventDefault();
       select(t.dataset.id, true);
     };
-    $('active').addEventListener('click', pickRow('tr[data-id]'));
-    $('motion-filters').addEventListener('click', e => { const b = e.target.closest('[data-f="motion"]'); if (b && b.dataset.v !== motionMode) { motionMode = b.dataset.v; motion(); } });
-    $('builds').addEventListener('click', pickRow('tr[data-id]'));
     $('track-rows').addEventListener('click', pickRow('tr[data-id]'));
     $('track-plot').addEventListener('click', pickRow('[data-id]'));
     $('intents').addEventListener('click', e => {
@@ -625,8 +828,6 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
       if (DOC) applyFilter();
     });
     put($('rows-head'), COLS); // drawn before the read, so a failed one keeps the columns
-    put($('builds-head'), html`<tr><th class="g">${SR('State')}</th><th>Builder run</th><th>Stage</th><th>Started</th><th class="num">ETA</th></tr>`);
-    put($('active-head'), html`<tr><th class="g">${SR('State')}</th><th>Item</th><th>Session</th><th>Started</th><th class="num">Elapsed</th></tr>`);
 
     // The shell's Shapeshift bar (sd:5539) filters Needs you through shell:filter.
     document.addEventListener('shell:filter', e => { query = e.detail.q.toLowerCase(); if (DOC) applyFilter(); });
@@ -640,7 +841,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motio
       first: () => $('rows').querySelector('tr[data-id]')?.dataset.id,
       // ?row= on a group member opens its group, so the selection is a row on screen.
       select: id => {
-        if (OTHER.has(id)) return select(id, false);
+        if (OTHER.has(id) || QOTHER.has(id)) return select(id, false);
         const g = NEEDS.find(r => (r.members || []).some(m => m.id === id));
         if (g && !OPEN.has(g.id)) { OPEN.add(g.id); FULL.add(g.id); needsTable(); }
         return [...$('rows').querySelectorAll('tr[data-id]')].some(tr => tr.dataset.id === id) ? select(id, false) : reconcile();

@@ -221,8 +221,8 @@ class Changed(Served):
         self.assertFalse(self.out.exists())
 
     def test_files_map_to_their_pages_and_a_shared_file_to_home(self) -> None:
-        self.assertEqual(shots.pages_for(["tasks.html", "static/queue.css", "static/home-kiosk.js", "pages/home.py"]),
-                         ["/home", "/queue", "/tasks"])
+        self.assertEqual(shots.pages_for(["tasks.html", "static/metrics.css", "static/home-kiosk.js", "pages/home.py"]),
+                         ["/home", "/metrics", "/tasks"])
         self.assertEqual(shots.pages_for(["static/tokens.css"]), ["/home"])
         self.assertEqual(shots.pages_for(["health.html", "static/places.js"]), ["/fleet-health", "/places"])
 
