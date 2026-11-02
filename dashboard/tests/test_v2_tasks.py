@@ -507,11 +507,11 @@ const lastToast = () => OUT.toasts[OUT.toasts.length - 1];
 const lastUndo = () => OUT.toasts.filter(t => t.undo).pop();
 """
 # The view switch as shell.js answers a page with PAGE_VIEWS (sd:6263): the shown view is #view=<id> when the page
-# declares it, else the first; show(id) shows a declared view and fires shell:view, as a tab click does.
-VIEW_SHELL = """window.shell.view = { now: null, ids: () => (window.PAGE_VIEWS || []).map(v => v.id),
-  current() { if (!this.now) { const h = (/^#view=([a-z0-9-]+)$/.exec(location.hash || '') || [])[1]; this.now = this.ids().includes(h) ? h : this.ids()[0] || null; } return this.now; },
+# declares it, else the first; show(id) shows a declared view and fires shell:view, as a tab click does; none() shows none.
+VIEW_SHELL = """window.shell.view = { now: undefined, ids: () => (window.PAGE_VIEWS || []).map(v => v.id),
+  current() { if (this.now === undefined) { const h = (/^#view=([a-z0-9-]+)$/.exec(location.hash || '') || [])[1]; this.now = this.ids().includes(h) ? h : this.ids()[0] || null; } return this.now; },
   show(id) { if (!this.ids().includes(id)) return false; if (this.current() !== id) { this.now = id; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id, first: true, api: null } })); } return true; },
-  hide() {}, count: (id, n) => { (OUT.counts = OUT.counts || {})[id] = n; } };
+  none() { this.now = null; }, hide() {}, count: (id, n) => { (OUT.counts = OUT.counts || {})[id] = n; } };
 """
 # What Tasks adds to the shared stand-in: shell.row() as shell.js answers it, its realm tabs, and the real reader (sd:2484).
 TASKS_SHELL = """window.shell.row = () => new URLSearchParams(location.search).get('row');

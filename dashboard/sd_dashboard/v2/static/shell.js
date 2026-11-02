@@ -188,6 +188,9 @@
   //   shell.view.hide(id, on) hides a
   //   view's rail entry, for a view with nothing in it (Writing's realms, sd:5064); a hidden view does not show,
   //   and hiding the shown one shows the first view left.
+  //   shell.view.none() shows no view, for a page whose views filter one surface and whose address asks for them all
+  //   (Tasks' ?realm=all, pack sd:7216): no rail entry is current, current() is null, and the next show(id), even of the
+  //   view shown before, shows it and fires 'shell:view'. Called in the page's DOMContentLoaded listener, no view fires first.
   //   'shell:view' fires on document with detail { id, first, api }: once at DOMContentLoaded, after the page's own listener,
   //   then on every change (a rail sub-entry, a key, back and forward). first is true the first time a view shows,
   //   so a page starts that view's reader (shell.read with source: api) then; the shell fetches nothing itself.
@@ -241,7 +244,8 @@
     viewItems[i].hidden = !!on;
     if (on && viewNow === id) { const left = VIEW_LIST.find((v, j) => viewOpen(j)); if (left) viewApply(left.id); }
   }
-  const view = { current: () => viewNow, show: viewShow, count: viewCount, hide: viewHide, auto: viewAuto };
+  function viewNone() { viewNow = null; viewLinks.forEach(a => a.removeAttribute('aria-current')); }
+  const view = { current: () => viewNow, show: viewShow, count: viewCount, hide: viewHide, auto: viewAuto, none: viewNone };
   if (VIEW_LIST.length) {
     // pack sd:7084: the rail's sub-entries are the one view switch; the page draws no tab bar of its own.
     const sub = document.createElement('ul');
@@ -274,7 +278,7 @@
     const names = VIEW_LIST.map(v => v.label);
     window.PAGE_KEYS = (window.PAGE_KEYS || []).concat([[VIEW_LIST.map(v => `v ${viewKey(v)}`).join(' / '),
       `${names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names[0]} view`]]);
-    const start = () => { viewStarted = true; viewFire(viewNow); };
+    const start = () => { viewStarted = true; if (viewNow) viewFire(viewNow); };
     document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', start) : start();
   }
   // view:end

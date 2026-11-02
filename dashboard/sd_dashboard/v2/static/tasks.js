@@ -17,8 +17,8 @@ window.PAGE_COMMANDS = [
 // layout panel (list, board, matrix) or the layout menu's view-btn and view-menu (sd:5641), takes no tab: the shell
 // would hide that panel. Home takes v o (g o opens the Home page), since v h is HOA's; a realm takes the first letter
 // of its id that no other tab, and not the layouts' v l, v b and v m, holds. pack sd:7216: no All tab; every task sits in
-// Personal or a realm (inPlace), so All only repeated them. An old #view=all or ?realm=all opens Personal; 'all' stays
-// reserved and v a unused, so a realm takes neither and no key moves.
+// Personal or a realm (inPlace), so All only repeated them. An old #view=all opens Personal; ?realm=all, Today's and
+// Metrics' drilldowns, still lists every realm (PLACE below). 'all' stays reserved and v a unused, so no key moves.
 if (location.hash === '#view=all') history.replaceState(history.state, '', '#view=personal');
 window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
   ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'hoa', 'home', 'all', 'list', 'board', 'matrix', 'btn', 'menu'].includes(r.id)).map(r => ({ id: r.id, label: r.label })),
@@ -80,11 +80,12 @@ addEventListener('DOMContentLoaded', () => {
   const scoped = t => t.parked ? window.shell.aside.shows(PARKED, true)
     : window.shell.aside.shows(PARKED, false) && !!t.scheduled === F.active.has('scheduled');
   // sd:6263: the shown realm tab (PAGE_VIEWS above). A row's area is the server's (places.area_of), the rule the HOA and
-  // Home pages' Tasks views use, so HOA and Home hold their rows; its realm is places.realm_of (sd:5064). Metrics' and
-  // Today's links name ?realm=all, as sd:5753's filter kept it: an address's ?realm= shows that tab, and all Personal.
+  // Home pages' Tasks views use, so HOA and Home hold their rows; its realm is places.realm_of (sd:5064). An address's
+  // ?realm= shows that tab. Metrics' and Today's drilldowns count every realm and name ?realm=all (pack sd:7216): PLACE is
+  // 'all', every row shows, no tab is current and the head says All realms, until a tab is picked.
   const asked = new URLSearchParams(location.search).get('realm');
-  if (asked) window.shell.view.show(asked === 'all' ? 'personal' : asked);
-  let PLACE = window.shell.view.current() || window.PAGE_VIEWS[0].id, REALMS = null;
+  if (asked === 'all') window.shell.view.none(); else if (asked) window.shell.view.show(asked);
+  let PLACE = asked === 'all' ? 'all' : window.shell.view.current() || window.PAGE_VIEWS[0].id, REALMS = null;
   const place = () => PLACE;
   document.addEventListener('shell:view', e => { if (e.detail.id === PLACE) return; PLACE = e.detail.id; L.page = 1; if (READ) { subhead(); render(); } });
   // sd:5096, sd:5097: the Personal and Work sweeps, as /api/tasks' `sweeps` reads them (sweep.status): running, the last run.
@@ -96,7 +97,7 @@ addEventListener('DOMContentLoaded', () => {
     : `sweep ${w.last.state}${w.last.exit != null ? `, exit ${w.last.exit}` : ''}${w.last.reason ? `: ${w.last.reason}` : ''}`;
   // A row's realm tab: its realm when that has a tab, else Personal (no realm list read, or a realm with no tab: pack sd:7216).
   const tabOf = t => t.realm !== 'hoa' && t.realm !== 'home' && window.PAGE_VIEWS.some(v => v.id === t.realm) ? t.realm : 'personal';
-  const inPlace = (t, p = place()) => p === 'hoa' || p === 'home' ? t.area === p : tabOf(t) === p;
+  const inPlace = (t, p = place()) => p === 'all' || (p === 'hoa' || p === 'home' ? t.area === p : tabOf(t) === p);
   const placed = () => listed().filter(t => inPlace(t));
 
   function state(t) {
@@ -539,7 +540,7 @@ addEventListener('DOMContentLoaded', () => {
   function subhead() {
     const parked = tasks.filter(t => t.parked).length, scheduled = tasks.filter(t => !t.parked && t.scheduled).length;
     // Without a readable realm list (dashboard.realms) every repo row sits in Personal; a realm view says why (sd:5064).
-    const why = REALMS && !['hoa', 'home'].includes(place()) && !['read', 'partial'].includes(REALMS.state)
+    const why = REALMS && !['hoa', 'home', 'all'].includes(place()) && !['read', 'partial'].includes(REALMS.state)
       ? ` · repos in no realm: ${REALMS.state === 'missing' ? 'no realm list; set dashboard.realms on Settings' : `${REALMS.source} ${REALMS.problems[0] || 'was not read'}`}` : '';
     // Personal and Work name their sweep's last run and carry Run sweep (sd:5096, sd:5097).
     const w = SWEEP_NAME[place()] && SWEEPS?.[place()];
@@ -548,7 +549,7 @@ addEventListener('DOMContentLoaded', () => {
     // Open counts as the realm tab does: the listed rows, not the scheduled ones.
     const held = tasks.filter(t => t.parked && inPlace(t)).length;
     put(document.getElementById('parked-seg'), window.shell.aside.buttons('parked', 'Parked', PARKED, { open: placed().length, aside: held }));
-    put(document.getElementById('subhead'), html`${parked ? `${parked} parked · ` : ''}${scheduled ? `${scheduled} scheduled · ` : ''}read ${READ ? html`<time class="rel" datetime="${READ}"></time>` : 'not yet'} · ${SUB[view]}${why}${w ? html` · <span class="sweep" data-sweep="${place()}">${SWEEP_NAME[place()]} ${sweepText(w)} ${C.rowActions('sweep:' + place())}</span>` : ''}`);
+    put(document.getElementById('subhead'), html`${place() === 'all' ? 'All realms · ' : ''}${parked ? `${parked} parked · ` : ''}${scheduled ? `${scheduled} scheduled · ` : ''}read ${READ ? html`<time class="rel" datetime="${READ}"></time>` : 'not yet'} · ${SUB[view]}${why}${w ? html` · <span class="sweep" data-sweep="${place()}">${SWEEP_NAME[place()]} ${sweepText(w)} ${C.rowActions('sweep:' + place())}</span>` : ''}`);
   }
   // The view menu (sd:5064): one button shows the current view's icon; its menu lists the three, one checked. The shell
   // wires it (shell.viewPick, sd:5641), as on Writing.
@@ -585,6 +586,7 @@ addEventListener('DOMContentLoaded', () => {
   }
   function writeURL() {
     const q = new URLSearchParams(); q.set('view', view);
+    if (place() === 'all') q.set('realm', 'all');
     FKEYS.forEach(key => { if (F[key].size) q.set(key, [...F[key]].join(',')); });
     if (Q) q.set('q', Q);
     const pp = window.shell.aside.param(PARKED); if (pp) q.set('parked', pp);

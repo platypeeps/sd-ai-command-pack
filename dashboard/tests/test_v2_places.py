@@ -1092,12 +1092,12 @@ for (const v of ['work', 'hoa', 'home', 'personal']) { await realm(v); R[v] = EL
         self.assertEqual(r["urls"], ["view=board"] * 5)
 
     def test_an_address_or_an_older_link_lands_on_its_realm(self):
-        """Metrics and Today link /tasks?...&realm=all, and a bookmark may hold #view=hoa or #view=home. pack sd:7216: All is
-        gone, so ?realm=all and #view=all open Personal, and the address says #view=personal."""
+        """Metrics and Today link /tasks?...&realm=all, and a bookmark may hold #view=hoa or #view=home. pack sd:7216: the
+        All tab is gone: ?realm=all still lists every realm, and #view=all opens Personal, the address saying #view=personal."""
         self.doc, self.details = self.realm_doc(), {}
         prelude = self.REALMS + "var history = { state: null, replaceState: (s, t, u) => { OUT.replaced = u; location.hash = u; } };\n"
         for search, hash_, shown in (("?realm=hoa", "", [True, False, False]), ("", "#view=all", [True, True, False]),
-                                     ("?realm=all", "", [True, True, False]), ("?realm=all", "#view=work", [True, True, False]),
+                                     ("?realm=all", "", [True, True, True]), ("?realm=all", "#view=work", [True, True, True]),
                                      ("", "#view=hoa", [True, False, False]), ("", "#view=home", [False, True, False]),
                                      ("", "#view=work", [False, False, True]), ("?realm=home", "#view=all", [False, True, False]),
                                      ("", "#view=nope", [True, True, False]), ("?realm=nope", "", [True, True, False])):
@@ -1105,6 +1105,26 @@ for (const v of ['work', 'hoa', 'home', 'personal']) { await realm(v); R[v] = EL
                 out = self.run_tasks("R.board = ELS['view-board'].html;", search=search, hash=hash_, prelude=prelude)
                 self.assertEqual([t in out["R"]["board"] for t in self.TITLES], shown)
                 self.assertEqual(out.get("replaced"), "#view=personal" if hash_ == "#view=all" else None)
+
+    def test_a_today_drilldown_with_realm_all_lists_every_realm_until_a_tab_is_picked(self):
+        """pack sd:7216: Today's and Metrics' drilldowns count every realm and link ?realm=all. With no All tab the list
+        still holds every realm's rows, a work-realm item too; no tab is current and the head says All realms. A filter
+        keeps ?realm=all in the address; a tab picked, Personal too, leaves it."""
+        self.doc, self.details = self.realm_doc(), {}
+        out = self.run_tasks("""R.cur = window.shell.view.current(); R.list = ELS['view-list'].html; R.sub = ELS.subhead.html;
+const box = document.getElementById('find-in'); box.value = 'the'; box.listeners.input[0]({ target: box }); await flush();
+R.kept = OUT.urls[OUT.urls.length - 1]; box.value = ''; box.listeners.input[0]({ target: box }); await flush();
+await realm('personal'); R.cur2 = window.shell.view.current(); R.list2 = ELS['view-list'].html; R.sub2 = ELS.subhead.html;
+R.left = OUT.urls[OUT.urls.length - 1];""", search="?view=list&realm=all")
+        r = out["R"]
+        self.assertEqual([t in r["list"] for t in self.TITLES], [True, True, True])
+        self.assertIsNone(r["cur"])
+        self.assertIn("All realms", r["sub"])
+        self.assertIn("realm=all", r["kept"])
+        self.assertEqual([t in r["list2"] for t in self.TITLES], [True, True, False])
+        self.assertEqual(r["cur2"], "personal")
+        self.assertNotIn("All realms", r["sub2"])
+        self.assertNotIn("realm=all", r["left"])
 
     def test_a_realm_with_a_taken_id_is_dropped(self):
         """A realm named for a tab Tasks owns, or for a layout panel (list, board, matrix, btn, menu), takes no tab."""

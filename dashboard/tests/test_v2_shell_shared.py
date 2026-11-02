@@ -1642,12 +1642,13 @@ class TheViewSwitch(unittest.TestCase):
     """The view switch, cut out of shell.js: one declaration, window.PAGE_VIEWS, draws the rail's sub-entries, the one
     switch (pack sd:7084)."""
 
-    def run_view(self, body, hash="", host=False, store=None):
+    def run_view(self, body, hash="", host=False, store=None, before=""):
         block = re.search(r"^  // view:start\n(.*?)^  // view:end$", SHELL_JS, re.S | re.M)
         self.assertIsNotNone(block, "shell.js has no view:start block")
         stand_in = (VIEW_STAND_IN.replace("HASH", json.dumps(hash)).replace("WITH_HOST", json.dumps(host))
                     .replace("KEPT_STORE", json.dumps({} if store is None else store or None)))
-        script = (stand_in + block.group(1) + r"""
+        # `before` runs ahead of the block: a page's own listeners, registered before shell.js's.
+        script = (stand_in + before + "\n" + block.group(1) + r"""
 var R = {};
 const shown = () => Object.values(PANELS).filter(p => !p.hidden).map(p => p.id);
 const RAIL = () => LI.children.length ? LI.children[0].children.map(li => li.children[0]) : [];
@@ -1685,6 +1686,18 @@ function run() { OUT.R = R; OUT.STORE = STORE; return JSON.stringify(OUT); }
         self.assertEqual((r["cur"], r["li"], r["back"], r["cur2"], r["again"]), ("cadence", True, False, "cadence", True))
         # A panel's own display (Today's grid) would beat the hidden attribute without this rule.
         self.assertIn('main [id^="view-"][hidden]', SHELL_CSS)
+
+    def test_none_shows_no_view_until_the_next_show_even_of_the_last_one(self):
+        # pack sd:7216: Tasks' ?realm=all lists every realm at once, so no rail entry is current. A page calls none() in
+        # its DOMContentLoaded listener, before the shell's start, which then fires no view; the next show(), even of the
+        # view shown before, shows it and fires shell:view.
+        out = self.run_view("R.cur = view.current(); R.links = RAIL().map(a => a.getAttribute('aria-current'));"
+                            " R.back = view.show('reports'); R.cur2 = view.current(); R.links2 = RAIL().map(a => a.getAttribute('aria-current'));",
+                            host=True, before="document.addEventListener('DOMContentLoaded', () => view.none());")
+        r = out["R"]
+        self.assertEqual((r["cur"], r["links"]), (None, [None, None, None]))
+        self.assertEqual((r["back"], r["cur2"], r["links2"]), (True, "reports", ["true", None, None]))
+        self.assertEqual(out["events"], [{"id": "reports", "first": True, "api": None}])
 
     def test_storage_that_throws_is_no_view(self):
         # sd:5753: keep: false went with the last views that set it (Designs' and Contributions' Hidden); a stored id no page
