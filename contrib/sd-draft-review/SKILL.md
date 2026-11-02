@@ -46,7 +46,7 @@ Change marks belong to this review copy alone. `sd-publish-drive` imports a clea
    - Re-push: mark what changed first, then `update_drive_file` with the recorded `file_id`, the marked file's `file_path`, and `source_format: "html"`. Say in the report that comment anchors detach, and that revision history keeps the old body.
      Per document, read the current Doc with `get_doc_as_markdown` (`comment_mode: "none"`) into `<scratch dir>/<name>.previous.md`, then run
      `sd-research-kit highlight --previous <scratch dir>/<name>.previous.md --since "<push time>" <scratch dir>/<name>.html <attachments>/<name>.html`.
-     `<push time>` is the `pushed` time in that copy's header. Changed `<p>` and `<li>` get a yellow background, and one note under the header names the count and the changed sections; `No changes since` when none did.
+     `<push time>` is the `pushed` time in that copy's header. Changed paragraphs, list items, headings, table cells and code blocks get a yellow background. One note under the header gives the count, how many earlier paragraphs no longer appear, and their sections; `No changes since` when neither.
      Reviewer edits are in that read-back, so they count as already seen. A failed read or a refusal stops the re-push: an unknown baseline would mark nothing or everything.
      A first push imports unmarked: it has nothing to compare against.
    - A result that is not `application/vnd.google-apps.document` is a failure to report.

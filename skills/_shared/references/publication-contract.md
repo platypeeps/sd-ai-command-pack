@@ -488,8 +488,9 @@ Draining is six steps per request, and the order matters:
      time with its zone. Then replace the body with `update_drive_file`,
      `file_path` the `<out.html>` and `source_format: "html"`: an HTML import
      keeps headings, tables and code blocks as the Markdown one does. Each
-     changed `<p>` and `<li>` gets a yellow background, and one note opens
-     the Doc: the count and the changed sections, or `No changes since`.
+     changed paragraph, list item, heading, table cell and code block gets a
+     yellow background. One note opens the Doc: the count, how many earlier
+     paragraphs no longer appear, and their sections, or `No changes since`.
      The read-back holds a reader's own edits, so they count as seen. A read
      that fails, or a `highlight` that exits non-zero, leaves the request: an
      unknown baseline would mark nothing or everything. Three writes carry

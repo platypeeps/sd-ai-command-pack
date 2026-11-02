@@ -9,19 +9,27 @@ reviewer's own edits count as already seen.
     sd-research-kit highlight --previous <baseline.md> [--since <time>] <in> <out.html>
 
 `<in>` is the HTML about to be uploaded, or Markdown (`.md`), which is laid out
-as HTML first, as a mirror's `content` is. Each `<p>` and `<li>` whose text is
-not in the baseline gets `background-color:#fff2a8`, and one note, highlighted
-the same way, says "Changed since <time>": the count and the changed sections.
-In HTML input, what comes before the first `<hr` is the review copy's header
-block (title, repository, push time): it is never compared, since its push time
-changes every push, and the note goes at its end. Otherwise the note opens the
+as HTML first, as a mirror's `content` is. Each unit whose text is not in the
+baseline gets `background-color:#fff2a8`: a paragraph, list item, heading, table
+cell or code block, and any text outside those, such as a list item's tail after
+its nested list. One note, highlighted the same way, says "Changed since
+<time>": the count, how many earlier units no longer appear (reworded or
+removed), and the sections of both. With neither it says "No changes since".
+
+A review copy's header block (title, repository, push time) is never compared,
+since its push time changes every push: in HTML input, what comes before a first
+`<hr` that no heading and at most five units precede, and in the baseline what
+comes before the matching rule. The note goes at its end; otherwise it opens the
 body.
 
-A paragraph is unchanged when its text, tags stripped and whitespace collapsed,
-equals the text of a line or a blank-line block of the baseline, with Markdown
-syntax taken away: links keep their text, images go, bold, italic and code
-marks go, and heading, quote and list markers go, with the `[ ]` checkbox Drive
-adds to an imported list.
+A unit is unchanged when its text, tags stripped and whitespace collapsed,
+equals an unmatched unit of the baseline with Markdown syntax taken away: links
+keep their text, images go, bold and italic marks go, and heading, quote and
+list markers go, with the `[ ]` checkbox Drive adds to an imported list. Code
+spans, code blocks and escaped characters keep their characters literally.
+Each baseline unit matches once, so a duplicated paragraph is new. Formatting,
+a link's target and an image are not compared, by the ruling: Drive rewrites
+image URLs and may rewrite links.
 
 An empty baseline is a first push, which has nothing to compare: the verb
 refuses it and writes nothing, so a failed read-back never marks a whole
@@ -38,45 +46,163 @@ from pathlib import Path
 
 MARK = "background-color:#fff2a8"
 USAGE = "usage: sd-research-kit highlight --previous <baseline.md> [--since <time>] <in> <out.html>"
-#: Every tag the scan stops at: a unit's text runs from its opening tag to the next of these.
-TAG = re.compile(r"<(/?)(p|li|h[1-6]|ul|ol|hr|div|table|blockquote|pre)\b([^>]*)>", re.I)
+#: Tags that hold a unit's text; a changed one gets the mark on its opening tag.
+UNIT = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "pre", "dt", "dd", "caption",
+        "figcaption", "blockquote", "div"}
+#: Every block tag: a unit's text runs from one of these to the next. Inline tags (a, code, br) do not cut it.
+BLOCK = UNIT | {"ul", "ol", "hr", "table", "thead", "tbody", "tfoot", "tr", "dl", "figure", "body", "html",
+                "section", "article", "main", "header", "footer"}
+TAG = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>")
 STYLE = re.compile(r"""\bstyle=(["'])(.*?)\1""", re.I | re.S)
 LINK = re.compile(r"\[((?:[^\[\]]|\[[^\]]*\])*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+\"[^\"]*\")?\)")
 IMAGE = re.compile(r"!\[[^\]]*\]\((?:[^()]|\([^)]*\))*\)")
 LEAD = re.compile(r"^\s*(?:#{1,6}\s+|>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s+)?")
+HEADING = re.compile(r"^\s*#{1,6}\s")
+ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+ROW = re.compile(r"^\s*\|.*\|\s*$")
+RULE = re.compile(r"^\s*(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$")
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+#: The note's own text, read back from the previous push: never a paragraph of the document.
+NOTE = re.compile(r"^(Changed since|No changes since) ")
+#: A header block holds the review copy's title, repository and push lines; more units than this is a body.
+HEADER_UNITS = 5
+#: Markdown's emphasis pairs, strong first: each keeps its text.
+EMPHASIS = (re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"), re.compile(r"\*(?=\S)(.+?)(?<=\S)\*"),
+            re.compile(r"(?<![\w\\])_(?=\S)(.+?)(?<=\S)_(?!\w)"))
 
 
-def _flat(text: str) -> str:
-    """Both sides' last step: entities, emphasis and code marks, whitespace."""
-
-    text = html.unescape(text)
-    text = text.replace("`", "").replace("**", "").replace("__", "")
-    text = re.sub(r"(?<!\w)[*_]+|[*_]+(?!\w)", "", text)
+def _collapse(text: str) -> str:
     return " ".join(text.split())
 
 
 def html_text(fragment: str) -> str:
-    return _flat(re.sub(r"<[^>]+>", "", re.sub(r"<br\b[^>]*>", " ", fragment, flags=re.I)))
+    """A fragment's text: tags stripped, `<br>` a space, entities read. Literal characters stay."""
+
+    return _collapse(html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<br\b[^>]*>", " ", fragment, flags=re.I))))
 
 
 def markdown_text(line: str) -> str:
-    """One Markdown line or block as the text its HTML would hold."""
+    """One Markdown line or block as the text its HTML would hold.
 
-    text = IMAGE.sub("", line)
+    Code spans and backslash escapes are set aside first, so their characters stay literal:
+    `` `__init__` `` reads `__init__`, while `__init__` outside code is bold `init`.
+    """
+
+    kept: list[str] = []
+
+    def keep(text: str) -> str:
+        kept.append(text)
+        return f"\x00{len(kept) - 1}\x00"
+
+    text = re.sub(r"(`+)(.+?)\1", lambda m: keep(m.group(2).strip() if m.group(2).strip() else m.group(2)), line)
+    text = re.sub(r"\\([\\`*_{}\[\]()#+\-.!|>~<])", lambda m: keep(m.group(1)), text)
+    text = IMAGE.sub("", text)
     text = LINK.sub(r"\1", text)
     text = re.sub(r"<(https?://[^>\s]+)>", r"\1", text)
     text = "\n".join(LEAD.sub("", row) for row in text.split("\n"))
-    text = re.sub(r"\\([\\`*_{}\[\]()#+\-.!|>~<])", r"\1", text)
-    return _flat(re.sub(r"<[^>]+>", "", text))
+    for pattern in EMPHASIS:
+        while True:
+            text, count = pattern.subn(lambda m: m.group(m.lastindex or 1), text)
+            if not count:
+                break
+    text = html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<br\b[^>]*>", " ", text, flags=re.I)))
+    text = re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], text)
+    return _collapse(text)
 
 
-def baseline(markdown: str) -> set[str]:
-    """Every line and every blank-line block, as text: Drive may break a paragraph either way."""
+class Baseline:
+    """The previous copy's units, each matched at most once.
 
-    seen = {markdown_text(line) for line in markdown.splitlines()}
-    seen |= {markdown_text(block) for block in re.split(r"\n\s*\n", markdown)}
-    seen.discard("")
-    return seen
+    A unit is a heading, a list item, a table cell, a fenced block, or a run of plain lines (one
+    paragraph, however Drive wrapped it). Each line of a run is also kept, since Drive may end a
+    paragraph at a single newline; a match through a line accounts for its run.
+    """
+
+    def __init__(self, markdown: str, header: bool) -> None:
+        self.units: list[tuple[str, str]] = []  # (text, section)
+        self.whole: dict[str, list[int]] = {}
+        self.lines: dict[str, list[int]] = {}
+        self.used: set[int] = set()
+        rows = markdown.splitlines()
+        if header:
+            rows = self._after_header(rows)
+        section, fence = "Opening", None
+        run: list[str] = []
+        code: list[str] = []
+        for row in rows + [""]:
+            if fence is not None:
+                if row.strip().startswith(fence):
+                    self._add(_collapse("\n".join(code)), section, [])
+                    fence, code = None, []
+                else:
+                    code.append(row)
+                continue
+            opened = FENCE.match(row)
+            structural = opened or not row.strip() or HEADING.match(row) or ITEM.match(row) or ROW.match(row)
+            if structural and run:
+                self._add(markdown_text("\n".join(run)), section, [markdown_text(line) for line in run])
+                run = []
+            if opened:
+                fence = opened.group(1)
+            elif structural:
+                section = self._structural(row, section)
+            elif not RULE.match(row):
+                run.append(row)
+
+    def _structural(self, row: str, section: str) -> str:
+        """Add a heading, list item or table row's units; the section that follows."""
+
+        if HEADING.match(row):
+            section = markdown_text(row) or section
+            self._add(section, section, [])
+        elif ITEM.match(row):
+            self._add(markdown_text(row), section, [])
+        elif ROW.match(row):
+            for cell in re.split(r"(?<!\\)\|", row.strip().strip("|")):
+                if not re.fullmatch(r"\s*:?-+:?\s*", cell):
+                    self._add(markdown_text(cell), section, [])
+        return section
+
+    @staticmethod
+    def _after_header(rows: list[str]) -> list[str]:
+        """The rows after a header block: a rule before any heading, after a few blocks at most."""
+
+        blocks = 0
+        for index, row in enumerate(rows):
+            if HEADING.match(row):
+                return rows
+            if RULE.match(row):
+                return rows[index + 1:] if blocks <= HEADER_UNITS else rows
+            if row.strip() and (index == 0 or not rows[index - 1].strip()):
+                blocks += 1
+        return rows
+
+    def _add(self, text: str, section: str, lines: list[str]) -> None:
+        if not text or NOTE.match(text):
+            return
+        index = len(self.units)
+        self.units.append((text, section))
+        self.whole.setdefault(text, []).append(index)
+        for line in lines:
+            if line and line != text:  # a one-line run is its whole
+                self.lines.setdefault(line, []).append(index)
+
+    def __bool__(self) -> bool:
+        return bool(self.units)
+
+    def match_unit(self, text: str) -> bool:
+        """Whether `text` is in the previous copy and not yet matched; a match uses that unit up."""
+
+        for table in (self.whole, self.lines):
+            if table.get(text):
+                self.used.add(table[text].pop(0))
+                return True
+        return False
+
+    def unmatched(self) -> list[tuple[str, str]]:
+        """The units no part of the new copy matched: reworded or removed."""
+
+        return [unit for index, unit in enumerate(self.units) if index not in self.used]
 
 
 def _marked(tag: str) -> str:
@@ -90,45 +216,70 @@ def _marked(tag: str) -> str:
     return tag[: found.start()] + f"style={found.group(1)}{style}{found.group(1)}" + tag[found.end():]
 
 
-def highlight(page: str, seen: set[str], since: str, header: bool) -> tuple[str, int, list[str]]:
-    """`page` with each unseen `<p>`/`<li>` marked and the note placed; the count and the sections."""
+def _header_end(page: str) -> int:
+    """Where a review copy's header block ends: its first `<hr`, if no heading and few units precede it."""
 
-    start = 0
-    if header:
-        rule = re.search(r"<hr\b", page, re.I)
-        start = rule.start() if rule else 0
-    if not start:
-        body = re.search(r"<body\b[^>]*>", page, re.I)
-        start = body.end() if body else 0
-    tags = list(TAG.finditer(page, start))
-    out, at, section, changed, sections = [], start, "Opening", 0, []
-    for index, tag in enumerate(tags):
-        closing, name = tag.group(1), tag.group(2).lower()
-        heading = re.fullmatch(r"h[1-6]", name) is not None
-        if closing or name not in ("p", "li") and not heading:
-            continue
-        end = tags[index + 1].start() if index + 1 < len(tags) else len(page)
-        text = html_text(page[tag.end():end])
-        if heading:
-            section = text or section
-            continue
-        if not text or text in seen:
-            continue
-        out.append(page[at:tag.start()])
-        out.append(_marked(tag.group(0)))
-        at = tag.end()
-        changed += 1
-        if section not in sections:
-            sections.append(section)
-    out.append(page[at:])
+    rule = re.search(r"<hr\b", page, re.I)
+    if not rule or re.search(r"<h[1-6]\b", page[:rule.start()], re.I):
+        return 0
+    units = len(re.findall(r"<(?:p|li|td|th|pre|div)\b", page[:rule.start()], re.I))
+    return rule.start() if units <= HEADER_UNITS else 0
+
+
+def _note(changed: int, gone: int, sections: list[str], since: str) -> str:
+    """The header note's inner HTML."""
+
+    parts = []
     if changed:
-        noun = "paragraph" if changed == 1 else "paragraphs"
-        note = (f"<strong>Changed since {html.escape(since)}</strong>: {changed} {noun}, highlighted below. "
+        parts.append(f"{changed} {'paragraph' if changed == 1 else 'paragraphs'}, highlighted below")
+    if gone:
+        parts.append(f"{gone} earlier {'paragraph no longer appears' if gone == 1 else 'paragraphs no longer appear'}"
+                     ", reworded or removed")
+    if parts:
+        note = (f"<strong>Changed since {html.escape(since)}</strong>: {'; '.join(parts)}. "
                 f"Sections: {html.escape('; '.join(sections))}.")
     else:
         note = f"<strong>No changes since {html.escape(since)}</strong>."
+    return note
+
+
+def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str, int, int, list[str]]:
+    """`page` marked, with its note: the count changed, the count gone, and the sections of both."""
+
+    start = _header_end(page) if header else 0
+    if not start:
+        body = re.search(r"<body\b[^>]*>", page, re.I)
+        start = body.end() if body else 0
+    tags = [tag for tag in TAG.finditer(page, start) if tag.group(2).lower() in BLOCK]
+    out, at, section, changed, sections = [], start, "Opening", 0, []
+    bounds = [(start, None)] + [(tag.end(), tag) for tag in tags]
+    for index, (begin, tag) in enumerate(bounds):
+        end = tags[index].start() if index < len(tags) else len(page)
+        text = html_text(page[begin:end])
+        if not text:
+            continue
+        name = tag.group(2).lower() if tag is not None and not tag.group(1) else ""
+        if re.fullmatch(r"h[1-6]", name):
+            section = text
+        if seen.match_unit(text):
+            continue
+        changed += 1
+        if section not in sections:
+            sections.append(section)
+        if name in UNIT and tag is not None:
+            out += [page[at:tag.start()], _marked(tag.group(0))]
+            at = tag.end()
+        else:  # text outside any unit tag, such as a list item's tail after its nested list
+            out += [page[at:begin], f'<span style="{MARK}">', page[begin:end], "</span>"]
+            at = end
+    out.append(page[at:])
+    gone = seen.unmatched()
+    for _, where in gone:
+        if where not in sections:
+            sections.append(where)
+    note = _note(changed, len(gone), sections, since)
     lead = page[:start] + f'<p style="{MARK}">{note}</p>\n'
-    return lead + "".join(out), changed, sections
+    return lead + "".join(out), changed, len(gone), sections
 
 
 def _layout(markdown: str) -> str:
@@ -177,24 +328,24 @@ def highlight_main(argv: list[str]) -> int:
     except OSError as error:
         print(f"sd-research-kit highlight: {error}", file=sys.stderr)
         return 2
-    seen = baseline(before)
-    if not seen:
+    markdown_in = is_markdown(source)
+    seen = Baseline(before, header=not markdown_in)
+    if not before.strip():
         print(f"sd-research-kit highlight: {previous} is empty: a first push has nothing to compare; "
               "upload without highlight", file=sys.stderr)
         return 2
-    markdown_in = is_markdown(source)
     page = _layout(page) if markdown_in else page
-    marked, changed, sections = highlight(page, seen, since, header=not markdown_in)
+    marked, changed, gone, sections = highlight(page, seen, since, header=not markdown_in)
     try:
         target.write_text(marked, encoding="utf-8")
     except OSError as error:
         print(f"sd-research-kit highlight: {error}", file=sys.stderr)
         return 2
-    if changed:
-        print(f"changed: {changed} since {since}")
+    print(f"changed: {changed} since {since}")
+    if gone:
+        print(f"gone: {gone}")
+    if sections:
         print(f"sections: {'; '.join(sections)}")
-    else:
-        print(f"changed: 0 since {since}")
     return 0
 
 

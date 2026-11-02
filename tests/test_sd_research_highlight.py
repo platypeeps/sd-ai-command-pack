@@ -93,7 +93,8 @@ class HighlightFixtureTests(unittest.TestCase):
     def test_the_header_note_appears_exactly_once_before_the_rule(self) -> None:
         self.assertEqual(self.page.count("Changed since"), 1)
         note = re.search(r'<p style="' + re.escape(MARK) + r'"><strong>Changed since 2026-11-02 12:04 MST</strong>: '
-                         r"3 paragraphs, highlighted below\. Sections: Opening; Where the pressure comes from; "
+                         r"3 paragraphs, highlighted below; 2 earlier paragraphs no longer appear, reworded or removed\. "
+                         r"Sections: Opening; Where the pressure comes from; "
                          r"Risks and open questions\.</p>\n<hr />", self.page)
         self.assertIsNotNone(note, self.page[:1200])
 
@@ -133,7 +134,8 @@ class HighlightEdgeTests(unittest.TestCase):
         self.assertIn(f'<body><p style="{MARK}"><strong>No changes since 09:00 MST</strong>.</p>\n\n<h2>', written)
 
     def test_an_existing_style_keeps_its_rules_and_gains_the_mark(self) -> None:
-        page, _, _ = self.highlight.highlight('<p style="margin:0;">New.</p><li>Old.</li>', {"Old."}, "t", header=False)
+        seen = self.highlight.Baseline("- Old.\n", header=False)
+        page, _, _, _ = self.highlight.highlight('<p style="margin:0;">New.</p><li>Old.</li>', seen, "t", header=False)
         self.assertIn(f'<p style="margin:0;{MARK}">New.</p>', page)
         self.assertIn("<li>Old.</li>", page)
 
@@ -147,11 +149,12 @@ class HighlightEdgeTests(unittest.TestCase):
         )
         for markdown, fragment in pairs:
             with self.subTest(markdown=markdown):
-                self.assertIn(self.highlight.html_text(fragment), self.highlight.baseline(markdown))
+                self.assertEqual(self.highlight.markdown_text(markdown), self.highlight.html_text(fragment))
 
     def test_a_nested_list_item_is_its_own_unit(self) -> None:
         page = "<ul><li>Outer<ul><li>Inner new</li></ul></li></ul>"
-        marked, changed, _ = self.highlight.highlight(page, {"Outer"}, "t", header=False)
+        marked, changed, _, _ = self.highlight.highlight(page, self.highlight.Baseline("- Outer\n", header=False), "t",
+                                                         header=False)
         self.assertEqual(changed, 1)
         self.assertIn(f'<li style="{MARK}">Inner new', marked)
 
@@ -183,6 +186,79 @@ class HighlightEdgeTests(unittest.TestCase):
                 self.assertEqual(kit.main(["sd-research-kit", "highlight", "--previous", base,
                                            str(self.write("in.html", "<p>Old.</p>")), str(self.tmp / "o.html")]), 0)
         self.assertEqual(calls, [("markdown", "markdown", ["highlight", "--previous", base, str(self.tmp / "in.md"), "o.html"])])
+
+
+class ChangesTheComparisonMustSee(unittest.TestCase):
+    """Round 1's class: a real change the comparison cannot see gives a false or short note.
+
+    One test per row of the failure table in the PR body.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.highlight = load_highlight()
+
+    def check(self, baseline: str, page: str) -> tuple[str, str]:
+        (self.tmp / "b.md").write_text(baseline, encoding="utf-8")
+        (self.tmp / "in.html").write_text(page, encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            code = self.highlight.highlight_main(["--previous", str(self.tmp / "b.md"), "--since", "T",
+                                                  str(self.tmp / "in.html"), str(self.tmp / "out.html")])
+        self.assertEqual(code, 0)
+        return said.getvalue(), (self.tmp / "out.html").read_text(encoding="utf-8")
+
+    def test_a_heading_edit_is_marked(self) -> None:
+        said, page = self.check("## Old title\n\nSame.\n", "<h2>New title</h2>\n<p>Same.</p>\n")
+        self.assertIn("changed: 1 since T", said)
+        self.assertIn(f'<h2 style="{MARK}">New title</h2>', page)
+
+    def test_a_table_cell_edit_is_marked(self) -> None:
+        said, page = self.check("| Key | Value |\n| --- | --- |\n| exit | 0 |\n",
+                                "<table><tr><th>Key</th><th>Value</th></tr><tr><td>exit</td><td>1</td></tr></table>")
+        self.assertIn("changed: 1 since T", said)
+        self.assertIn(f'<td style="{MARK}">1</td>', page)
+
+    def test_a_fenced_code_edit_is_marked(self) -> None:
+        said, page = self.check("```\nset -e\nexit 0\n```\n", "<pre><code>set -e\nexit 1\n</code></pre>")
+        self.assertIn("changed: 1 since T", said)
+        self.assertIn(f'<pre style="{MARK}">', page)
+
+    def test_an_unchanged_fenced_block_stays_unmarked(self) -> None:
+        said, _ = self.check("```\nset -e\nexit 0\n```\n", "<pre><code>set -e\nexit 0\n</code></pre>")
+        self.assertIn("changed: 0 since T", said)
+
+    def test_literal_markdown_characters_count(self) -> None:
+        said, _ = self.check("Call `init` now.\n", "<p>Call <code>__init__</code> now.</p>")
+        self.assertIn("changed: 1 since T", said)
+        said, _ = self.check("Call `__init__` and \\*args now.\n", "<p>Call <code>__init__</code> and *args now.</p>")
+        self.assertIn("changed: 0 since T", said)
+
+    def test_a_deletion_alone_is_reported_not_called_no_change(self) -> None:
+        said, page = self.check("## Plan\n\nOne.\n\nTwo.\n", "<h2>Plan</h2>\n<p>One.</p>\n")
+        self.assertIn("gone: 1", said)
+        self.assertNotIn("No changes since", page)
+        self.assertIn("1 earlier paragraph no longer appears, reworded or removed. Sections: Plan.", page)
+
+    def test_an_added_duplicate_is_marked(self) -> None:
+        said, _ = self.check("Yes.\n", "<p>Yes.</p>\n<p>Yes.</p>\n")
+        self.assertIn("changed: 1 since T", said)
+
+    def test_text_outside_any_paragraph_is_compared(self) -> None:
+        said, page = self.check("- [ ] Outer\n- [ ] Inner\n",
+                                "<ul><li>Outer<ul><li>Inner</li></ul>Tail added</li></ul>")
+        self.assertIn("changed: 1 since T", said)
+        self.assertIn(f'<span style="{MARK}">Tail added</span>', page)
+
+    def test_the_previous_note_read_back_is_not_a_gone_paragraph(self) -> None:
+        said, page = self.check("**Changed since T0**: 1 paragraph, highlighted below. Sections: Opening.\n\nSame.\n",
+                                "<p>Same.</p>\n")
+        self.assertEqual(said, "changed: 0 since T\n")
+        self.assertIn("No changes since T", page)
+
+    def test_a_rule_after_a_heading_is_not_a_header_block(self) -> None:
+        said, _ = self.check("## Plan\n\nOriginal.\n\n---\n\nSame.\n",
+                             "<h2>Plan</h2>\n<p>Edited.</p>\n<hr />\n<p>Same.</p>\n")
+        self.assertIn("changed: 1 since T", said)
 
 
 if __name__ == "__main__":
