@@ -28,7 +28,7 @@ from . import review, workflow
 from .errors import SdDbError
 
 QUEUE = "priority"
-KINDS = ("task", "followup", "personal")
+KINDS = ("task", "followup")
 CLOSE_DAYS = 30
 #: A due date this close proposes P2.
 DUE_SOON_DAYS = 14

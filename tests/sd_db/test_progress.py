@@ -331,7 +331,7 @@ class TaskCancellation(ProgressCase):
             cancel_work(self.db, item, reason="Not needed", who="operator")
         with self.assertRaisesRegex(WorkflowError, "task and followup"):
             cancel_work(self.db, self.item, reason="Not needed", who="operator", guard=task_guard)
-        for kind in ("personal", "report", "idea"):
+        for kind in ("work-idea", "report", "idea"):
             with self.subTest(kind=kind), self.assertRaisesRegex(WorkflowError, "task and followup"):
                 cancel_work(self.db, self.task(kind), reason="Not needed", who="operator", guard=task_guard)
 

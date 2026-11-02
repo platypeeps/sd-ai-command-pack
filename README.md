@@ -274,7 +274,7 @@ that checkout, and the task keeps the checkout it was filed in.
 A commit that states the trailer outside that block is refused by name rather
 than reported as carrying none. An item that belongs to no checkout has no
 default branch to verify a commit against, so `--delivered-by` on a
-`personal` item, or on a `followup` filed off every checkout, is refused for
+`followup` filed off every checkout is refused for
 that reason and the item closes without it. A `followup` filed in a
 registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
