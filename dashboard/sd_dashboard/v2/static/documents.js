@@ -87,7 +87,7 @@ function renderFacets() {
     const chipEl = html`<button class="chip" type="button" data-f="${field}" data-v="${v}" aria-pressed="${String(on)}"${dis}>${extra}${label} <span class="n">${n}</span></button>`;
     return off ? html`${chipEl}<span class="offwhy" id="${id}">${off}</span>` : chipEl;
   };
-  // sd:6701: Open | Hidden | All, the shell's one set-aside group, in the Show facet beside Pinned only.
+  // sd:6701: Open | Hidden, the shell's one set-aside group, in the Show facet beside Pinned only.
   const hid = DOCS.filter(d => d.hidden).length;
   put(facets, html`
     <div class="facet">${window.shell.list.pick('repo', 'Repo', shownRoots().map(r => [r.key, LABEL[r.key] || r.key, facetCount('repo', r.key), r.n === 0 ? `Nothing generated yet in ${r.path}` : '']), F.repo, { multi: true, help: hiddenRoots() })}</div>

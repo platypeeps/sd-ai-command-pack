@@ -61,9 +61,8 @@ addEventListener('DOMContentLoaded', () => {
   // The Filed view (sd:5488): its rows, by key, and whether it is the shown view.
   let FILED = [], FBY = new Map(), FILEDVIEW = false;
   const u0 = new URLSearchParams(location.search);
-  // Open | Hidden (sd:6701, after sd:5753's toggle): which rows the Open table draws, kept as ?hidden=1. Pack sd:7263
-  // dropped the shell's All here (operator 2026-11-02), so an older ?hidden=all link lands on Open.
-  let HID = window.shell.aside.mode('hidden') === 'aside' ? 'aside' : 'open';
+  // Open | Hidden (sd:6701, after sd:5753's toggle): which rows the Open table draws, kept as ?hidden=1.
+  let HID = window.shell.aside.mode('hidden');
   const inView = r => window.shell.aside.shows(HID, r.hidden), HIDDEN = () => HID === 'aside';
   let scope = SCOPES.includes(u0.get('scope')) ? u0.get('scope') : 'all';
   // The lane filter: an open lane, or `github`, the open rows GitHub already merged or closed (the fourth lamp).
@@ -282,10 +281,8 @@ addEventListener('DOMContentLoaded', () => {
     putKeep(document.getElementById('tally'), html`${HIDDEN() ? html`${n(tot('hidden'))} hidden`
       : html`<span class="g-caution">▲ ${n(tot('newly_unblocked') + tot('awaiting_you'))} yours</span><span class="g-queued">◌ ${n(tot('awaiting_them'))} theirs</span><span class="g-unknown">▨ ${n(tot('unknown'))} unknown freshness</span>`}${C.rowActions('collector')}`);
     const sort = L.sort !== LIST.sort || L.dir !== LIST.dir ? { sort: L.sort, dir: L.dir > 0 ? 'asc' : 'desc' } : {};
-    // The Open table's filter bar: Open | Hidden (sd:6701), counted in the scope; the shell's group less its All (pack sd:7263).
-    const seg = [['open', 'Open', openN(scope)], ['aside', 'Hidden', tot('hidden')]];
-    put(document.getElementById('hidden-seg'), html`<div class="vseg" role="group" aria-label="Hidden rows">${seg.map(([v, label, c]) =>
-      html`<button type="button" data-aside="hidden" data-v="${v}" aria-pressed="${String(v === HID)}">${label} <span class="n">${String(c)}</span></button>`)}</div>`);
+    // The Open table's filter bar: Open | Hidden (sd:6701), counted in the scope.
+    put(document.getElementById('hidden-seg'), window.shell.aside.seg('hidden', 'Hidden', HID, { open: openN(scope), aside: tot('hidden') }));
     window.shell.url({ ...(scope !== 'all' && { scope }), ...(lane && { lane }), ...(HID !== 'open' && { hidden: window.shell.aside.param(HID) }), ...(v && { q: v }), ...sort });
   }
 
