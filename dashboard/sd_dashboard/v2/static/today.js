@@ -1,5 +1,5 @@
 // Today v2 (sd:2110): the page script. It loads before shell.js, which reads what it declares.
-// pack sd:7084: the annunciator heads the page; the rail switches Needs you, Since yesterday, Timeline, In motion and
+// pack sd:7084: the annunciator heads the page; the rail switches Needs you, In motion, Since yesterday, Timeline and
 // Queues, each a view-<id> panel, all from /api/now (now_screen.document). A lamp that filters Needs you shows that view.
 // Needs you is the document's `needs`: every fact that asks for an act, ranked in the bands, a kind of many rows folded into
 // one group row. A group opens in place to its first rows, then "N more". A lamp or an intent shows only its rows; the
@@ -17,8 +17,9 @@
 }
 // moved:end
 window.PAGE_FILTER = { '': 'Needs you' };
-window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'digest', label: 'Since yesterday', key: 'y' },
-  { id: 'timeline', label: 'Timeline', key: 't' }, { id: 'motion', label: 'In motion', key: 'm' }, { id: 'queues', label: 'Queues', key: 'q' }];
+// pack sd:7218: In motion comes second, after Needs you: what runs now before what changed; the keys stay.
+window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'motion', label: 'In motion', key: 'm' },
+  { id: 'digest', label: 'Since yesterday', key: 'y' }, { id: 'timeline', label: 'Timeline', key: 't' }, { id: 'queues', label: 'Queues', key: 'q' }];
 (() => {
   // The rail's map (built sections, and the old screen each unported one opens) is /ui/sections.js, loaded before this.
   // Capture (n) and the field's task mode file through the shell's default capture (sd:3520): POST /api/items.
