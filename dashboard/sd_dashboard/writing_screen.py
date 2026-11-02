@@ -4,14 +4,17 @@
 opening of its draft. The repository goes out by its folder name only, so no local path leaves. Its `attention` is the
 page's rail badge (sd:3446, `_attention`). Each piece's `realm` is `places.realm_of` of its repo, the rule Tasks' Realm
 filter uses (sd:5064). Its `grill` is its open question notes and the count of its rulings (pack sd:6700): Details
-walks the questions, and Apply answers waits until none is open.
+walks the questions, and Apply answers waits until none is open. Its `mirror` is its Drive and Notion choice and each
+mirrored file's copies (`publishing.piece_mirror`, pack sd:7243); a queue not read is unknown with its reason.
 """
 
+import json
 from pathlib import Path
 
-from sd_db import writing
+from sd_db import paths, writing
 from sd_db.workflow import WorkflowError
 
+from . import publishing
 from .decisions import RULING, parse
 from .markup import href
 from .places import realm_of, realms
@@ -32,6 +35,10 @@ def document(connection, *, now):
     pieces = []
     found = realms(connection)
     rules = found["list"] if found["state"] in ("read", "partial") else None
+    try:
+        queue, receipts, unread = publishing.kit().QUEUE, publishing.kit().receipts(), ""
+    except Exception as error:  # noqa: BLE001 - a queue not read is unknown, never "no copy"
+        queue, receipts, unread = None, None, f"the pack's mirror queue was not read: {error}"
     for row in writing.list_pieces(connection, include_parked=True):
         full = writing.piece_state(connection, row["id"])
         state = full["writing"]
@@ -54,9 +61,23 @@ def document(connection, *, now):
             "files": files, "draft": draft, "words": words, "grill": _grill(full["notes"]),
             # pack sd:6977: adversarial.md against the draft by its digest stamp; Apply review shows only when current.
             "adversarial": gates.get("companions", {}).get("adversarial"),
+            "mirror": _mirror(row, queue, receipts, unread),
         })
     return {"read": now, "stages": list(writing.STAGES), "pieces": pieces, "attention": _attention(pieces),
             "realms": {key: found[key] for key in ("state", "source", "problems")}}
+
+
+def _mirror(row, queue, receipts, unread: str) -> dict:
+    """The piece's `mirror`: `piece_mirror` and what was not read; unknown (`choice` None) when the queue was not."""
+    if unread:
+        return {"choice": None, "copies": {}, "unread": unread}
+    try:
+        fields = json.loads(row["fields"] or "{}")
+    except ValueError:
+        fields = None
+    found = publishing.piece_mirror(paths.expand(row["repo"]), row["piece"], fields if isinstance(fields, dict) else {},
+                                    queue=queue, receipts=receipts)
+    return {**found, "unread": "" if isinstance(fields, dict) else "its fields are not a JSON object"}
 
 
 def _grill(notes) -> dict:

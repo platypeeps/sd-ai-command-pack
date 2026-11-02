@@ -98,6 +98,37 @@ class TheDocument(Pieces):
         # A parked piece is listed, and it has no moves until it is revived.
         self.assertEqual((by[self.ids["parked"]]["parked"], by[self.ids["parked"]]["next"]), (True, []))
 
+    def test_each_piece_carries_its_drive_choice_and_each_files_copies(self):
+        # pack sd:7243: fields.publish.drive is the choice; fields.published and the queue give each file's copy.
+        import tempfile
+
+        from sd_dashboard import publishing
+        from sd_db import paths
+
+        queue = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pending-mirror-syncs"
+        self.enterContext(mock.patch.object(publishing.kit(), "QUEUE", queue))
+        url = "https://docs.google.com/document/d/example-doc/edit"
+        fields = {"publish": {"drive": {}},
+                  "published": {f"{paths.key(str(self.root))}::2026-fixture-research": {"drive": url}}}
+        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(fields), self.ids["fixture"]))
+        self.connection.commit()
+        by = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}
+        mirror = by[self.ids["fixture"]]["mirror"]
+        self.assertEqual((mirror["choice"], mirror["unread"]), ({"drive": True, "notion": False}, ""))
+        self.assertEqual([(c["channel"], c["state"], c["url"]) for c in mirror["copies"]["research.md"]],
+                         [("drive", "published", url)])
+        self.assertEqual((mirror["copies"]["index.md"], by[self.ids["parked"]]["mirror"]["choice"]),
+                         ([], {"drive": False, "notion": False}))
+
+    def test_a_mirror_not_read_is_unknown_with_its_reason(self):
+        # A pack without the queue says why; it is never "no copy".
+        from sd_dashboard import publishing
+
+        with mock.patch.object(publishing, "kit", side_effect=ImportError("no sd_research_publish")):
+            pieces = writing_screen.document(self.connection, now=NOW)["pieces"]
+        self.assertEqual([p["mirror"]["choice"] for p in pieces], [None, None])
+        self.assertIn("no sd_research_publish", pieces[0]["mirror"]["unread"])
+
     def test_a_published_piece_carries_its_claims_url_and_a_link_only_for_http(self):
         # sd:3465: the writing claim URL becomes a link; an address in another scheme stays text.
         claim = "INSERT INTO publication_claim (id, item, payload, state, created_at, updated_at) VALUES (?, ?, '{}', ?, ?, ?)"
@@ -189,6 +220,21 @@ class ThePage(Pieces):
         piece = next(p for p in json.loads(self.request("/api/writing", headers=cookie)[2])["pieces"] if p["id"] == ids["fixture"])
         self.assertEqual((piece["stage"], piece["ready_recorded"]), ("ready", True))
         self.assertEqual(self.post(f"/api/items/{piece['id']}/park", {"revision": piece["revision"]})[0], 200)
+
+    def test_mirror_to_drive_posts_the_designation_and_the_pack_queues_the_piece(self):
+        # pack sd:7243: POST /api/writing/publish writes fields.publish.drive and calls the pack's enqueue_pieces.
+        from sd_dashboard import publishing
+
+        ids = self.seed()
+        queued = []
+        self.enterContext(mock.patch.object(publishing.kit(), "enqueue_pieces",
+                                            lambda connection, items: queued.append(items) or ["mirror: queued 2026-fixture-draft -> Briefs/writing"]))
+        status, _, answer = self.post("/api/writing/publish", {"item": ids["fixture"], "channel": "drive"})
+        self.assertEqual((status, answer["designated"], answer["queued"]), (200, "drive", True))
+        self.assertEqual(queued, [{ids["fixture"]}])
+        fields = json.loads(self.connection.execute("SELECT fields FROM item WHERE id = ?", (ids["fixture"],)).fetchone()[0])
+        self.assertEqual(fields["publish"], {"drive": {}})
+        self.assertEqual(self.post("/api/writing/publish", {"item": ids["fixture"], "channel": "obsidian"})[0], 400)
 
 
 def piece(id, title, stage, **fields):
@@ -578,7 +624,7 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
 
 
 class TheRegistration(Registers, unittest.TestCase):
-    page, section, route, api = "writing", "Writing", "/writing", ("/api/writing",)
+    page, section, route, api = "writing", "Writing", "/writing", ("/api/writing", "/api/writing/publish")
 
 
 if __name__ == "__main__":
