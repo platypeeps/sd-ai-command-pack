@@ -6,6 +6,7 @@ Two lists, read from the workflow database and from nothing else:
   `done` and whose `fields.attention` is not false: a non-zero exit, an `SD_REPORT_ATTENTION:` line, or fields nobody can
   read, which is for a person to look at as well (`reporting.UNREADABLE_FIELDS`). A quiet run report is left out, as the
   backlog leaves it out. Acknowledge posts the Reports page's route, `/api/reports/<id>/acknowledge`, with the revision.
+  A report whose output shows an expired login carries `login` (`job_failures.login`), which Fix opens (sd:6964).
 - `briefs`: the routine briefs (`briefs_screen`) filed in the last `WINDOW_DAYS` days, newest first, that the operator has
   not marked seen. Seen is a Today snooze (`snooze`), key `today:brief:<stem>`, held until the brief changes
   (`writes.SNOOZE_FOREVER`, sd:5752): the place pages' Briefs (`places.briefs`) read the same mark (`seen_row`), so a brief
@@ -24,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from sd_db import reads, reporting, writes
 from sd_db.errors import SdDbError
 
-from . import briefs_screen, snooze
+from . import briefs_screen, job_failures, snooze
 
 __all__ = ["READ", "SHOWN", "WINDOW_DAYS", "document", "seen_row"]
 
@@ -71,7 +72,7 @@ def _problem(connection, row, revision: str) -> dict:
             "job": report.get("job") or None, "exit": report.get("exit_code"), "host": report.get("host") or None,
             "why": basis.splitlines()[0] if basis else ("its fields cannot be read" if not readable else ""),
             "basis": basis, "repeats": repeats.get("count"), "body": text[-BODY_CHARS:], "cut": len(text) > BODY_CHARS,
-            "revision": revision, "fields_read": readable}
+            "revision": revision, "fields_read": readable, "login": job_failures.login(text)}
 
 
 def problems(connection: sqlite3.Connection) -> tuple[list[dict], int, bool]:
