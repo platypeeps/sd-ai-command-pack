@@ -291,7 +291,7 @@ def _bump(state: dict, release: dict, acts: dict, world: Any, types: list[str]) 
 
 
 def _merge(state: dict, release: dict, acts: dict, world: Any, types: list[str]) -> str:
-    merged = world.merged(state["pr"])  # first: a kill after the merge, before its save, or a queue that merged it
+    merged = world.merged(state["pr"], release["key"], state["version"])  # first: a kill after the merge, before its save, or a queue that merged it
     if merged:
         state["merged"] = merged
         return "verify"
@@ -304,7 +304,7 @@ def _merge(state: dict, release: dict, acts: dict, world: Any, types: list[str])
         raise Wait(f"{state['pr']} stays open: {checks}", failed=checks.startswith("red"))
     _ask(state, "merge", acts.get("push", "auto"), f"merge {state['pr']}, its checks green?", world)
     world.merge_bump(state["pr"])
-    merged = world.merged(state["pr"])
+    merged = world.merged(state["pr"], release["key"], state["version"])
     if not merged:  # `gh pr merge` exits 0 when it only adds the PR to a merge queue
         raise Wait(f"{state['pr']} is queued to merge; the chain stays at merge until GitHub reads it MERGED")
     state["merged"] = merged
@@ -557,15 +557,28 @@ class Repositories:
             finally:
                 self._run("git", "worktree", "remove", "--force", str(tree), cwd=deploy, ok=(0, 128))
 
-    def merged(self, url: str) -> str | None:
-        """The commit GitHub merged `url` as, or None while it is not MERGED: a merge-queue add is not a merge."""
-        held = json.loads(self._run("gh", "pr", "view", url, "--json", "state,mergeCommit", cwd=self._deploy()))
+    def merged(self, url: str, key: str, version: str) -> str | None:
+        """The commit GitHub merged `url` as, or None while it is not MERGED: a merge-queue add is not a merge.
+
+        A ReleaseError unless that commit is on origin's default branch and sets `key` to `version`: a PR merged
+        by hand, a queue or an earlier run is accepted only as this bump (sd:7014).
+        """
+        deploy = self._deploy()
+        held = json.loads(self._run("gh", "pr", "view", url, "--json", "state,mergeCommit", cwd=deploy))
         if held.get("state") != "MERGED":
             return None
-        sha = (held.get("mergeCommit") or {}).get("oid")
+        sha = str((held.get("mergeCommit") or {}).get("oid") or "")
         if not sha:
             raise ReleaseError(f"{url} reads MERGED with no merge commit, so the commit to verify is unknown")
-        return str(sha)
+        self._tips.pop(deploy, None)  # the merge moved origin's default branch since this run read it
+        tip = self._origin_tip(deploy)
+        if not self._has(deploy, sha) or self._run("git", "rev-list", "-1", sha, f"^{tip}", cwd=deploy):
+            raise ReleaseError(f"{url} merged as {sha[:12]}, which is not on origin's default branch")
+        value = set_value(self._run("git", "show", f"{sha}:{self.file}", cwd=deploy, strip=False), key, "")[0]
+        if value != version:
+            raise ReleaseError(f"{url} merged as {sha[:12]}, which sets {key} to {value}, not {version}; "
+                               "finish this release by hand")
+        return sha
 
     def pr_state(self, url: str, policy: dict, key: str, version: str) -> str:
         """`green`, `pending: ...` or `red: ...`; no check at all is pending, never green, unless the policy's `ci`

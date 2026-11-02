@@ -83,7 +83,7 @@ class World:
         self.values_written, self.message = text, message
         return PR
 
-    def merged(self, url):
+    def merged(self, url, key, version):
         return self.merged_at
 
     def pr_state(self, url, policy, key, version):
@@ -779,6 +779,35 @@ class OnDisk(unittest.TestCase):
                 self.assertEqual((state["step"], state["failed"], github.get("merged")), ("merge", True, None))
                 self.assertRegex(state["reason"], reason)
 
+    def test_a_pr_merged_outside_the_chain_advances_only_with_the_bump_on_main(self):
+        """Review: the chain found the PR already MERGED and went on to verify, though the operator had changed
+        the branch's value, or merged it into another base, while the chain waited."""
+        merged = {
+            "a push sets another value": ("main", VALUES.replace("0.17.2", "0.19.0"),
+                                          "sets image.tag to 0.19.0, not 0.18.0"),
+            "it merged into another base": ("next", None, "is not on origin's default branch"),
+        }
+        for case, (base, text, reason) in merged.items():
+            with self.subTest(case):
+                github = {"origin": self.origin}
+                self.reset_branch()
+                git(self.origin, "branch", "-f", "next", "main")
+
+                def save(saved, base=base, text=text, github=github):
+                    if saved["step"] == "merge" and not github.get("merged"):  # merged by hand while it waited
+                        if text:
+                            self.push_to_branch(text)
+                        tip = git(self.origin, "rev-parse", "refs/heads/release/app-v0.18.0")
+                        github["merged"] = git(self.origin, "commit-tree", f"{tip}^{{tree}}", "-p", base, "-m", "m")
+                        git(self.origin, "update-ref", f"refs/heads/{base}", github["merged"])
+                state = {"step": "bump", "tag": "v0.18.0", "sha": "abc123", "last": "v0.17.2"}
+                state = sd_release.advance_release(state, {**RELEASE, "verify": ""}, MANAGED,
+                                                   GitHubOnDisk(self.deploy, self.tmp / "app", github), save=save,
+                                                   deploy_acts=MANAGED)
+                self.assertEqual((state["step"], state["failed"], "merged" in state), ("merge", True, False),
+                                 state.get("reason"))
+                self.assertIn(reason, state["reason"])
+
     def test_a_head_that_moved_as_it_was_read_waits_and_an_ungated_merge_refuses(self):
         self.bumped()
         world = Gh(self.deploy, {"view": [self.view(HEAD)]})
@@ -879,15 +908,24 @@ class OnDisk(unittest.TestCase):
             self.assertTrue(world.pr_state(URL, {"ci": ci}, "image.tag", "0.18.0").startswith("red: Jenkins build"))
         self.assertEqual(world.pr_state(URL, {}, "image.tag", "0.18.0"), "pending: no check has reported yet")
 
+    def test_a_pr_closed_outside_the_chain_reads_red_and_gates_nothing(self):
+        closed = json.dumps({**json.loads(self.view(self.bumped())), "state": "CLOSED"})
+        world = Gh(self.deploy, {"view": [closed]})
+        self.assertEqual(world.pr_state(URL, {}, "image.tag", "0.18.0"), "red: the PR is closed")
+        with self.assertRaisesRegex(sd_release.ReleaseError, "was not gated in this run"):
+            world.merge_bump(URL)
+
     def test_a_merge_queue_add_reads_as_not_merged(self):
         """`gh pr merge` exits 0 when it only queues the PR; merged is what `gh pr view` reads."""
+        squashed = git(self.origin, "commit-tree", f"{self.bumped()}^{{tree}}", "-p", "main", "-m", "m")
+        git(self.origin, "update-ref", "refs/heads/main", squashed)
         queued = json.dumps({"state": "OPEN", "mergeCommit": None})
-        done = json.dumps({"state": "MERGED", "mergeCommit": {"oid": HEAD}})
+        done = json.dumps({"state": "MERGED", "mergeCommit": {"oid": squashed}})
         world = Gh(self.deploy, {"view": [queued, done, json.dumps({"state": "MERGED", "mergeCommit": None})]})
-        self.assertIsNone(world.merged(URL))
-        self.assertEqual(world.merged(URL), HEAD)
+        self.assertIsNone(world.merged(URL, "image.tag", "0.18.0"))
+        self.assertEqual(world.merged(URL, "image.tag", "0.18.0"), squashed)
         with self.assertRaisesRegex(sd_release.ReleaseError, "MERGED with no merge commit"):
-            world.merged(URL)
+            world.merged(URL, "image.tag", "0.18.0")
 
 
 class GitHubOnDisk(Gh):
