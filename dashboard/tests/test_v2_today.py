@@ -207,7 +207,8 @@ class TheAssets(BrowserSession):
                     for t in tables]
         self.assertEqual(captions, [
             "Headless build runs: items, stage, start, ETA from past runs, model and cost.",
-            "Open items with a live worktree, lane entry, sd-* command or herdr agent, longest-running first.",
+            # pack sd:7222: the sessions band by repo.
+            "Open items with a live worktree, lane entry, sd-* command or herdr agent, grouped by repo, longest-running first.",
         ])
 
 class TheShellPort(BrowserSession):

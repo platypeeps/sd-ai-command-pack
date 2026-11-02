@@ -507,11 +507,11 @@ const lastToast = () => OUT.toasts[OUT.toasts.length - 1];
 const lastUndo = () => OUT.toasts.filter(t => t.undo).pop();
 """
 # The view switch as shell.js answers a page with PAGE_VIEWS (sd:6263): the shown view is #view=<id> when the page
-# declares it, else the first; show(id) shows a declared view and fires shell:view, as a tab click does.
-VIEW_SHELL = """window.shell.view = { now: null, ids: () => (window.PAGE_VIEWS || []).map(v => v.id),
-  current() { if (!this.now) { const h = (/^#view=([a-z0-9-]+)$/.exec(location.hash || '') || [])[1]; this.now = this.ids().includes(h) ? h : this.ids()[0] || null; } return this.now; },
+# declares it, else the first; show(id) shows a declared view and fires shell:view, as a tab click does; none() shows none.
+VIEW_SHELL = """window.shell.view = { now: undefined, ids: () => (window.PAGE_VIEWS || []).map(v => v.id),
+  current() { if (this.now === undefined) { const h = (/^#view=([a-z0-9-]+)$/.exec(location.hash || '') || [])[1]; this.now = this.ids().includes(h) ? h : this.ids()[0] || null; } return this.now; },
   show(id) { if (!this.ids().includes(id)) return false; if (this.current() !== id) { this.now = id; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id, first: true, api: null } })); } return true; },
-  hide() {}, count: (id, n) => { (OUT.counts = OUT.counts || {})[id] = n; } };
+  none() { this.now = null; }, hide() {}, count: (id, n) => { (OUT.counts = OUT.counts || {})[id] = n; } };
 """
 # What Tasks adds to the shared stand-in: shell.row() as shell.js answers it, its realm tabs, and the real reader (sd:2484).
 TASKS_SHELL = """window.shell.row = () => new URLSearchParams(location.search).get('row');
@@ -755,15 +755,13 @@ class TheScript(ScreenCase):
     def row(self, name):
         return next(r for r in self.doc["rows"] if r["id"] == self.ids[name])
 
-    def run_page(self, body, answer="null", *, prelude="", env=None, search="", hash="", realm="all"):
+    def run_page(self, body, answer="null", *, prelude="", env=None, search="", hash=""):
         """Load tasks.js at `search` and `hash`, fire DOMContentLoaded, run `body` (async), and return OUT plus what `body`
         set on R.
 
-        Each address the page writes is in OUT.urls, as shell.url() received it. Personal is the first realm tab, and a repo
-        row is in no realm without realms.conf, so a page opens at `realm` (All) unless the address names one or `realm` is None.
+        Each address the page writes is in OUT.urls, as shell.url() received it. The page opens on Personal, the first realm
+        tab, unless the address names another; without realms.conf every row sits there (pack sd:7216).
         """
-        if realm and "realm=" not in search and not hash:
-            search += ("&" if search else "?") + "realm=" + realm
         script = (prelude + STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + TASKS_SHELL
                   + f"\nconst DOC = {json.dumps(self.doc)}, DETAILS = {json.dumps(self.details)};\n"
                   + "const WRITE = " + answer + ";\nvar DETAIL = null;\n" + STORED
@@ -886,7 +884,7 @@ R.pick = [menu.hidden, btn.attrs['aria-label'], OUT.focus.at(-1)];""")
         self.assertIn('<select id="f-p" class="fsel" data-pick="p"><option value="" selected>All</option><option value="1">P1</option>', filters)
         self.assertIn('<option value="unset">unset</option></select>', filters)
         self.assertIn("Port the page", out["R"]["board"])
-        self.assertEqual(out["counts"]["all"], 3, "sd:5524, sd:6263: the All tab carries the count")
+        self.assertEqual(out["counts"]["personal"], 3, "sd:5524, sd:6263: the Personal tab carries the count")
         self.assertNotIn("3 tasks", out["R"]["sub"])
         # The badge is the read's own (sd:3446): at NOW the seeded due date is 3 days off, so nothing is due yet.
         self.assertEqual(out["attention"][-1], {"state": "ok", "n": 0, "what": "nothing due"})
@@ -918,7 +916,7 @@ pick('p', ''); R.url2 = OUT.urls[OUT.urls.length - 1];""", search="?kind=task,wo
         self.doc["rows"] = [*self.doc["rows"], {**self.doc["rows"][0], "id": 902, "title": "A vault idea", "kind": "idea", "base": "blog-idea"}]
         out = self.run_page("R.board = ELS['view-board'].html; R.filters = ELS.filters.html;")
         self.assertNotIn("A vault idea", out["R"]["board"])
-        self.assertEqual(out["counts"]["all"], 3)
+        self.assertEqual(out["counts"]["personal"], 3)
         self.assertIn('<option value="idea">idea</option>', out["R"]["filters"])
         for search in ("?kind=idea", "?base=blog-idea"):
             self.assertIn("A vault idea", self.run_page("R.board = ELS['view-board'].html;", search=search)["R"]["board"])
@@ -1742,7 +1740,7 @@ R.seg = ELS['parked-seg'].html; {self.PARK_SEG % 'aside'}
 R.parked = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1];
 {self.PARK_SEG % 'all'} R.all = ELS['view-board'].html; R.urlAll = OUT.urls[OUT.urls.length - 1];""")
         self.assertIn("1 parked · read", out["R"]["sub"])
-        self.assertEqual(out["counts"]["all"], 3)
+        self.assertEqual(out["counts"]["personal"], 3)
         self.assertNotIn("Parked by the prune", out["R"]["board"])
         self.assertIn("Plan the review", out["R"]["board"])
         # sd:5643's Scope keeps Open only and Scheduled only (sd:5649); Parked is the toolbar's segment now.
@@ -1854,7 +1852,7 @@ ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'active' }, value: 
 R.scheduled = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1]; R.chips = ELS.filters.html;
 document.dispatchEvent(new CustomEvent('tasks:view', { detail: 'list' })); await flush(); R.list = ELS['view-list'].html;""")
         self.assertIn("1 scheduled · read", out["R"]["sub"])
-        self.assertEqual(out["counts"]["all"], 2, "a scheduled row is not counted on a realm tab")
+        self.assertEqual(out["counts"]["personal"], 2, "a scheduled row is not counted on a realm tab")
         self.assertNotIn("Plan the review", out["R"]["board"])
         self.assertIn("Plan the review", out["R"]["scheduled"])
         self.assertIn('<span class="opens">opens Sep 7</span>', out["R"]["scheduled"])

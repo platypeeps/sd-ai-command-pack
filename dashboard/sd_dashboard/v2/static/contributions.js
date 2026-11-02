@@ -276,8 +276,10 @@ addEventListener('DOMContentLoaded', () => {
     f.hidden = !(lane || v || cut);
     f.textContent = [lane || v ? (rows.length ? `${rows.length} of ${all.length} shown${lane ? ' · ' + LABEL[lane] : ''}${v ? ` · “${v}”` : ''}. Esc clears.` : `Nothing matches${v ? ` “${v}”` : ''}. Esc clears.`) : '', cut].filter(Boolean).join(' ');
     title.textContent = { open: 'Open', aside: 'Hidden', all: 'All' }[HID];
-    put(document.getElementById('tally'), HIDDEN() ? html`${n(tot('hidden'))} hidden`
-      : html`<span class="g-caution">▲ ${n(tot('newly_unblocked') + tot('awaiting_you'))} yours</span><span class="g-queued">◌ ${n(tot('awaiting_them'))} theirs</span><span class="g-unknown">▨ ${n(tot('unknown'))} unknown freshness</span>`);
+    // sd:7211: Re-run collector heads the Open view, as Clean all safe heads Health's Checkouts: the collector's row actions,
+    // so the sync needs no Collector pick first.
+    putKeep(document.getElementById('tally'), html`${HIDDEN() ? html`${n(tot('hidden'))} hidden`
+      : html`<span class="g-caution">▲ ${n(tot('newly_unblocked') + tot('awaiting_you'))} yours</span><span class="g-queued">◌ ${n(tot('awaiting_them'))} theirs</span><span class="g-unknown">▨ ${n(tot('unknown'))} unknown freshness</span>`}${C.rowActions('collector')}`);
     const sort = L.sort !== LIST.sort || L.dir !== LIST.dir ? { sort: L.sort, dir: L.dir > 0 ? 'asc' : 'desc' } : {};
     // The Open table's filter bar: Open | Hidden | All (sd:6701), counted in the scope.
     put(document.getElementById('hidden-seg'), window.shell.aside.seg('hidden', 'Hidden', HID, { open: openN(scope), aside: tot('hidden') }));

@@ -2,9 +2,11 @@
 // Views: one at a time, Checkouts, Machine, GitHub and Jobs, each its own reader of /api/health/<view> (health_screen.part),
 // started the first time the view opens; PAGE_VIEWS declares them to the shell's view switch, which owns #view=<id>. The
 // lamps, the badge and each view's count are /api/health/summary, read at start and again after a view's read; it waits on
-// no walker, so the strip draws before any view's rows. Show draws the rows that want something (warning, caution,
-// unknown) by default; All adds the ok and queued ones, and ?show=all keeps it. Ignored (sd:5470) lists the rows Ignore hid,
-// a snooze with no end, instead of the areas' rows, each with Unignore; ?show=ignored keeps it.
+// no walker, so the strip draws before any view's rows. State starts on the states that want something (warning, caution,
+// unknown), so ok and queued rows wait until their State is pressed; with no State pressed every row shows (sd:7207). A
+// State that differs from that start goes in ?state=, an empty one too; an old ?show=all link opens with none pressed.
+// Show ignored (sd:5470) lists the rows Ignore hid, a snooze with no end, instead of the areas' rows, each with Unignore;
+// ?show=ignored keeps it.
 // Rows: the areas health_screen.document builds from the fleet child (worktree registrations),
 // Operations > Ports' reader (ports), protection.rows (branch protection, and the
 // alerts behind Dependencies and Security, sd:2205 and sd:2206), the nightly credentials heartbeat (sd:2203) and
@@ -60,11 +62,15 @@
   const S = {}, readers = {}; // each view's last reading and its reader
   const F = { state: new Set(), area: new Set() };
   const byId = id => ROWS.find(r => r.id === id);
-  // Show: the rows that want something, or all of them, or the ignored ones. A filter on ok or queued names those rows, so it shows them.
+  // Show: the areas' rows, or the ignored ones. State does the rest: it starts on the states that want something
+  // (PROBLEMS) and Clear all returns it there, the page's home; with no State pressed every row shows (sd:7207).
   const QUIET = new Set(['ok', 'queued']);
+  const PROBLEMS = STATES.filter(s => !QUIET.has(s));
+  const atStart = () => F.state.size === PROBLEMS.length && PROBLEMS.every(s => F.state.has(s));
   // Repos: a row of a registered repository carries managed (health_screen._tag_managed); Managed hides the others. A row of no repo stays.
   const scoped = r => repos === 'all' || r.managed !== false;
-  const drawn = r => scoped(r) && (showing !== 'findings' || !QUIET.has(r.state) || F.state.has(r.state));
+  // An ok or queued row counts as the area's only while its State is pressed or none is: the tally and the quiet line read it.
+  const drawn = r => scoped(r) && (!QUIET.has(r.state) || !F.state.size || F.state.has(r.state));
   const listed = () => (showing === 'ignored' ? IGNORED : ROWS).filter(scoped);
   const viewOf = area => PAGE_VIEWS.find(v => v.areas.includes(area))?.id;
 
@@ -77,11 +83,11 @@
   const text = r => [r.what, r.detail, r.kind, ...Object.values(r.facts || {}), ...(r.list || []).map(x => x.text ?? x)].join(' ').toLowerCase();
   const passes = r => drawn(r) && (!F.state.size || F.state.has(r.state)) && (!F.area.size || F.area.has(r.area))
     && (!query || text(r).includes(query));
-  const filtering = () => !!(F.state.size || F.area.size || query);
-  const quiet = a => a.rows.filter(r => !drawn(r)).length;
-  // An area stays on the page while it has a row the filters pass, or when only the Area filter names it: a lamp for an area
-  // with no reader then shows what that area does not read.
-  const areaShown = a => a.rows.some(passes) || (!F.state.size && !query && (!F.area.size || F.area.has(a.id)));
+  const filtering = () => !!(!atStart() || F.area.size || query);
+  const quiet = a => a.rows.filter(r => scoped(r) && !drawn(r)).length;
+  // An area stays on the page while it has a row the filters pass, or while State is at its start or empty and only the
+  // Area filter names it: a lamp for an area with no reader then shows what that area does not read.
+  const areaShown = a => a.rows.some(passes) || ((!F.state.size || atStart()) && !query && (!F.area.size || F.area.has(a.id)));
   const loud = { warning: 0, caution: 1, unknown: 2 };
 
   // Every area's lamp, from the summary: pressing one opens its view with its area alone, or toggles it in this view.
@@ -114,11 +120,11 @@
   // while a filter hides some of them (sd:5281).
   function filters() {
     const L = listed(), list = shell.list, n = f => L.filter(f).length;
-    const mine = ROWS.filter(scoped), shows = [['findings', mine.filter(r => !QUIET.has(r.state)).length], ['all', mine.length], ['ignored', IGNORED.filter(scoped).length]];
+    const mine = ROWS.filter(scoped), shows = [['findings', mine.filter(r => !QUIET.has(r.state)).length], ['ignored', IGNORED.filter(scoped).length]];
     const tagged = ROWS.filter(r => 'managed' in r);
     return html`<div class="filters toolbar-2">${list.fbar(html`${list.fseg('show', 'Show', shows.map(([v, c]) => ({ v, pressed: showing === v, label: html`${v} <span class="n">${String(c)}</span>` })))}${
       tagged.length ? list.fseg('repos', 'Repos', [['managed', tagged.filter(r => r.managed).length], ['all', tagged.length]].map(([v, c]) => ({ v, pressed: repos === v, label: html`${v} <span class="n">${String(c)}</span>` }))) : ''}${
-      list.fseg('state', 'State', STATES.filter(s => L.some(r => r.state === s)).map(s => { const c = n(r => r.state === s);
+      list.fseg('state', 'State', STATES.filter(s => F.state.has(s) || L.some(r => r.state === s)).map(s => { const c = n(r => r.state === s);
         return { v: s, pressed: F.state.has(s), title: `${s}: ${c}`, label: html`<span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span><span class="n">${String(c)}</span><span class="sr"> ${s}</span>` }; }))}${
       AREAS.length > 1 ? list.pick('area', 'Area', AREAS.map(a => [a.id, a.name, n(r => r.area === a.id)]), F.area, { multi: true }) : ''}${
       [...F.area].map(a => list.tok('area', a, AREAS.find(x => x.id === a)?.name || a))}${query ? list.tok('q', '', `“${query}”`) : ''}`, { clear: filtering() })}</div>`;
@@ -140,7 +146,7 @@
           <td class="g g-${r.state}"><span aria-hidden="true">${GLYPH[r.state]}</span><span class="sr">${r.state}</span></td>
           <td class="what"><button type="button">${r.what}</button><span class="detail">${r.detail}</span></td>
           <td class="fix">${shell.commands.rowActions(r.id)}</td></tr>`)}</tbody></table>` : ''}
-      ${a.read && !a.error && quiet(a) && !filtering() ? html`<p class="quiet">${rows.length ? '' : 'Nothing wants you here. '}${plural(quiet(a), 'ok or queued row')} not shown: Show all lists ${quiet(a) === 1 ? 'it' : 'them'}.</p>` : ''}
+      ${a.read && !a.error && quiet(a) && !filtering() ? html`<p class="quiet">${rows.length ? '' : 'Nothing wants you here. '}${plural(quiet(a), 'ok or queued row')} not shown: press ok or queued in State to list ${quiet(a) === 1 ? 'it' : 'them'}.</p>` : ''}
     </section>`; })}`;
   }
 
@@ -217,7 +223,8 @@
 
   function writeURL() {
     const q = new URLSearchParams();
-    ['state', 'area'].forEach(k => { if (F[k].size) q.set(k, [...F[k]].join(',')); });
+    if (!atStart()) q.set('state', [...F.state].join(','));
+    if (F.area.size) q.set('area', [...F.area].join(','));
     if (query) q.set('q', query);
     if (showing !== 'findings') q.set('show', showing);
     if (repos !== 'managed') q.set('repos', repos);
@@ -229,10 +236,11 @@
     put($(`body-${VIEW}`), html`${DOC ? filters() : ''}${DOC && showing === 'ignored' ? ignored() : areas()}`);
     // The selection is always a row the viewer can see: the first visible one, or none with the reason.
     shell.reconcile({ rows: document.querySelectorAll('.ledger tbody tr[data-id]'), current: selected, select: id => select(id, false),
-      clear: () => { selected = null; put($('details'), html`<p class="why">${!DOC ? 'Nothing is selected: Health could not be read.' : showing === 'ignored' ? 'Nothing is selected: an ignored row has Unignore only. Show findings to pick a row.' : ROWS.some(drawn) ? 'No row matches the filter, so nothing is selected. Show all rows to pick one.' : ROWS.length ? 'Nothing is selected: no row here wants you. Show all lists the ok rows.' : 'Nothing is selected: no area raised a row.'}</p>`); } });
+      clear: () => { selected = null; put($('details'), html`<p class="why">${!DOC ? 'Nothing is selected: Health could not be read.' : showing === 'ignored' ? 'Nothing is selected: an ignored row has Unignore only. Show findings to pick a row.' : !ROWS.some(scoped) ? (ROWS.length ? 'Nothing is selected: every row here is of a repo that is not managed. Repos all lists them.' : 'Nothing is selected: no area raised a row.') : filtering() ? 'No row matches the filter, so nothing is selected.' : 'Nothing is selected: no row here wants you. Press ok or queued in State to list those rows.'}</p>`); } });
     writeURL();
   }
-  function clearFilters() { const had = filtering(); F.state.clear(); F.area.clear(); query = ''; shell.filter(''); lamps(); apply(); return had; }
+  // Clear all returns State to its start, the problem states, not to no State pressed: the page's home is what wants you.
+  function clearFilters() { const had = filtering(); F.state = new Set(PROBLEMS); F.area.clear(); query = ''; shell.filter(''); lamps(); apply(); return had; }
 
   // The badge is the summary's (sd:3446, health_screen._attention over every area); the subhead says it in words.
   function attention() {
@@ -461,10 +469,11 @@
         'branch protection', 'dependabot alerts', 'secret scanning', 'credential', 'service', 'dashboard service', 'launch agent', 'vault mirror'] });
 
     const u = new URLSearchParams(location.search);
-    (u.get('state') || '').split(',').filter(s => STATES.includes(s)).forEach(s => F.state.add(s));
+    // No ?state= is the start; an empty one is no State pressed, as is an old ?show=all link (sd:7207).
+    F.state = new Set(u.get('state') !== null ? u.get('state').split(',').filter(s => STATES.includes(s)) : u.get('show') === 'all' ? [] : PROBLEMS);
     (u.get('area') || '').split(',').filter(Boolean).forEach(a => F.area.add(a));
     query = (u.get('q') || '').trim().toLowerCase(); // the shell's bar reads ?q= too
-    showing = ['all', 'ignored'].includes(u.get('show')) ? u.get('show') : 'findings';
+    showing = u.get('show') === 'ignored' ? 'ignored' : 'findings';
     repos = u.get('repos') === 'all' ? 'all' : 'managed';
     // An ?area= link opens that area's view unless #view= names one. The shell's first shell:view fires after this listener.
     const asked = viewOf([...F.area][0]);

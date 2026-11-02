@@ -21,5 +21,7 @@ A job row also has Show log, which opens the job on Management > Schedules, and 
 copy; Print is the row's act after exit 127. Both are the declarations Management and Activity use (sd:3449).
 
 Working now lists each open item with a live session, longest-running first, from the same `/api/now` document (sd:3466).
+In motion groups those rows by repo (pack sd:7222): one collapsible band per repo, an item with no repo under Unassociated, last.
+Live + next adds each repo's ready items from the Queues rows, highest value first, at most three per repo.
 A session is a worktree, a lane entry, a running `sd-*` command or a herdr agent; each row names what tied it to its item.
 A source that could not be read is said under the table; a Fix launch herdr could not confirm shows as ▨.

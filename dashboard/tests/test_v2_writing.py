@@ -276,22 +276,39 @@ DOC.pieces.forEach(p => { p.realm = p.id === 12 ? 'brand' : 'personal'; });
 """)
 
     def test_realm_views_hold_their_pieces_and_a_realm_with_none_hides(self):
-        # sd:5064: Personal, the realms, All; a piece is in its repo's realm (places.realm_of), and Work, which holds no piece,
+        # sd:5064: Personal, then the realms; a piece is in its repo's realm (places.realm_of), and Work, which holds no piece,
         # hides. A realm named editor would take this page's editor panel, so it is dropped, and so are menu and btn, the
-        # layout menu's ids (view-menu, view-btn, sd:5641); b and e stay Writing's keys.
+        # layout menu's ids (view-menu, view-btn, sd:5641); b and e stay Writing's keys. sd:7213: no All view, and a stays
+        # unused, so the realms keep the keys they had.
         out = self.run_page("""R.views = window.PAGE_VIEWS.map(v => [v.id, v.key]); R.personal = ELS['view-board'].html;
-VIEW = 'brand'; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: 'brand' } })); await flush(); R.brand = ELS['view-board'].html;
-VIEW = 'all'; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: 'all' } })); await flush(); R.all = ELS['view-board'].html;""",
+VIEW = 'brand'; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: 'brand' } })); await flush(); R.brand = ELS['view-board'].html;""",
                             prelude=self.REALMS)
         r = out["R"]
-        self.assertEqual(r["views"], [["personal", "p"], ["brand", "r"], ["work", "w"], ["all", "a"]])
+        self.assertEqual(r["views"], [["personal", "p"], ["brand", "r"], ["work", "w"]])
         self.assertEqual(out["hidden"], {"brand": False, "work": True})  # Personal never hides (sd:5642)
         def has(board):
             return ["Three Budgets" in board, "Gated Review" in board, "File Owned" in board]
-        self.assertEqual((has(r["personal"]), has(r["brand"]), has(r["all"])),
-                         ([True, False, True], [False, True, False], [True, True, True]))
+        self.assertEqual((has(r["personal"]), has(r["brand"])), ([True, False, True], [False, True, False]))
         # Each realm reads again, so the reader's objects are the pieces the view shows.
-        self.assertEqual(out["gets"], ["/api/writing"] * 3)
+        self.assertEqual(out["gets"], ["/api/writing"] * 2)
+
+    def test_every_piece_sits_in_one_view_and_an_old_all_link_opens_personal(self):
+        """sd:7213: with no All view, a piece of no realm, of a realm list not read (None), of a realm with no view here
+        (editor is dropped, ghost is not configured) shows in Personal; a realm's piece in its realm's view."""
+        realms = self.REALMS + ("var REALM_OF = { 11: null, 12: 'brand', 13: 'editor', 14: 'ghost' };\n"
+                                "DOC.pieces.forEach(p => { p.realm = REALM_OF[p.id]; p.parked = false; });\n"
+                                "location.hash = '#view=all'; var history = { state: null, replaceState: (s, t, u) => { OUT.replaced = u; } };\n")
+        out = self.run_page("""R.views = window.PAGE_VIEWS.map(v => v.id); R.board = {};
+for (const v of R.views) { VIEW = v; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: v } })); await flush(); R.board[v] = ELS['view-board'].html; }""",
+                            prelude=realms)
+        r = out["R"]
+        self.assertNotIn("all", r["views"])
+        where = {title: [v for v, board in r["board"].items() if title in board]
+                 for title in ("Three Budgets", "Gated Review", "Parked Idea", "File Owned")}
+        self.assertEqual(where, {"Three Budgets": ["personal"], "Gated Review": ["brand"], "Parked Idea": ["personal"],
+                                 "File Owned": ["personal"]})
+        self.assertEqual(out["hidden"], {"brand": False, "work": True})
+        self.assertEqual(out["replaced"], "#view=personal", "an old #view=all link did not land on Personal")
 
     def test_personal_shows_with_no_piece_in_it_and_says_where_the_pieces_are(self):
         # sd:5642: Personal is a tab for personal writing, as on Tasks: it stays when every piece's repo is in a realm line,

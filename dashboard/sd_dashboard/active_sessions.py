@@ -446,7 +446,7 @@ def document(connection, *, now: str, sessions: dict, sessions_error: str = "", 
             continue
         item = items[row["item"]]
         seconds = int((clock - row["at"]).total_seconds()) if row["at"] else None
-        rows.append({"item": row["item"], "title": item["title"], "status": item["status"], "kind": row["kind"],
+        rows.append({"item": row["item"], "title": item["title"], "status": item["status"], "repo": item["repo"], "kind": row["kind"],
                      "session": row["session"], "started": _iso(row["at"]), "elapsed": elapsed(seconds) if seconds is not None else "",
                      "seconds": seconds, "via": row["via"], "verified": row["verified"]})
     first = {}

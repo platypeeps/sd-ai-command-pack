@@ -18,7 +18,10 @@ count), Apply review asks first and posts `/fix` with
 `apply: adversarial`: claude edits the draft for each finding or rejects it
 with a reason, records each with `sd writing reconcile`, and leaves the edit
 uncommitted. It publishes nothing. The page reads through
-the shell's reader, `read.js`. The old list was retired in sd:3402.
+the shell's reader, `read.js`. The old list was retired in sd:3402. The views are Personal, then one per
+`dashboard.realms` realm (sd:5064); there is no All view (sd:7213). A piece
+sits in its realm's view, else in Personal, which also takes a piece whose
+realm was not read or has no view; an old `#view=all` link opens Personal.
 
 Grill (pack sd:6700) asks first, then posts Fix with `{"grill": "ask"}`:
 claude in herdr reads the draft and writes 5 to 10 question notes on the
