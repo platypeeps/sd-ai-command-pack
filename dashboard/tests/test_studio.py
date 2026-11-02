@@ -261,11 +261,14 @@ class TheServer(BrowserSession):
     def test_scan_problems_show_before_the_page_says_no_project_json_exists(self):
         """sd:7151: a scan that could not read a folder found nothing it can vouch for, so the page names the problem."""
         doc = {"read": "2026-11-01T07:00:00Z", "root": "/repos", "projects": [], "attention": {"state": "caution", "n": 1, "what": "x"},
-               "problems": ["art: songs could not be read: [Errno 13] Permission denied"]}
+               "problems": ["art: songs could not be read: [Errno 13] Permission denied",
+                            "Two registered repositories are named twin: neither is served."]}
         out = self.run_page(doc, "R.details = ELS.details.html;")
         last = out["states"][-1]
         self.assertEqual(last["kind"], "partial", out["states"])
-        self.assertIn("art: songs could not be read: [Errno 13] Permission denied", last["text"])
+        self.assertTrue(last["text"].startswith("art: songs could not be read: [Errno 13] Permission denied · Two registered "
+                                                "repositories are named twin: neither is served. No project was read"), last["text"])
+        self.assertIn("The scan named a problem, so nothing is selected.", out["R"]["details"])
         self.assertNotIn("No project.json is under the repositories", json.dumps(out["states"]) + out["R"]["details"])
         out = self.run_page({**doc, "problems": []}, "R.details = ELS.details.html;")
         self.assertEqual(out["states"][-1]["kind"], "empty")
