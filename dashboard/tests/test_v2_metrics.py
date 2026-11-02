@@ -417,6 +417,15 @@ class TheSixMonths(Fixture):
             ("2026-08", True, 7.0, 7.0, {"capped": 0.0, "plan": 0.0}),    # a row on no bill is a row and its dollars
             ("2026-09", True, 80.0, None, {"capped": 80.0, "plan": 0.0})])
 
+    def test_an_open_hold_on_no_bill_is_no_row_in_an_empty_month(self):
+        """pack sd:7229: the read's roles carry every open hold whatever its month, so one on no bill made each empty
+        month read $0 spent, not no rows."""
+        self.cost("reserved", "2026-05-02T10:00:00Z", provider="claude", bill=None, role="author", usd=2, call_id="old")
+        months = self.ranged()["ranged"]["spend"]["months"]
+        self.assertEqual([(m["month"], m["rows"], m["unbilled"]) for m in months], [
+            ("2026-04", False, None), ("2026-05", False, None), ("2026-06", False, None),
+            ("2026-07", True, None), ("2026-08", True, 7.0), ("2026-09", True, None)])
+
     def test_each_month_is_sd_usage_s_own_read_and_there_are_six(self):
         months = []
         real = usage.read
@@ -430,7 +439,7 @@ class TheSixMonths(Fixture):
         self.assertEqual([m for m in months if m], ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"])
         for month in spend["months"]:
             read = real(self.connection, month=month["month"], now=NOW).document()
-            self.assertEqual(month["spent"], read["spent"] + sum(r["spent"] for r in read["roles"] if r["bill"] is None))
+            self.assertEqual((month["spent"], month["unbilled"]), (read["spent"], read["unbilled"]))
 
     def test_the_months_cross_a_year(self):
         doc = metrics_screen.document(self.connection, now="2027-02-10T12:00:00Z", span="6mo")["ranged"]
@@ -609,6 +618,14 @@ class TheScript(Controlled):
         self.assertRegex(lamps, r'data-cell="ci" data-ev="ci" data-view="ci" data-state="unknown".*?no gate run')
         self.assertEqual(out["attention"][-1], {"state": "caution", "n": 1, "what": "readings past a threshold"})
         self.assertIsNone(out["states"][-1])
+
+    def test_the_spend_lamp_counts_a_row_on_no_bill(self):
+        """pack sd:7219: a start session's row may name no bill; the month lamp read it as $0.00."""
+        self.cost("run", "2026-09-04T10:00:00Z", provider="claude", bill=None, role="author", usd=3)
+        out = self.run_page("R.lamps = ELS.annunciator.html; open('spend'); R.det = ELS.details.html; R.note = ELS['bills-note'].textContent;")
+        self.assertRegex(out["R"]["lamps"], r'data-cell="spend" data-ev="spend" data-view="spend" data-state="ok".*?<b>\$83.00</b>')
+        self.assertIn("<dt>No bill</dt><dd>$3.00</dd>", out["R"]["det"])
+        self.assertTrue(out["R"]["note"].startswith("Total $83.00 spent ($3.00 on no bill) and $0.00 held in 2026-09."), out["R"]["note"])
 
     def test_the_panels_are_the_shells_views(self):
         """sd:5080: Spend (spend, the week, usage), Providers, CI and Age are PAGE_VIEWS panels; Skills moved (sd:5881)."""

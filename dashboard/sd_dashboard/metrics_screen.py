@@ -369,20 +369,18 @@ def _months(today) -> list[str]:
 def _spend_months(connection, now, months):
     """Dollars by bill for each month, one `usage.read` a month, as `sd-db usage --month` reads it.
 
-    `unbilled` is the month's run and bound dollars on rows naming no listed bill (a start session's row may name
-    none), from the read's `roles`, which the bill list leaves out; None when no such row. `spent` is both. `rows` is
-    whether a bill's burn line has a point or such a row exists: a month without either is no rows, not $0.
+    `unbilled` and `spent` are the read's own: the dollars on rows naming no listed bill, and every bill's with them
+    (pack sd:7219). `rows` is whether the month has a run or bound row: a bill's burn point or `unbilled`, both the
+    month's own. A month without either is no rows, not $0. The roles are not asked: they carry every open hold
+    whatever its month (pack sd:7229).
     """
     found, bills = [], {}
     for month in months:
         read = usage.read(connection, month=month, now=now).document()
-        names = {bill["name"] for bill in read["bills"]}
         for bill in read["bills"]:
             bills.setdefault(bill["name"], bill["cost_basis"])
-        loose = [role for role in read["roles"] if role["bill"] not in names]
-        unbilled = round(sum(role["spent"] for role in loose), 6) if loose else None
-        found.append({"month": month, "rows": bool(loose) or any(bill["burn"] for bill in read["bills"]),
-                      "spent": round(read["spent"] + (unbilled or 0.0), 6), "unbilled": unbilled,
+        found.append({"month": month, "rows": read["unbilled"] is not None or any(bill["burn"] for bill in read["bills"]),
+                      "spent": read["spent"], "unbilled": read["unbilled"],
                       "bills": {bill["name"]: bill["spent"] for bill in read["bills"]}})
     return {"error": "", "bills": [{"name": name, "cost_basis": basis} for name, basis in bills.items()], "months": found}
 
