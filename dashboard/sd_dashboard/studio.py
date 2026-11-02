@@ -4,7 +4,8 @@ The shape is `docs/work/2026-10-31-studio/design.md`. This slice reads and serve
 
 **Which projects.** Every `project.json` in a registered repository that sits under `REPO_ROOT`, found by a walk a few
 folders deep that skips dot folders and build output. The page names no repository: a machine with no `project.json`
-shows an empty list. A repository's key is its folder name; two registered repositories with one name share no key,
+shows an empty list, but a folder the walk cannot list, or a `REPO_ROOT` that does not resolve, is a problem the page
+shows first (sd:7151), not an empty list. A repository's key is its folder name; two registered repositories with one name share no key,
 so neither is served and the document names the contest, as Documents does.
 
 **What a project says.** `kind` (`shirt`, `song`, `episode`; a file with no `kind` is another tool's), `title`, `brief`, `item` (`sd:<n>`) and `roots`, a map
@@ -77,13 +78,14 @@ def _repo_root(repo_root: Path | None = None) -> Path:
 
 
 def repositories(connection, repo_root: Path | None = None) -> tuple[dict[str, Path], list[str]]:
-    """(key -> checkout) for each registered repository under `REPO_ROOT`, and the problems: a contested key."""
+    """(key -> checkout) for each registered repository under `REPO_ROOT`, and the problems: a `REPO_ROOT` that does not
+    resolve, or a contested key."""
     from sd_db import repos
 
     try:
         base = _repo_root(repo_root).resolve(strict=True)
-    except (OSError, RuntimeError):
-        return {}, []
+    except (OSError, RuntimeError) as problem:
+        return {}, [f"REPO_ROOT {_repo_root(repo_root)} does not resolve: {problem}"]
     found: dict[str, list[Path]] = {}
     for row in repos.registered(connection):
         path = Path(str(row["path"])).expanduser()
@@ -101,15 +103,16 @@ def repositories(connection, repo_root: Path | None = None) -> tuple[dict[str, P
     return dict(sorted(keys.items())), problems
 
 
-def _project_files(checkout: Path) -> list[Path]:
-    """Every `project.json` within `DEPTH` folders of the checkout, in path order; dot folders and build output skipped."""
-    out = []
-    for current, folders, files in os.walk(checkout):
+def _project_files(checkout: Path) -> tuple[list[Path], list[OSError]]:
+    """Every `project.json` within `DEPTH` folders of the checkout, in path order, and each folder the walk could not
+    list (sd:7151: os.walk skips one silently, which read as no project there); dot folders and build output skipped."""
+    out, unread = [], []
+    for current, folders, files in os.walk(checkout, onerror=unread.append):
         depth = len(Path(current).relative_to(checkout).parts)
         folders[:] = sorted(f for f in folders if designs.SEGMENT.fullmatch(f) and f not in SKIP) if depth < DEPTH else []
         if PROJECT in files:
             out.append(Path(current) / PROJECT)
-    return sorted(out)
+    return sorted(out), unread
 
 
 def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
@@ -203,11 +206,10 @@ def projects(connection, repo_root: Path | None = None) -> tuple[list[dict], lis
     keys, problems = repositories(connection, repo_root)
     found = []
     for key, checkout in keys.items():
-        try:
-            manifests = _project_files(checkout)
-        except OSError as problem:
-            problems.append(f"{key} could not be read: {problem}")
-            continue
+        manifests, unread = _project_files(checkout)
+        for problem in unread:
+            folder = Path(problem.filename or checkout).relative_to(checkout, walk_up=True).as_posix()
+            problems.append(f"{key}{'' if folder == '.' else ': ' + folder} could not be read: {problem.strerror or problem}")
         found.extend(entry for entry in (_project(key, checkout, manifest) for manifest in manifests) if entry is not None)
     return found, problems
 
@@ -236,7 +238,7 @@ def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path,
     if found is None:
         return None
     target = found[0]
-    for manifest in _project_files(checkout):
+    for manifest in _project_files(checkout)[0]:
         entry = _project(key, checkout, manifest, listing=False)
         for root in entry["roots"] if entry else ():
             base = (manifest.parent / root["path"]).resolve()

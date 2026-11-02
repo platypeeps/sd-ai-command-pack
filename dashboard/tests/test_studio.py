@@ -132,6 +132,24 @@ class TheProjects(ScreenCase):
         doc = studio.document(self.connection, now="2026-11-01T07:00:00Z", repo_root=empty)
         self.assertEqual((doc["projects"], doc["problems"], doc["attention"]["state"]), ([], [], "ok"))
 
+    def test_a_folder_the_scan_cannot_read_is_a_problem_not_an_empty_list(self):
+        """sd:7151: os.walk skips a folder it cannot list unless asked; the scan says so instead of finding nothing."""
+        locked = self.root / "example" / "art" / "songs"
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o755)
+        doc = self.read()
+        self.assertEqual([p["id"] for p in doc["projects"]], ["art/shirts/cat"])
+        self.assertEqual(len(doc["problems"]), 1, doc["problems"])
+        self.assertRegex(doc["problems"][0], r"^art: songs could not be read: .*Permission denied")
+        self.assertEqual(doc["attention"]["state"], "caution")
+
+    def test_a_repo_root_that_does_not_resolve_is_a_problem_not_an_empty_list(self):
+        missing = Path(self.tmp.name) / "no-such-root"
+        doc = studio.document(self.connection, now="2026-11-01T07:00:00Z", repo_root=missing)
+        self.assertEqual(doc["projects"], [])
+        self.assertEqual(len(doc["problems"]), 1, doc["problems"])
+        self.assertTrue(doc["problems"][0].startswith(f"REPO_ROOT {missing} does not resolve: "), doc["problems"])
+
     def test_two_registered_repositories_with_one_name_are_neither_served(self):
         twin = self.root / "other" / "art"
         (twin / "p").mkdir(parents=True)
@@ -239,6 +257,22 @@ class TheServer(BrowserSession):
         for link in links:
             with self.subTest(link=link):
                 self.assertEqual(self.fetch(link)[0], 200)
+
+    def test_scan_problems_show_before_the_page_says_no_project_json_exists(self):
+        """sd:7151: a scan that could not read a folder found nothing it can vouch for, so the page names the problem."""
+        doc = {"read": "2026-11-01T07:00:00Z", "root": "/repos", "projects": [], "attention": {"state": "caution", "n": 1, "what": "x"},
+               "problems": ["art: songs could not be read: [Errno 13] Permission denied",
+                            "Two registered repositories are named twin: neither is served."]}
+        out = self.run_page(doc, "R.details = ELS.details.html;")
+        last = out["states"][-1]
+        self.assertEqual(last["kind"], "partial", out["states"])
+        self.assertTrue(last["text"].startswith("art: songs could not be read: [Errno 13] Permission denied · Two registered "
+                                                "repositories are named twin: neither is served. No project was read"), last["text"])
+        self.assertIn("The scan named a problem, so nothing is selected.", out["R"]["details"])
+        self.assertNotIn("No project.json is under the repositories", json.dumps(out["states"]) + out["R"]["details"])
+        out = self.run_page({**doc, "problems": []}, "R.details = ELS.details.html;")
+        self.assertEqual(out["states"][-1]["kind"], "empty")
+        self.assertIn("No project.json is under the repositories yet.", out["R"]["details"])
 
     def test_a_range_on_an_mp4_answers_206_with_its_bytes(self):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=0-99")

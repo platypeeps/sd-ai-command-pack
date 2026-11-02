@@ -471,6 +471,16 @@ class Deadlines(unittest.TestCase):
         # asks for, not the wall clock: an elapsed-time bound also timed
         # process creation and a loaded gate's scheduling, and failed at 8.19
         # and 9.44 s with the cap in force (sd:7122).
+        self.kill_wait(start=0)
+
+    def test_the_kill_wait_holds_when_the_command_starts_slowly(self):
+        # sd:7156: on a loaded gate the command's python took past its three
+        # seconds to start, so it was killed before it wrote its pids and the
+        # check read "did not both start". A shell that sleeps before it execs
+        # python stands in for that start, longer than the command's timeout.
+        self.kill_wait(start=3.5)
+
+    def kill_wait(self, *, start):
         temporary = tempfile.TemporaryDirectory(prefix="tile-deadline-")
         self.addCleanup(temporary.cleanup)
         pids = Path(temporary.name) / "pids"
@@ -485,7 +495,20 @@ class Deadlines(unittest.TestCase):
         waits, lefts = [], []
         communicate, time_left = subprocess.Popen.communicate, self.module.time_left
 
+        def ready():
+            # Whole lines only, as `Nested.recorded` reads them.
+            text = pids.read_text() if pids.exists() else ""
+            return sum(line.endswith("\n") for line in text.splitlines(keepends=True)) >= 2
+
         def waited(child, *args, timeout=None, **kwargs):
+            if not waits:
+                # The command's three seconds and the deadline count from when
+                # it is ready, both pids written, not from `Popen`: how long an
+                # interpreter takes to start is the machine's, not `run`'s (sd:7156).
+                asked = time.monotonic()
+                while not ready() and time.monotonic() < asked + SURVIVE_SECONDS:
+                    time.sleep(0.05)
+                self.module.DEADLINE += time.monotonic() - asked
             waits.append(timeout)
             return communicate(child, *args, timeout=timeout, **kwargs)
 
@@ -497,7 +520,7 @@ class Deadlines(unittest.TestCase):
                 patch.object(subprocess.Popen, "communicate", waited), \
                 patch.object(self.module, "time_left", left), \
                 self.module.set_deadline(4.0, started=time.monotonic()):
-            out = self.module.run([sys.executable, "-c", ESCAPING], timeout=3)
+            out = self.module.run(["/bin/sh", "-c", f'sleep {start}; exec "$0" -c "$1"', sys.executable, ESCAPING], timeout=3)
         # The shape really happened: the grandchild started, and outlived the kill.
         recorded = pids.read_text().split() if pids.exists() else []
         self.assertEqual(len(recorded), 2, "the command and its grandchild did not both start")
