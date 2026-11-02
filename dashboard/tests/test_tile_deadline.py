@@ -466,8 +466,11 @@ class Deadlines(unittest.TestCase):
     def test_the_wait_after_a_command_timeout_stops_at_the_deadline(self):
         # The command times out on its own three seconds, inside a four-second
         # deadline, so `run` kills its group and waits for the pipe -- which the
-        # escaped grandchild holds. Uncapped that wait is five seconds more, so
-        # never less than eight in all; capped it ends at the deadline.
+        # escaped grandchild holds. Uncapped that wait is five seconds; capped
+        # it is no longer than the time left. The test reads the waits `run`
+        # asks for, not the wall clock: an elapsed-time bound also timed
+        # process creation and a loaded gate's scheduling, and failed at 8.19
+        # and 9.44 s with the cap in force (sd:7122).
         temporary = tempfile.TemporaryDirectory(prefix="tile-deadline-")
         self.addCleanup(temporary.cleanup)
         pids = Path(temporary.name) / "pids"
@@ -479,21 +482,30 @@ class Deadlines(unittest.TestCase):
                 except OSError:
                     pass
         self.addCleanup(reap)
-        started = time.monotonic()
+        waits, lefts = [], []
+        communicate, time_left = subprocess.Popen.communicate, self.module.time_left
+
+        def waited(child, *args, timeout=None, **kwargs):
+            waits.append(timeout)
+            return communicate(child, *args, timeout=timeout, **kwargs)
+
+        def left():
+            lefts.append(time_left())
+            return lefts[-1]
+
         with patch.dict(os.environ, {"DEADLINE_PIDS": str(pids)}), \
-                self.module.set_deadline(4.0, started=started):
+                patch.object(subprocess.Popen, "communicate", waited), \
+                patch.object(self.module, "time_left", left), \
+                self.module.set_deadline(4.0, started=time.monotonic()):
             out = self.module.run([sys.executable, "-c", ESCAPING], timeout=3)
-        elapsed = time.monotonic() - started
         # The shape really happened: the grandchild started, and outlived the kill.
         recorded = pids.read_text().split() if pids.exists() else []
         self.assertEqual(len(recorded), 2, "the command and its grandchild did not both start")
         grandchild = int(recorded[1])
         self.assertTrue(running(grandchild), "the grandchild did not hold the pipe past the kill")
         self.assertEqual(out, "")
-        # Not a tight bound: uncapped the wait cannot end before five past the
-        # command's three, and capped it ends near four; all between is slack
-        # for a loaded gate (sd:6468).
-        self.assertLess(elapsed, 3 + 5, "the wait after the kill ignored the tile's deadline")
+        self.assertEqual(len(waits), 2, "run did not wait again after the kill")
+        self.assertLessEqual(waits[1], max(0.0, lefts[-1]), "the wait after the kill ignored the tile's deadline")
 
     def test_the_wait_after_a_timeout_is_five_seconds_unless_the_deadline_is_nearer(self):
         timeouts = []

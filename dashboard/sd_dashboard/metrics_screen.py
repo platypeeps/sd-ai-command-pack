@@ -248,8 +248,8 @@ def _health_window(entries: list[tuple[str, dict]], runs: list, since: str, unti
                                                      "gate": 0, "other": 0})
         row["entries"] += 1
         if entry["status"] in PASSED:
-            if entry["status"] == "merged" and isinstance(entry.get("enqueued_at"), str):
-                lead.append((_stamp(at) - _stamp(entry["enqueued_at"])).total_seconds() / 60)
+            if entry["status"] == "merged" and "enqueued" in entry:
+                lead.append((_stamp(at) - entry["enqueued"]).total_seconds() / 60)
             continue
         kind = _failure(entry) if entry["status"] == "failed" else "other"
         row["review" if kind == "review" else "gate" if kind == "gate" else "other"] += 1
@@ -258,7 +258,7 @@ def _health_window(entries: list[tuple[str, dict]], runs: list, since: str, unti
             suites.update((entry["repository"], name) for name in named or {"unnamed"})
     for row in repos.values():
         row["failed_percent"] = round(100 * (row["review"] + row["gate"] + row["other"]) / row["entries"])
-    ended = [run for run in runs if run["outcome"] and since <= _stamp(run["created_at"]).strftime("%Y-%m-%dT%H:%M:%SZ") <= until]
+    ended = [run for run in runs if run["outcome"] and since <= _stamp(run["updated_at"]).strftime("%Y-%m-%dT%H:%M:%SZ") <= until]
     lead.sort()
     return {
         "since": since, "until": until,
@@ -282,7 +282,9 @@ def health(connection, *, now: str) -> dict:
     - `builds`: build runs that ended, done over all, and the reap reasons of the rest (`_reason`).
     - `lead_minutes`: enqueue to merge, the median and p90 over merged entries.
 
-    An entry that ran no lane step (pending, running) is not counted; a body that is not a lane entry is `unreadable`.
+    An entry that ran no lane step (pending, running) is not counted; a body that is not a lane entry, or whose
+    `finished_at` or `enqueued_at` is no time, is `unreadable` (pack sd:7005). A build run counts in the window it
+    ended in: its `updated_at`.
     """
     entries, unreadable = [], 0
     for row in reads.lane_entries(connection):
@@ -292,8 +294,11 @@ def health(connection, *, now: str) -> dict:
                 raise ValueError(row["key"])
             if entry.get("status") in ("pending", "running", None):
                 continue
-            entries.append((_stamp(entry["finished_at"]).strftime("%Y-%m-%dT%H:%M:%SZ"), entry))
-        except (ValueError, KeyError, TypeError):
+            finished = _stamp(entry["finished_at"]).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if entry["status"] == "merged" and isinstance(entry.get("enqueued_at"), str):
+                entry = {**entry, "enqueued": _stamp(entry["enqueued_at"])}
+            entries.append((finished, entry))
+        except (ValueError, KeyError, TypeError, AttributeError):
             unreadable += 1
     runs = reads.build_runs(connection)
     stamp, day = _stamp(now), timedelta(days=1)

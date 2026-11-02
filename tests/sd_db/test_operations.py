@@ -622,12 +622,13 @@ class Operations(unittest.TestCase):
         self.assertIn("item is done", blocked["capabilities"]["cancel"]["reason"])
         with self.assertRaisesRegex(WorkflowError, "item is done"):
             cancel_assignment(self.db, aid, expected_revision=blocked["revision"], who="operator")
-        transition(self.db, item, "done", who="operator")
-        # A runner attempt that has not released its lease still owns the row.
+        # A runner attempt that has not released its lease still owns the row,
+        # so done leaves it blocked (sd:6996 cancels only an unheld one).
         upsert_repo(self.db, "/fixture/repo")
         self.db.execute(
             "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, created_at, updated_at)"
             " VALUES ('r1', ?, 1, '/fixture/repo', 'b', 'o', '/w', '/r', 'now', 'now')", (aid,))
+        transition(self.db, item, "done", who="operator")
         held = assignment_state(self.db, aid)
         self.assertNotEqual(held["revision"], blocked["revision"])
         self.assertFalse(held["capabilities"]["cancel"]["allowed"])

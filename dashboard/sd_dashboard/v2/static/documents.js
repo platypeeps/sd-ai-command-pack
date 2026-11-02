@@ -87,21 +87,16 @@ function renderFacets() {
     const chipEl = html`<button class="chip" type="button" data-f="${field}" data-v="${v}" aria-pressed="${String(on)}"${dis}>${extra}${label} <span class="n">${n}</span></button>`;
     return off ? html`${chipEl}<span class="offwhy" id="${id}">${off}</span>` : chipEl;
   };
+  // sd:6701: Open | Hidden | All, the shell's one set-aside group, in the Show facet beside Pinned only.
+  const hid = DOCS.filter(d => d.hidden).length;
   put(facets, html`
     <div class="facet">${window.shell.list.pick('repo', 'Repo', shownRoots().map(r => [r.key, LABEL[r.key] || r.key, facetCount('repo', r.key), r.n === 0 ? `Nothing generated yet in ${r.path}` : '']), F.repo, { multi: true, help: hiddenRoots() })}</div>
     <div class="facet"><span class="label">Kind <button class="help" type="button" aria-label="Help: Kind" data-help="<b>Derived until the index exists.</b> A checkout with research.conf.py makes research; the rest are reports. The document index (backend work) stores kind per file.">${I('circle-help')}</button></span><div class="chips">${KINDS.map(k => chip('kind', k, k))}</div></div>
     <div class="facet"><span class="label">Freshness</span><div class="chips">${Object.entries(FRESH).map(([k, l]) => chip('fresh', k, l, k === 'stale' ? html`<span class="g-caution" aria-hidden="true">▲</span>` : ''))}</div></div>
     <div class="facet"><span class="label">Destination</span><div class="chips">${Object.entries(DEST).map(([k, [l, i]]) => chip('dest', k, l, i ? I(i) : ''))}</div></div>
-    <div class="facet"><span class="label">Show</span><div class="chips">
+    <div class="facet"><span class="label">Show</span><div class="chips">${window.shell.aside.seg('hidden', 'Hidden', F.hidden, { open: DOCS.length - hid, aside: hid })}
       <button class="chip" type="button" id="f-pinned" aria-pressed="${String(F.pinned)}">${I('pin')}Pinned only <span class="n">${DOCS.filter(d => d.pinned && !d.hidden).length}</span></button></div></div>`);
-  // sd:6701: Open | Hidden | All, the shell's one set-aside group, at the toolbar's left.
-  const hid = DOCS.filter(d => d.hidden).length;
-  put(document.getElementById('hidden-seg'), window.shell.aside.buttons('hidden', 'Hidden', F.hidden, { open: DOCS.length - hid, aside: hid }));
 }
-document.getElementById('hidden-seg').addEventListener('click', e => {
-  const b = e.target.closest('button[data-aside="hidden"]'); if (!b) return;
-  F.hidden = b.dataset.v; L.page = 1; render();
-});
 // The fold of hidden roots, each with Unhide root; it stays open across a reread while the operator has it open.
 function hiddenRoots() {
   const hid = ROOTS.filter(r => r.hidden); if (!hid.length) return '';
@@ -111,6 +106,8 @@ function hiddenRoots() {
 // stays in it, off with its reason.
 facets.addEventListener('change', e => window.shell.list.pickChange(e, F, () => { L.page = 1; render(); }));
 facets.addEventListener('click', e => {
+  const b = e.target.closest('button[data-aside="hidden"]');
+  if (b) { F.hidden = b.dataset.v; L.page = 1; render(); return; }
   const c = e.target.closest('.chip');
   if (!c && e.target.closest('.rootfold summary')) { FOLD = !FOLD; return; }
   if (!c || c.getAttribute('aria-disabled') === 'true') return;

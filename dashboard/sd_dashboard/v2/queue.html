@@ -5,7 +5,7 @@
   Data: /api/queue (queue_screen.document: sd-ship lane list per managed repository, its builder gate logs, sd gate status,
   the load average), read when the page opens, on Read again and every 30 s while the page is visible.
   Layout (sd:5921): one ledger row per active lane (pips, head of lane, one primary action); idle lanes on one line;
-  the open lane's entries in Details. Last 7 days, its own tab (sd:6973, ?tab=times): each lane's median wait,
+  the open lane's entries in Details. Last 7 days, its own rail view (pack sd:7084): each lane's median wait,
   median gate time and the slowest entry (pack sd:6006). Show: active rows (merging, next, held, building, blocked) by default; All adds
   cancelled and landed rows.
   Writes: /api/queue/move, which runs sd-ship lane move|hold|release|cancel|retry and nothing else; cancel, a running
@@ -13,9 +13,10 @@
   --expected-head) runs at once, as Retry does. An entry's Adversarial review posts /api/adversarial (sd:5064).
   Builds (pack sd:6095): /api/queue/builds (builds.panel), above the lanes: one row per open build run (items, repo,
   model, step, elapsed, last output, cost, Cancel, Log) in its state, working, waiting on me, stalled or lost. The
-  ended runs, under Show All (?show=all, pack sd:6834), sit at the bottom, after the lanes, in a <details> closed by
-  default (sd:6973), each with Show assignment and Retry on a blocked one. Cancel
+  ended runs are the Ended builds rail view (pack sd:7084), each with Show assignment and Retry on a blocked one. Cancel
   posts /api/assignments/<lead>/cancel and asks first; Retry posts /api/queue/builds/retry and runs at once.
+  Assignments (pack sd:7115, from Management's Ship lane): /api/queue/runner (queue_screen.runner), the runner's queued
+  and running assignments and the items waiting at ready_to_send; reads only.
   Nothing here is sample data.
 -->
 <html lang="en">
@@ -43,18 +44,21 @@
   <div id="state" hidden></div>
   <dl class="readings" id="readings" aria-label="Machine readings"></dl>
   <p class="edits" id="edits">Edits take effect at the next item boundary.</p>
-  <!-- The toolbar standard (sd:5281): row 1, the realm tabs (pack sd:6016), the Queue | Last 7 days tabs (sd:6973),
-       the Show chips, then the shell's Shapeshift bar, which filters the lane ledger (sd:5539). -->
-  <div class="toolbar" id="toolbar" data-shift>
-    <div id="viewswitch"></div>
-    <div class="vseg" id="tab" role="group" aria-label="Queue or last 7 days"></div>
+  <!-- pack sd:7084: the rail switches Overview, Ended builds, Last 7 days and Assignments; the filter row holds Active | All, then the
+       realm chips (none picked shows every realm), then the shell's Shapeshift bar, which filters the lane ledger (sd:5539). -->
+  <div class="toolbar" id="toolbar" data-shift></div>
+  <div class="filters toolbar-2" id="filterbar" role="group" aria-label="Filters">
     <div class="vseg" id="show" role="group" aria-label="Lane rows shown"></div>
+    <div id="realms"></div>
   </div>
-  <section id="builds" aria-labelledby="builds-h"></section>
-  <div id="lanes"></div>
-  <p class="idle" id="idle"></p>
-  <section id="ended" aria-label="Ended build runs"></section>
-  <section id="times" aria-label="Lane times" hidden></section>
+  <div id="view-overview">
+    <section id="builds" aria-labelledby="builds-h"></section>
+    <div id="lanes"></div>
+    <p class="idle" id="idle"></p>
+  </div>
+  <section id="view-ended" aria-label="Ended build runs" hidden><div id="ended"></div></section>
+  <section id="view-times" aria-label="Lane times" hidden><div id="times"></div></section>
+  <section id="view-assignments" aria-label="Runner assignments" hidden><div id="assignments"></div></section>
   <div id="adv"></div>
 </main>
 <div class="details" id="details"><p class="why">Reading the lanes…</p></div>

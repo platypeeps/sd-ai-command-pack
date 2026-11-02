@@ -1106,8 +1106,9 @@ class TheScript(Lane, ScreenCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         out = json.loads(result.stdout)
         self.assertIsNone(out["error"])
-        # The Builds panel (pack sd:6095) reads beside the lanes on each load; its own test reads it, the lane tests do not.
-        out["gets"] = [path for path in out.get("gets", []) if path.split("?")[0] != "/api/queue/builds"]
+        # The Builds panel (pack sd:6095) and the Assignments view (pack sd:7115) read beside the lanes on each load; their
+        # own tests read them, the lane tests do not.
+        out["gets"] = [path for path in out.get("gets", []) if path.split("?")[0] not in ("/api/queue/builds", "/api/queue/runner")]
         return out
 
     BUILDS = {"error": "", "read": NOW, "show": "all", "quiet_seconds": 900, "stale_seconds": 180,
@@ -1138,25 +1139,22 @@ R.after = ELS.builds.html;""")
         self.assertIn(["/api/queue/builds/retry", {"assignment": 5, "revision": "b" * 64}], [post[:2] for post in out["posts"]])
         self.assertIn("sd:5 queued again for build.", out["R"]["after"])
 
-    def test_a_released_blocked_run_shows_under_all_with_show_assignment_not_under_active(self):
-        """Pack sd:6834: a parked item's note points to Retry on the Builds panel. The panel's Show reads the ended
-        runs only under All (?show=all), each with Retry and Show assignment; Active draws none of them."""
-        script = f"""const B = {json.dumps(self.BUILDS)}, A = {json.dumps(dict(self.BUILDS, recent=[]))};
+    def test_the_ended_runs_are_read_whatever_show_says_and_the_builds_panel_has_no_show_of_its_own(self):
+        """Pack sd:7084: the ended runs are the Ended builds view, so the page always reads them (?show=all on the
+        builds read); Show narrows the lanes alone and the Builds panel carries no second Active | All."""
+        script = f"""const B = {json.dumps(self.BUILDS)};
 OUT.paths = [];
-window.ELSE = (p, b) => {{ OUT.paths.push(p); return p === '/api/queue/builds?show=all' ? [200, B] : p === '/api/queue/builds' ? [200, A] : [404, {{ error: 'no' }}]; }};
+window.ELSE = (p, b) => {{ OUT.paths.push(p); return p === '/api/queue/builds?show=all' ? [200, B] : [404, {{ error: 'no' }}]; }};
 await window.PAGE_AGAIN.run(); await flush(); await flush();
-R.builds = ELS.builds.html + ELS.ended.html;"""
+R.builds = ELS.builds.html; R.ended = ELS.ended.html;"""
         active = self.run_page(script, search="")
-        self.assertIn("/api/queue/builds", active["paths"])
+        self.assertEqual(set(active["paths"]), {"/api/queue/builds?show=all", "/api/queue/runner"})
+        self.assertNotIn("data-show", active["R"]["builds"])
         self.assertNotIn('data-run="r0"', active["R"]["builds"])
-        self.assertIn('data-show="all" aria-pressed="false"', active["R"]["builds"])
-        every = self.run_page(script)
-        self.assertIn("/api/queue/builds?show=all", every["paths"])
-        shown = every["R"]["builds"]
-        self.assertIn('data-show="all" aria-pressed="true"', shown)
-        self.assertIn('data-build="retry" data-run="r0"', shown)
-        self.assertIn('data-copy="sd assignments get 5"', shown)
-        self.assertIn("interrupted at building", shown)
+        ended = active["R"]["ended"]
+        self.assertIn('data-build="retry" data-run="r0"', ended)
+        self.assertIn('data-copy="sd assignments get 5"', ended)
+        self.assertIn("interrupted at building", ended)
 
     def test_a_build_row_with_a_pull_request_links_it_and_one_without_shows_nothing(self):
         """Pack sd:6020 ruling #31553: no diff Review page; a row whose branch has a pull request opens it on GitHub."""
@@ -1216,34 +1214,39 @@ R.after = ELS.builds.html;""")
         self.assertIn("<b>operator acts</b>", lanes)
         self.assertIn("PR #161", lanes)
 
-    def test_the_realm_tabs_narrow_the_lanes_and_count_each_tabs_active_rows(self):
-        """pack sd:6016: Tasks' realm tabs on Queue. Personal shows no Work lane and says All has it; Work shows it."""
+    def test_the_realm_chips_narrow_the_lanes_none_picked_shows_all_and_each_chip_counts_its_active_rows(self):
+        """Pack sd:7084: the realms are filter chips, not tabs. None picked shows every lane; a pick narrows the lanes
+        and the times, and the address keeps it (?realm=)."""
         conf = Path(self.tmp.name) / "realms.conf"
         conf.write_text(f"realm|work|Work|{self.checkout.parent}/*\n")
+        realms = "window.SHELL_REALMS = [{ id: 'work', label: 'Work' }];\n"
+        chip = r'data-f="realm" data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
         with mock.patch.object(places, "REALMS_CONFIG", conf):
-            out = self.run_page("R.views = window.PAGE_VIEWS; R.personal = ELS.lanes.html; R.ptimes = ELS.times.html;"
-                                " window.shell.view.show('work'); R.work = ELS.lanes.html;", search="?tab=times",
-                                shell="window.SHELL_REALMS = [{ id: 'work', label: 'Work' }];\n" + VIEW_SHELL)
-        self.assertEqual([(v["id"], v["key"]) for v in out["R"]["views"]], [("personal", "p"), ("work", "w"), ("all", "a")])
-        self.assertIn("No lane in this realm. All shows 1 lane.", out["R"]["personal"])
-        self.assertIn("No lane ran an entry", out["R"]["ptimes"])
-        self.assertIn('aria-label="Active lanes"', out["R"]["work"])
-        self.assertNotIn("No lane in this realm", out["R"]["work"])
-        self.assertEqual(out["counts"], {"personal": 0, "work": 7, "all": 7})
+            none = self.run_page("R.chips = ELS.realms.html; R.lanes = ELS.lanes.html;", search="", shell=realms + VIEW_SHELL)
+            personal = self.run_page("R.lanes = ELS.lanes.html; R.times = ELS.times.html; R.chips = ELS.realms.html;",
+                                     search="?realm=personal", shell=realms + VIEW_SHELL)
+            pick = self.run_page("window.shell.url = q => OUT.urls.push(q); OUT.urls = [];"
+                                 " ELS.realms.listeners.click[0]({ target: { closest: s => s === 'button[data-f=\"realm\"]' ? { dataset: { v: 'work' } } : null } });"
+                                 " R.lanes = ELS.lanes.html;", search="?realm=personal", shell=realms + VIEW_SHELL)
+        self.assertEqual(re.findall(chip, none["R"]["chips"]), [("personal", "false", "0"), ("work", "false", "7")])
+        self.assertIn('aria-label="Active lanes"', none["R"]["lanes"])
+        self.assertIn("No lane in the picked realms. Clearing the realm chips shows 1 lane.", personal["R"]["lanes"])
+        self.assertIn("No lane ran an entry", personal["R"]["times"])
+        self.assertEqual(re.findall(chip, personal["R"]["chips"])[0], ("personal", "true", "0"))
+        self.assertEqual(pick["urls"], [{"realm": "personal,work"}])
+        self.assertIn('aria-label="Active lanes"', pick["R"]["lanes"])
         conf.unlink()
         with mock.patch.object(places, "REALMS_CONFIG", conf):
-            out = self.run_page("R.personal = ELS.lanes.html;", search="",
-                                shell="window.SHELL_REALMS = [{ id: 'work', label: 'Work' }];\n" + VIEW_SHELL)
-        # No realm list: the lane's realm is unknown, so no tab hides it.
-        self.assertIn('aria-label="Active lanes"', out["R"]["personal"])
-        self.assertEqual(out["counts"], {"personal": 7, "work": 7, "all": 7})
+            out = self.run_page("R.lanes = ELS.lanes.html;", search="?realm=personal", shell=realms + VIEW_SHELL)
+        # No realm list: the lane's realm is unknown, so no chip hides it.
+        self.assertIn('aria-label="Active lanes"', out["R"]["lanes"])
 
     def test_the_times_table_shows_each_lanes_medians_and_slowest_entry(self):
         """Pack sd:6006: one row per lane with entries in 7 days; a median wait past an hour says the question files."""
         read = {"days": 7, "entries": 4, "wait": 4500.0, "gate": 610.0, "over": True,
                 "slowest": {"item": 42, "title": "A slow one", "total": 9000.0}}
         with mock.patch.object(queue_screen, "times", return_value=read):
-            times = self.run_page("R.times = ELS.times.html;", search="?tab=times")["R"]["times"]
+            times = self.run_page("R.times = ELS.times.html;")["R"]["times"]
         self.assertIn('aria-label="Wait and gate time per lane, last 7 days"', times)
         cells = re.findall(r"<td[^>]*>(.*?)</td>", re.search(r"<tbody>(.*?)</tbody>", times, re.S)[1], re.S)
         self.assertEqual(cells[:4], ["system", "4", "1h 15m", "10m 10s"])
@@ -1252,43 +1255,55 @@ R.after = ELS.builds.html;""")
 
     def test_a_lane_whose_times_were_not_read_says_so(self):
         with mock.patch.object(queue_screen, "times", return_value={"error": "database is locked"}):
-            times = self.run_page("R.times = ELS.times.html;", search="?tab=times")["R"]["times"]
+            times = self.run_page("R.times = ELS.times.html;")["R"]["times"]
         self.assertIn("▨ not read: database is locked", times)
 
-    def test_ended_build_runs_sit_in_a_closed_details_after_the_lanes(self):
-        """sd:6973: the ended runs leave the Builds panel for a native <details> under the lanes, closed by default;
-        it reads what Show All reads, so collapsing changes nothing fetched."""
+    def test_overview_ended_builds_and_last_7_days_are_rail_views_each_with_its_panel(self):
+        """Pack sd:7084: views switch only in the rail. Overview holds the builds and the lanes, Ended builds the ended
+        runs (its rail entry counts them), Last 7 days the times; no tab row sits on the page."""
         page = (V2 / "queue.html").read_text(encoding="utf-8")
-        self.assertLess(page.index('id="lanes"'), page.index('id="ended"'))
+        for panel, inner in (("view-overview", ('id="builds"', 'id="lanes"', 'id="idle"')), ("view-ended", ('id="ended"',)),
+                             ("view-times", ('id="times"',))):
+            start = page.index(f'id="{panel}"')
+            for one in inner:
+                self.assertLess(start, page.index(one), (panel, one))
+        self.assertNotIn('id="viewswitch"', page)
+        self.assertNotIn('id="tab"', page)
         out = self.run_page(f"""const B = {json.dumps(self.BUILDS)};
 window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : [404, {{ error: 'no' }}];
 await window.PAGE_AGAIN.run(); await flush(); await flush();
-R.builds = ELS.builds.html; R.ended = ELS.ended.html;""")
-        self.assertNotIn('data-run="r0"', out["R"]["builds"])
-        ended = out["R"]["ended"]
-        self.assertTrue(ended.startswith('<details class="ended"><summary>Ended <span class="n">1</span></summary>'), ended)
-        self.assertNotIn("<details class=\"ended\" open", ended)
-        self.assertIn('data-build="retry" data-run="r0"', ended)
-        self.assertIn('data-copy="sd assignments get 5"', ended)
-        self.assertEqual(self.run_page("R.ended = ELS.ended.html;", search="")["R"]["ended"], "")
+R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key]); R.times = ELS.times.html; R.ended = ELS.ended.html;""",
+                            shell=VIEW_SHELL)
+        self.assertEqual(out["R"]["views"], [["overview", "Overview", "o"], ["ended", "Ended builds", "e"], ["times", "Last 7 days", "l"],
+                                             ["assignments", "Assignments", "a"]])
+        self.assertIn("Last 7 days</h2>", out["R"]["times"])
+        self.assertTrue(out["R"]["ended"].startswith('<ul class="qrows ended">'), out["R"]["ended"])
+        self.assertEqual((out["counts"]["overview"], out["counts"]["ended"]), (7, 1))
 
-    def test_last_7_days_is_its_own_tab_kept_in_the_address(self):
-        """sd:6973: tabs Queue (default) | Last 7 days; ?tab=times opens the second, and a pick writes the address."""
-        default = self.run_page("R.times = ELS.times.html; R.tab = ELS.tab.html; R.lanes = ELS.lanes.hidden;", search="")
-        self.assertNotIn("Last 7 days</h2>", default["R"]["times"] or "")
-        self.assertIs(default["R"]["lanes"], False)
-        tabs = r'data-tab="(\w+)" aria-pressed="(\w+)">([^<]+)<'
-        self.assertEqual(re.findall(tabs, default["R"]["tab"]), [("queue", "true", "Queue"), ("times", "false", "Last 7 days")])
-        times = self.run_page("R.times = ELS.times.html; R.hid = ['builds', 'lanes', 'idle', 'ended', 'show'].map(i => ELS[i].hidden);"
-                              " R.tab = ELS.tab.html;", search="?show=all&tab=times")
-        self.assertIn("Last 7 days</h2>", times["R"]["times"])
-        self.assertEqual(times["R"]["hid"], [True] * 5)
-        self.assertEqual(re.findall(tabs, times["R"]["tab"])[1], ("times", "true", "Last 7 days"))
-        pick = self.run_page("window.shell.url = q => OUT.urls.push(q); OUT.urls = [];"
-                             " ELS.tab.listeners.click[0]({ target: { closest: s => s === 'button[data-tab]' ? { dataset: { tab: 'times' } } : null } });"
-                             " R.times = ELS.times.html;", search="?show=all")
-        self.assertEqual(pick["urls"], [{"show": "all", "tab": "times"}])
-        self.assertIn("Last 7 days</h2>", pick["R"]["times"])
+    RUNNER = {"live": [{"id": 41, "item": 7, "title": "Port the page", "repo": "~/repos/sd", "role": "merge", "provider": "claude",
+                        "status": "running", "lane": "hub", "queued_at": NOW, "started": NOW, "ended": None}],
+              "ready": [{"id": 9, "title": "Ready to send", "repo": "~/repos/sd"}]}
+
+    def test_the_assignments_view_lists_the_runner_assignments_and_the_items_ready_to_send(self):
+        """Pack sd:7115: Management's Ship lane folded into Queue: the runner's live assignments and the items waiting at
+        ready_to_send are Queue's Assignments rail view, read from /api/queue/runner; its rail entry counts the live ones."""
+        page = (V2 / "queue.html").read_text(encoding="utf-8")
+        self.assertLess(page.index('id="view-assignments"'), page.index('id="assignments"'))
+        out = self.run_page(f"""const B = {json.dumps(self.BUILDS)}, A = {json.dumps(self.RUNNER)};
+window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : p === '/api/queue/runner' ? [200, A] : [404, {{ error: 'no' }}];
+await window.PAGE_AGAIN.run(); await flush(); await flush();
+R.views = window.PAGE_VIEWS.map(v => v.id); R.asg = ELS.assignments.html;""", shell=VIEW_SHELL)
+        self.assertEqual(out["R"]["views"], ["overview", "ended", "times", "assignments"])
+        asg = out["R"]["asg"]
+        self.assertIn("#41 Port the page", asg)
+        self.assertIn("merge · running", asg)
+        self.assertIn('data-copy="sd assignments get 41"', asg)
+        self.assertIn("#9 Ready to send", asg)
+        self.assertEqual(out["counts"]["assignments"], 1)
+
+    def test_the_runner_route_reads_the_live_assignments_and_the_ready_items(self):
+        from sd_dashboard.v2.pages import queue as queue_page
+        self.assertIn("/api/queue/runner", [api.path for api in queue_page.PAGE.api])
 
     def test_adversarial_review_on_a_lane_row_posts_its_worktree_and_item(self):
         """sd:5064: a lane row with a recorded worktree asks for {kind: change, target, item}; Details follow the run."""
@@ -1476,10 +1491,10 @@ R.det = ELS.adv.html;""")
 
     def test_queue_has_no_lanes_or_idle_tab(self):
         page = (V2 / "queue.html").read_text(encoding="utf-8")
-        # pack sd:6016: the only tabs are the realm tabs, which narrow the one ledger and have no panel.
+        # pack sd:7084: the lanes and the idle line are Overview's, not views of their own.
         self.assertNotIn("id: 'lanes'", QUEUE_JS)
         self.assertNotIn("id: 'idle'", QUEUE_JS)
-        self.assertNotIn('id="view-', page)
+        self.assertNotIn('id="view-lanes"', page)
         self.assertIn('id="details"', page)
 
     def test_a_running_entry_past_its_lease_lights_caution(self):
@@ -1506,9 +1521,9 @@ R.det = ELS.adv.html;""")
         # sd:5921: a quiet lane has no ledger row and no Details; it is one count on the Idle line.
         self.assertNotIn(str(other), out["R"]["ledger"])
         self.assertEqual(out["R"]["idle"], "Idle, quiet: 1 lane.")
-        # The line under the title counts the managed repositories; only the realm tabs (pack sd:6016) carry a count.
+        # The line under the title counts the managed repositories; the rail entries carry the counts (pack sd:7084).
         self.assertIn("2 managed repositories · read", out["R"]["subhead"])
-        self.assertEqual(sorted(out["counts"]), ["all", "personal"])
+        self.assertEqual(sorted(out["counts"]), ["assignments", "ended", "overview", "times"])
 
     def test_only_next_rows_carry_controls_and_the_ends_are_off(self):
         lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]
@@ -1662,7 +1677,7 @@ R.det = ELS.adv.html;""")
 
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route, api = "queue", "Queue", "/queue", ("/api/queue", "/api/queue/move", "/api/queue/builds",
-                                                           "/api/queue/builds/retry")
+                                                           "/api/queue/builds/retry", "/api/queue/runner")
 
     def test_queue_ends_now_and_has_left_fleet(self):
         now = re.search(r"\['Now',\s*\[(.*?)\]\],", GROUP_BLOCK).group(1)

@@ -173,30 +173,29 @@
   // view:start
   // build (view switch): the one contract for a top-level page with sub-sections. The page declares them once, before shell.js:
   //   window.PAGE_VIEWS = [{ id, label, key?, api? }, …]   id is [a-z0-9-]+; the first view is the default.
-  //   Each view's panel is the page's element id="view-<id>"; a view with no panel is not drawn. The shell makes the panels
-  //   tabpanels, hides all but the shown one, and puts the switch (WAI-ARIA tabs: ← → Home End) before the first panel, under
-  //   the lamps. The rail lists the views under the current page, each linking <page>#view=<id>.
-  //   A page whose views filter one surface instead (Writing's realms) puts an empty <div id="viewswitch"> where the
-  //   switch goes: the shell draws it there and keeps every declared view; a view-<id> panel is still hidden where one exists.
-  //   With no #viewswitch, a page's row-1 toolbar (id="toolbar", sd:5281) takes the switch at its start, else the first panel.
+  //   Each view's panel is the page's element id="view-<id>"; a view with no panel is not drawn. The shell hides all but the
+  //   shown panel. The rail lists the views under the current page, each linking <page>#view=<id>: that list is the one view
+  //   switch (pack sd:7084), and no page draws a tab bar. A page whose views filter one surface instead (Writing's realms)
+  //   puts an empty <div id="viewswitch"> on the page: the shell keeps every declared view; a view-<id> panel is still
+  //   hidden where one exists.
   //   key: the letter after v that shows the view (default the id's first letter).
   //   The address keeps the view as #view=<id>; another hash (#main, #chat) leaves the view as it is.
   //   The last view the reader chose is kept per page in localStorage (sd:5064) and shown when the address names none.
   //   shell.view.current() is the shown id; shell.view.show(id) shows a view and writes the hash (a lamp that filters a view
-  //   calls it); shell.view.count(id, n) puts n on the view's segment, and null hides it. The tab is where a list's row count
+  //   calls it); shell.view.count(id, n) puts n on the view's rail entry, and null hides it. The entry is where a list's row count
   //   shows (sd:5524): a view the page never counts takes the shown rows of the one table in its panel, and none for two or more
   //   (a view with an api, once it has shown).
   //   shell.view.hide(id, on) hides a
-  //   view's segment and rail entry, for a view with nothing in it (Writing's realms, sd:5064); a hidden view does not show,
+  //   view's rail entry, for a view with nothing in it (Writing's realms, sd:5064); a hidden view does not show,
   //   and hiding the shown one shows the first view left.
   //   'shell:view' fires on document with detail { id, first, api }: once at DOMContentLoaded, after the page's own listener,
-  //   then on every change (a segment, a key, a rail sub-entry, back and forward). first is true the first time a view shows,
+  //   then on every change (a rail sub-entry, a key, back and forward). first is true the first time a view shows,
   //   so a page starts that view's reader (shell.read with source: api) then; the shell fetches nothing itself.
   const viewHost = document.getElementById('viewswitch'), viewPanel = v => document.getElementById(`view-${v.id}`);
   const VIEW_LIST = (window.PAGE_VIEWS || []).filter(v => /^[a-z0-9-]+$/.test(v.id) && (viewHost || viewPanel(v)));
   const viewKey = v => v.key || v.id[0];
   let viewNow = null, viewStarted = false, viewChord = 0;
-  const viewSeen = new Set(), viewTabs = [], viewLinks = [], viewItems = [];
+  const viewSeen = new Set(), viewLinks = [], viewItems = [];
   const VKEY = `sd.view.${location.pathname}`;
   const viewKept = () => { try { const id = localStorage.getItem(VKEY); return VIEW_LIST.some(v => v.id === id) ? id : null; } catch (_) { return null; } };
   const viewOf = h => { const m = /^#view=([a-z0-9-]+)$/.exec(h || ''); return m && VIEW_LIST.some(v => v.id === m[1]) ? m[1] : null; };
@@ -209,13 +208,12 @@
     viewNow = id;
     VIEW_LIST.forEach((v, i) => {
       const on = v.id === id;
-      viewTabs[i].setAttribute('aria-selected', on); viewTabs[i].tabIndex = on ? 0 : -1;
       const panel = viewPanel(v); if (panel) panel.hidden = !on;
       if (viewLinks[i]) on ? viewLinks[i].setAttribute('aria-current', 'true') : viewLinks[i].removeAttribute('aria-current');
     });
     if (viewStarted) viewFire(id);
   }
-  const viewOpen = i => i >= 0 && !viewTabs[i].hidden;
+  const viewOpen = i => i >= 0 && !viewItems[i].hidden;
   function viewShow(id) {
     if (!viewOpen(VIEW_LIST.findIndex(v => v.id === id))) return false;
     if (location.hash !== `#view=${id}`) try { history.pushState(history.state, '', `#view=${id}`); } catch (_) {}
@@ -225,7 +223,7 @@
   }
   const viewOwned = new Set();
   function viewSet(i, n) {
-    const t = viewTabs[i]; if (!t) return;
+    const t = viewLinks[i]; if (!t) return;
     const c = t.children[1], said = n == null ? '' : String(n);
     if (c.hidden !== (n == null)) c.hidden = n == null; if (c.textContent !== said) c.textContent = said;
   }
@@ -240,39 +238,25 @@
   }
   function viewHide(id, on) {
     const i = VIEW_LIST.findIndex(v => v.id === id); if (i < 0) return;
-    viewTabs[i].hidden = !!on; viewItems[i].hidden = !!on;
+    viewItems[i].hidden = !!on;
     if (on && viewNow === id) { const left = VIEW_LIST.find((v, j) => viewOpen(j)); if (left) viewApply(left.id); }
   }
   const view = { current: () => viewNow, show: viewShow, count: viewCount, hide: viewHide, auto: viewAuto };
   if (VIEW_LIST.length) {
-    const bar = document.createElement('div');
-    bar.className = 'viewswitch'; bar.setAttribute('role', 'tablist'); bar.setAttribute('aria-label', `${page} views`);
+    // pack sd:7084: the rail's sub-entries are the one view switch; the page draws no tab bar of its own.
     const sub = document.createElement('ul');
     sub.className = 'subnav'; sub.setAttribute('aria-label', `${page} views`);
     VIEW_LIST.forEach(v => {
-      const t = document.createElement('button'), nm = document.createElement('span'), n = document.createElement('span');
-      t.type = 'button'; t.setAttribute('role', 'tab'); t.setAttribute('id', `vt-${v.id}`);
+      const li = document.createElement('li'), a = document.createElement('a'), nm = document.createElement('span'), n = document.createElement('span');
+      a.setAttribute('href', `${hrefOf(page) || ''}#view=${v.id}`);
       nm.className = 'nm'; nm.textContent = v.label; n.className = 'n'; n.hidden = true;
-      t.append(nm, n); t.addEventListener('click', () => viewShow(v.id));
-      bar.append(t); viewTabs.push(t);
-      const panel = viewPanel(v);
-      if (panel) { t.setAttribute('aria-controls', panel.id); panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', `vt-${v.id}`); }
-      const li = document.createElement('li'), a = document.createElement('a');
-      a.setAttribute('href', `${hrefOf(page) || ''}#view=${v.id}`); a.textContent = v.label;
+      a.append(nm, n);
       // On the page a sub-entry switches in place, so the page keeps its query (?job=); the href opens a new tab there.
       a.addEventListener('click', e => { e.preventDefault(); viewShow(v.id); });
       li.append(a); sub.append(li); viewLinks.push(a); viewItems.push(li);
+      // A panel the page did not label takes its view's name, as a tabpanel took its tab's.
+      const panel = viewPanel(v); if (panel && !panel.getAttribute('aria-label') && !panel.getAttribute('aria-labelledby')) panel.setAttribute('aria-label', v.label);
     });
-    // Roving focus: ← → Home End move between segments and show each (WAI-ARIA tabs, automatic activation).
-    bar.addEventListener('keydown', e => {
-      const open = viewTabs.filter(t => !t.hidden), i = open.indexOf(e.target), last = open.length - 1;
-      const k = { ArrowRight: i + 1 > last ? 0 : i + 1, ArrowLeft: i < 1 ? last : i - 1, Home: 0, End: last }[e.key];
-      if (i < 0 || k === undefined) return;
-      const to = viewTabs.indexOf(open[k]);
-      e.preventDefault(); viewShow(VIEW_LIST[to].id); viewTabs[to].focus();
-    });
-    const toolbar = document.getElementById('toolbar');
-    viewHost ? viewHost.append(bar) : toolbar ? toolbar.prepend(bar) : viewPanel(VIEW_LIST[0]).before(bar);
     rail.querySelector(`[data-section="${page}"]`)?.closest('li')?.append(sub);
     viewApply(viewOf(location.hash) || viewKept() || VIEW_LIST[0].id);
     const follow = () => { const id = viewOf(location.hash); if (id) viewApply(id); else if (!location.hash) viewApply(VIEW_LIST[0].id); };
@@ -386,7 +370,7 @@
         <p class="hint" id="shift-hint">→ changes the reading · Enter runs · Esc clears</p>
       </div>`);
     // sd:6693: the bar follows the row's segment groups (the view switch, a .vseg) and comes before its actions.
-    const segs = shiftRow.querySelectorAll(':scope > :is(.viewswitch, #viewswitch, .place-switch, .vseg)');
+    const segs = shiftRow.querySelectorAll(':scope > :is(#viewswitch, .place-switch, .vseg)');
     const segEnd = segs[segs.length - 1], segHelp = segEnd?.nextElementSibling?.matches('.help') && segEnd.nextElementSibling;
     segEnd ? (segHelp || segEnd).after(el) : shiftRow.prepend(el);
     shiftIn = el.querySelector('#shift'); shiftPrev = el.querySelector('#shift-preview');
@@ -1587,7 +1571,7 @@
     // on) and folds for 2 bands or more. A table that names its toolbar row (data-toolbar="<id>", the row with the
     // view buttons) puts the bar's parts in that row; otherwise the bar is its own row. A table the page's text filter covers
     // (data-tfilter="page") names the row that holds that filter, so the column filter sits beside it and no table gets two
-    // text filters (the sd:5281 ruling; test_v2_shell_shared walks every page). The bar carries no row count: the view's tab
+    // text filters (the sd:5281 ruling; test_v2_shell_shared walks every page). The bar carries no row count: the view's rail entry
     // does (sd:5524), and the filter chips say how many of how many while a filter is on.
     const { facet: facetOn, folds: foldsOn } = tbar({ total, filterOn, ownFilter, bands: groups.length });
     const facets = facetOn ? tfacets(cols, rows, sortable.map(s => !s)) : [];
@@ -1615,7 +1599,7 @@
     if (slot._t !== chipsHtml.text) { put(slot, chipsHtml); slot._t = chipsHtml.text; }
   }
   let tq = 0;
-  // A bar whose table a redraw replaced goes: in a shared row (data-toolbar) nothing else removes it. Then each view's tab
+  // A bar whose table a redraw replaced goes: in a shared row (data-toolbar) nothing else removes it. Then each view's rail entry
   // takes its count.
   const tscan = () => {
     tq = 0; document.querySelectorAll('main table').forEach(t => { try { tapply(t); } catch (e) { console.error('table grammar', e); } });

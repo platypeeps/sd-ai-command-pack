@@ -4,7 +4,8 @@ row's Re-queue and a running row's Release post /api/queue/move, which runs `sd-
 The Builds panel (pack sd:6095) reads /api/queue/builds (`builds.panel`), with ?show=all the ended runs too (pack
 sd:6834); a blocked or cancelled run's Retry posts
 /api/queue/builds/retry, and its Send to builder posts the same route with a `finding` (pack sd:6020); a running
-build's Cancel posts the assignment cancel route that exists."""
+build's Cancel posts the assignment cancel route that exists. The Assignments view (pack sd:7115) reads
+/api/queue/runner (`queue_screen.runner`): the live assignments and the items at ready_to_send."""
 
 from __future__ import annotations
 
@@ -22,6 +23,12 @@ def _builds(read):
 
     shown = (read.parameters.get("show") or ["active"])[0]
     return builds.panel(read.connection, now=read.now, show="all" if shown == "all" else "active")
+
+
+def _runner(read):
+    from ... import queue_screen
+
+    return queue_screen.runner(read.connection)
 
 
 def _retry(payload, principal):
@@ -55,6 +62,6 @@ PAGE = Page(
     html="queue.html",
     item="sd:2585",
     api=(Api("/api/queue", _read), Api("/api/queue/move", write=_move), Api("/api/queue/builds", _builds, query=True),
-         Api("/api/queue/builds/retry", write=_retry)),
+         Api("/api/queue/builds/retry", write=_retry), Api("/api/queue/runner", _runner)),
     # No rail badge (sd:5921): a blocked entry is a broken row of Today's Needs you, which counts it there.
 )

@@ -156,6 +156,21 @@ class Report(Case):
         self.assertIn(f"{telemetry.PHOENIX_UI}/redirects/traces/{ident}", text)
         self.assertIn(f"{telemetry.PHOENIX_UI}/redirects/traces/{denied}", text)
 
+    def test_a_merge_noted_on_an_interrupted_run_counts_for_its_retry(self):
+        """pack sd:7008: the merge was lost when only the bundle's cleanup retry ended done."""
+        ident, items = self.run_row(["Build me"], outcome="interrupted", detail="supervisor lost", notes=[
+            ("2026-10-31T08:26:35+00:00",
+             "Build run {run} enqueued build/sd-1 in the lane as entry 20261031T082558Z-4791"),
+            ("2026-10-31T09:01:01+00:00", f"Code delivery https://github.com/o/r/pull/1722 at {SHA}")])
+        self.db.execute("INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, "
+                        "created_at, updated_at, released_at, outcome, detail) SELECT id || '-retry', assignment, "
+                        "run + 1, repo, branch, owner, work_path, retained_path, '2026-10-31T09:10:00+00:00', "
+                        "'2026-10-31T09:12:00+00:00', '2026-10-31T09:12:00+00:00', 'done', 'worktree removed' "
+                        "FROM runner_run WHERE id = ?", (ident,))
+        self.db.commit()
+        text = telemetry.month_report(self.db, "2026-10")
+        self.assertIn(f"| repo | #1722 | sd:{items[0]} |", text)
+
     def test_the_report_carries_no_title_detail_or_note_body(self):
         self.merged(review_round=1)
         self.failed("ended at /Users/x/secret: permission denied: Bash")

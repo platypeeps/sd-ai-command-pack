@@ -23,10 +23,11 @@ __all__ = ["PACK_MODULES", "__version__", "pack_bin", "pack_library", "pack_modu
 
 __version__ = "0.1.0"
 
-#: The pack `bin/` modules this process imports: `sd_lane`, for the Queue's read, and what it imports in turn; `sd_research_publish`,
+#: The pack `bin/` modules this process imports: `sd_lane`, for the Queue's read, and what it imports in turn
+#: (`sd_release`, the release chain after a merge, sd:6881); `sd_research_publish`,
 #: for the mirror queue and the research.conf.py trust record (sd:5102).
 #: `runtime.build_digests` hashes each, so a pack update to one restarts the server like a library update.
-PACK_MODULES = ("sd_lane", "sd_lib", "sd_ship_workflow", "sd_research_publish")
+PACK_MODULES = ("sd_lane", "sd_lib", "sd_release", "sd_ship_workflow", "sd_research_publish")
 
 
 def pack_library():

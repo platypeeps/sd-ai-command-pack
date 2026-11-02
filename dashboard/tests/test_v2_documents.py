@@ -38,10 +38,12 @@ from sd_dashboard import (
     learning_screen,
     research_screen,
     server,
+    source_intake,
     v2,
 )
 from sd_db import connect, create_item, records, writes
 from support import NOW, ScreenCase
+from test_run_actions import Run
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
 from test_v2_tasks import SHELL, STAND_IN, VIEW_SHELL
@@ -698,11 +700,12 @@ FIELD_VALUES.tag = 'Board Q1'; shellRun(tag, other); await flush();""", answer=s
         self.assertEqual([t[0] for t in out["toasts"]], ["Tagged q4 · The plan", "Tagged q4 · Overview", "Tagged board-q1 · Overview"])
 
     def test_hidden_shows_the_hidden_documents_alone_and_all_shows_every_one(self):
+        """Open | Hidden | All sits in the filter area, beside Pinned only (operator 2026-11-01)."""
         self.rows_of(**{"civic/brief.html": {"hidden": True}, "lab/plan.html": {"pinned": True}})
         def click(v):
-            return ("ELS['hidden-seg'].listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"hidden\"]'"
+            return ("ELS.facets.listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"hidden\"]'"
                     f" ? {{ dataset: {{ v: '{v}' }} }} : null }} }});")
-        out = self.run_page(f"""R.rows = ELS.rows.html; R.seg = ELS['hidden-seg'].html; {click('aside')}
+        out = self.run_page(f"""R.rows = ELS.rows.html; R.seg = ELS.facets.html; {click('aside')}
 R.hidden = ELS.rows.html; R.url = {self.URL}; {click('all')} R.all = ELS.rows.html; R.urlAll = {self.URL};
 {click('open')} R.back = ELS.rows.html;""")
         def ids(rows):
@@ -1241,6 +1244,26 @@ C.run(cmd('book.open'), book); C.run(cmd('book.open'), article); R.cli = cmd('bo
         self.assertIn(["off: no http or https URL on this row", False], out["toasts"])
         self.assertRegex(out["R"]["cli"], r"^sd task show \d+$")
 
+    def test_add_book_and_add_video_post_the_url_typed_and_read_the_view_again(self):
+        """pack sd:7081: each view's head carries its Add, which posts learning.add with the view and reads it again."""
+        docs = {**self.books(), "/api/documents/videos": [200, learning_screen.videos(self.connection, now=NOW)],
+                "/api/actions/run": [200, {"action": "learning.add", "label": "Add", "line": "sd store add", "exit": 0, "output": ""}]}
+        out = self.run_view("""window.shell.view.show('books'); await flush();
+FIELD_VALUES = { url: 'https://press.example.test/new', title: '' }; C.run(cmd('book.add'), OBJ.get('books')); await flush();
+window.shell.view.show('videos'); await flush();
+FIELD_VALUES = { url: 'https://youtu.be/abc', title: 'A Talk' }; C.run(cmd('video.add'), OBJ.get('videos')); await flush();
+R.reg = REG.filter(c => c.id.endsWith('.add')).map(c => [c.id, c.label, c.on]);""", docs)
+        self.assertEqual(out["R"]["reg"], [["book.add", "Add book", "book list"], ["video.add", "Add video", "video list"]])
+        self.assertEqual([p[:2] for p in out["posts"]], [
+            ["/api/actions/run", {"action": "learning.add", "view": "books", "url": "https://press.example.test/new", "title": ""}],
+            ["/api/actions/run", {"action": "learning.add", "view": "videos", "url": "https://youtu.be/abc", "title": "A Talk"}]])
+        self.assertEqual(out["gets"].count("/api/documents/books"), 2, out["gets"])
+        page = (V2 / "documents.html").read_text(encoding="utf-8")
+        for view, noun in (("books", "book"), ("videos", "video")):
+            head = page[page.index(f'<section id="view-{view}"'):]
+            self.assertIn(f'<div class="tools"><button class="btn quiet" type="button" data-cmd="{noun}.add" data-obj="{view}">Add {noun}…</button></div>',
+                          head[:head.index("<table")])
+
     def test_videos_is_a_view_with_channel_date_and_watched_state_newest_first(self):
         seed_learning(self.connection)
         docs = {"/api/documents/videos": [200, learning_screen.videos(self.connection, now=NOW)]}
@@ -1289,6 +1312,48 @@ window.shell.view.show('documents'); await flush(); await window.PAGE_AGAIN.run(
         self.assertIn({"kind": "error", "text": "The books and articles were not read: no such table: item. Reload retries it.", "source": "/api/documents/books"},
                       out["states"])
         self.assertIn("The books and articles were not read, so nothing is selected.", out["R"]["details"])
+
+
+class TheAddActions(Run):
+    """Add book and Add video (pack sd:7081): a URL becomes a to-read or to-watch learning row through `sd store add`."""
+
+    def setUp(self):
+        super().setUp()
+        self.titles = []
+        title = mock.patch.object(source_intake, "_title", lambda url, deadline: self.titles.append(url) or "Fetched Title - YouTube")
+        title.start()
+        self.addCleanup(title.stop)
+        self.ids = seed_learning(self.connection)
+        self.connection.commit()
+
+    def test_add_book_files_a_book_row_with_the_typed_title(self):
+        status, body = self.run_("learning.add", view="books", url="https://press.example.test/new", title="A New Book")
+        self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Add"), body)
+        [line] = self.ran()
+        self.assertTrue(line.startswith("sd store add sdw.learning A New Book --field content-type=book "
+                                        "--field url=https://press.example.test/new --field dateCreated="), line)
+        self.assertEqual(self.titles, [], "a typed title fetched the page")
+
+    def test_add_video_reads_the_pages_title_and_names_a_youtube_link_youtube(self):
+        status, body = self.run_("learning.add", view="videos", url="https://youtu.be/abc", title="")
+        self.assertEqual((status, body["exit"]), (200, 0), body)
+        self.assertTrue(self.ran()[-1].startswith("sd store add sdw.learning Fetched Title --field content-type=youtube "), self.ran())
+        self.run_("learning.add", view="videos", url="https://media.example.test/talk", title="A Talk")
+        self.assertIn("--field content-type=video ", self.ran()[-1])
+
+    def test_add_refuses_a_bad_url_a_known_url_or_another_view(self):
+        before = self.ran()
+        for ids, said in (({"view": "books", "url": "javascript:alert(1)", "title": ""}, "http or https URL"),
+                          ({"view": "books", "url": "https://example.test/a b", "title": ""}, "no spaces"),
+                          ({"view": "books", "url": "https://books.example.test/retro", "title": ""}, "already in Learning"),
+                          ({"view": "courses", "url": "https://example.test", "title": ""}, "books or videos"),
+                          ({"view": "books", "url": "https://example.test", "title": "a/b"}, "Name the"),
+                          ({"view": "books", "url": "https://example.test"}, "takes title, url, view")):
+            with self.subTest(ids=ids):
+                status, _, body = self.post("/api/actions/run", {"action": "learning.add", **ids})
+                self.assertEqual(status, 400, body)
+                self.assertIn(said, body["error"])
+        self.assertEqual(self.ran(), before)
 
 
 class TheRegistration(Registers, unittest.TestCase):

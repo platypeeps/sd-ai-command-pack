@@ -39,7 +39,7 @@ import threading
 import time
 import weakref
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import remote, tailnet
@@ -235,12 +235,14 @@ class Role:
     `holder` is the name `sd.hub_name` holds, `None` when unset; `reason`
     is one line a refusal can quote. Callers that act off this machine refuse
     on `elsewhere` and `unknown`; a write to its own database refuses on
-    `elsewhere` alone (`write_role`).
+    `elsewhere` alone (`write_role`). `observed` is the `time.monotonic`
+    reading of its oldest input, from which `Held` ages it; `None` is now.
     """
 
     state: str
     holder: str | None
     reason: str
+    observed: float | None = field(default=None, compare=False)
 
     @property
     def refuses(self) -> bool:
@@ -270,7 +272,9 @@ def role(connection, name=None) -> Role:
 
     `connection` is this machine's own database; `name` reads this node's
     tailnet name (`tailnet.this_name`; a failure stands for `NAME_SECONDS`). The setting
-    is read first, so a machine that never set it asks Tailscale nothing.
+    is read first, so a machine that never set it asks Tailscale nothing,
+    and read again once Tailscale answers, so the answer is no older than
+    Tailscale's (pack sd:7120). `observed` is its oldest input.
 
     Unset is `off`: a fleet that never named its hub runs as before, and
     `promote` refuses to move the role until the setting exists, so a
@@ -279,22 +283,39 @@ def role(connection, name=None) -> Role:
     """
     from . import writes
 
-    try:
+    def setting() -> tuple[float, str | None]:
+        read = time.monotonic()
         # A database older than the `state` table can hold no setting: never set, not unreadable.
         held = connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'state'").fetchone()
-        holder = writes.read_settings(connection, [HUB_NAME]).get(HUB_NAME) if held else None
+        return read, writes.read_settings(connection, [HUB_NAME]).get(HUB_NAME) if held else None
+
+    def unset(read: float) -> Role:
+        return Role("off", None, f"{HUB_NAME} is unset, so the fence is off; "
+                                 f"on the hub run `sd config set {HUB_NAME} <its tailnet name>`", read)
+
+    try:
+        read, holder = setting()
     except (SdDbError, sqlite3.Error, OSError) as error:
         return Role("unknown", None, f"{HUB_NAME} does not read: {error}")
     if not holder:
-        return Role("off", None, f"{HUB_NAME} is unset, so the fence is off; "
-                                 f"on the hub run `sd config set {HUB_NAME} <its tailnet name>`")
+        return unset(read)
     try:
         mine = (name or _this_name)()
     except tailnet.TailnetError as error:
-        return Role("unknown", holder, f"Tailscale does not name this node, so it cannot match {holder}: {error}")
+        # A failure `_this_name` holds was seen when it was cached.
+        failed = _name_failed[0] if _name_failed is not None and _name_failed[1] is error else read
+        return Role("unknown", holder, f"Tailscale does not name this node, so it cannot match {holder}: {error}",
+                    min(read, failed))
+    told = time.monotonic()
+    try:
+        read, holder = setting()
+    except (SdDbError, sqlite3.Error, OSError) as error:
+        return Role("unknown", None, f"{HUB_NAME} does not read: {error}")
+    if not holder:
+        return unset(read)
     if _matches(mine, holder):
-        return Role("holder", holder, f"this node is {mine}, the hub {HUB_NAME} names")
-    return Role("elsewhere", holder, f"{HUB_NAME} names {holder}, and this node is {mine}")
+        return Role("holder", holder, f"this node is {mine}, the hub {HUB_NAME} names", told)
+    return Role("elsewhere", holder, f"{HUB_NAME} names {holder}, and this node is {mine}", told)
 
 
 def role_at(path: Path, name=None) -> Role:
@@ -313,11 +334,12 @@ def role_at(path: Path, name=None) -> Role:
 
 # ------------------------------------------------------- the write fence
 
-#: Seconds a write inside a transaction trusts the last fence answer for one
-#: database, as a tailnet frame does (`serve.FENCE_SECONDS`). A commit
-#: never trusts it: it asks afresh, as the listener's commit does. A wall
-#: clock that moved `CLOCK_SLACK` more than the monotonic one, which does
-#: not count a sleep, asks again.
+#: Seconds a write and its commit trust the last fence answer for one
+#: database, as a tailnet frame and its commit do (`serve.FENCE_SECONDS`).
+#: A transaction's opening asks again past half of it, before SQLite's write
+#: lock, so a commit asks Tailscale under the lock only when its transaction
+#: ran that long (pack sd:7042). A wall clock that moved `CLOCK_SLACK` more
+#: than the monotonic one, which does not count a sleep, asks again.
 FENCE_SECONDS = 5.0
 CLOCK_SLACK = 1.0
 #: SQLite's action codes for a statement that writes a database file. A
@@ -371,7 +393,52 @@ _FORBIDDEN_PRAGMAS = {
        for name in ("page_size", "auto_vacuum")},
 }
 
-_answers: dict[str, tuple[float, float, Role]] = {}
+class Held:
+    """One fence answer and when it came (pack sd:7042).
+
+    `get(ask, within)` returns the held answer while it is younger than
+    `within` seconds, counted from its oldest input, and the wall clock
+    moved with the monotonic one since `ask` began;
+    otherwise it calls `ask` and holds what it returns. One ask runs at a
+    time. A caller that finds an answer young enough takes no lock, so a
+    slow Tailscale stalls only the callers that need a new answer.
+    """
+
+    def __init__(self) -> None:
+        self._held: tuple[float, float, object] | None = None
+        self._asking = threading.Lock()
+
+    def _young(self, within: float) -> tuple[bool, object]:
+        held = self._held
+        if held is None:
+            return False, None
+        since, at, found = held
+        ticks, wall = time.monotonic(), time.time()
+        return ticks - since < within and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK, found
+
+    def get(self, ask: Callable[[], object], within: float):
+        young, found = self._young(within)
+        if young:
+            return found
+        with self._asking:
+            # Another caller may have asked while this one waited.
+            young, found = self._young(within)
+            if young:
+                return found
+            ticks, wall = time.monotonic(), time.time()
+            found = ask()
+            # Aged from its oldest input (`Role.observed`), else from its
+            # arrival: from the call's start, an answer slower than `within`
+            # came stale, and the next write asked again under SQLite's
+            # write lock (pack sd:7120). The wall clock keeps the start, so
+            # a sleep during the call still reads as a jump.
+            observed = getattr(found, "observed", None)
+            since = time.monotonic() if observed is None else observed
+            self._held = (since, wall + (since - ticks), found)
+            return found
+
+
+_answers: dict[str, Held] = {}
 _answers_guard = threading.Lock()
 
 
@@ -384,35 +451,29 @@ class Fenced(remote.RemoteError):
     """
 
 
-def write_role(path: Path, *, fresh: bool = False) -> Role:
-    """`role` of the database at `path`, read from that file and held `FENCE_SECONDS`.
+def write_role(path: Path, *, within: float | None = None) -> Role:
+    """`role` of the database at `path`, read from that file and held `within` seconds, `FENCE_SECONDS` by default.
 
     The file itself, never through `hub.json`: during demotion `hub.json`
     sits beside the database, and a `HubConflict` read as `unknown` would let
-    a writer that is already open go on. `fresh` asks again whatever is
-    held, as a commit does: a held `holder` may predate the rename.
+    a writer that is already open go on. `within=0` asks again whatever is
+    held, as an operation no ROLLBACK undoes does.
     """
     from .database import open_local
 
-    key = str(path)
-    with _answers_guard:
-        ticks, wall = time.monotonic(), time.time()
-        held = _answers.get(key)
-        if held is not None and not fresh:
-            since, at, found = held
-            if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
-                return found
+    def ask() -> Role:
         try:
             connection = open_local(Path(path), write=False, create=False)
         except Exception as error:  # noqa: BLE001 -- no answer is unknown, named
-            found = Role("unknown", None, f"the database at {path} did not open: {type(error).__name__}: {error}")
-        else:
-            try:
-                found = role(connection)
-            finally:
-                connection.close()
-        _answers[key] = (ticks, wall, found)
-        return found
+            return Role("unknown", None, f"the database at {path} did not open: {type(error).__name__}: {error}")
+        try:
+            return role(connection)
+        finally:
+            connection.close()
+
+    with _answers_guard:
+        held = _answers.setdefault(str(path), Held())
+    return held.get(ask, FENCE_SECONDS if within is None else within)
 
 
 #: The raw fix for a mistyped `sd.hub_name` on the real hub: the fence stays
@@ -440,12 +501,17 @@ class _WriteFence:
 
     Write unless fenced (#31093): only `elsewhere` refuses. `holder`, `off`
     and `unknown` write, so a Tailscale outage does not stop a healthy hub.
-    Each boundary that makes a write persist asks afresh: COMMIT, and the
-    RELEASE of a savepoint opened outside a transaction. A write outside a
+    Each boundary that makes a write persist asks: COMMIT, and the RELEASE
+    of a savepoint opened outside a transaction. It trusts an answer up to
+    `FENCE_SECONDS` old: the transaction's opening (BEGIN, or that
+    savepoint) asks again before SQLite's write lock once the held answer
+    passed half of that, and refuses nothing. A fresh ask at the commit held
+    every other writer for a Tailscale call (pack sd:7042). A write outside a
     transaction commits when SQLite ends it, which no authorizer sees, so it
     is refused at prepare (`unwrapped`); the cursor runs it again inside
     BEGIN IMMEDIATE ... COMMIT (`_batched`), as it runs `executemany`. A
-    transaction that wrote nothing commits without asking, so reads keep working.
+    transaction that wrote nothing commits without asking, so reads keep
+    working; its opening may ask, once per half window.
     A pragma that changes the file is a write (pack sd:6328). Outside a
     transaction it runs again inside one, as other writes do:
     `incremental_vacuum` frees a page per row fetched, after execute().
@@ -456,7 +522,8 @@ class _WriteFence:
     outer savepoint clear when a statement is prepared outside one, never on
     a BEGIN, ROLLBACK or RELEASE that may yet fail (review of f716079a9).
     A write inside a transaction asks the held answer, to stop early; its
-    commit decides. So a transaction open across the console rename rolls back.
+    commit decides. So a commit more than `FENCE_SECONDS` after the console
+    rename, or after a sleep, rolls back.
     The connection caches no statement: Python does not authorize a cached one again.
     It holds its connection weakly, so the pair makes no cycle.
     """
@@ -485,18 +552,21 @@ class _WriteFence:
         if not opened:
             self.wrote, self.outer = False, None
         if action == sqlite3.SQLITE_TRANSACTION:
+            if arg1 == "BEGIN" and not opened:
+                return self._open_ask()
             ends = arg1 == "COMMIT" and opened and self.wrote
-            return self._ask(fresh=True) if ends else sqlite3.SQLITE_OK
+            return self._ask() if ends else sqlite3.SQLITE_OK
         if action == sqlite3.SQLITE_SAVEPOINT:
             name = (arg2 or "").lower()
             if arg1 == "BEGIN" and not opened:
                 self.outer = name
+                return self._open_ask()
             if arg1 == "RELEASE" and opened and name == self.outer and self.wrote:
-                return self._ask(fresh=True)
+                return self._ask()
             return sqlite3.SQLITE_OK
         if action == sqlite3.SQLITE_ATTACH:
             # VACUUM, VACUUM INTO and ATTACH: VACUUM commits itself.
-            return self._ask(fresh=True)
+            return self._ask(within=0)
         pragma = (arg1 or "").lower() if action == sqlite3.SQLITE_PRAGMA else None
         writes = action in _WRITES or pragma is not None and (
             pragma in _PRAGMA_WRITES or arg2 is not None and pragma not in _PRAGMA_READ_OR_CONNECTION)
@@ -505,16 +575,21 @@ class _WriteFence:
                 self.forbidden = _FORBIDDEN_PRAGMAS[pragma]
                 return sqlite3.SQLITE_DENY
             if pragma in _PRAGMA_UNDONE_BY_NOTHING:
-                return self._ask(fresh=True)
+                return self._ask(within=0)
             if not opened:
                 self.unwrapped = True
                 return sqlite3.SQLITE_DENY
             self.wrote = True
-            return self._ask(fresh=False)
+            return self._ask()
         return sqlite3.SQLITE_OK
 
-    def _ask(self, *, fresh: bool) -> int:
-        found = write_role(self.path, fresh=fresh)
+    def _open_ask(self) -> int:
+        """At a transaction's opening, before its write lock: renew an answer past half its window."""
+        write_role(self.path, within=FENCE_SECONDS / 2)
+        return sqlite3.SQLITE_OK
+
+    def _ask(self, *, within: float | None = None) -> int:
+        found = write_role(self.path, within=within)
         if found.state != "elsewhere":
             return sqlite3.SQLITE_OK
         self.refusal = demotion(self.path, found)
@@ -549,7 +624,7 @@ def _fenced(connection: sqlite3.Connection, run, *args):
 
 
 def _batched(connection: sqlite3.Connection, run, *args):
-    """A write in its own transaction outside one, so its COMMIT asks the fence afresh.
+    """A write in its own transaction outside one, so its COMMIT asks the fence.
 
     In autocommit SQLite commits a write when it ends, and `executemany`
     after each parameter set, with no authorizer call between.
@@ -617,7 +692,7 @@ class FencedConnection(sqlite3.Connection):
 
     def blobopen(self, *args, readonly: bool = False, name: str = "main"):
         # A blob write passes no authorizer and commits on each write outside
-        # a transaction, so it is held to one whose COMMIT asks afresh.
+        # a transaction, so it is held to one whose COMMIT asks.
         if not readonly and name != "temp":
             if not self.in_transaction:
                 raise SdDbError("a writable blob needs a transaction (BEGIN IMMEDIATE ... COMMIT)")

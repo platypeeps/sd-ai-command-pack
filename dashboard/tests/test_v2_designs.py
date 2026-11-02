@@ -67,6 +67,8 @@ DOC["attention"] = designs._attention(DOC)
 COMMANDS = [
     # sd:5530 (operator, 2026-10-20): History and Retake screenshots are gone from the row menu, and so from the page.
     ["design.brief", "brief", "Read brief", "b", "safe"],
+    # sd:6678: Open as drawn is a command, a row icon and a Details button, not a link in Details.
+    ["design.open", "page", "Open as drawn", "o", "safe"],
     # sd:3447: Hide and Unhide, the view state Documents' Hide writes, on each row type.
     ["design.hide", "page", "Hide", "h", "undo"], ["design.unhide", "page", "Unhide", "h", "undo"],
     ["design.hide", "brief", "Hide", "h", "undo"], ["design.unhide", "brief", "Unhide", "h", "undo"],
@@ -154,6 +156,8 @@ location.pathname = '/designs'; OUT.counts = {}; OUT.replacedState = null;
 var history = { state: null, replaceState(s, t, u) { OUT.replacedState = u; const h = u.indexOf('#'), q = u.indexOf('?');
   location.hash = h < 0 ? '' : u.slice(h); location.search = q < 0 ? '' : u.slice(q, h < 0 ? undefined : h); } };
 window.shell.view = { current: () => 'pages', count: (id, n) => { OUT.counts[id] = n; } };
+OUT.rowActs = []; C.rowActions = (id, o) => { OUT.rowActs.push([id, o || null]); return mk``; };
+OUT.opened = []; window.open = (u, t, f) => OUT.opened.push([u, t, f]);
 """
 
 
@@ -178,7 +182,7 @@ class TheScript(unittest.TestCase):
         out = self.run_page("R.reg = REG.map(c => [c.id, c.on, c.label, c.key, c.risk]); R.exec = REG.map(c => c.executes);")
         self.assertEqual(out["R"]["reg"], COMMANDS)
         # Read brief is copy only; Hide and Unhide (sd:3447) write view state, as Documents' do.
-        self.assertEqual(out["R"]["exec"], [False, None, None, None, None])
+        self.assertEqual(out["R"]["exec"], [False, None, None, None, None, None])
 
     def test_hide_and_unhide_are_the_rows_act(self):
         # sd:5457: the row shows Hide (or Unhide, under Hidden) on every page and brief row.
@@ -196,6 +200,16 @@ class TheScript(unittest.TestCase):
         self.assertEqual(out["selected"][-1], "product:brand")
         self.assertIn('<pre class="brief">', out["R"]["details"])
         self.assertIn("Who it is for.", out["R"]["details"])
+
+    def test_open_as_drawn_opens_the_page_in_a_new_tab_from_the_row_icon_and_details(self):
+        # sd:6678: one command on page rows, shown as the row's icon (rowActions icons) and in Details' bar.
+        out = self.run_page(f"R.icon = cmd('design.open').icon; R.bar = cmd('design.open').bar;"
+                            f" R.off = C.offWhy(cmd('design.open'), C.get('{PAGES}/today.html'));"
+                            f" shellRun(cmd('design.open'), C.get('{PAGES}/today.html')); await flush();")
+        self.assertEqual((out["R"]["icon"], out["R"].get("bar"), out["R"]["off"]), ("arrow-up-right", None, ""))
+        self.assertEqual(out["opened"], [[f"/designs/{PAGES}/today.html", "_blank", "noopener"]])
+        self.assertEqual(out["toasts"], ["Opened in a new tab · designs/pages/today.html"])
+        self.assertEqual({tuple(sorted((o or {}).items())) for _, o in out["rowActs"]}, {(("icons", True),)})
 
     def test_a_cut_brief_says_where_the_rest_is(self):
         doc = json.loads(json.dumps(DOC))
@@ -348,7 +362,8 @@ class TheScript(unittest.TestCase):
 
     def test_details_open_the_page_and_its_screenshot_where_the_tab_serves_them(self):
         out = self.run_page(f"open('{PAGES}/today.html'); R.page = ELS.details.html; open('product:brand'); R.brief = ELS.details.html;")
-        self.assertIn(f'<a class="open" href="/designs/{PAGES}/today.html">', out["R"]["page"])
+        # sd:6678: Open as drawn left Details' text link for the command bar.
+        self.assertNotIn('class="open"', out["R"]["page"])
         self.assertIn('<img src="/designs/products/system/designs/shots/v2-today-1440.png"', out["R"]["page"])
         self.assertIn('width="1440" height="900"', out["R"]["page"])
         self.assertIn("2, current", out["R"]["page"])

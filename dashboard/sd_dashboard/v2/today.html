@@ -49,17 +49,20 @@
       <li><button class="cell" type="button" data-src="pulls" data-state="unknown" aria-pressed="false"><span class="lbl">Pulls<svg class="i" aria-hidden="true"><use href="#i-git-pull-request"/></svg></span><span class="val">reading…</span></button></li>
       <li><button class="cell" type="button" data-src="mail" data-state="unknown" aria-pressed="false"><span class="lbl">Mail<svg class="i" aria-hidden="true"><use href="#i-mail"/></svg></span><span class="val">reading…</span></button></li>
       <li><button class="cell" type="button" data-src="repos" data-state="unknown" aria-pressed="false"><span class="lbl">Repos<svg class="i" aria-hidden="true"><use href="#i-hard-drive-download"/></svg></span><span class="val">reading…</span></button></li>
-      <li><a class="cell" href="#motion-h" id="lamp-sessions" data-state="unknown"><span class="lbl">Sessions<svg class="i" aria-hidden="true"><use href="#i-bot"/></svg></span><span class="val">reading…</span></a></li>
+      <li><a class="cell" href="#view=motion" id="lamp-sessions" data-state="unknown"><span class="lbl">Sessions<svg class="i" aria-hidden="true"><use href="#i-bot"/></svg></span><span class="val">reading…</span></a></li>
       <li><a class="cell" href="/queue" id="lamp-gate" data-state="unknown"><span class="lbl">Gate<svg class="i" aria-hidden="true"><use href="#i-gauge"/></svg></span><span class="val">reading…</span></a></li>
     </ul></annunciator-strip>
 
-    <section class="digest" aria-labelledby="digest-h">
+    <!-- The toolbar standard (sd:5281): the shell's Shapeshift bar (sd:5539) over every view; its text filters Needs you. -->
+    <div class="toolbar" id="toolbar" data-shift></div>
+
+    <section class="digest" id="view-digest" aria-labelledby="digest-h" hidden>
       <h2 id="digest-h">Since yesterday</h2>
       <div id="digest"><p class="why">Reading the day…</p></div>
     </section>
 
-    <section class="daytrack" id="track" aria-labelledby="track-h">
-      <h2 class="sr" id="track-h">The last 24 hours</h2>
+    <section class="daytrack" id="view-timeline" aria-labelledby="track-h" hidden>
+      <h2 id="track-h">The last 24 hours</h2>
       <div class="track-plot" id="track-plot"><p class="why">Reading the day…</p></div>
       <ul class="flowkey" id="flowkey" aria-label="Where the work is"></ul>
       <p class="spend" id="spend">Reading spend…</p>
@@ -68,15 +71,14 @@
       </details>
     </section>
 
-    <section aria-labelledby="needs-h">
+    <section id="view-needs" aria-labelledby="needs-h">
       <div class="sec-head">
         <h2 id="needs-h">Needs you <button class="help" type="button" aria-label="Help: Needs you" data-help="&lt;b&gt;Everything that asks you to act, in one list.&lt;/b&gt; Broken first, then what to look at, then what is queued. Rows of one kind fold into one group row: open it for its first rows. A lamp above, or an intent, shows only its rows. Each row has one main action and the rest under ⋯. &lt;code&gt;sd today&lt;/code&gt; prints the full status.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="tally"></p>
       </div>
-      <!-- The toolbar standard (sd:5281): the shell's Shapeshift bar (sd:5539), then the intents, views over the one list. -->
-      <div class="toolbar" id="toolbar" data-shift></div>
-      <div class="intents" id="intents" role="group" aria-label="Show only"></div>
+      <!-- The filter row holds the intents (pack sd:7084). -->
+      <div class="filters toolbar-2"><div class="intents" id="intents" role="group" aria-label="Show only"></div></div>
       <table class="ledger needs" aria-labelledby="needs-h" data-tfilter="page" data-toolbar="toolbar">
         <thead id="rows-head"></thead>
         <tbody id="rows"><tr class="empty"><td colspan="6">Reading the fleet…</td></tr></tbody>
@@ -87,7 +89,7 @@
       <p class="foot" id="foot">Waiting elsewhere: <a href="/decide">Decide</a> holds the decisions and review questions, <a href="/health">Health</a> the findings. <code>sd today</code> prints the full status.</p>
     </section>
 
-    <section aria-labelledby="motion-h">
+    <section id="view-motion" aria-labelledby="motion-h" hidden>
       <div class="sec-head">
         <h2 id="motion-h">In motion <button class="help" type="button" aria-label="Help: In motion" data-help="&lt;b&gt;Open items with a live session.&lt;/b&gt; First the headless builder runs: each one's items, stage (building, review, lane), start and ETA, the median of past runs. Then each session: a worktree, a lane entry, a running &lt;code&gt;sd-*&lt;/code&gt; command or a herdr agent, each tied to its item by a lane entry, a branch name, &lt;code&gt;--item&lt;/code&gt;, &lt;code&gt;-C&lt;/code&gt; or a Fix note. Longest-running first. What landed today is on Queue.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
@@ -106,13 +108,13 @@
       <p class="filtered" id="active-note" hidden></p>
     </section>
 
-    <section aria-labelledby="queues-h">
+    <section id="view-queues" aria-labelledby="queues-h" hidden>
       <div class="sec-head">
         <h2 id="queues-h">Queues <button class="help" type="button" aria-label="Help: Queues" data-help="&lt;b&gt;What waits to be built and landed.&lt;/b&gt; Ready items, highest priority first, then the build queue (queued, running, blocked) and the merge lane (position, state, the step a stopped entry stopped at). A repo chip shows one repo. &lt;code&gt;sd today&lt;/code&gt; prints the same table. A failed or blocked entry also sends one push.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="queues-tally"></p>
       </div>
-      <div class="intents" id="queues-repos" role="group" aria-label="Show one repo"></div>
+      <div class="filters toolbar-2"><div class="intents" id="queues-repos" role="group" aria-label="Show one repo"></div></div>
       <table class="ledger active" aria-labelledby="queues-h">
         <thead><tr><th class="g"><span class="sr">State</span></th><th>What</th><th>Queue · detail</th><th class="num">Age</th></tr></thead>
         <tbody id="queues"><tr class="empty"><td colspan="4">Reading the queues…</td></tr></tbody>

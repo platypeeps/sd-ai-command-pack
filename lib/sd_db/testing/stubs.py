@@ -175,12 +175,16 @@ def main(argv):
 
     The answer is the state file. `whois` answers from `whois`, a map from
     the peer's IP to the record the real command prints, and fails for an
-    IP it does not hold, as the real one does.
+    IP it does not hold, as the real one does. `status_delay` is seconds
+    `status` takes, as a daemon under load does.
     """
     current = state()
     if not argv:
         return record(argv, 1)
     if argv[0] == "status":
+        if current.get("status_delay"):
+            import time
+            time.sleep(float(current["status_delay"]))
         if current.get("backend", "Running") != "Running":
             sys.stderr.write("Tailscale is stopped.\n")
             return record(argv, 1)

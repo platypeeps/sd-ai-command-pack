@@ -338,6 +338,8 @@ def _transition(
             "UPDATE item SET status = ?, updated_at = ? WHERE id = ?",
             (target, stamp, item),
         )
+        if target == "done":
+            cancel_done_blocked(connection, item, stamp, f"item {item} moved to done by {who}")
         note = f"{current} -> {target} by {who}"
         if reason:
             note += f": {reason}"
@@ -346,6 +348,23 @@ def _transition(
             (item, stamp, STATUS_CHANGE, note, session or who),
         )
     return current
+
+
+def cancel_done_blocked(connection: sqlite3.Connection, item: int, stamp: str, why: str) -> None:
+    """Cancel a done item's blocked assignments that no unreleased run holds (sd:6996).
+
+    A blocked row waits on an operator for work the item no longer needs, so
+    left open it lingers on every surface. One whose run still holds its
+    lease (its own, or its bundle lead's) stays the runner's; `build._release`
+    calls this again once the lease is gone.
+    """
+    connection.execute(
+        "UPDATE assignment SET status = 'cancelled', ended = ?, result = ? "
+        "WHERE item = ? AND status = 'blocked' AND EXISTS (SELECT 1 FROM item WHERE id = ? AND status = 'done') "
+        "AND NOT EXISTS (SELECT 1 FROM runner_run WHERE runner_run.released_at IS NULL "
+        "AND runner_run.assignment IN (assignment.id, assignment.parent))",
+        (stamp, why, item, item),
+    )
 
 
 def set_item_fields(

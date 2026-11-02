@@ -249,7 +249,7 @@ def _job_name(row: dict) -> dict:
 #: The manual cron job (`JOB_SCHEDULE="manual"`) that refreshes each source, for a checkout whose source-ages rows do
 #: not name it yet (sd:5280); Refresh now starts it through the route Management's Retry posts,
 #: `/api/jobs/<name>/retry` (sd:4965). The job files are private config, installed with `cron-jobs.sh install <name>`.
-REFRESH_JOBS = {"mission": "hoa-mission-export", "vantaca": "hoa-vantaca-pull"}
+REFRESH_JOBS = {"mission": "hoa-mission-export"}
 
 #: The fields of `operations.job_state` the page reads.
 JOB_KEYS = ("name", "service", "state", "last_exit", "revision", "capabilities", "last_request")

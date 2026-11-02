@@ -182,8 +182,17 @@ class TheList(ReaderCase):
     CLICK = ("const click = (el, attr, v) => ELS[el].listeners.click[0]({ target: { closest: s => s === `[data-${attr}]`"
              " ? { dataset: { [attr]: v } } : null } });\n")
 
-    def test_today_has_no_views(self):
-        self.assertNotIn("PAGE_VIEWS", TODAY_JS)
+    def test_today_sections_are_rail_views_and_a_lamp_shows_needs_you(self):
+        """Pack sd:7084: Needs you, Since yesterday, Timeline, In motion and Queues are views, each a view-<id> panel;
+        a lamp filters Needs you, so it shows that view."""
+        page = (V2 / "today.html").read_text(encoding="utf-8")
+        views = re.findall(r"\{ id: '([a-z]+)', label: '([^']+)'", TODAY_JS)
+        self.assertEqual(views, [("needs", "Needs you"), ("digest", "Since yesterday"), ("timeline", "Timeline"),
+                                 ("motion", "In motion"), ("queues", "Queues")])
+        for view, _ in views:
+            self.assertIn(f'id="view-{view}"', page)
+        self.assertIn('href="#view=motion" id="lamp-sessions"', page)
+        self.assertIn("if (srcFilter) window.shell.view.show('needs');", TODAY_JS)
         self.assertNotIn("todayCount", TODAY_JS)
 
     def test_a_group_row_opens_to_its_first_five_members_then_the_rest(self):
@@ -274,9 +283,10 @@ class TheTrack(ReaderCase):
         self.assertEqual((plot.count('<line class="land"'), plot.count('<rect class="fail"'), plot.count('<circle class="brief"'),
                           plot.count('<rect class="sess"')), (2, 1, 0, 1))
         self.assertIn('aria-label="Last 24 hours: 2 landed, 1 job failed, 0 briefs filed, 1 session live"', plot)
-        self.assertIn('<a href="?row=job%3Anightly-sync%3A7">', plot)
+        # sd:6714: each mark names the row a click selects.
+        self.assertIn('<a href="?row=job%3Anightly-sync%3A7" data-id="job:nightly-sync:7">', plot)
         self.assertIn("sd:8 &lt;b&gt;Eight&lt;/b&gt;", out["R"]["rows"])
-        self.assertEqual(out["R"]["rows"].count("<tr>"), 4)
+        self.assertEqual(out["R"]["rows"].count("<tr data-id="), 4)
         self.assertIn('status=blocked&amp;realm=all">Blocked</a></li><li><b>27</b>', out["R"]["key"])
         self.assertFalse(out["R"]["table"])
 
@@ -307,7 +317,7 @@ class TheTrack(ReaderCase):
         900-unit width that square is 24 px. The square sits between the Jobs (36-44) and Live (72-75) lanes."""
         self.doc["track"] = {**self.TRACK, "briefs": [{"at": "2026-09-06T08:00:00Z", "id": "brief:3", "what": "brief 3 filed"}]}
         plot = self.run_page(self.DRAWN)["R"]["plot"]
-        link = re.search(r'<a href="\?row=brief%3A3">(.*?)</a>', plot, re.S).group(1)
+        link = re.search(r'<a href="\?row=brief%3A3" data-id="brief:3">(.*?)</a>', plot, re.S).group(1)
         hit = re.search(r'<rect class="hit" x="([\d.]+)" y="(\d+)" width="(\d+)" height="(\d+)">', link)
         dot = re.search(r'<circle class="brief" cx="([\d.]+)" cy="(\d+)" r="([\d.]+)"', link)
         self.assertIsNotNone(hit, link)

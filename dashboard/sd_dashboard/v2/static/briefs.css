@@ -6,7 +6,9 @@
 
 /* Annunciator (Today grammar) */
 
-.tally .chips { margin: 0; }
+/* pack sd:7084: the Range chips sit in the filter row; the list's filter bar flows beside them. */
+.filters .chips { margin: 0; }
+.filters > .fhost { display: contents; }
 
 /* Cadence strip: one lane per source over the range. Ticks = messages; ■ = watchdog failure; hatch = no mail source. */
 .cadence { margin: 0 0 var(--space-xl); }

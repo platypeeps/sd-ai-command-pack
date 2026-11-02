@@ -215,14 +215,14 @@ class TheHealth(Fixture):
     """The weekly KISS audit's numbers (pack sd:6744). NOW is 2026-09-06T12:00Z; the window is 14 days, and last
     week's is the 14 days that ended 2026-08-30T12:00Z."""
 
-    def build_run(self, ident, created, outcome, detail=None):
+    def build_run(self, ident, created, outcome, detail=None, ended=None):
         item = self.item(f"Build {ident}", kind="task")
         assignment = self.assignment(item, status="running")
         self.connection.execute("UPDATE assignment SET scope = 'build' WHERE id = ?", (assignment,))
         self.connection.execute(
             "INSERT INTO runner_run (id, assignment, run, branch, owner, work_path, retained_path, created_at,"
             " updated_at, outcome, detail) VALUES (?, ?, 1, 'build/sd-1', 'fixture', '/wt', '/wt', ?, ?, ?, ?)",
-            (ident, assignment, created, created, outcome, detail))
+            (ident, assignment, created, ended or created, outcome, detail))
         self.connection.commit()
 
     def test_the_lane_splits_each_repositorys_failures_by_class(self):
@@ -280,6 +280,25 @@ class TheHealth(Fixture):
                  enqueued="2026-09-01T11:00:00Z")                            # not merged: no lead time
         lead = metrics_screen.health(self.connection, now=NOW)["now"]["lead_minutes"]
         self.assertEqual(lead, {"merged": 5, "median": 30, "p90": 100})
+
+    def test_a_build_run_counts_in_the_window_it_ended_in(self):
+        # pack sd:7005: a run that started before the window and ended in
+        # it was left out; one that ended after the window was counted.
+        # Last week's window is 2026-08-16T12:00Z to 2026-08-30T12:00Z.
+        self.build_run("r1", "2026-08-10T10:00:00+00:00", "done", ended="2026-08-17T10:00:00+00:00")
+        self.build_run("r2", "2026-08-29T10:00:00+00:00", "blocked", ended="2026-08-31T10:00:00+00:00")
+        builds = metrics_screen.health(self.connection, now=NOW)["last_week"]["builds"]
+        self.assertEqual((builds["done"], builds["total"]), (1, 1))
+
+    def test_an_entry_with_a_bad_stamp_is_unreadable_not_fatal(self):
+        # pack sd:7005: a null finished_at or a bad enqueued_at raised out
+        # of health instead of skipping the one entry.
+        lane_run(self.connection, "a1", "merged", "2026-09-05T10:00:00Z", enqueued="not a time")
+        lane_run(self.connection, "a2", "failed", None, reason=REVIEW)
+        lane_run(self.connection, "a3", "merged", "2026-09-05T11:00:00Z", enqueued="2026-09-05T10:50:00Z")
+        found = metrics_screen.health(self.connection, now=NOW)
+        self.assertEqual(found["unreadable"], 2)
+        self.assertEqual(found["now"]["lead_minutes"], {"merged": 1, "median": 10, "p90": 10})
 
     def test_sd_reports_health_prints_the_document(self):
         with mock.patch.object(sys, "path", [str(V2.parents[2] / "bin"), *sys.path]):

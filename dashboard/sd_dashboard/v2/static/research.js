@@ -633,7 +633,11 @@ function drawPickers() {
     el.value = selected || '';
   }
 }
-['reader-pick', 'claims-pick'].forEach(id => document.getElementById(id).addEventListener('change', e => { if (e.target.value) select(e.target.value, false); }));
+// A project picked here is the viewer's choice, so it is also the Add source target, as opening one is (operator 2026-11-01).
+['reader-pick', 'claims-pick'].forEach(id => document.getElementById(id).addEventListener('change', e => {
+  if (!e.target.value) return;
+  select(e.target.value, false); toEl.value = e.target.value; drawIntake();
+}));
 function select(key, open) {
   if (!PROJECTS.some(p => p.key === key)) return;
   selected = key; curSource = null; resetClaims(); drawPickers();

@@ -26,7 +26,16 @@ ARGV = ["-p", "--model", "sonnet", "--restricted", "--strict-mcp-config", "--too
         "--no-session-persistence"]
 
 
+#: The longest `MODEL_TIMEOUT` a test here lets a hung run reach, and how long `bound_from` waits for its pid file.
+HUNG_BOUND = 3
+PID_WAIT = 10
+
+
 class ChatCase(BrowserSession):
+    #: A hung run spends the wait for its pid file, its bound and the kill inside one request; 5 s left a loaded gate
+    #: about 2 s past the 3 s bound and the first ask timed out in `_read_status` (sd:7144).
+    http_timeout = PID_WAIT + HUNG_BOUND + 12
+
     def setUp(self):
         super().setUp()
         root = Path(self.tmp.name)
@@ -153,9 +162,13 @@ class TheContext(ChatCase):
 
 
 class OneAtATime(ChatCase):
+    def test_a_request_outwaits_a_hung_run_and_its_kill(self):
+        """sd:7144: a 5 s request gave up on a run that the server killed 3 s after its child started."""
+        self.assertGreaterEqual(self.http_timeout, PID_WAIT + HUNG_BOUND + 10)
+
     def test_a_second_question_while_one_runs_is_refused(self):
         first = {}
-        with self.hung(), patch.object(email_draft, "MODEL_TIMEOUT", 3):
+        with self.hung(), patch.object(email_draft, "MODEL_TIMEOUT", HUNG_BOUND):
             thread = threading.Thread(target=lambda: first.update(answer=self.ask()))
             thread.start()
             deadline = time.monotonic() + patience(10)

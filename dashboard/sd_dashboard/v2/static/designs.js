@@ -88,7 +88,7 @@ function renderRows() {
     <td class="g"><span class="g-${r.state}" aria-hidden="true">${GLYPH[r.state]}</span><span class="sr">${r.state}</span></td>
     <td class="what"><button type="button" data-open="${r.id}"><span class="sr">${r.product}: </span>${name}<small>${sub}</small></button></td>
     <td class="at">${r.changed ? html`<time class="rel" datetime="${r.changed}"></time>` : '—'}</td>
-    <td class="act">${shell.commands.rowActions(r.id)}</td></tr>`;
+    <td class="act">${shell.commands.rowActions(r.id, { icons: true })}</td></tr>`;
   })}`);
   const empty = document.getElementById('empty');
   empty.hidden = rows.length > 0; empty.textContent = F.hidden === 'aside' && !narrowed() ? `Nothing is hidden. ${STORE ? `${STORE}.` : 'Hide a row from its actions or Details.'}` : active() ? 'No page matches this filter. Clear it to see all pages.' : `No design pages found in ${D.root}/products.`;
@@ -126,7 +126,6 @@ function show(id) {
     const shot = r.shots.find(s => /1440/.test(s)) || r.shots[0];
     put(details, html`<p class="kind"><span class="g-${r.state}" aria-hidden="true">${GLYPH[r.state]}</span> Page · ${r.kind}</p>
       <h2>${r.local}</h2>
-      <p><a class="open" href="${UP + r.path}">${I('arrow-up-right')}Open as drawn</a></p>
       <dl><dt>Product</dt><dd>${r.product}</dd><dt>Title</dt><dd>${r.title || '—'}</dd>
         <dt>Changed</dt><dd>${T(r.changed)} · ${r.sha || 'never committed'}</dd><dt>Commit</dt><dd>${r.subject || '—'}</dd>
         <dt>Size</dt><dd>${(r.bytes / 1024).toFixed(1)} KB</dd>
@@ -165,7 +164,7 @@ function update() {
   renderAnnunciator(); renderRows(); reconcile();
 }
 
-// Commands (commands.md). Opening a page is a link, not a command: the tab serves it, nothing runs.
+// Commands (commands.md). sd:6678: Open as drawn is a command, so a row shows its icon and Details its button.
 // History and Retake left the row menu with sd:5530; Read brief shows the brief.
 // sd:5457: Hide or Unhide is every row's act. Read brief is not the row's act: the row's name opens the same Details.
 const NO_CLI = 'no CLI: view state; the dashboard writes it (POST /api/designs/view)';
@@ -183,6 +182,8 @@ function registerCommands() {
     // build: the brief's text comes in the ledger (designs.BRIEF_CHARS); Details shows it, the tab serving no Markdown.
     { id: 'design.brief', on: 'brief', label: 'Read brief', does: 'Shows the product\'s design brief in Details.', key: 'b', icon: 'file-text', risk: 'safe', executes: false,
       when: o => !!o.brief || 'this product has no brief', cli: o => `less ${REPO()}/${o.brief}`, run: o => { select(o.id, true); return `Brief of ${o.product} shown in Details`; } },
+    { id: 'design.open', on: 'page', label: 'Open as drawn', does: 'Opens the drawn page in a new tab.', key: 'o', icon: 'arrow-up-right', risk: 'safe',
+      cli: o => `open ${location.origin}${UP + o.path}`, run: o => { window.open(UP + o.path, '_blank', 'noopener'); return `Opened in a new tab · ${o.label}`; } },
     ...hiding('page'), ...hiding('brief'),
   );
 }
