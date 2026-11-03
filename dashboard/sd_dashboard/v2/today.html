@@ -12,7 +12,8 @@
   and briefs. The rail badge counts its rows (now_screen._attention). One selection: ?row=, a group row too.
   Queue (pack sd:7234): one row per repo that opens to its working rows (live sessions from active_sessions.document, build
   runs, runner assignments), its lane's merging, next and blocked entries, and with the filters on its suggested ready items
-  and ended runs. It reads /api/queue, /api/queue/builds?show=all and /api/queue/runner when it first shows.
+  and ended runs. It reads /api/queue, /api/queue/builds?show=all and /api/queue/runner when it first shows. A suggested
+  row shows the Tasks page's Details (task-details.js, /api/tasks/<id>) and acts with Build (pack sd:7271).
   Snooze (sd:1896): /ui/snooze.js; a row's Snooze or Unsnooze posts /api/snooze, and Today reads again.
   The old views' addresses (#view=now|work|inbox|status) land here, #view=queues and #view=motion on Queue; Decisions moved to Decide and GitHub to GitHub (sd:5781).
 -->
@@ -30,6 +31,7 @@
 <link rel="stylesheet" href="/ui/annunciator-strip.css">
 <link rel="stylesheet" href="/ui/today.css">
 <link rel="stylesheet" href="/ui/issues.css">
+<link rel="stylesheet" href="/ui/task-details.css">
 </head>
 <body data-page="Today" data-scope="fleet">
 <script src="/ui/icons.js"></script>
@@ -99,7 +101,7 @@
       <div class="filters toolbar-2" id="queue-filters" role="group" aria-label="Filters"></div>
       <p class="filtered" id="queue-said" role="status" hidden></p>
       <table class="ledger active queue" aria-labelledby="queue-h" data-tgrid="off">
-        <caption>One row per repo; open one for its working, merging, next, blocked, suggested and ended rows.</caption>
+        <caption>One row per repo; open one for its working, merging, next, blocked, suggested, open and ended rows.</caption>
         <thead><tr><th class="mk">Type</th><th>What</th><th>Detail</th><th class="num">Age</th><th class="act"><span class="sr">Actions</span></th></tr></thead>
         <tbody id="queue"><tr class="empty"><td colspan="5">Reading the queue…</td></tr></tbody>
       </table>
@@ -113,6 +115,7 @@
 <script src="/ui/read.js"></script>
 <script src="/ui/snooze.js"></script>
 <script src="/ui/commands.js"></script>
+<script src="/ui/task-details.js"></script>
 <script src="/ui/today.js"></script>
 <script src="/ui/shell.js"></script>
 </body>
