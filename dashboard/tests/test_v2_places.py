@@ -1020,25 +1020,27 @@ clickAct('sim', 'Start'); await flush(); R.after = ELS['overview-rows'].html;"""
                   {"tracker": "GitHub", "ref": "#12", "key": "github:example/acme-site#12", "title": "Crash <b>on</b> start", "repo": "acme-site",
                    "reason": "assigned", "url": "https://github.com/example/acme-site/issues/12", "hidden": False}]}
 
-    def test_tasks_lists_the_realms_issues_with_their_source_and_hidden_ones_under_all(self):
+    def test_tasks_lists_the_realms_issues_with_their_source_and_hidden_ones_under_hidden(self):
         docs = {"/api/place/acme/overview": [200, self.TILES], "/api/place/acme/tasks": [200, self.ISSUES]}
         out = self.run_page("""await go('#view=tasks'); R.rows = ELS['tasks-rows'].html;
-const b = { dataset: { v: 'all' } };
+const b = { dataset: { v: 'aside' } };
 (DOC_LISTENERS['click'] || []).forEach(f => f({ button: 0, target: { closest: sel => sel === 'button[data-aside="issues-hidden"]' ? b : null } }));
 await flush(); R.all = ELS['tasks-rows'].html;""", docs, place="acme")
-        rows, every = out["R"]["rows"], out["R"]["all"]
+        rows, aside = out["R"]["rows"], out["R"]["all"]
         self.assertIn("<h3>Issues</h3>", rows)
         self.assertIn('<td class="src">GitHub</td>', rows)
         self.assertIn('<a href="https://github.com/example/acme-site/issues/12" target="_blank" rel="noopener">#12</a>', rows)
         self.assertIn("Crash &lt;b&gt;on&lt;/b&gt; start", rows)
         self.assertNotIn("ACME-8", rows, "a hidden issue showed by default")
         self.assertIn('data-aside="issues-hidden" data-v="aside" aria-pressed="false">Hidden <span class="n">1</span>', rows)
-        # pack sd:7210: the Issues table's column filter joins its Open | Hidden | All row, not a row of its own.
+        # pack sd:7210: the Issues table's column filter joins its Open | Hidden row, not a row of its own.
         self.assertIn('<h3>Issues</h3><div class="filters toolbar-2" id="place-issues-filters">', rows)
         self.assertIn('<table class="ledger place-issues" data-toolbar="place-issues-filters">', rows)
-        self.assertIn('<td class="src">Jira</td>', every)
-        self.assertIn("ACME-8", every)
-        self.assertIn('data-v="all" aria-pressed="true"', every)
+        self.assertIn('<td class="src">Jira</td>', aside)
+        self.assertIn("ACME-8", aside)
+        self.assertNotIn("#12", aside)
+        self.assertIn('data-v="aside" aria-pressed="true"', aside)
+        self.assertNotIn('data-aside="issues-hidden" data-v="all"', rows)
 
     def test_a_refused_or_unanswered_start_says_why_and_an_off_button_posts_nothing(self):
         out = self.run_overview("clickAct('app', 'Deploy'); await flush();", answer=(409, {"error": "Staging site Deploy is already running"}))

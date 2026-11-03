@@ -139,6 +139,66 @@
       run: o => runAction(o, 'assignment.get', { assignment: o.n }) };
   }
 
+  // The dispatcher's kickstart after a build queues (tasks_screen.build): started now, or at its next slot and why.
+  const kickText = k => !k ? '' : k.ok ? ' · the dispatcher was started' : ` · the dispatcher starts at its next slot (${k.why})`;
+  // Build (pack sd:6095): the press queues a headless build of each picked ready item (`sd assignments build`). The
+  // dialog reads the server's plan first (builds.plan): each repository's bundles of up to 3 items, the model, the
+  // room now, and every item the press would refuse with why. One refusal refuses the whole press, so the dialog then
+  // offers no Build. Build posts the items with the revisions the plan read; a 409 changed nothing. The dispatcher claims
+  // a bundle when there is room; until then each row shows its assignment as queued. Tasks and Today's suggested Queue
+  // rows (pack sd:7271) register it: `row(o)` is the item's { id, status, repo, assignment }, or nothing once the page no
+  // longer lists it; `reread()` reads the page again after the press.
+  function build({ row, reread, primary = () => false }) {
+    const { html, put, plural } = window.markup;
+    const toast = m => window.shell.toast(m);
+    const dlg = document.createElement('dialog');
+    dlg.className = 'palette date-dlg start-dlg'; dlg.setAttribute('aria-labelledby', 'build-h');
+    document.body.append(dlg);
+    async function ask(objs, done) {
+      const rows = objs.map(row).filter(Boolean);
+      if (!rows.length) { toast('Build: no listed task is selected'); return; }
+      let P;
+      try { P = await window.shell.getJSON(`/api/tasks/build/plan?items=${rows.map(t => t.id).join(',')}`); }
+      catch (err) { toast(`Build plan not read: ${err.message}`); return; }
+      const room = P.room.why ? `No builder starts now: ${P.room.why}. The press still queues; a claim waits for room.`
+        : `${P.room.machine} of ${P.room.cap} builders free now · at most ${P.room.repo_cap} per repository`;
+      const items = P.bundles.flatMap(b => b.items), ok = !P.refused.length && items.length;
+      put(dlg, html`<form method="dialog" class="date-form">
+        <h2 id="build-h">Build ${plural(rows.length, 'task')}</h2>${window.shell.closeX}
+        <p class="why">${room}</p>
+        ${P.refused.length ? html`<p class="why">▲ Nothing can be queued while one item is refused:</p>
+          <ul class="start-list">${P.refused.map(r => html`<li><code>#${String(r.id)}</code> ${r.why}</li>`)}</ul>` : ''}
+        ${P.bundles.map(b => html`<section class="build-bundle" aria-label="Bundle in ${b.name}"><h3>${b.name} <small>${b.model} · branch ${b.branch} · ${b.room ? `${b.room} may start now` : 'waits for room'}</small></h3>
+          <ol class="start-list">${b.items.map(r => html`<li><code>#${String(r.id)}</code> ${r.title}</li>`)}</ol></section>`)}
+        <p class="why">One run per bundle, ${String(P.budget_minutes)} min each. The items lock until each run ends; Cancel on Queue › Builds stops one.</p>
+        <div class="actions">
+          ${ok ? html`<button class="btn" value="build" type="submit">Build</button>` : ''}
+          <button class="btn quiet" value="cancel" type="submit" formnovalidate data-cancel>Cancel</button>
+        </div></form>`);
+      dlg.onclose = () => {
+        if (dlg.returnValue !== 'build' || !ok) return;
+        const revisions = Object.fromEntries(items.map(r => [String(r.id), r.revision]));
+        window.shell.post('/api/tasks/build', { items: items.map(r => r.id), revisions }).then(out => {
+          toast(`Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${kickText(out.kickstart)}`); done?.(); reread();
+        }, err => {
+          // A 409 is a refused press that changed nothing; no status is no answer, so whether it queued is not known.
+          toast(err.status === 409 ? err.message : err.status ? `Nothing queued: ${err.message}` : `Build got no answer, so what queued is not known: read the tasks again (${err.message})`);
+          reread();
+        });
+      };
+      dlg.returnValue = '';
+      dlg.showModal(); (dlg.querySelector('[value="build"]') || dlg.querySelector('[value="cancel"]'))?.focus();
+    }
+    return { id: 'item.build', on: 'item', label: 'Build', icon: 'rocket', risk: 'safe', bulk: true, executes: true, primary,
+      does: 'Queues a headless build per item; the dispatcher bundles them by repository.',
+      when: o => { const t = row(o); return !t ? 'the task is no longer listed' : t.status !== 'ready' ? `a build takes a ready task; this one is ${String(t.status || '').replace(/_/g, ' ').toLowerCase()}`
+        : !t.repo ? 'a build needs a repository' : t.assignment === 'running' || t.assignment === 'queued' ? `a runner assignment is ${t.assignment}` : true; },
+      cli: o => `sd assignments build ${row(o)?.id ?? o.id}`,
+      sends: () => 'POST /api/tasks/build {items, revisions}',
+      batch: (objs, done) => ask(objs, done),
+      run: o => { ask([o]); return null; } };
+  }
+
   // Open a pull request on GitHub, in a new tab, from a pull request row or a review of one (`on`). `pr(o)` names
   // { repo: 'owner/name', number, url }.
   function openPullRequest({ on = 'pull request', pr, primary = () => true }) {
@@ -360,5 +420,5 @@
       ${state ? html`<p class="why">${state}</p>` : ''}</section>`;
   }
 
-  window.commands = { answered, fix, grill, applyReview, retry, runAction, showLog, logLine, printJob, showAssignment, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
+  window.commands = { answered, fix, grill, applyReview, retry, runAction, showLog, logLine, printJob, showAssignment, kickText, build, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
 })();
