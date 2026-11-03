@@ -1386,6 +1386,43 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         off = self.run_view(f"R.off = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
         self.assertEqual(off["R"]["off"], "a build needs a repository")
 
+    # pack sd:7334: a planned or an unscheduled suggested row offers its next status before its Details are read, as a
+    # Tasks list row does: its task is the /api/tasks row, read while Suggested shows, not only once Details open.
+    def test_a_planned_and_an_unscheduled_suggestion_offer_their_next_status_unopened(self):
+        from sd_dashboard import tasks_screen
+        from sd_db import workflow
+        planned = self.item("Due later", kind="task", priority=2, repo=str(self.checkout), due="2026-09-20")
+        workflow.change_status(self.connection, planned, "in_progress", who="test", reason="test")
+        loose = self.item("No date", kind="task", priority=1, repo=str(self.checkout))
+        self.doc["queues"]["suggested"] = [
+            {"id": planned, "repo": "~/repos/example/system", "title": "Due later", "status": "in_progress",
+             "why": "planned", "due": "2026-09-20", "priority": 2},
+            {"id": loose, "repo": "~/repos/example/system", "title": "No date", "status": "planning",
+             "why": "unscheduled", "due": None, "priority": 1}]
+        answers = {"/api/tasks": [200, tasks_screen.document(self.connection, now=NOW)]}
+        def primary(n):
+            return (f"(() => {{ const o = C.get('{n}'), on = REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true));"
+                    " return (on.find(c => c.primary && c.primary(o)) || {}).id; })()")
+        out = self.run_view(f"open('system'); R.html = ELS.queue.html; R.planned = {primary(planned)}; R.loose = {primary(loose)};"
+                            f" R.done = cmd('item.status.done').when({{ id: '{planned}' }});"
+                            f" R.ready = cmd('item.status.ready').when({{ id: '{loose}' }});",
+                            search="?show=suggested", answers=answers)
+        self.assertIn(f'data-type="suggested" data-item="{loose}"', out["R"]["html"])
+        self.assertEqual([g for g in out["gets"] if g.startswith("/api/tasks/")], [], "no Details were read")
+        self.assertEqual(out["R"]["done"], True)
+        self.assertEqual(out["R"]["ready"], True)
+        self.assertEqual(out["R"]["planned"], "item.status.done")
+        self.assertEqual(out["R"]["loose"], "item.status.ready")
+        # Turned on from off, Suggested reads the tasks; a tasks read that failed is said, not taken as no task.
+        on = self.run_view("R.before = OUT.gets.slice(); press('suggested'); await flush(); await flush(); await flush();"
+                           f" R.ready = cmd('item.status.ready').when({{ id: '{loose}' }});", answers=answers)
+        self.assertNotIn("/api/tasks", on["R"]["before"], "off, the view reads no tasks")
+        self.assertIn("/api/tasks", on["gets"])
+        self.assertEqual(on["R"]["ready"], True)
+        failed = self.run_view("R.note = ELS['queue-note'].textContent;", search="?show=suggested",
+                               answers={"/api/tasks": [500, {"error": "tasks down"}]})
+        self.assertIn("Suggested items' tasks not read", failed["R"]["note"])
+
     # pack sd:7271 (#40961): All items adds the repo's other open items, read from /api/tasks only while it is on. Each
     # is an item row as a suggested one is, and its act is the one Tasks' list row offers: the move to its next status.
     def open_items(self):

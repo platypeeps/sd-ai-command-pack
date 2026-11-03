@@ -47,9 +47,12 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // pack sd:7271: the Queue view's suggested rows, keyed by item number as Tasks keys a task (?row=<id>): SUGG is each one
   // the read suggests, SROW its /api/tasks row once its Details were read, and TD the Tasks page's Details (task-details.js).
   // OPENI is All items' rows (#40961): each repo's other open tasks, in TD's task shape, from /api/tasks while it is on.
-  let SUGG = new Map(), OPENI = new Map(), TD = null;
+  // TASKS is every /api/tasks row in that shape, read while All items or Suggested shows: a suggested row's task before
+  // its Details are read, so its status commands are on from the start (pack sd:7334).
+  let SUGG = new Map(), OPENI = new Map(), TASKS = new Map(), TD = null;
   const SROW = new Map();
-  const isItem = id => SUGG.has(id) || OPENI.has(id), taskOf = k => SROW.get(k) || OPENI.get(k);
+  const listedTask = k => OPENI.get(k) || (SUGG.has(k) ? TASKS.get(k) : undefined);
+  const isItem = id => SUGG.has(id) || OPENI.has(id), taskOf = k => SROW.get(k) || listedTask(k);
   const OPEN = new Set(), FULL = new Set(); // the groups opened, and the ones showing every member
   const $ = id => document.getElementById(id);
   const row = () => new URLSearchParams(location.search).get('row'); // the selected row
@@ -422,11 +425,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   const openRow = t => ['open', OPENS[t.status] || 'queued', html`<tr class="child" data-type="open" data-item="${t.key}" data-id="${t.key}" aria-selected="${String(row() === t.key)}">${marker(OPENS[t.status] || 'queued', 'open')}
     <td class="what"><a href="${shell.itemHref(t.id)}">#${t.id} ${t.title}</a></td>
     <td class="detail">${String(t.status).replace(/_/g, ' ')}${t.p ? ` · P${t.p}` : ''}</td><td class="num">${t.since ? age(t.since) : ''}</td><td class="act">${shell.commands.rowActions(t.key)}</td></tr>`];
-  const openItems = () => new Map((QV.tasks ? QV.tasks.rows.map(TD.shape) : [])
-    .filter(t => t.status !== 'done' && !t.parked && t.repo_path && !(qShow.has('suggested') && SUGG.has(t.key))).map(t => [t.key, t]));
+  function openItems() {
+    TASKS = new Map((QV.tasks ? QV.tasks.rows.map(TD.shape) : []).map(t => [t.key, t]));
+    return new Map([...TASKS].filter(([k, t]) => qShow.has('open') && t.status !== 'done' && !t.parked && t.repo_path && !(qShow.has('suggested') && SUGG.has(k))));
+  }
   // A task's read row (SROW) holds while it is still an item row at the revision its /api/tasks row has (pack sd:7251): a
   // row read at another revision is dropped, so taskOf acts on the fresh row, not the status it had when it was selected.
-  const freshRows = () => [...SROW].filter(([k, t]) => !isItem(k) || (OPENI.has(k) && OPENI.get(k).revision !== t.revision)).forEach(([k]) => SROW.delete(k));
+  const freshRows = () => [...SROW].filter(([k, t]) => !isItem(k) || (listedTask(k) && listedTask(k).revision !== t.revision)).forEach(([k]) => SROW.delete(k));
   // Each repo's children, from the four reads, each with the rows the filters show; queueView draws a repo that shows one.
   function qGroups() {
     const G = new Map(), add = (repo, [type, s, tr]) => {
@@ -475,6 +480,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (ACTIVE && ACTIVE.error) unread.push(`Sessions not read: ${ACTIVE.error}`);
     if (qShow.has('suggested') && (DOC.queues || {}).error) unread.push(`Suggested items not read: ${DOC.queues.error}`);
     if (qShow.has('open') && !QV.tasks) unread.push(`Open items not read: ${QV.tasksErr || 'no answer yet'}`);
+    else if (qShow.has('suggested') && !QV.tasks) unread.push(`Suggested items' tasks not read: ${QV.tasksErr || 'no answer yet'}`);
     // pack sd:7251: a filter counts its rows in every repo, before a repo with no row shown is left out.
     const all = qGroups(), every = all.flatMap(g => g.rows), groups = all.filter(g => g.shown.length), active = every.filter(c => !QSHOW.includes(c.type)).length;
     if (!groups.some(g => g.key === qOpen)) qOpen = null;
@@ -495,9 +501,9 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   async function loadQueue() {
     QV.seen = true;
     const get = path => shell.getJSON(path).then(doc => [doc, ''], err => [null, err.message]);
-    // All items reads the Tasks page's rows only while it is on (#40961).
+    // All items reads the Tasks page's rows only while it is on (#40961), and Suggested for its rows' tasks (pack sd:7334).
     const [[l, le], [b, be], [r, re], [t, te]] = await Promise.all(['/api/queue', '/api/queue/builds?show=all', '/api/queue/runner']
-      .map(get).concat(qShow.has('open') ? get('/api/tasks') : [[null, '']]));
+      .map(get).concat(qShow.has('open') || qShow.has('suggested') ? get('/api/tasks') : [[null, '']]));
     Object.assign(QV, { lanes: l, lanesErr: le, built: b, builtErr: be, runner: r, runnerErr: re, tasks: t, tasksErr: te });
     qAdopt();
   }
@@ -728,7 +734,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     return { objects: [...[...ALL.values()].map(objectOf), ...[...OTHER].map(([id, o]) => ({ id, ...o.obj })), ...items, ...SNOOZED.map(window.snooze.object)],
              state: doc.snooze_error ? window.snooze.unread(doc.snooze_error, '/api/now') : null };
   }
-  function clear(err) { DOC = null; NEEDS = []; ALL = new Map(); OTHER = new Map(); SUGG = new Map(); OPENI = new Map(); SROW.clear(); SNOOZED = []; ACTIVE = null; failed = err.message; delete document.body.dataset.observed; }
+  function clear(err) { DOC = null; NEEDS = []; ALL = new Map(); OTHER = new Map(); SUGG = new Map(); OPENI = new Map(); TASKS = new Map(); SROW.clear(); SNOOZED = []; ACTIVE = null; failed = err.message; delete document.body.dataset.observed; }
   function draw() {
     if (DOC) return render();
     // Nothing from the last read stays on screen: rows, counts, lamps, the observed time, the selection and the badge.
@@ -922,8 +928,10 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       if (!qShow.delete(b.dataset.v)) qShow.add(b.dataset.v);
       // An empty show= is every filter off (pack sd:7314): no key would turn Suggested back on at the next load.
       shell.url({ show: QSHOW.filter(v => qShow.has(v)).join(',') });
-      // All items reads /api/tasks, or drops its rows; Suggested moves the ready rows All items shows (pack sd:7251).
-      if (b.dataset.v === 'open') loadQueue(); else if (b.dataset.v === 'suggested') qAdopt(); else queueView();
+      // All items reads /api/tasks, or drops its rows; Suggested moves the ready rows All items shows (pack sd:7251) at
+      // once, then reads /api/tasks for its rows' tasks when no read holds it (pack sd:7334).
+      if (b.dataset.v === 'open') loadQueue();
+      else if (b.dataset.v === 'suggested') { qAdopt(); if (qShow.has('suggested') && !QV.tasks) loadQueue(); } else queueView();
     });
     const showKey = new URLSearchParams(location.search).get('show');
     (showKey === null ? 'suggested' : showKey).split(',').filter(v => QSHOW.includes(v)).forEach(v => qShow.add(v));

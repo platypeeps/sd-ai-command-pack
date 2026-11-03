@@ -42,7 +42,8 @@ on the open repo closes it. The rows, in order:
   `queues.suggested`, ranked by `sd_db.today.suggested` (ready items in the backlog's order, then planned items
   soonest first, then unscheduled ones highest priority first), less any item that is live, in the lane or held by a
   build. Each row says why: `ready`, `planned for <date>` or `unscheduled P<n>`; one that is not ready shows its
-  status and offers its next status, not Build;
+  status and offers its next status, not Build. Its task is its `/api/tasks` row, read while Suggested shows, so
+  that act is on before its Details are read (pack sd:7334);
 - ended: ended build runs, and the cancelled and landed lane entries.
 
 Each row's marker is its state glyph and its type in words; a repo's glyph is its worst row's.
