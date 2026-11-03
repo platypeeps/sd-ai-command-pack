@@ -1,30 +1,109 @@
 """Writing pieces: `document` feeds /api/writing (sd:2125); the old screen was retired in sd:3402.
 
-`document` is each piece's stage, gates and next moves as `writing.piece_state` gives them, its files' sizes, and the
-opening of its draft. The repository goes out by its folder name only, so no local path leaves. Its `attention` is the
+`document` is each piece's stage, gates and next moves as `writing.piece_state` gives them, its files' sizes, and its
+draft up to `DRAFT_CHARS` (pack sd:7242). The repository goes out by its folder name only, so no local path leaves. Its `attention` is the
 page's rail badge (sd:3446, `_attention`). Each piece's `realm` is `places.realm_of` of its repo, the rule Tasks' Realm
 filter uses (sd:5064). Its `grill` is its open question notes and the count of its rulings (pack sd:6700): Details
-walks the questions, and Apply answers waits until none is open.
+walks the questions, and Apply answers waits until none is open. Its `ideas` are the vault's inbox blog ideas
+(pack sd:7244), the `sdw.blog-idea` rows `records.list_rows` reads, highest score first: IDEAS of them beside the inbox
+count, each with a link only for http. A failed read is unknown with its reason, never an empty inbox.
 """
 
+import math
+import re
 from pathlib import Path
 
-from sd_db import writing
+from sd_db import records, writing
 from sd_db.workflow import WorkflowError
 
 from .decisions import RULING, parse
 from .markup import href
 from .places import realm_of, realms
 
-#: Draft paragraphs the editor shows; the rest stay in the file.
-PARAGRAPHS = 6
+#: Draft characters a piece carries to the editor, whole paragraphs only: the longest draft measured 2026-11-02 held
+#: 19,347 bytes and all 28 held 310,061, so a draft past this is cut and says so (pack sd:7242). A first paragraph
+#: past it keeps an excerpt cut at a word, so a long draft never reads as no draft.
+DRAFT_CHARS = 64_000
 
 
-def _draft(document: str | None) -> tuple[list[str], int]:
-    """The draft's first paragraphs and its word count, from the text after `## Draft`."""
+def _draft(document: str | None) -> tuple[list[str], bool, int]:
+    """The draft's paragraphs up to DRAFT_CHARS, whether that cut any, and its word count, from the text after `## Draft`."""
     prose = document.split("## Draft", 1)[1] if document and "## Draft" in document else ""
     paragraphs = [" ".join(block.split()) for block in prose.split("\n\n") if block.strip() and not block.lstrip().startswith("#")]
-    return paragraphs[:PARAGRAPHS], len(prose.split())
+    kept, size = [], 0
+    for paragraph in paragraphs:
+        size += len(paragraph)
+        if size > DRAFT_CHARS:
+            if not kept:  # pack sd:7242 review: an excerpt, cut at the last word that fits, or mid-word if none does
+                excerpt = paragraph[:DRAFT_CHARS]
+                at_word = paragraph[DRAFT_CHARS] == " " or " " not in excerpt
+                kept.append(excerpt if at_word else excerpt.rsplit(" ", 1)[0])
+            return kept, True, len(prose.split())
+        kept.append(paragraph)
+    return kept, False, len(prose.split())
+
+
+#: A gate's view icon reads its report at /api/writing/<item>/<gate> (pack sd:7242), cut at REPORT_CHARS: of the 60
+#: reports measured 2026-11-02 the largest held 261,321 bytes and all held 1,766,726, so a cut is rare and says so.
+REPORT = r"/api/writing/([1-9][0-9]{0,17})/(research|fact-check|adversarial)"
+REPORT_CHARS = 512_000
+
+
+def report(connection, path: str):
+    """One piece report, read only: `{item, name, text, cut}`, or a 404 that names the missing file or the non-piece."""
+    item, gate = re.fullmatch(REPORT, path).groups()
+    item, name = int(item), writing.REPORTS[gate]
+    try:
+        text = writing.read_report(connection, item, gate, REPORT_CHARS)
+    except WorkflowError as error:
+        return 404, {"error": f"#{item}: {error}"}
+    except OSError as error:  # a failed read is not a missing file: it says its cause
+        return 500, {"error": f"#{item} {name} not read: {error.strerror or error}"}
+    if text is None:
+        return 404, {"error": f"#{item} has no {name}."}
+    return 200, {"item": item, "name": name, "text": text[:REPORT_CHARS], "cut": len(text) > REPORT_CHARS}
+
+
+#: Inbox ideas the Ideas column shows; the header counts them all.
+IDEAS = 10
+
+
+def read_ideas(connection) -> list[dict]:
+    return records.list_rows(connection, "blog-idea", stage="inbox")
+
+
+def _score(value) -> float | None:
+    """A finite number, or None: the fields are JSON, so a score may be a bool, 'nan', 'inf', '1e999', an inf literal
+    or 10**400, which float() refuses with OverflowError. One NaN in /api/writing fails the page's JSON parse, and one
+    raise fails the reply, for every piece (pack sd:7244 review)."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _text(value) -> str | None:
+    """`value` when it is text, else None: a JSON field may hold any value, an inf number too."""
+    return value if isinstance(value, str) else None
+
+
+def _ideas(connection) -> dict:
+    """The inbox blog ideas, highest score first, or why they were not read."""
+    try:
+        got = read_ideas(connection)
+    except Exception as error:  # noqa: BLE001 - a failed read says its cause, never an empty inbox
+        return {"state": "unknown", "reason": str(error) or type(error).__name__, "count": None, "rows": []}
+    rows = []
+    for row in got:
+        fields = row["fields"]
+        url = _text(fields.get("url")) or ""
+        rows.append({"item": row["id"], "title": row["title"], "score": _score(fields.get("score")), "url": url,
+                     "href": href(url) if url else None, "created": _text(fields.get("dateCreated"))})
+    rows.sort(key=lambda idea: (idea["score"] is None, -(idea["score"] or 0), idea["title"].casefold()))
+    return {"state": "read", "reason": "", "count": len(rows), "rows": rows[:IDEAS]}
 
 
 def document(connection, *, now):
@@ -39,10 +118,10 @@ def document(connection, *, now):
             files = writing.piece_files(row)
         except (OSError, WorkflowError):
             files = {}
-        draft, words = _draft(state["document"])
+        draft, cut, words = _draft(state["document"])
         gates = state["gates"]
         claims = state.get("publications") or []
-        live = next((claim for claim in reversed(claims) if claim["url"]), None)
+        live = next((claim for claim in reversed(claims) if _text(claim["url"])), None)
         pieces.append({
             "id": row["id"], "title": row["title"], "stage": row["stage"], "parked": state["parked"], "piece": row["piece"],
             "repo": Path(row["repo"]).name, "realm": realm_of(row["repo"], row["kind"], rules), "folder": "content-parked" if (row["path"] or "").startswith("content-parked/") else "content",
@@ -51,11 +130,11 @@ def document(connection, *, now):
             "ready_recorded": bool(row["ready_digest"]) and row["ready_digest"] == gates["digest"],
             "publication": {"claim": live["id"], "url": live["url"], "phase": live["phase"], "href": href(live["url"])} if live else None,
             "next": state["available_stages"], "corrections": state["correction_stages"],
-            "files": files, "draft": draft, "words": words, "grill": _grill(full["notes"]),
+            "files": files, "draft": draft, "draft_cut": cut, "words": words, "grill": _grill(full["notes"]),
             # pack sd:6977: adversarial.md against the draft by its digest stamp; Apply review shows only when current.
             "adversarial": gates.get("companions", {}).get("adversarial"),
         })
-    return {"read": now, "stages": list(writing.STAGES), "pieces": pieces, "attention": _attention(pieces),
+    return {"read": now, "stages": list(writing.STAGES), "pieces": pieces, "attention": _attention(pieces), "ideas": _ideas(connection),
             "realms": {key: found[key] for key in ("state", "source", "problems")}}
 
 
