@@ -124,11 +124,23 @@ def item_for_artifact(connection: sqlite3.Connection, repo: str, path: str) -> s
     return rows[0]
 
 
-def _fields(raw: str | None) -> dict:
+#: An integer literal of more digits reads as unset (None) in a display read: int() refuses one past 4,300 digits
+#: with ValueError, and json.dumps refuses to write one back (pack sd:7329).
+INT_DIGITS = 4000
+
+
+def small_int(digits: str) -> int | None:
+    """`parse_int` for a read that shows the value: the int, or None past `INT_DIGITS` digits."""
+    return int(digits) if len(digits) <= INT_DIGITS else None
+
+
+def _fields(raw: str | None, *, readable: bool = False) -> dict:
+    """The stored JSON object. A write path keeps the default, so a number is never rewritten as null;
+    a display read passes `readable` and gets None for an integer past `INT_DIGITS` digits."""
     if raw is None:
         return {}
     try:
-        value = json.loads(raw)
+        value = json.loads(raw, parse_int=small_int if readable else None)
     except (TypeError, ValueError):
         raise WorkflowError("item metadata is malformed; repair it before changing progress") from None
     if not isinstance(value, dict):
