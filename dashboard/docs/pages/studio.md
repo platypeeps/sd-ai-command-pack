@@ -12,6 +12,13 @@ A file that does not parse lists with its error; an unknown kind or role,
 or a root that leaves the project folder, lists as a problem and the root
 is left out. A machine with no `project.json` shows an empty list.
 
+A repository's key is its folder name. Two registered repositories of one
+name each take their path under `REPO_ROOT` with `-` for `/`
+(`alpha-tools`, `beta-tools`), so both are read (sd:7392); a key two still
+share is served for neither and listed as a problem. When the scan names
+a problem and finds no project, the banner says how many repositories it
+read.
+
 Details shows each root's images, audio and video, listed from disk: the
 media is untracked, so git is never asked. Each file is served at
 `/studio/files/<repo>/<path in the repository>` under `designs.resolve`'s
