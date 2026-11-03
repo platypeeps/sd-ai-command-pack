@@ -445,6 +445,16 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     }).sort((a, b) => (a.key === '') - (b.key === '') || RANK[a.s] - RANK[b.s] || a.key.localeCompare(b.key));
   }
   const tally = rows => QTYPES.map(t => [t, rows.filter(c => c.type === t).length]).filter(([, n]) => n);
+  // A repo row's three boxes (pack sd:7272, Queue's lane ledger until #1768): merging, next and blocked, counted from all
+  // the repo's rows, so a filter hides no count. A box is lit only when its count is not zero; blocked lights the warning
+  // lamp; the label says all three in words. A lane that was not read counts nothing: the cell says so, not 0.
+  const pip = (n, on) => html`<span class="pip${n ? on : ''}">${String(n)}</span>`;
+  function pips(g) {
+    if (g.key && (!QV.lanes || QV.lanes.problems.some(p => repoKey(p.repo) === g.key)))
+      return html`<td class="detail"><span class="g-unknown" aria-hidden="true">${GLYPH.unknown}</span> lane not read</td>`;
+    const [m, n, b] = ['merging', 'next', 'blocked'].map(t => g.rows.filter(c => c.type === t).length);
+    return html`<td class="detail pipe" aria-label="${m} merging, ${n} next, ${b} blocked">${pip(m, ' on')}${pip(n, ' on')}${pip(b, ' warn')}</td>`;
+  }
   function queueView() {
     const unread = [];
     if (!QV.seen) return;
@@ -467,7 +477,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     const parent = g => { const on = qOpen === g.key, name = g.key || 'Unassociated';
       return html`<tr class="repo" data-repo="${g.key}" aria-expanded="${String(on)}">${marker(g.s, 'repo')}
         <td class="what"><button type="button" class="disc" data-open="${g.key}" aria-expanded="${String(on)}" aria-label="${on ? 'Close' : 'Open'} ${name}">${I('chevron-right')}</button><button type="button" class="pick" data-open="${g.key}">${name}</button>${g.host ? html`<small>lane on ${g.host}</small>` : ''}</td>
-        <td class="detail">${tally(g.shown).map(([t, n], i) => html`${i ? ' · ' : ''}${n} ${t}`)}</td><td class="num"></td><td class="act"></td></tr>`; };
+        ${pips(g)}<td class="num"></td><td class="act"></td></tr>`; };
     put($('queue'), groups.length ? html`${groups.map(g => html`${parent(g)}${qOpen === g.key ? g.shown.map(c => c.tr) : ''}`)}`
       : html`<tr class="empty"><td colspan="5">${unread.length ? 'No row in what was read; the line under the table names what was not.'
         : `Nothing is working, merging, next or blocked${qShow.size ? ', and no row matches the filters' : ''}.`}</td></tr>`);
@@ -764,7 +774,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     // build holding it. Build registers ahead of TD's commands, so it is the act wherever it is on; elsewhere the act is
     // the move to the next status, as on Tasks' list (view 'list').
     const sel = () => isItem(row()) ? row() : null;
-    const ready = o => taskOf(o.id) || (SUGG.has(o.id) ? { id: SUGG.get(o.id).id, status: 'ready', repo: SUGG.get(o.id).repo, assignment: null } : null);
+    const ready = o => taskOf(o.id) || (SUGG.has(o.id) ? { id: SUGG.get(o.id).id, status: 'ready', repo: SUGG.get(o.id).repo, repo_path: SUGG.get(o.id).repo, assignment: null } : null);
     C.register(K.build({ row: ready, reread: () => reading.reread(), primary: () => true }));
     TD = window.taskDetails.attach({ details: $('details'), rows: () => [...new Map([...OPENI, ...SROW]).values()], byKey: taskOf, selected: sel,
       read: () => DOC && DOC.now, view: () => 'list', render: () => { if (sel()) TD.renderDetails(); }, reread: () => reading.reread(),
