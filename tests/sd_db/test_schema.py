@@ -3187,5 +3187,103 @@ class TheIssuesPolicyMove(SchemaCase):
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
+class TheMergeAndCiPolicyBackfill(SchemaCase):
+    """Migration 47 (pack sd:7366 slice 1). `runner_merge` and `ci` gain
+    their policy keys, `merge` and `ci.provider`, beside the columns, which
+    stay until 48: `auto` and `local` are copied, the defaults add nothing,
+    an org or external row takes no `merge`, and the columns are set from
+    the policy so every row agrees. One transaction: a failure leaves 46
+    with no key written; the reverse takes the keys out again."""
+
+    VERSION = 47
+    COLUMNS = "path, created_at, updated_at, runner_merge, ci, declarations"
+    ROWS = [("/auto-local", "t1", "t2", "auto", "local", None),
+            ("/default", "t1", "t2", "manual", "github", None),
+            ("/kept", "t1", "t2", "auto", "github", '{"policy":{"issues":"read"},"review":{"x":1}}'),
+            ("/local-only", "t1", "t2", "manual", "local", '{"policy":{"issues":"ask"}}'),
+            ("/org", "t1", "t2", "auto", "local", '{"policy":{"mode":"org"}}'),
+            ("/jenkins", "t1", "t2", "manual", "local",
+             '{"policy":{"ci":{"provider":"jenkins","url":"https://ci.example.test","job":"j/PR-{pr}"}}}'),
+            ("/junk", "t1", "t2", "auto", "local", '{"policy":"auto"}')]
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO repo ({self.COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        import json
+        return {path: (merge, ci, json.loads(text) if text else None) for path, merge, ci, text in
+                connection.execute("SELECT path, runner_merge, ci, declarations FROM repo ORDER BY path")}
+
+    AFTER = {
+        "/auto-local": ("auto", "local", {"policy": {"merge": "auto", "ci": {"provider": "local"}}}),
+        "/default": ("manual", "github", None),
+        "/kept": ("auto", "github", {"policy": {"issues": "read", "merge": "auto"}, "review": {"x": 1}}),
+        "/local-only": ("manual", "local", {"policy": {"issues": "ask", "ci": {"provider": "local"}}}),
+        # Failure table, row "S1 backfill, org-mode row": no `merge`, so the row reads, and now says, manual.
+        "/org": ("manual", "local", {"policy": {"mode": "org", "ci": {"provider": "local"}}}),
+        # A declared provider wins; the column follows it (jenkins checks are not `local`).
+        "/jenkins": ("manual", "github", {"policy": {"ci": {"provider": "jenkins", "url": "https://ci.example.test",
+                                                              "job": "j/PR-{pr}"}}}),
+        # A policy that is not an object takes no key; its readers fail closed, and the columns follow them.
+        "/junk": ("manual", "github", {"policy": "auto"}),
+    }
+
+    def test_the_backfill_copies_auto_and_local_and_the_columns_agree(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.addCleanup(raw.close)
+        self.assertEqual(schema_version(raw), self.VERSION)
+        self.assertEqual(self._rows(raw), self.AFTER)
+        from sd_db.writes import CI_SQL, MERGE_SQL
+        self.assertEqual(raw.execute(f"SELECT count(*) FROM repo WHERE runner_merge IS NOT {MERGE_SQL.format(t='repo')} "
+                                     f"OR ci IS NOT {CI_SQL.format(t='repo')}").fetchone()[0], 0)
+
+    def test_a_failure_at_the_second_update_leaves_46_and_no_key(self):
+        """Failure table, row "S1 migration 047 backfill": kill at the second UPDATE."""
+        self._before()
+        raw = sqlite3.connect(self.path)
+        raw.execute("CREATE TRIGGER stuck BEFORE UPDATE ON repo "
+                    "WHEN json_extract(NEW.declarations, '$.policy.ci.provider') = 'local' "
+                    "BEGIN SELECT RAISE(ABORT, 'stuck'); END")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual({path: row[2] for path, row in self._rows(raw).items()},
+                         {path: (None if text is None else __import__("json").loads(text))
+                          for path, _, _, _, _, text in self.ROWS})
+        raw.execute("DROP TRIGGER stuck")
+        raw.commit()
+        raw.close()
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+        connection = sqlite3.connect(self.path)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.AFTER)
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        import json
+        self.assertEqual({path: row[2] for path, row in self._rows(raw).items()}, {
+            "/auto-local": None, "/default": None, "/kept": {"policy": {"issues": "read"}, "review": {"x": 1}},
+            "/local-only": {"policy": {"issues": "ask"}}, "/org": {"policy": {"mode": "org"}},
+            "/jenkins": json.loads(str(self.ROWS[5][5])), "/junk": {"policy": "auto"}})
+        self.assertEqual({path: row[:2] for path, row in self._rows(raw).items()},
+                         {path: row[:2] for path, row in self.AFTER.items()})
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+
 if __name__ == "__main__":
     unittest.main()

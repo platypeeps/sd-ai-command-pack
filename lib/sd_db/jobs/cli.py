@@ -69,7 +69,7 @@ from ..schema import SCHEMA_VERSION
 from ..sources import index_cache, issues, register
 from ..sources import run as run_sitting
 from ..sources import verify as verify_source
-from ..writes import OPEN_STATE_KINDS
+from ..writes import OPEN_STATE_KINDS, policy_ci, policy_merge
 
 
 def _home() -> Path:
@@ -879,10 +879,11 @@ def command_repo(argv: list[str]) -> int:
                       "`bin/sd-db repo managed PATH yes`", file=sys.stderr)
                 return 0
         for row in rows:
+            # pack sd:7366: `ci` and the last field read the policy, in the words the columns used.
             print(f"sd-db: {row['path']}  {row['remote'] or '-'}  "
                   f"{'yes' if row['managed'] else 'no'}  "
-                  f"{row['ci']}  {issues_policy(connection, row['path'])}  "
-                  f"{row['lane_host'] or LANE_HUB}  {row['runner_merge']}")
+                  f"{policy_ci(row['declarations'])}  {issues_policy(connection, row['path'])}  "
+                  f"{row['lane_host'] or LANE_HUB}  {policy_merge(row['declarations'])}")
         return 0
     finally:
         connection.close()
@@ -1011,8 +1012,10 @@ def _repo_declare(connection, rest: list[str]) -> int:
         return 0
     kind, word = rest[1], rest[2]
     target, before = set_declaration(connection, path, kind, declaration_value(kind, word))
+    # `off` on a policy keeps its `merge` and `ci` (pack sd:7366), so the row says what it holds now.
+    after = (declarations(connection, target) or {}).get(kind)
     print(f"sd-db: {target} {kind} {'declared' if before is not None else 'none'} -> "
-          f"{'none' if word == DECLARATION_OFF else 'declared'}")
+          f"{'none' if after is None else 'declared'}")
     return 0
 
 

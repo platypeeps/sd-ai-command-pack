@@ -139,6 +139,87 @@ def _json(value: Any) -> str | None:
 
 # ---------------------------------------------------------------- repo
 
+#: The two row settings the `policy` declaration holds (pack sd:7366): `runner_merge` is `policy.merge`, `ci` is
+#: `policy.ci.provider`. Each reader fails closed: `auto` only for exactly `auto` on a managed policy, and a
+#: provider only for one of `CI_PROVIDERS`; anything else, no key and junk included, reads `manual` or `github`.
+CI_PROVIDERS = ("github", "local", "jenkins")
+#: The same two reads in SQL, over the table alias `{t}`, in the column's words (`jenkins` reads `github`, as
+#: its column did). `json_extract` answers NULL for a missing key and for a path through a non-object.
+MERGE_SQL = ("(CASE WHEN json_extract({t}.declarations, '$.policy.merge') = 'auto' "
+             "AND COALESCE(json_extract({t}.declarations, '$.policy.mode'), 'managed') = 'managed' "
+             "THEN 'auto' ELSE 'manual' END)")
+CI_SQL = ("(CASE WHEN json_extract({t}.declarations, '$.policy.ci.provider') = 'local' "
+          "THEN 'local' ELSE 'github' END)")
+
+
+def policy_of(declarations: Any) -> dict[str, Any]:
+    """The `policy` object of a `repo.declarations` text or object; `{}` for none and for anything unread."""
+    if isinstance(declarations, (str, bytes, bytearray)):
+        try:
+            declarations = json.loads(declarations)
+        except (ValueError, RecursionError):
+            return {}
+    held = declarations.get("policy") if isinstance(declarations, dict) else None
+    return held if isinstance(held, dict) else {}
+
+
+def policy_merge(declarations: Any) -> str:
+    """`runner_merge`'s word for a row's declarations: `auto` or `manual` (pack sd:7366)."""
+    policy = policy_of(declarations)
+    managed = policy.get("mode") is None or policy.get("mode") == "managed"
+    return "auto" if policy.get("merge") == "auto" and managed else "manual"
+
+
+def policy_ci(declarations: Any) -> str:
+    """Where a row's checks run: `github`, `local` or `jenkins` (pack sd:7366)."""
+    block = policy_of(declarations).get("ci")
+    provider = block.get("provider") if isinstance(block, dict) else None
+    return provider if isinstance(provider, str) and provider in CI_PROVIDERS else "github"
+
+
+def declarations_text(value: dict[str, Any]) -> str:
+    """`value` as `repo.declarations` stores it: compact JSON with sorted keys."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+
+def with_row_settings(text: Any, *, runner_merge: str | None = None, ci: str | None = None) -> str | None:
+    """`repo.declarations` with `policy.merge` and `policy.ci.provider` set from the column words given.
+
+    `manual` and `github` are the defaults and remove their key, and a `ci`
+    or `policy` left empty goes with it, as `set_github_issues` does. Refuses
+    (`SdDbError`) `auto` on an org or external policy (note #34749), a `ci`
+    over a declared `jenkins`, and a declaration that does not read.
+    """
+    held: Any = {} if text is None else None
+    if text is not None:
+        try:
+            held = json.loads(text)
+        except (TypeError, ValueError, RecursionError):
+            held = None
+    raw = held.get("policy", {}) if isinstance(held, dict) else None
+    if not isinstance(raw, dict):
+        raise SdDbError("repo.declarations or its policy does not read as a JSON object; set it again")
+    policy = dict(raw)
+    if runner_merge is not None:
+        policy.pop("merge", None)
+        if runner_merge == "auto":
+            if policy.get("mode") not in (None, "managed"):
+                raise SdDbError(f"merge is ask in a {policy['mode']} repository; auto is for managed ones only "
+                                f"(note #34749)")
+            policy["merge"] = "auto"
+    if ci is not None:
+        block = policy.get("ci", {})
+        if not isinstance(block, dict):
+            raise SdDbError("the policy's ci does not read as a JSON object; set it again")
+        if block.get("provider") == "jenkins":
+            raise SdDbError("the policy declares jenkins checks; change them with `sd-db repo declare PATH policy`")
+        block = {key: value for key, value in block.items() if key != "provider"}
+        if ci == "local":
+            block["provider"] = "local"
+        policy = {**{k: v for k, v in policy.items() if k != "ci"}, **({"ci": block} if block else {})}
+    held = {**{k: v for k, v in held.items() if k != "policy"}, **({"policy": policy} if policy else {})}
+    return declarations_text(held) if held else None
+
 
 def upsert_repo(
     connection: sqlite3.Connection,
@@ -182,7 +263,11 @@ def upsert_repo(
             "ci": ci,
             "pieces_source": pieces_source,
         }
-        given = {key: value for key, value in updates.items() if value is not None}
+        given: dict[str, Any] = {key: value for key, value in updates.items() if value is not None}
+        if runner_merge is not None or ci is not None:
+            # pack sd:7366: column and policy key in one statement, so they agree until slice 2 drops the column.
+            stored = connection.execute("SELECT declarations FROM repo WHERE path = ?", (path,)).fetchone()
+            given["declarations"] = with_row_settings(stored[0], runner_merge=runner_merge, ci=ci)
         if given:
             assignments = ", ".join(f"{key} = ?" for key in given)
             connection.execute(
