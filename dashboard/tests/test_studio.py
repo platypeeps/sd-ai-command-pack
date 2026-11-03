@@ -365,6 +365,42 @@ class TheServer(BrowserSession):
             with self.subTest(link=link):
                 self.assertEqual(self.fetch(link)[0], 200)
 
+    def test_details_draw_the_strip_and_next_stage_posts_the_items_route_with_the_revision(self):
+        number = self.item("Cat shirt")
+        name_item(self.root, number)
+        doc = json.loads(self.fetch("/api/studio")[2])
+        cat = doc["projects"][0]
+        self.post(f"/api/items/{number}/stage", {"revision": cat["revision"], "stage": "brief"})
+        doc = json.loads(self.fetch("/api/studio")[2])
+        cat = doc["projects"][0]
+        out = self.run_page(doc, "window.PAGE_LIST.select('art/shirts/cat'); R.details = ELS.details.html;"
+                                 "const c = REG.find(x => x.id === 'studio.stage'); R.does = c.does(OBJ.get('art/shirts/cat'));"
+                                 "C.run(c, OBJ.get('art/shirts/cat')); await flush();")
+        details = out["R"]["details"]
+        self.assertIn('<li class="now" aria-current="step">brief</li><li class="" aria-current="false">candidates</li>', details)
+        self.assertIn("print export", details)
+        self.assertEqual(out["R"]["does"], f"Moves #{number} from brief to candidates, with a note.")
+        self.assertIn([f"/api/items/{number}/stage", {"revision": cat["revision"], "stage": "candidates"}, 64], out["posts"])
+        self.assertIn("studio.stage", out["confirms"])
+
+    def test_a_pinned_file_leads_its_root_a_hidden_one_folds_and_pin_posts_the_view(self):
+        self.post("/api/studio/view", {"file": "art/shirts/cat/media/take.wav", "pinned": True})
+        self.post("/api/studio/view", {"file": "art/shirts/cat/candidates/one.png", "hidden": True})
+        doc = json.loads(self.fetch("/api/studio")[2])
+        out = self.run_page(doc, "window.PAGE_LIST.select('art/shirts/cat'); R.details = ELS.details.html;"
+                                 "const o = OBJ.get('file:art/shirts/cat/media/clip.mp4');"
+                                 "R.off = ['studio.pin', 'studio.unpin', 'studio.hide', 'studio.unhide'].map(id => C.offWhy(REG.find(x => x.id === id), o));"
+                                 "C.run(REG.find(x => x.id === 'studio.pin'), o); await flush();")
+        details = out["R"]["details"]
+        media = details[details.index("<h3>media"):]
+        self.assertLess(media.index("take.wav"), media.index("clip.mp4"))
+        self.assertIn('<b class="pinmark">pinned · </b>take.wav', media)
+        candidates = details[details.index("<h3>candidates"):details.index("<h3>media")]
+        self.assertIn("Every file in this root is hidden.", candidates)
+        self.assertIn('<summary>Hidden <span class="n">1</span></summary>', candidates)
+        self.assertEqual(out["R"]["off"], ["", "not pinned", "", "not hidden"])
+        self.assertIn(["/api/studio/view", {"file": "art/shirts/cat/media/clip.mp4", "pinned": True}, 64], out["posts"])
+
     def test_scan_problems_show_before_the_page_says_no_project_json_exists(self):
         """sd:7151: a scan that could not read a folder found nothing it can vouch for, so the page names the problem."""
         doc = {"read": "2026-11-01T07:00:00Z", "root": "/repos", "projects": [], "attention": {"state": "caution", "n": 1, "what": "x"},
