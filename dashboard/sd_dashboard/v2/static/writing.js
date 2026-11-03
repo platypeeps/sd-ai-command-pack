@@ -209,14 +209,17 @@ addEventListener('DOMContentLoaded', () => {
   // ---------- Editor ----------
   // build: read only. No route writes a draft, so the design's Edit button and its save state are not drawn. The evidence
   // tabs show each file's facts, its lamp and its text, read once per change time from /api/writing/<id>/<gate> (pack sd:7242).
+  // The change time is whole seconds, so two versions in one second share a key (pack sd:7328): every read of the pieces
+  // drops the cache, and a read that answers after that drop does not fill it.
   let evTab = 'research';
   const reports = new Map();
   function evText(p, file, gate) {
     const key = `${p.id}/${file}/${p.files[file].mtime}`, got = reports.get(key), tab = evTab;
     if (!got) {
-      reports.set(key, { state: 'reading' });
+      const pending = { state: 'reading' };
+      reports.set(key, pending);
       window.shell.getJSON(`/api/writing/${p.id}/${gate}`).then(r => ({ state: 'read', ...r }), e => ({ state: 'failed', reason: e.message }))
-        .then(r => { reports.set(key, r); if (view === 'editor' && +selected === p.id && evTab === tab) renderEditor(); });
+        .then(r => { if (reports.get(key) !== pending) return; reports.set(key, r); if (view === 'editor' && +selected === p.id && evTab === tab) renderEditor(); });
     }
     const r = reports.get(key);
     if (r.state === 'reading') return html`<p>Reading ${file}…</p>`;
@@ -513,7 +516,7 @@ addEventListener('DOMContentLoaded', () => {
     adopt: doc => {
       // Personal stays, as on Tasks (sd:5642): it is where personal writing goes, so its tab shows with nothing in it.
       (window.PAGE_VIEWS || []).forEach(v => { if (v.id !== 'personal') window.shell.view?.hide(v.id, !(doc.pieces || []).some(p => inRealm(p, v.id))); });
-      D = doc; pieces = (doc.pieces || []).filter(p => inRealm(p));
+      D = doc; pieces = (doc.pieces || []).filter(p => inRealm(p)); reports.clear();
       document.body.dataset.observed = D.read;
       const known = ['read', 'partial'].includes(doc.realms?.state);
       // Each repo once, with the realm that claims it: "sd-writing under Work".
