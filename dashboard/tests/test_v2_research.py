@@ -944,6 +944,63 @@ shellRun(cmd('research.render'), C.get('research/beta')); await flush(); await f
         self.assertIn("<h3>Last render</h3>", out["R"]["det"])
         self.assertIn("<li>mirror: queued 10-notes/notes.md -&gt; notion:abc</li>", out["R"]["det"])
 
+    def render_answer(self, polls, *, status=None):
+        """The board (its second read marked), a render's 202 queued run, and its polls answered in turn from `polls`."""
+        doc = self.experiment_board()
+        after = json.loads(doc)
+        after["projects"][0]["render"] = {"s": "ok", "txt": "read again", "sub": ""}
+        run = {"id": "render-20260906T120000Z", "state": "queued", "reason": None, "repo": "research/alpha", "out": None,
+               "started": NOW, "finished": None}
+        return run, (f"(POLLS = {json.dumps(polls)}, STATUS = {json.dumps({'run': status})},"
+                     f" (path, body) => path === '/api/research' ? [200, (BOARDS = (typeof BOARDS === 'number' ? BOARDS : 0) + 1) > 1 ? {json.dumps(after)} : {doc}]"
+                     f" : path === '/api/research/render' ? [202, {json.dumps(run)}] : path === '/api/research/deck/status' ? [200, STATUS]"
+                     f" : path === '/api/research/deck/{run['id']}' ? POLLS.shift() : [404, {{ error: 'none' }}])")
+
+    def test_a_render_shows_on_its_rows_while_it_runs_and_a_failed_one_redraws_them_with_its_reason(self):
+        """sd:7273: Render pressed in Details: the board's row, the Experiments row and Details say the run goes; once it
+        fails, the board is read again and each says why."""
+        reason = "sd-research-kit render exited 1: dashboard: no command by hand has executed this research.conf.py"
+        run, answer = self.render_answer([])
+        failed = {**run, "state": "failed", "reason": reason, "finished": NOW}
+        out = self.run_page(f"""window.TIMERS = []; setTimeout = f => {{ TIMERS.push(f); return TIMERS.length; }};
+select('research/alpha', true); shellRun(cmd('research.render'), C.get('research/alpha')); await flush();
+R.rowRun = ELS.rows.html; R.xpRun = ELS['xp-rows'].html; R.detRun = ELS.details.html;
+POLLS.push([200, {json.dumps(failed)}]); TIMERS.shift()(); await flush(); await flush();
+R.rows = ELS.rows.html; R.xp = ELS['xp-rows'].html; R.det = ELS.details.html; R.left = TIMERS.length;""", answer=answer)
+        r, row = out["R"], (lambda html: re.search(r'<tr data-id="research/alpha".*?</tr>', html, re.S).group(0))
+        going = f"◌</span> Rendering: run {run['id']} is queued"
+        for name in ("rowRun", "xpRun", "detRun"):
+            self.assertIn(going, row(r[name]) if name != "detRun" else r[name], name)
+        self.assertEqual(out["gets"].count("/api/research"), 2, "a failed render reads the board again")
+        self.assertIn("read again", row(r["rows"]))
+        said = f"■</span> Last render failed: {reason}"
+        for name in ("rows", "xp", "det"):
+            html = row(r[name]) if name != "det" else r[name]
+            self.assertIn(said, html, name)
+            self.assertNotIn("Rendering:", html, name)
+        self.assertIn([f"Render failed · Alpha: {reason}", False], out["toasts"])
+        self.assertEqual(r["left"], 0, "a settled run polls no more")
+
+    def test_a_poll_that_does_not_read_is_no_end_and_a_render_running_at_page_open_is_followed(self):
+        """sd:7273: a render the page did not start, still running when it opens, is followed; a poll that fails says
+        so on the row and polls again; its end reads the board again."""
+        run, answer = self.render_answer([], status={"id": "render-20260906T120000Z", "state": "running", "reason": None,
+                                                     "repo": "research/alpha", "out": None, "started": NOW, "finished": None})
+        done = {**run, "state": "done", "finished": NOW, "mirrors": []}
+        answer = answer.replace("POLLS = []", f"POLLS = [[503, {{ error: 'the state file was mid-write' }}], [200, {json.dumps(done)}]], "
+                                "TIMERS = [], setTimeout = f => { TIMERS.push(f); return TIMERS.length; }", 1)
+        out = self.run_page("""R.first = ELS.rows.html; TIMERS.shift()(); await flush(); R.unread = ELS.rows.html;
+TIMERS.shift()(); await flush(); await flush(); R.rows = ELS.rows.html; R.left = TIMERS.length;""", answer=answer)
+        r, row = out["R"], (lambda html: re.search(r'<tr data-id="research/alpha".*?</tr>', html, re.S).group(0))
+        self.assertIn(f"Rendering: run {run['id']} is running</span>", row(r["first"]))
+        self.assertIn("is running; its state was not read: the state file was mid-write</span>", row(r["unread"]))
+        self.assertEqual(out["gets"].count(f"/api/research/deck/{run['id']}"), 2)
+        self.assertEqual(out["gets"].count("/api/research"), 2)
+        self.assertIn("read again", row(r["rows"]))
+        self.assertNotIn("Rendering:", row(r["rows"]))
+        self.assertIn(["Rendered · Alpha", False], out["toasts"])
+        self.assertEqual(r["left"], 0)
+
     def test_make_experiment_drafts_one_for_the_rows_project_and_is_off_when_linked(self):
         # sd:5662: a project row and its Details turn the project into an experiment: a draft create naming the project.
         out = self.run_page("""const beta = C.get('research/beta');

@@ -33,6 +33,8 @@ keeps, so the port adds no collector:
   page's "All read" range can show them; the other kinds stay in the window.
   The read is the latest `JOURNAL_CAP` notes: `journal_unread` counts the
   older ones it left out, so the page says so rather than cut them silently.
+  A page's command shows how it ended as its detail, from its log
+  (`command_journal.said`, sd:7274), not the holder item's title.
 
 A source that raises is named in `sources` with its reason and adds no
 rows, so a failed read never looks like a quiet day. Nothing here writes.
@@ -230,13 +232,25 @@ def commands(connection, end: datetime, skipped: dict, read: dict) -> list[dict]
         outcome = "running" if row["ended"] is None else "no exit code" if code is None else f"exit {code}"
         out.append({"id": f"cmd:{row['id']}", "k": "command", "at": _iso(stamp), "s": state, "repo": None,
                     "what": f"{text} · {outcome}", "ref": f"note {row['id']}",
-                    "detail": row.get("detail") or row["title"] or "",
+                    "detail": _detail(connection, row),
                     "source": row.get("source") or ("dashboard" if row.get("scope") == command_journal.SCOPE else "palette"),
                     "title": row["title"], "command": text, "assignment": row.get("assignment"),
                     "note": row["id"], "item": row["item"], "exit": code, "who": row["session"],
                     "scope": row.get("scope"), "started": row["started"], "ended": row["ended"],
                     "expired": row.get("output_expired"), "src": "the execution journal (runner_exec.executions)"})
     return out
+
+
+def _detail(connection, row: dict) -> str:
+    """A record's detail: the runner's outcome, or for a page's command how it ended (sd:7274), else its item's
+    title. The holder's title says only where the journal keeps a page's runs, so it is no detail."""
+    if row.get("detail"):
+        return row["detail"]
+    if row.get("scope") == command_journal.SCOPE and row["ended"] is not None:
+        ended = command_journal.said(connection, row["id"], row["exit_code"])
+        if ended:
+            return ended
+    return "" if row["title"] == command_journal.HOLDER_TITLE else row["title"] or ""
 
 
 def document(connection: sqlite3.Connection, *, now: str, jobs_backend=None) -> dict:
