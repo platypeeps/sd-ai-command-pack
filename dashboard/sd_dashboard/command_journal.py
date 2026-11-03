@@ -43,8 +43,8 @@ from typing import Callable
 
 from sd_db.errors import SdDbError
 
-__all__ = ["COMMANDS", "HOLDER", "POLL_SECONDS", "REFUSALS", "SCOPE", "SETTLE", "SETTLE_SECONDS", "UNKNOWN", "command",
-           "record", "resume", "settle", "watch"]
+__all__ = ["COMMANDS", "DETAIL_CHARS", "HOLDER", "POLL_SECONDS", "REFUSALS", "SCOPE", "SETTLE", "SETTLE_SECONDS", "UNKNOWN",
+           "command", "record", "resume", "said", "settle", "watch"]
 
 SCOPE = "dashboard"
 #: The holder item's identity, `(source, external_id)`: the schema's unique index keeps it to one row.
@@ -128,7 +128,41 @@ COMMANDS = (
     Command(r"/api/items/([1-9][0-9]*)/draft-email", "Draft email", _item),
     Command(r"/api/items/([1-9][0-9]*)/file-issue", "Draft issue", _item, run="issue"),
     Command(r"/api/issue-runs/([A-Za-z0-9-]{1,80})/confirm", "File issue", _group),
+    # sd:7274: the lane verbs, the dispatcher's kickstart, GitHub and Drive.
+    Command(r"/api/queue/move", "Lane", lambda match, payload: f"{str(payload.get('action'))[:20]} sd:{payload.get('item')}"),
+    Command(r"/api/queue/builds/retry", "Retry build",
+            lambda match, payload: f"assignment {payload.get('assignment')}" + (" with a finding" if payload.get("finding") else "")),
+    Command(r"/api/tasks/build", "Build", _items),
+    Command(r"/api/today/github/copilot-review", "Request Copilot", _key("repo", "number")),
+    Command(r"/api/hoa/attach", "Attach", _key("asset", "name")),
 )
+
+
+#: The most of a record's end line `said` gives Activity.
+DETAIL_CHARS = 300
+
+
+def said(connection, note: int, code) -> str:
+    """What a page command's log says of its end, for Activity's detail (sd:7274): a 202 run's end line, the first
+    line `_end` appended, or a failed answer's line; "" for an answer that succeeded at once or a run still open.
+    A log that does not read says so: that is not knowing, not an empty answer."""
+    from sd_db import runner_exec
+
+    try:
+        found = runner_exec.read_execution(connection, note)
+    except (OSError, SdDbError) as problem:
+        return f"its log was not read: {problem}"[:DETAIL_CHARS]
+    if found["output_expired"]:
+        return f"its log was pruned on {found['output_expired']}"
+    lines = found["output"].splitlines()
+    if not lines:
+        return "its log is empty or gone, so how it ended is not read"
+    # `record` writes the label, the POST line, then what the answer said; a label is the payload's, so find the POST.
+    start = next((at for at, line in enumerate(lines) if line.startswith("POST ")), None)
+    answer = lines[start + 1] if start is not None and start + 1 < len(lines) else ""
+    if answer.startswith("answered 202"):
+        return lines[start + 2][:DETAIL_CHARS] if start + 2 < len(lines) else ""
+    return answer[:DETAIL_CHARS] if code != 0 else ""
 
 
 def command(path: str, payload: dict | None = None):

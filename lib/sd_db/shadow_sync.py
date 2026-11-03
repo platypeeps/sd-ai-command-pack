@@ -849,7 +849,8 @@ def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str,
     is current and is left out. One in `unsettled`, which a run read and
     left as it was -- a failed read, or a contribution's unmoved answer --
     goes after the rest, in the order it was deferred, so rows that always
-    fail cannot starve the others, nor the oldest of them the rest. The
+    fail cannot starve the others, nor the oldest of them the rest. Of the
+    rest, shadow rows go before contribution-only ones (sd:7265). The
     caller reads the first `REVISIT_LIMIT`.
     """
     floor = datetime.min.replace(tzinfo=timezone.utc)
@@ -869,9 +870,12 @@ def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str,
             continue
         rows.setdefault(name, {"url": entry["url"], "shadow": None, "key": None, "at": observed})["key"] = entry["key"]
     # By identity: a shadow row and a contribution can spell one url two ways.
+    # Undeferred shadow rows first (sd:7265): no other read closes one, and
+    # 1,750 older contributions held every slot. A deferred one goes after
+    # the contributions: only a revisit folds one whose repository moved.
     turn = {identity(url) or url: index for index, url in enumerate(unsettled)}
     ordered = sorted(rows.values(), key=lambda row: (turn.get(identity(row["url"]) or row["url"], -1),
-                                                     row["at"], row["url"]))
+                                                     row["shadow"] is None, row["at"], row["url"]))
     return [{name: row[name] for name in ("url", "shadow", "key")} for row in ordered]
 
 
