@@ -5,6 +5,7 @@ these tests. The merge guard's and the backup's are in `test_ship.py` and
 `test_build.py`, the CLI's in `tests/test_sd_operations.py`, and the
 readers' in the dashboard's `test_build_panel.py` and `test_now_screen.py`.
 """
+import json
 import sys
 import tempfile
 import unittest
@@ -26,7 +27,13 @@ from sd_db import (
 )
 from sd_db.database import connect
 from sd_db.migrate import initialise
-from sd_db.writes import create_assignment, create_item, record_state, upsert_repo
+from sd_db.writes import (
+    create_assignment,
+    create_item,
+    record_state,
+    transition,
+    upsert_repo,
+)
 from sd_db.writes import now as clock
 
 from .test_build import later
@@ -118,6 +125,45 @@ class Start(Case):
                 self.start([self.item(status="ready"), item])
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0], before)
+
+    def lane(self, ident, body):
+        """One lane entry as `sd_lane.store` writes it: the newest `checkpoint` row of its key."""
+        self.db.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                        (f"lane:v1:Fixture/Repo:{ident}", clock(), body if isinstance(body, str) else json.dumps(body)))
+
+    def test_a_start_refuses_an_item_a_lane_entry_still_delivers(self):
+        """pack sd:7288: a pending or running entry delivers its item and its closes; a merged delivering entry
+        owes each a close until a note records `delivered at` its merge commit. Other entries hold nothing."""
+        merge = "a" * 40
+        pending, running, closed_by, owed, owed_close = (self.item(status="ready") for _ in range(5))
+        paid, associated, failed = (self.item(status="ready") for _ in range(3))
+        self.lane("e1", {"id": "e1", "item": pending, "status": "pending", "claim": "deliver", "closes": []})
+        self.lane("e2", {"id": "e2", "item": running, "status": "running", "claim": "deliver", "closes": [closed_by]})
+        self.lane("e3", {"id": "e3", "item": owed, "status": "merged", "claim": "deliver", "closes": [owed_close],
+                         "merge_commit": merge})
+        self.lane("e4", {"id": "e4", "item": paid, "status": "merged", "claim": "deliver", "closes": [],
+                         "merge_commit": merge})
+        transition(self.db, paid, "done", who="sd-ship", reason=f"delivered at {merge} on origin/main")
+        transition(self.db, paid, "ready", who="operator", reason="reopened")
+        self.lane("e5", {"id": "e5", "item": associated, "status": "merged", "claim": "associate-only", "closes": [],
+                         "merge_commit": merge})
+        self.lane("e6", {"id": "e6", "item": failed, "status": "failed", "claim": "deliver", "closes": []})
+        before = self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0]
+        cases = {pending: "pending lane entry e1", running: "running lane entry e2",
+                 closed_by: "running lane entry e2", owed: f"close owed by merged lane entry e3 of sd:{owed} at {merge}",
+                 owed_close: f"close owed by merged lane entry e3 of sd:{owed} at {merge}"}
+        for item, why in cases.items():
+            with self.subTest(item=item), self.assertRaisesRegex(teammate.TeammateRefused, f"item {item}.*{why}"):
+                self.start([self.item(status="ready"), item])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0], before)
+        self.start([paid, associated, failed])
+
+    def test_a_start_refuses_when_a_lane_entry_is_unreadable(self):
+        """An entry that does not parse may deliver the item: unknown is not "no" (pack sd:7288)."""
+        self.lane("bad", "{not json")
+        with self.assertRaisesRegex(teammate.TeammateRefused, "lane entry lane:v1:Fixture/Repo:bad is unreadable"):
+            self.start([self.item(status="ready")])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
 
     def test_a_restore_reimport_holds_a_start_and_the_reap(self):
         item = self.item()

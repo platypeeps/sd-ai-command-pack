@@ -774,19 +774,21 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
                 entry["cited"] = cited
                 entry["body"] = sd_ship_body.with_cited(
                     body, [f"- {repo} sd:{row['item']}: {row['source']}" for row in cited])
-        on_hub(queue, lambda connection: refuse_teammate(connection, [item, *entry["closes"]]))  # the whole set
+        on_hub(queue, lambda connection: refuse_teammate(connection, entry))  # the whole set
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}", refuse_before_push,
                       lambda tip: tip_past(worktree, branch, tip, head))
     return add_entry(queue, entry)
 
 
-def refuse_teammate(connection: Any, items: list[int]) -> None:
+def refuse_teammate(connection: Any, entry: dict[str, Any]) -> None:
     """Refuse an entry delivering an item an open teammate run holds (`sd_ship_body.refuse_teammate_held`, pack sd:7221):
-    the claimed item, each `--item` and each cited close; `sd-ship merge` checks the set again before it publishes."""
+    the claimed item, each `--item` and each cited close; `sd-ship merge` checks the set again before it publishes.
+    The set is `reads.lane_delivered`, which `teammate.start` reads the other way round (pack sd:7288)."""
     import sd_ship_body  # noqa: PLC0415
+    from sd_db.reads import lane_delivered  # noqa: PLC0415
     from sd_ship_remote import Refusal  # noqa: PLC0415
     try:
-        sd_ship_body.refuse_teammate_held(connection, items)
+        sd_ship_body.refuse_teammate_held(connection, lane_delivered(entry))
     except Refusal as error:
         raise LaneError(f"{error}; {error.workflow['next_action']} Nothing was queued.",
                         code=error.workflow["blocker"]["code"]) from None

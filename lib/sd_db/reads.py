@@ -1570,6 +1570,15 @@ def lane_entries(connection: sqlite3.Connection) -> list[sqlite3.Row]:
         " AND key >= ? AND key < ? GROUP BY key)", LANE_KEYS).fetchall()
 
 
+def lane_delivered(entry: dict) -> list:
+    """The items a lane entry delivers: its own item, then each of its `closes`, once each (pack sd:7288).
+
+    `sd_lane.enqueue_entry` checks this set against teammate runs before its
+    push, and `teammate.start` checks a new run's items against it.
+    """
+    return list(dict.fromkeys([entry.get("item"), *(entry.get("closes") or ())]))
+
+
 def build_runs(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     """Every build run's `outcome`, `detail`, `created_at` and `updated_at`, ended or not, in no set order (pack sd:6744).
 
@@ -1592,4 +1601,4 @@ def launch_notes(connection: sqlite3.Connection, prefix: str) -> list[sqlite3.Ro
         (len(prefix), prefix)).fetchall()
 
 
-__all__ += ["build_runs", "lane_entries", "launch_notes"]
+__all__ += ["build_runs", "lane_delivered", "lane_entries", "launch_notes"]

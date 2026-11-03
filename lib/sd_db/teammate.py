@@ -24,10 +24,11 @@ either the old row or the new one.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta
 
-from . import build
+from . import build, reads
 from .database import transaction
 from .errors import SdDbError
 from .runner import IN_SESSION, restoration_pending
@@ -42,6 +43,8 @@ STATUS = IN_SESSION
 GRACE_MINUTES = 30
 #: The item statuses a run may not start on.
 CLOSED = ("done", "cancelled")
+#: The lane entry states whose items the lane still delivers: queued, or in its runner (`sd_lane`).
+LANE_LIVE = ("pending", "running")
 
 
 class TeammateRefused(SdDbError):
@@ -79,6 +82,39 @@ def holding(connection, item: int) -> dict | None:
     return dict(row) if row else None
 
 
+def lane_holding(connection, item: int) -> str | None:
+    """Why a lane entry still delivers `item`, or None (pack sd:7288).
+
+    A pending or running entry delivers its item and its closes
+    (`reads.lane_delivered`). A merged entry that claimed delivery owes each
+    of them a close until a status note on it records `delivered at` the
+    merge commit, the sentence every delivering transition writes
+    (`workflow.DELIVERED_AT`); a reopen after that close owes nothing. An
+    entry that does not parse may deliver the item, so it refuses too.
+    """
+    for row in reads.lane_entries(connection):
+        try:
+            entry = json.loads(row["body"])
+        except (TypeError, ValueError):
+            entry = None
+        if not isinstance(entry, dict) or not isinstance(entry.get("closes") or [], list):
+            return f"lane entry {row['key']} is unreadable, so whether it delivers item {item} is unknown"
+        if item not in reads.lane_delivered(entry):
+            continue
+        status, where = entry.get("status"), f"lane entry {entry.get('id')} of sd:{entry.get('item')}"
+        if status in LANE_LIVE:
+            return f"item {item} is delivered by {status} {where}; wait for the lane to end it"
+        if status == "merged" and entry.get("claim") == "deliver":
+            commit = entry.get("merge_commit")
+            paid = isinstance(commit, str) and commit and connection.execute(
+                "SELECT 1 FROM note WHERE item = ? AND kind = 'status_change' AND instr(body, ?) > 0 LIMIT 1",
+                (item, f"delivered at {commit}")).fetchone()
+            if not paid:
+                return (f"item {item} has its close owed by merged {where} at {commit or 'an unrecorded commit'}; "
+                        "settle it with `sd-ship reconcile` first")
+    return None
+
+
 def start(connection, items: list[int], *, worktree: str, branch: str, budget_minutes: int, owner: str) -> dict:
     """Register one teammate run for `items`, the first its lead; the run, as `build.run` reads it."""
     if not items or len(set(items)) != len(items) or any(type(item) is not int for item in items):
@@ -106,6 +142,9 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
             retained = build._held(connection, item)  # a build run not yet released, bundle members too
             if retained:
                 raise TeammateRefused(retained)
+            delivering = lane_holding(connection, item)
+            if delivering:
+                raise TeammateRefused(delivering)
             active = connection.execute(
                 f"SELECT id, status, scope FROM assignment WHERE item = ? AND status IN {build.ACTIVE} LIMIT 1",
                 (item,)).fetchone()
