@@ -8,7 +8,7 @@ nine-step sequence, which also supports changes without a database item.
 forever and catches nothing -- it breaks on a rewrite that preserves the
 meaning and survives a rewrite that destroys it. So the checks aim at the
 forbidden thing: a `--delete-branch` on a merge, a `sleep` or a loop in the
-settle step, `sd-spec` inside the sequence, a placeholder `Work:` line, a
+settle step, a `docs/spec/` update inside the sequence, a placeholder `Work:` line, a
 review cap restated in the skill. Where presence must be asserted it anchors
 on a flag or a command token (`--watch`, `--match-head-commit`,
 `delete_branch_on_merge`) rather than on the sentence around it, or on a
@@ -148,9 +148,9 @@ def steps() -> dict[int, str]:
 
     A step owns the indented lines under it and stops at the next number or
     at the first unindented paragraph. That boundary is the point: the
-    paragraph excluding `sd-spec` from the sequence sits after step 9 and
-    must not be read as part of it, or criterion 2's `sd-spec` check would
-    pass on a file that ran `sd-spec` in step 9.
+    paragraph excluding a `docs/spec/` update from the sequence sits after
+    step 9 and must not be read as part of it, or criterion 2's check would
+    pass on a file that updated `docs/spec/` in step 9.
     """
 
     found: dict[int, str] = {}
@@ -370,18 +370,18 @@ class TheSequenceParses(unittest.TestCase):
 class AChangeWithNoWorkItem(unittest.TestCase):
     """Criterion 2, all four clauses, against the file's own text."""
 
-    def test_no_step_runs_sd_spec(self) -> None:
-        offenders = [n for n, body in steps().items() if "sd-spec" in body]
-        self.assertEqual(offenders, [], f"sd-spec is inside steps {offenders}")
+    def test_no_step_updates_the_spec(self) -> None:
+        offenders = [n for n, body in steps().items() if "docs/spec/" in body]
+        self.assertEqual(offenders, [], f"a docs/spec/ update is inside steps {offenders}")
 
-    def test_the_file_still_says_where_sd_spec_runs(self) -> None:
+    def test_the_file_still_says_where_the_spec_update_runs(self) -> None:
         """The other half: the token vanishing from the page entirely would
         satisfy the check above while telling the reader nothing."""
 
         outside = sequence_section()
         for body in steps().values():
             outside = outside.replace(body, "")
-        self.assertIn("sd-spec", outside)
+        self.assertIn("docs/spec/", outside)
 
     def test_no_placeholder_work_line_anywhere_in_the_file(self) -> None:
         self.assertEqual(PLACEHOLDER_WORK.findall(SKILL_TEXT), [])
@@ -498,7 +498,7 @@ class PostMergeCloseout(unittest.TestCase):
                       "durable successor",
                       "eligible inline thread", "read back", "leave the thread open",
                       "Authorized shipping closeout owns remote replies",
-                      "That skill remains local-only"):
+                      "That step remains local-only"):
             with self.subTest(boundary=token):
                 self.assertIn(token, self.closeout)
 
