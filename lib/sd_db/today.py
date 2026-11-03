@@ -16,6 +16,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+from . import hub
 from .reads import (
     IDEA_KINDS,
     REVIEW_BATCH,
@@ -85,14 +86,46 @@ def _attention_rows(connection: sqlite3.Connection, keep: set[str | None] | None
     return found
 
 
+#: A satellite's request for the hub's mail, Slack, Notion or Drive work: `sd task add --ref hub:<host>-<slug>`
+#: (system sd:7324 H2). The exact source, so a mistyped ref is no request.
+HUB_REQUEST = "(item.source IS 'task-ref' AND substr(item.external_id, 1, 4) IS 'hub:')"
+#: A hub request's Attention `why`: what the hub session does with it.
+HUB_WHY = "hub request: claim it, answer in a note, close it"
+
+
+def _hub_rows(connection: sqlite3.Connection, keep: set[str | None] | None) -> list[tuple[Any, str]]:
+    """Each open hub request, with its `why`, when this machine holds the hub role (pack sd:7358).
+
+    The role is `sd-db fence`'s (`hub.machine_role`), asked only when a
+    request is open: `holder` and `off` (one machine, no hub named) list
+    them, `elsewhere` (a satellite) lists none, and `unknown` lists them
+    with the reason, as a failed read is no satellite.
+    """
+    where, values = _in("item.repo", keep)
+    rows = connection.execute(
+        f"SELECT * FROM item WHERE item.status != 'done' AND {HUB_REQUEST} AND {where}"
+        " ORDER BY created_at DESC, id DESC", values).fetchall()
+    if not rows:
+        return []
+    found = hub.machine_role(connection)
+    if found.state == "elsewhere":
+        return []
+    why = HUB_WHY if found.state in ("holder", "off") else f"{HUB_WHY}; hub role unknown: {found.reason}"
+    return [(row, why) for row in rows]
+
+
 def attention(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
-    """Open reports whose fields say they need attention, newest first: `status`, `why`, `at`.
+    """Open reports whose fields say they need attention, and on the hub open hub requests (`_hub_rows`),
+    newest first: `status`, `why`, `at`.
 
     Unreadable fields count, as an unknown is no pass.
     """
+    keep = _keep(repos)
+    rows = sorted([*_attention_rows(connection, keep), *_hub_rows(connection, keep)],
+                  key=lambda pair: (pair[0]["created_at"], pair[0]["id"]), reverse=True)
     return [{"id": row["id"], "repo": row["repo"], "status": row["status"], "title": row["title"],
              "why": why if isinstance(why, str) else "", "at": row["created_at"]}
-            for row, why in _attention_rows(connection, _keep(repos))]
+            for row, why in rows]
 
 
 #: The finding of a report whose fields do not parse: it may name this machine, so it is a row, not a pass.
@@ -199,8 +232,9 @@ def review_questions(connection: sqlite3.Connection, *, repos: Iterable[str | No
 def followups(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
     """Open followups, oldest first, except a report's own, which is the report's attention row:
     `note`, `title` (the followup's first line), `item_title`, `at`."""
-    reports = {row["id"] for row in attention(connection, repos=repos)}
-    return [row for row in _notes(connection, "followup", _keep(repos)) if row["id"] not in reports]
+    keep = _keep(repos)
+    reports = {row["id"] for row, _ in _attention_rows(connection, keep)}
+    return [row for row in _notes(connection, "followup", keep) if row["id"] not in reports]
 
 
 def _closed(connection: sqlite3.Connection, repos: Iterable[str | None] | None, now: str | None,
