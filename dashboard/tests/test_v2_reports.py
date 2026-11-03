@@ -340,9 +340,10 @@ class ThePage(BrowserSession):
     def test_the_rail_opens_the_new_page_and_the_old_screen_is_retired(self):
         self.assertEqual(v2.SECTIONS.get("Reports"), "/reports")
         self.assertNotIn("Reports", v2.CLASSIC)
-        # sd:3402 retired the classic Reports area; Resources, which Toolbox, Vault and Queues need, stays.
+        # sd:3402 retired the classic Reports area; Resources, which Toolbox, Vault and Queues need, stays, as an
+        # Operations view (pack sd:7266).
         self.assertNotIn("Reports (classic)", v2.SCREENS)
-        self.assertEqual(v2.SCREENS.get("Resources (classic)"), "/operations?area=resources")
+        self.assertEqual(v2.CLASSIC.get("Operations"), "/operations")
 
     def test_the_data_routes_need_a_session_and_the_reading_takes_no_query(self):
         self.assertEqual(self.request("/api/reports")[0], 403)

@@ -73,12 +73,13 @@ def _equivalents(rendered_body: Markup) -> Markup:
 
 
 def shell_page(title: str, section: str, *body: object, subtitle: str, note: str, screen: str,
-               cli_equivalents: bool = True) -> str:
+               cli_equivalents: bool = True, script: str = "") -> str:
     """A classic screen inside the v2 shell (sd:3586): the rail, pane and keys are shell.js's, the tokens the foundation's.
 
     `section` is the rail entry the screen belongs to; `note` fills the Details pane; `screen` names the palette scope,
     one of `runner_exec.SCREENS` (sd:4002).
     `cli_equivalents=False` leaves out the folded list of the body's commands.
+    `script` names a `/ui/` page script that loads before shell.js, as a v2 page's does: Operations declares its views.
     The body keeps its server-drawn forms, which `/static/dashboard.js` submits as before; it leaves the keys to the
     shell but `p`. `/ui/classic.css` styles that markup.
     A body with a table or a list gets row 1 marked for the shell's one bar (sd:5539), which filters its tables and sets
@@ -122,6 +123,7 @@ def shell_page(title: str, section: str, *body: object, subtitle: str, note: str
             tag("div", main, tag("div", tag("p", note, class_="note"), class_="details", id="details"), class_="shell"),
             tag("script", src="/ui/sections.js"),
             tag("script", src=f"/static/dashboard.js?v={STATIC_VERSIONS['dashboard.js']}"),
+            tag("script", src=f"/ui/{script}") if script else Markup(""),
             tag("script", src="/ui/shell.js"),
             data_page=section, data_scope=section.lower(),
         ),
