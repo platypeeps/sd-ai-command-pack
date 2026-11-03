@@ -100,6 +100,7 @@ second writer on a teammate's item is the failure. Tests are in
 | runner delivery (`runner.delivery_candidates`) | none | a merge while the builder works | skipped until the run ends | same test |
 | Unscheduled (`today.unscheduled`) | none | the item offered for pickup | skipped: reads `OWNING` | `test_unscheduled_and_the_report_clean_skip_a_teammates_item` |
 | report clean (`reporting.clean_reports`) | none | a held report closed | declined: reads `OWNING` | same test |
+| report retention (`reporting.clean_candidates`, `retention.settle_clean_reports`, pack sd:7284) | item status | a report a runner or teammate run owns moved to `done` | not a candidate: reads `OWNING` | `test_retention_leaves_a_clean_report_a_runner_or_teammate_owns` |
 | skill proposals (`skills_catalog.apply_proposals`) | none | the source changed under the session | refused: reads `OWNING` | `test_a_skill_review_a_teammate_holds_takes_no_proposals` |
 | lane cleanup (`bin/sd_lane.builder_busy`) | none | the worktree removed under the session | kept: reads `OWNING` | `test_the_lane_keeps_a_teammates_worktree` |
 | status write and choices (`workflow.change_status`, `allowed_statuses`) | item status | the session's own write refused | not read: `ACTIVE_ASSIGNMENTS` | `Start.test_the_session_still_moves_its_items`, `test_the_sessions_own_status_cancel_and_edit_writes_pass` |

@@ -8,6 +8,7 @@ readers' in the dashboard's `test_build_panel.py` and `test_now_screen.py`.
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from sd_db import (
     progress,
     reads,
     reporting,
+    retention,
     runner,
     skills_catalog,
     teammate,
@@ -184,6 +186,23 @@ class Ownership(Case):
         found = reporting.clean_reports(self.db, before=reporting.cutoff("2026-02-01"))
         self.assertEqual([row["id"] for row in found["selected"]], [])
         self.assertEqual(found["declined"], [{"id": report, "why": "work on it is queued, running or ending"}])
+
+    def test_retention_leaves_a_clean_report_a_runner_or_teammate_owns(self):
+        """pack sd:7284: `clean_candidates` reads `runner.OWNING`, as `clean_reports` does; an unowned report still settles."""
+        def report():
+            ident = create_item(self.db, kind="report", title="A clean report", repo=A, status="planning",
+                                fields={"attention": 0})
+            self.db.execute("UPDATE item SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?", (ident,))
+            return ident
+        teamed, running, free = report(), report(), report()
+        self.start([teamed])
+        create_assignment(self.db, item=running, role="author", status="running")
+        before = reporting.cutoff("2026-02-01")
+        self.assertEqual(reporting.clean_candidates(self.db, before=before), [free])
+        self.assertEqual(retention.settle_clean_reports(self.db, now=datetime(2026, 2, 1, tzinfo=UTC)), 1)
+        status = {row["id"]: row["status"] for row in self.db.execute(
+            "SELECT id, status FROM item WHERE id IN (?, ?, ?)", (teamed, running, free))}
+        self.assertEqual(status, {teamed: "planning", running: "planning", free: "done"})
 
     def test_a_skill_review_a_teammate_holds_takes_no_proposals(self):
         review = create_item(self.db, kind="task", title="Review a skill", repo=A, status="ready",
