@@ -3494,6 +3494,25 @@ roles:
         self.assertEqual(caught.exception.workflow["blocker"]["code"], "teammate_held")
         self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
 
+    def test_a_held_item_refuses_prepare_before_it_commits_or_catches_up(self):
+        """pack sd:7221 round 4: the builder may still write its worktree, so prepare writes none of it first."""
+        from sd_db import teammate
+
+        before = self.shared_context()  # the branch is behind main, so --catch-up would merge
+        teammate.start(self.connection, [self.item], worktree="/w/teammate", branch="feat/t",
+                       budget_minutes=60, owner="lead")
+        message = self.directory / "message.txt"
+        message.write_text("focused change")
+        for extra in (["--catch-up"], ["--path", "src.py", "--message-file", str(message)]):
+            if "--path" in extra:
+                (self.root / "src.py").write_text("held edit\n")
+            status = _git(self.root, "status", "--porcelain")
+            with self.subTest(extra=extra), self.assertRaises(ship.Refusal) as caught:
+                self.prepare(*extra)
+            self.assertEqual(caught.exception.workflow["blocker"]["code"], "teammate_held")
+            self.assertEqual(_git(self.root, "rev-parse", "HEAD"), before)
+            self.assertEqual(_git(self.root, "status", "--porcelain"), status)
+
     def test_a_closing_set_read_at_another_head_refuses_the_merge(self):
         """Failure table, row 3: the stored set names the head it was read at."""
         self.task_item("task")

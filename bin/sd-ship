@@ -1429,6 +1429,7 @@ class Ship(SharedReview):
             return self.reconcile()
         self.refuse_live_review()
         self.require_claim()
+        self.check_held(tuple(dict.fromkeys(self.args.closes)))  # before it commits or catches up (pack sd:7221)
         if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))
                 and (self.args.path or self.args.message_file)):
             raise Refusal("additional review cannot commit; name an already committed exact head")
