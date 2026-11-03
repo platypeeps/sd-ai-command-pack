@@ -22,5 +22,12 @@ predicate of its own, so `?f=` never names it. It is pressed when the bar's
 Open is, the URL keeps `?hidden=1` for Hidden and nothing for Open, and a
 second press changes nothing, Open being the default. The other lamps count
 the rows the current view shows.
+Changed: Any | 7 d | 30 d (sd:7361) is a segment after the state. It keeps
+the rows whose last commit is under that many days old, counted from the
+reading as the Changed 7 d lamp counts. A row with no commit, such as a
+brief-only product, leaves while an age is set. It combines with the lamps,
+Open | Hidden, the state, the product and the query, shows as a token, and
+Clear all drops it. The URL keeps `?age=7` or `?age=30`; Any writes nothing,
+and any other value is ignored. The Changed 7 d lamp is unchanged.
 Observed rereads `/api/designs`. The page reads through the shell's reader,
 `read.js`. The old listing was retired in sd:3402.
