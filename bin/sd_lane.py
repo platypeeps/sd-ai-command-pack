@@ -785,6 +785,7 @@ def refuse_teammate(connection: Any, entry: dict[str, Any]) -> None:
     the claimed item, each `--item` and each cited close; `sd-ship merge` checks the set again before it publishes.
     The set is `reads.lane_delivered`, which `teammate.start` reads the other way round (pack sd:7288)."""
     import sd_ship_body  # noqa: PLC0415
+    sd_lib.import_sd_db()  # every caller holds an sd_db connection, so this finds it
     from sd_db.reads import lane_delivered  # noqa: PLC0415
     from sd_ship_remote import Refusal  # noqa: PLC0415
     try:
