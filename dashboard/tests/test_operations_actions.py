@@ -110,12 +110,10 @@ class OperationsActions(BrowserSession):
             with self.subTest(area=area):
                 status, _, page = self.request(f"/operations?area={area}")
                 self.assertEqual(status, 200)
-                navigation = re.search(r'<nav[^>]*aria-label="Operations areas"[^>]*>(.*?)</nav>', page).group(1)
-                self.assertEqual(re.findall(r'href="/operations\?area=(\w+)"[^>]*>(\w+)</a>', navigation),
-                                 [("usage", "Usage"), ("services", "Services"), ("resources", "Resources"),
-                                  ("trackers", "Trackers"), ("sessions", "Sessions")])
-                active = re.findall(r'<a[^>]*href="([^"]+)"[^>]*aria-current="page"', navigation)
-                self.assertEqual(active, [f"/operations?area={area}"])
+                # pack sd:7266: the five areas are the shell's views; only the one asked for is drawn and shown.
+                panels = re.findall(r'<div id="view-(\w+)"( hidden)?>', page)
+                self.assertEqual([key for key, _ in panels], ["usage", "services", "resources", "trackers", "sessions"])
+                self.assertEqual([key for key, hidden in panels if not hidden], [area])
                 self.assertIn(heading, page)
                 for other in headings.values():
                     if other != heading:
