@@ -44,6 +44,12 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
   let DOC = null, NEEDS = [], ALL = new Map(), OTHER = new Map(), SNOOZED = [], ACTIVE = null, srcFilter = null, intent = null, query = '', picked = [];
+  // pack sd:7271: the Queue view's suggested rows, keyed by item number as Tasks keys a task (?row=<id>): SUGG is each one
+  // the read suggests, SROW its /api/tasks row once its Details were read, and TD the Tasks page's Details (task-details.js).
+  // OPENI is All items' rows (#40961): each repo's other open tasks, in TD's task shape, from /api/tasks while it is on.
+  let SUGG = new Map(), OPENI = new Map(), TD = null;
+  const SROW = new Map();
+  const isItem = id => SUGG.has(id) || OPENI.has(id), taskOf = k => SROW.get(k) || OPENI.get(k);
   const OPEN = new Set(), FULL = new Set(); // the groups opened, and the ones showing every member
   const $ = id => document.getElementById(id);
   const row = () => new URLSearchParams(location.search).get('row'); // the selected row
@@ -82,7 +88,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     $('details').setAttribute('data-swap', ''); requestAnimationFrame(() => $('details').removeAttribute('data-swap'));
     if (open) shell.openPane('tab-details');
   }
-  const listed = id => ALL.has(id) || OTHER.has(id) || QOTHER.has(id);
+  const listed = id => ALL.has(id) || OTHER.has(id) || QOTHER.has(id) || isItem(id);
   const day = iso => String(iso || '').slice(0, 10), hm = iso => String(iso || '').slice(11, 16);
 
   function details(r) {
@@ -114,7 +120,15 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       <dl>${Object.entries(facts(r)).map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}<dt>Read</dt><dd><time class="rel" data-long datetime="${DOC.now}"></time></dd></dl>
       ${SRC[r.source]?.[2] ? html`<p><a href="${SRC[r.source][2]}">Open ${SRC[r.source][0]} in ${SRC[r.source][3]}</a></p>` : ''}${act}`;
   }
+  // An item row's Details are the Tasks page's: drawn from the row its /api/tasks/<id> reading names, read again on
+  // each select, so a read of Today shows the item as it is now. Until the reading answers they say it is being read.
+  function pickItem(id, open) {
+    pick(id, () => html``, open);
+    TD.renderDetails();
+    TD.redrawDet(Number(id));
+  }
   function select(id, open) {
+    if (isItem(id)) return pickItem(id, open);
     const r = ALL.get(id), o = OTHER.get(id) || QOTHER.get(id);
     if (!r) return o && pick(id, o.draw, open);
     pick(id, () => details(r), open);
@@ -285,9 +299,11 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // its child rows under it and closes the row that was open, and a click on the open row closes it. The children, in order:
   // working (the live items of `active`, the build runs of /api/queue/builds, a builder's gate in the lane and the runner's
   // assignments no run holds), merging, next and blocked (the lane entries of /api/queue), suggested (the repo's ready items
-  // from `queues`, at most three, as pack sd:7222's Live + next reads them) and ended (ended build runs, and the cancelled
+  // from `queues`, at most three, as pack sd:7222's Live + next reads them), open (All items: its other open tasks, from
+  // /api/tasks) and ended (ended build runs, and the cancelled
   // and landed lane entries). Each row's marker is its state glyph and its type in words; the parent's glyph is its worst
-  // child's. Suggested and Ended builds are off by default; on, a repo with only those rows shows too; ?show= keeps them.
+  // child's. Suggested, All items and Ended builds are off by default; on, a repo with only those rows shows too; ?show=
+  // keeps them.
   // The lane's writes are Queue's (sd:2585): up, down, top, hold, release and cancel post /api/queue/move with the lane's
   // revision; the server runs sd-ship lane move|hold|release|cancel|retry and refuses a stale revision. Cancel asks first
   // (sd:3012). A cancelled row offers Re-queue (sd:3398) when the installed pack's retry takes a cancelled entry
@@ -299,8 +315,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // the merge, which nothing takes back. A build run's Cancel asks first and posts the assignment cancel route; an ended
   // blocked or cancelled bundle's Retry and Send to builder post /api/queue/builds/retry (pack sd:6020). The view reads its
   // three documents when it first shows and on each Today read after; a source that was not read is said under the table.
-  const QTYPES = ['working', 'merging', 'next', 'blocked', 'suggested', 'ended'], QSHOW = ['suggested', 'ended'], NEXT = 3;
-  const QV = { lanes: null, lanesErr: '', built: null, builtErr: '', runner: null, runnerErr: '', seen: false, busy: false };
+  const QTYPES = ['working', 'merging', 'next', 'blocked', 'suggested', 'open', 'ended'], QSHOW = ['suggested', 'open', 'ended'], NEXT = 3;
+  const QV = { lanes: null, lanesErr: '', built: null, builtErr: '', runner: null, runnerErr: '', tasks: null, tasksErr: '', seen: false, busy: false };
   const QOTHER = new Map(); // the lane entries, selectable as Today's other rows are
   const qShow = new Set();
   let qOpen = null, qSaid = null; // the one open repo; the last write's result
@@ -382,9 +398,24 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       <td class="detail"><ul class="sessions">${rows.map(r => html`<li>${r.verified ? '' : html`<span class="g-unknown" title="not confirmed">${GLYPH.unknown} </span>`}${r.session}<span class="via">${r.via}</span></li>`)}</ul></td>
       <td class="num">${top.elapsed || 'not known'}</td><td class="act">${shell.commands.rowActions(id)}</td></tr>`];
   }
-  const suggestRow = r => ['suggested', 'queued', html`<tr class="child" data-type="suggested" data-item="${r.id}">${marker('queued', 'suggested')}
+  // A suggested row (pack sd:7271) is a task: a click shows the Tasks page's Details, and its act is Build.
+  const suggestRow = r => ['suggested', 'queued', html`<tr class="child" data-type="suggested" data-item="${r.id}" data-id="${String(r.id)}" aria-selected="${String(row() === String(r.id))}">${marker('queued', 'suggested')}
     <td class="what"><a href="${shell.itemHref(r.id)}">#${r.id} ${r.title}</a></td>
-    <td class="detail">ready${r.detail && r.detail !== '-' ? ` · ${r.detail}` : ''}</td><td class="num">${r.since ? age(r.since) : ''}</td><td class="act"></td></tr>`];
+    <td class="detail">ready${r.detail && r.detail !== '-' ? ` · ${r.detail}` : ''}</td><td class="num">${r.since ? age(r.since) : ''}</td><td class="act">${shell.commands.rowActions(String(r.id))}</td></tr>`];
+  // The repo's ready items no live item holds, at most NEXT per repo, in the read's order (pack sd:7222's Live + next).
+  function suggested(doc) {
+    const live = new Set(((doc.active || {}).rows || []).map(r => r.item)), counted = {}, found = new Map();
+    ((doc.queues || {}).rows || []).filter(r => r.queue === 'ready' && !live.has(r.id)).forEach(r => {
+      const k = repoKey(r.repo); counted[k] = (counted[k] || 0) + 1; if (counted[k] <= NEXT) found.set(String(r.id), r); });
+    return found;
+  }
+  // All items (#40961): an open task of a repo, as Tasks reads it, that is no suggested row. Its act is Tasks' list row's.
+  const OPENS = { blocked: 'caution', in_progress: 'ok' }; // a blocked task is a look, not a lane's needs-you
+  const openRow = t => ['open', OPENS[t.status] || 'queued', html`<tr class="child" data-type="open" data-item="${t.key}" data-id="${t.key}" aria-selected="${String(row() === t.key)}">${marker(OPENS[t.status] || 'queued', 'open')}
+    <td class="what"><a href="${shell.itemHref(t.id)}">#${t.id} ${t.title}</a></td>
+    <td class="detail">${String(t.status).replace(/_/g, ' ')}${t.p ? ` · P${t.p}` : ''}</td><td class="num">${t.since ? age(t.since) : ''}</td><td class="act">${shell.commands.rowActions(t.key)}</td></tr>`];
+  const openItems = () => new Map((QV.tasks ? QV.tasks.rows.map(TD.shape) : [])
+    .filter(t => t.status !== 'done' && !t.parked && t.repo_path && !SUGG.has(t.key)).map(t => [t.key, t]));
   // Each repo's children, from the four reads; a repo with no row is not drawn.
   function qGroups() {
     const G = new Map(), add = (repo, [type, s, tr]) => {
@@ -400,9 +431,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     ((QV.runner || {}).live || []).filter(a => !held.has(a.id)).forEach(a => add(a.repo, asgRow(a)));
     (QV.lanes ? QV.lanes.lanes : []).forEach(l => { l.rows.forEach(r => add(l.path, entryRow(l, r)));
       if (G.has(repoKey(l.path))) G.get(repoKey(l.path)).host = l.host; });
-    const Q = DOC.queues || { rows: [] }, counted = {};
-    Q.rows.filter(r => r.queue === 'ready' && !live.has(r.id)).forEach(r => {
-      const k = repoKey(r.repo); counted[k] = (counted[k] || 0) + 1; if (counted[k] <= NEXT) add(r.repo, suggestRow(r)); });
+    SUGG.forEach(r => add(r.repo, suggestRow(r)));
+    OPENI.forEach(t => add(t.repo_path, openRow(t)));
     B.recent.forEach(r => add(r.repo, endedRun(r)));
     const RANK = { warning: 0, caution: 1, unknown: 2, ok: 3, queued: 4 };
     return [...G.values()].map(g => {
@@ -432,9 +462,10 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     Object.entries((ACTIVE || {}).sources || {}).filter(([, why]) => why).forEach(([k, why]) => unread.push(`${SOURCE[k] || k} not read: ${why}`));
     if (ACTIVE && ACTIVE.error) unread.push(`Sessions not read: ${ACTIVE.error}`);
     if (qShow.has('suggested') && (DOC.queues || {}).error) unread.push(`Ready items not read: ${DOC.queues.error}`);
+    if (qShow.has('open') && !QV.tasks) unread.push(`Open items not read: ${QV.tasksErr || 'no answer yet'}`);
     const groups = qGroups(), every = groups.flatMap(g => g.rows), active = every.filter(c => !QSHOW.includes(c.type)).length;
     if (!groups.some(g => g.key === qOpen)) qOpen = null;
-    put($('queue-filters'), shell.list.fseg('qshow', 'Show', [['suggested', 'Suggested'], ['ended', 'Ended builds']].map(([v, label]) =>
+    put($('queue-filters'), shell.list.fseg('qshow', 'Show', [['suggested', 'Suggested'], ['open', 'All items'], ['ended', 'Ended builds']].map(([v, label]) =>
       ({ v, pressed: qShow.has(v), label: html`${label} <span class="n">${String(every.filter(c => c.type === v).length)}</span>` }))));
     put($('queue-tally'), html`${tally(every.filter(c => !QSHOW.includes(c.type))).map(([t, n]) => html`<span>${n} ${t}</span>`)}`);
     const said = $('queue-said'); said.hidden = !qSaid; said.textContent = qSaid ? qSaid.text : ''; said.setAttribute('role', qSaid && !qSaid.ok ? 'alert' : 'status');
@@ -451,8 +482,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   async function loadQueue() {
     QV.seen = true;
     const get = path => shell.getJSON(path).then(doc => [doc, ''], err => [null, err.message]);
-    const [[l, le], [b, be], [r, re]] = await Promise.all(['/api/queue', '/api/queue/builds?show=all', '/api/queue/runner'].map(get));
-    Object.assign(QV, { lanes: l, lanesErr: le, built: b, builtErr: be, runner: r, runnerErr: re });
+    // All items reads the Tasks page's rows only while it is on (#40961).
+    const [[l, le], [b, be], [r, re], [t, te]] = await Promise.all(['/api/queue', '/api/queue/builds?show=all', '/api/queue/runner']
+      .map(get).concat(qShow.has('open') ? get('/api/tasks') : [[null, '']]));
+    Object.assign(QV, { lanes: l, lanesErr: le, built: b, builtErr: be, runner: r, runnerErr: re, tasks: t, tasksErr: te });
+    OPENI = openItems(); TD.adopt([...OPENI.values()]);
+    [...SROW.keys()].filter(k => !isItem(k)).forEach(k => SROW.delete(k));
+    OPENI.forEach(x => shell.commands.put(TD.objectOf(taskOf(x.key))));
     QOTHER.clear();
     (l ? l.lanes : []).forEach(lane => lane.rows.filter(x => x.state !== 'building').forEach(x => {
       const id = entryId(lane, x);
@@ -633,7 +669,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     put($('details'), html`<p class="why">${!DOC ? 'Nothing is selected: Today could not be read.' : NEEDS.length ? 'No row matches the filter, so nothing is selected. Esc clears it.' : 'Nothing is selected: nothing needs you.'}</p>`);
   }
   const reconcile = () => shell.reconcile({ rows: $('rows').querySelectorAll('tr[data-id]'), current: row(),
-    keep: id => OTHER.has(id) || QOTHER.has(id), select: id => select(id, false), clear: unselect });
+    keep: id => OTHER.has(id) || QOTHER.has(id) || isItem(id), select: id => select(id, false), clear: unselect });
   function applyFilter() { needsTable(); reconcile(); }
 
   // ---------- Reading (build, sd:2483): shell.read reads /api/now ----------
@@ -644,11 +680,15 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     DOC = doc; NEEDS = doc.needs || []; SNOOZED = doc.snoozed; ACTIVE = doc.active || null;
     ALL = new Map(); NEEDS.forEach(r => { ALL.set(r.id, r); (r.members || []).forEach(m => ALL.set(m.id, m)); });
     OTHER = others(doc);
+    SUGG = suggested(doc); OPENI = openItems();
+    [...SROW.keys()].filter(k => !isItem(k)).forEach(k => SROW.delete(k));
     document.body.dataset.observed = doc.now;
-    return { objects: [...[...ALL.values()].map(objectOf), ...[...OTHER].map(([id, o]) => ({ id, ...o.obj })), ...SNOOZED.map(window.snooze.object)],
+    const items = [...[...SUGG].map(([id, r]) => SROW.has(id) ? TD.objectOf(SROW.get(id)) : { id, type: 'item', label: `#${r.id} ${r.title}`, item: r.id }),
+      ...[...OPENI.keys()].map(k => TD.objectOf(taskOf(k)))];
+    return { objects: [...[...ALL.values()].map(objectOf), ...[...OTHER].map(([id, o]) => ({ id, ...o.obj })), ...items, ...SNOOZED.map(window.snooze.object)],
              state: doc.snooze_error ? window.snooze.unread(doc.snooze_error, '/api/now') : null };
   }
-  function clear(err) { DOC = null; NEEDS = []; ALL = new Map(); OTHER = new Map(); SNOOZED = []; ACTIVE = null; failed = err.message; delete document.body.dataset.observed; }
+  function clear(err) { DOC = null; NEEDS = []; ALL = new Map(); OTHER = new Map(); SUGG = new Map(); OPENI = new Map(); SROW.clear(); SNOOZED = []; ACTIVE = null; failed = err.message; delete document.body.dataset.observed; }
   function draw() {
     if (DOC) return render();
     // Nothing from the last read stays on screen: rows, counts, lamps, the observed time, the selection and the badge.
@@ -712,6 +752,20 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     const BULK = 25; // shell.js asks first for a bulk act on more rows than this; a group act on more members asks too
     const lane = action => o => post('/api/queue/move', { repo: o.repoPath, item: o.item, action, revision: o.laneRevision, head: o.head });
     const go = (href, said) => () => { location.href = href; return said; };
+    // pack sd:7271: an item row's Details, fields and item commands are the Tasks page's (task-details.js), read from
+    // /api/tasks/<id>; a write folds into the row, then Today reads again. A ready row's act is Tasks' Build
+    // (commands.build), from the row the reading named, or before that from the read's ready row: ready, its repo, no
+    // build holding it. Build registers ahead of TD's commands, so it is the act wherever it is on; elsewhere the act is
+    // the move to the next status, as on Tasks' list (view 'list').
+    const sel = () => isItem(row()) ? row() : null;
+    const ready = o => taskOf(o.id) || (SUGG.has(o.id) ? { id: SUGG.get(o.id).id, status: 'ready', repo: SUGG.get(o.id).repo, assignment: null } : null);
+    C.register(K.build({ row: ready, reread: () => reading.reread(), primary: () => true }));
+    TD = window.taskDetails.attach({ details: $('details'), rows: () => [...new Map([...OPENI, ...SROW]).values()], byKey: taskOf, selected: sel,
+      read: () => DOC && DOC.now, view: () => 'list', render: () => { if (sel()) TD.renderDetails(); }, reread: () => reading.reread(),
+      load: () => load().then(() => !!DOC, () => false), select: (key, open) => select(key, open),
+      got: (id, got) => { if (got.row && isItem(String(id))) { const t = TD.shape(got.row); SROW.set(t.key, t); C.put(TD.objectOf(t)); } return false; },
+      empty: () => TD.DET.failed[sel()] ? `#${sel()} did not open: ${TD.DET.failed[sel()]}.` : `Reading #${sel()}…`,
+      more: t => html`<p class="why"><a href="${shell.itemHref(t.id)}">Open on Tasks</a>: the board, the matrix and every task.</p>` });
     C.register(
       // Each lane entry is a command object (sd:5064): its menu offers Adversarial review of the worktree the lane recorded.
       K.adversarialReview('entry', { payload: o => ({ kind: 'change', target: o.worktree, item: o.item }),
@@ -809,7 +863,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     $('queue-filters').addEventListener('click', e => {
       const b = e.target.closest('button[data-f="qshow"]'); if (!b) return;
       if (!qShow.delete(b.dataset.v)) qShow.add(b.dataset.v);
-      shell.url(qShow.size ? { show: QSHOW.filter(v => qShow.has(v)).join(',') } : {}); queueView();
+      shell.url(qShow.size ? { show: QSHOW.filter(v => qShow.has(v)).join(',') } : {});
+      if (b.dataset.v === 'open') loadQueue(); else queueView(); // All items reads /api/tasks, or drops its rows
     });
     (new URLSearchParams(location.search).get('show') || '').split(',').filter(v => QSHOW.includes(v)).forEach(v => qShow.add(v));
     document.addEventListener('shell:view', e => { if (e.detail.id === 'queue' && !QV.seen) loadQueue(); });
@@ -851,7 +906,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       first: () => $('rows').querySelector('tr[data-id]')?.dataset.id,
       // ?row= on a group member opens its group, so the selection is a row on screen.
       select: id => {
-        if (OTHER.has(id) || QOTHER.has(id)) return select(id, false);
+        if (OTHER.has(id) || QOTHER.has(id) || isItem(id)) return select(id, false);
         const g = NEEDS.find(r => (r.members || []).some(m => m.id === id));
         if (g && !OPEN.has(g.id)) { OPEN.add(g.id); FULL.add(g.id); needsTable(); }
         return [...$('rows').querySelectorAll('tr[data-id]')].some(tr => tr.dataset.id === id) ? select(id, false) : reconcile();

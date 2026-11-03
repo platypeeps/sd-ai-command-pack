@@ -613,20 +613,20 @@ shellRun(cmd('contribution.dismiss'), ext); await flush(); R.off = cmd('contribu
     VIEWS = ("(path, body) => { if (path === '/api/contributions/view') { DOC.rows.find(r => r.key === body.key).hidden = body.hidden;"
              " return [200, { key: body.key, hidden: body.hidden }]; } return [200, DOC]; }")
 
-    #: A click on the Open table's Open | Hidden | All (sd:5753, sd:6701).
+    #: A click on the Open table's Open | Hidden (sd:5753, sd:6701; pack sd:7263 dropped All).
     PRESS = "ELS['open-filters'].listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"hidden\"]' ? { dataset: { v: '%s' } } : null } });"
-    SHOW_HIDDEN, SHOW_OPEN, SHOW_ALL = PRESS % "aside", PRESS % "open", PRESS % "all"
+    SHOW_HIDDEN, SHOW_OPEN = PRESS % "aside", PRESS % "open"
+    SEG = r'data-aside="hidden" data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
 
     def test_a_hidden_row_leaves_the_open_rows_and_show_hidden_lists_it_with_unhide(self):
-        # sd:5486: Open lists the unhidden rows. sd:5753, sd:6701: Hidden, in the Open table's Open | Hidden | All, lists
-        # the hidden ones alone and All lists every row; the URL keeps the choice, and Open drops it.
+        # sd:5486: Open lists the unhidden rows. sd:5753, sd:6701: Hidden, in the Open table's Open | Hidden, lists
+        # the hidden ones alone; the URL keeps the choice, and Open drops it. Pack sd:7263: the bar has no All.
         self.hidden()
         out = self.run_page(f"""R.rows = ELS.rows.html; R.lamps = ELS.annunciator.html; R.tally = ELS.tally.html; R.bar = ELS['hidden-seg'].html;
 {self.SHOW_HIDDEN} R.hidden = ELS.rows.html; R.title = ELS['open-title'].textContent; R.htally = ELS.tally.html;
 R.bar2 = ELS['hidden-seg'].html; R.url = OUT.urls[OUT.urls.length - 1];
 R.off = [cmd('contribution.hide').when(C.get('{ONE}')), cmd('contribution.unhide').when(C.get('{ONE}')),
   cmd('contribution.unhide').when(C.get('github:{EXTERNAL}'))];
-{self.SHOW_ALL} R.all = ELS.rows.html; R.url3 = OUT.urls[OUT.urls.length - 1];
 {self.SHOW_OPEN} R.back = ELS.rows.html; R.url2 = OUT.urls[OUT.urls.length - 1];""")
         ids = r'<tr data-id="([^"]+)"'
         self.assertNotIn(ONE, re.findall(ids, out["R"]["rows"]))
@@ -636,14 +636,25 @@ R.off = [cmd('contribution.hide').when(C.get('{ONE}')), cmd('contribution.unhide
         self.assertEqual(re.findall(ids, out["R"]["hidden"]), [ONE])
         self.assertEqual((out["R"]["title"], out["R"]["htally"]), ("Hidden", "1 hidden"))
         self.assertEqual(out["R"]["off"], ["already hidden", True, "not hidden"])
-        seg = r'data-aside="hidden" data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
-        self.assertEqual(re.findall(seg, out["R"]["bar"]), [("open", "true", "3"), ("aside", "false", "1"), ("all", "false", "4")])
-        self.assertEqual(re.findall(seg, out["R"]["bar2"])[1], ("aside", "true", "1"))
-        self.assertEqual(len(re.findall(ids, out["R"]["all"])), 4)
-        self.assertEqual((out["R"]["url"], out["R"]["url3"], out["R"]["url2"]), ({"hidden": "1"}, {"hidden": "all"}, {}))
+        self.assertEqual(re.findall(self.SEG, out["R"]["bar"]), [("open", "true", "3"), ("aside", "false", "1")])
+        self.assertEqual(re.findall(self.SEG, out["R"]["bar2"]), [("open", "false", "3"), ("aside", "true", "1")])
+        self.assertNotIn(">All <", out["R"]["bar"])
+        self.assertEqual((out["R"]["url"], out["R"]["url2"]), ({"hidden": "1"}, {}))
         self.assertNotIn("hidden", out["counts"], "Hidden is no view, so no tab carries its count")
         self.assertNotIn(ONE, re.findall(ids, out["R"]["back"]))
         self.assertEqual(out["attention"]["n"], 1)
+
+    def test_an_older_hidden_all_link_lands_on_open_and_drops_the_key(self):
+        # Pack sd:7263: All left the bar, so ?hidden=all, which it kept, lands on Open: the unhidden rows, Open pressed.
+        self.hidden()
+        out = self.run_page("R.rows = ELS.rows.html; R.bar = ELS['hidden-seg'].html; R.title = ELS['open-title'].textContent;",
+                            search="?hidden=all")
+        ids = r'<tr data-id="([^"]+)"'
+        self.assertNotIn(ONE, re.findall(ids, out["R"]["rows"]))
+        self.assertEqual(len(re.findall(ids, out["R"]["rows"])), 3)
+        self.assertEqual(re.findall(self.SEG, out["R"]["bar"]), [("open", "true", "3"), ("aside", "false", "1")])
+        self.assertEqual(out["R"]["title"], "Open")
+        self.assertNotIn("hidden", out["urls"][-1])
 
     def test_hide_posts_the_row_and_undo_posts_it_back(self):
         out = self.run_page(f"""shellRun(cmd('contribution.hide'), C.get('{ONE}')); await flush(); R.rows = ELS.rows.html;

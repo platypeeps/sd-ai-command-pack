@@ -34,6 +34,8 @@ SNOOZE_JS = (V2 / "static" / "snooze.js").read_text(encoding="utf-8")
 SHELL_JS = (V2 / "static" / "shell.js").read_text(encoding="utf-8")
 MARKUP_JS = (V2 / "static" / "markup.js").read_text(encoding="utf-8")
 COMMANDS_JS = (V2 / "static" / "commands.js").read_text(encoding="utf-8")
+# pack sd:7271: a suggested Queue row's Details are the Tasks page's, so today.html loads task-details.js before today.js.
+TASK_DETAILS_JS = (V2 / "static" / "task-details.js").read_text(encoding="utf-8")
 # reconcile reads the walk's rule for a shown row (sd:5113), so the extract carries that line too.
 RECONCILE = (re.search(r"^  const shownRow = .*$", SHELL_JS, re.M).group(0) + "\n"
              + re.search(r"^  function reconcile\(.*?^  }$", SHELL_JS, re.S | re.M).group(0))
@@ -87,7 +89,7 @@ class ReaderCase(ScreenCase):
     def run_page(self, body, search="", after=""):
         script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + PAGE + SHELL_MORE + READ_SHELL
                   + f"\nconst DOC0 = {json.dumps(self.doc)};\nlocation.search = {json.dumps(search)};\n"
-                  + "ANSWER = () => [200, DOC0];\n" + SNOOZE_JS + COMMANDS_JS + TODAY_JS + after
+                  + "ANSWER = () => [200, DOC0];\n" + SNOOZE_JS + COMMANDS_JS + TASK_DETAILS_JS + TODAY_JS + after
                   + "\nvar R = {};\n(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
                   + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
                   + "function run() { OUT.R = R; return JSON.stringify(OUT); }\n")
@@ -619,7 +621,7 @@ class TheBadge(ReaderCase):
                   + "ANSWER = (path, body) => path === '/api/now' ? [200, DOC0]"
                     " : path === '/api/decisions' ? [200, DECISIONS]"
                     " : [200, { revision: 'b'.repeat(64), ruling: { id: 99, kind: 'decision', body: 'x' } }];\n"
-                  + SNOOZE_JS + COMMANDS_JS + TODAY_JS + "\n" + DECISIONS_JS
+                  + SNOOZE_JS + COMMANDS_JS + TASK_DETAILS_JS + TODAY_JS + "\n" + DECISIONS_JS
                   + "\nvar R = {};\nconst click = (note, i) => ELS.decisions.listeners.click[0]({ target: { closest: s => s === 'button[data-option]'"
                     " ? { dataset: { note: String(note), option: String(i) }, closest: () => null } : null } });\n"
                   + "(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
