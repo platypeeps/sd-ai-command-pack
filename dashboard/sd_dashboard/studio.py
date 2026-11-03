@@ -1,6 +1,7 @@
-"""Studio (sd:6920, slice 2 of sd:6919): creative projects, each a folder with a `project.json`, and their artifacts.
+"""Studio (sd:6920, sd:6921; slices 2 and 3 of sd:6919): creative projects, each a folder with a `project.json`.
 
-The shape is `docs/work/2026-10-31-studio/design.md`. This slice reads and serves; it writes nothing.
+The shape is `docs/work/2026-10-31-studio/design.md`. Slice 2 reads and serves; slice 3 moves a project's stage on its
+sd item and pins or hides a file. Nothing else here writes.
 
 **Which projects.** Every `project.json` in a registered repository that sits under `REPO_ROOT`, found by a walk a few
 folders deep that skips dot folders and build output. The page names no repository: a machine with no `project.json`
@@ -19,6 +20,16 @@ file answers under `POLICY`, a sandbox, so an opened SVG runs nothing.
 
 **Seeking.** `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and `Content-Range` (`byte_range`): past the end
 is 416, and a header that does not parse, or asks for several ranges, gets the whole file (200).
+
+**The stage.** The item a project names holds its stage, as a Writing piece's does: `STAGES` is each kind's strip, and
+`move_stage` moves the item one step along it, at the revision the page read, with a note. A stale revision is a 409
+(`StaleItem`); a stage that is not the next one is a 400; neither writes. The page posts `/api/items/<n>/stage`, the
+route Writing and Watches post; `server.action_route` sends an item that is no writing piece and that one project names
+here. An item at a stage off its strip is refused, so a move never overwrites another tool's stage.
+
+**Pin and hide.** Documents' view state (`writes.set_view`), keyed `studio/<repo key>/<path in the repository>`: a
+rejected candidate hides without a delete. `view_request` refuses a file the gallery does not serve. A view store that
+does not read pins and hides nothing, and `store.reason` says why.
 """
 
 from __future__ import annotations
@@ -71,6 +82,16 @@ POLICY = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-s
 
 #: The file route's prefix.
 FILES_PREFIX = "/studio/files/"
+
+#: Each kind's stage strip, in order (the design's table). A project's item moves one stage at a time along it.
+STAGES = {
+    "shirt": ("brief", "candidates", "selected", "print_export", "approved", "ordered"),
+    "song": ("lyrics", "suno", "selections", "film", "delivered"),
+    "episode": ("idea", "outlined", "scripted", "in_production", "published"),
+}
+
+#: The first segment of a studio file's view key, so it shares no key with a Documents root.
+VIEW_ROOT = "studio"
 
 
 def _repo_root(repo_root: Path | None = None) -> Path:
@@ -201,8 +222,9 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
     return entry
 
 
-def projects(connection, repo_root: Path | None = None) -> tuple[list[dict], list[str]]:
-    """Every project under `REPO_ROOT`, by repository then folder, and the scan's own problems."""
+def projects(connection, repo_root: Path | None = None, *, listing: bool = True) -> tuple[list[dict], list[str]]:
+    """Every project under `REPO_ROOT`, by repository then folder, and the scan's own problems; `listing` false leaves
+    each root's files out."""
     keys, problems = repositories(connection, repo_root)
     found = []
     for key, checkout in keys.items():
@@ -210,21 +232,121 @@ def projects(connection, repo_root: Path | None = None) -> tuple[list[dict], lis
         for problem in unread:
             folder = Path(problem.filename or checkout).relative_to(checkout, walk_up=True).as_posix()
             problems.append(f"{key}{'' if folder == '.' else ': ' + folder} could not be read: {problem.strerror or problem}")
-        found.extend(entry for entry in (_project(key, checkout, manifest) for manifest in manifests) if entry is not None)
+        found.extend(entry for entry in (_project(key, checkout, manifest, listing=listing) for manifest in manifests)
+                     if entry is not None)
     return found, problems
 
 
 def document(connection, *, now: str = "", repo_root: Path | None = None) -> dict:
     """`/api/studio`: the projects, each with its roots' files, and `attention`, the projects that list an error."""
+    from .documents_screen import views
     from .v2.pages import attention
 
     found, problems = projects(connection, repo_root)
+    kept, unread = views(connection)
+    for entry in found:
+        _stage(connection, entry)
+        for root in entry["roots"]:
+            for file in root["files"]:
+                state = kept.get(view_key(f"{entry['repo']}/{file['path']}"), {})
+                file["pinned"], file["hidden"] = bool(state.get("pinned")), bool(state.get("hidden"))
     return {
         "read": now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "root": str(_repo_root(repo_root)), "projects": found, "problems": problems,
+        "store": {"available": not unread, "reason": unread},
         "attention": attention(("caution" if p["error"] or p["problems"] else "ok" for p in found),
                                {"caution": "projects whose project.json lists a problem"}),
     }
+
+
+def view_key(file: str) -> str:
+    """The view key of `/studio/files/<file>`: `studio/<repo key>/<path in the repository>`."""
+    return f"{VIEW_ROOT}/{file}"
+
+
+def next_stage(kind: str, current: str | None) -> str | None:
+    """The stage after `current` on the kind's strip: the first for an item with none, None at the end or off the strip."""
+    strip = STAGES[kind]
+    if not current:
+        return strip[0]
+    if current not in strip:
+        return None
+    at = strip.index(current) + 1
+    return strip[at] if at < len(strip) else None
+
+
+def _stage(connection, entry: dict) -> None:
+    """`entry` with its item's `stage`, the `next` one, the `strip` and the `revision` a move posts; a problem when the
+    item is missing, or at a stage off its kind's strip."""
+    from sd_db import workflow
+
+    entry.update(strip=list(STAGES.get(entry["kind"], ())), stage="", next="", revision="")
+    if entry["item"] is None or not entry["kind"]:
+        return
+    try:
+        state = workflow.item_state(connection, entry["item"])
+    except workflow.MissingItem:
+        entry["problems"].append(f"item sd:{entry['item']} does not exist")
+        return
+    current = state["item"]["stage"] or ""
+    entry.update(stage=current, next=next_stage(entry["kind"], current) or "", revision=state["revision"])
+    if current and current not in STAGES[entry["kind"]]:
+        entry["problems"].append(f"item sd:{entry['item']} is at stage {current!r}, which is not on the {entry['kind']} strip")
+
+
+def naming(connection, item: int, repo_root: Path | None = None) -> dict | None:
+    """The one project whose `project.json` names `item` and a kind, or None; ValueError when two name it."""
+    found = [p for p in projects(connection, repo_root, listing=False)[0] if p["item"] == item and p["kind"]]
+    if len(found) > 1:
+        raise ValueError(f"Two projects name sd:{item}: {', '.join(p['id'] for p in found)}. Name it in one project.json.")
+    return found[0] if found else None
+
+
+def move_stage(connection, item: int, project: dict, target: str, *, who: str, expected_revision: str) -> dict:
+    """Move `item` to `target`, the next stage on `project`'s strip, at `expected_revision`, with a comment note; the
+    item's state after. A stale revision raises `StaleItem` (409); any other stage raises `WorkflowError` (400). The
+    stage and the note are one transaction, so a failure writes neither."""
+    from sd_db import workflow
+    from sd_db.database import transaction
+    from sd_db.writes import add_note, set_item_fields
+
+    kind = project["kind"]
+    with transaction(connection):
+        state = workflow.item_state(connection, item)
+        if state["revision"] != expected_revision:
+            raise workflow.StaleItem(f"item {item} changed; reload it before applying this change")
+        current = state["item"]["stage"] or None
+        if current == target:
+            return state
+        if current and current not in STAGES[kind]:
+            raise workflow.WorkflowError(f"sd:{item} is at stage {current!r}, which is not on the {kind} strip; "
+                                         "move it from the shell")
+        following = next_stage(kind, current)
+        if target != following:
+            raise workflow.WorkflowError(f"A {kind} moves one stage at a time: {current or 'no stage'} goes to "
+                                         f"{following or 'nothing; it is at the end of its strip'}, not {target}.")
+        set_item_fields(connection, item, stage=target)
+        add_note(connection, item, "comment", f"Studio stage {current or 'none'} -> {target} by {who} ({project['id']})",
+                 session=who)
+    return workflow.item_state(connection, item)
+
+
+def view_request(payload: dict):
+    """`POST /api/studio/view`: `{"file", "pinned" | "hidden"}`, `file` as `/studio/files/<file>` names it; the write as
+    `action_route` returns one. A file the gallery does not serve now is refused, so a stale page writes nothing."""
+    from sd_db import writes
+
+    fields = {name: payload[name] for name in ("pinned", "hidden") if name in payload}
+    if (not isinstance(payload.get("file"), str) or set(payload) - {"file", "pinned", "hidden"} or not fields
+            or not all(type(value) is bool for value in fields.values())):
+        raise ValueError("Send the file, and pinned or hidden, true or false.")
+    file = payload["file"]
+
+    def write(connection):
+        if located(connection, file) is None:
+            raise ValueError(f"No studio file {file} is served: read the projects again.")
+        return {"file": file, **writes.set_view(connection, view_key(file), **fields)}
+    return write
 
 
 def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path, str] | None:
