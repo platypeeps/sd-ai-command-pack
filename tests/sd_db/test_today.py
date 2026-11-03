@@ -161,6 +161,30 @@ class TheSections(TodayCase):
         self.item("Done", status="done")
         self.assertEqual([row["id"] for row in today.unscheduled(self.connection)], [high, low, unranked, finished])
 
+    def test_suggested_is_ready_then_planned_then_unscheduled_once_each(self):
+        """Pack sd:7314: what sd-next offers next, in its order. An item counts once, under its first reason; one in
+        the lane or held by a build is the Queue view's merging, next, blocked or working row, so it is left out."""
+        low, high = self.item("Low ready", repo=APP, status="ready", priority=3), self.item("High ready", repo=APP, status="ready", priority=1)
+        later, sooner = self.item("Later", repo=APP, due="2026-09-30"), self.item("Sooner", repo=LIB, due="2026-09-07")
+        dated_ready = self.item("Ready and dated", repo=APP, status="ready", due="2026-09-08")
+        loose, urgent = self.item("Loose", repo=LIB, priority=4), self.item("Urgent", repo=APP, priority=0)
+        laned = self.item("Laned and ready", repo=APP, status="ready")
+        self.lane("example-owner/app", "e1", item=laned, status="failed", position=1)
+        planned_laned = self.item("Laned and dated", repo=APP, due="2026-09-10")
+        self.lane("example-owner/app", "e2", item=planned_laned, status="pending", position=2)
+        building = self.item("Building", repo=APP, status="ready")
+        ident = create_assignment(self.connection, item=building, role="author", status="queued")
+        self.connection.execute("UPDATE assignment SET scope = 'build', queued_at = ? WHERE id = ?", (WHEN, ident))
+        rows = today.suggested(self.connection, now=NOW)
+        self.assertEqual([(row["id"], row["why"]) for row in rows],
+                         [(high, "ready"), (low, "ready"), (dated_ready, "ready"), (sooner, "planned"), (later, "planned"),
+                          (urgent, "unscheduled"), (loose, "unscheduled")])
+        self.assertEqual({k: rows[3][k] for k in ("repo", "status", "due", "priority")},
+                         {"repo": LIB, "status": "planning", "due": "2026-09-07", "priority": None})
+        self.assertEqual(rows[5]["priority"], 0)
+        queued = today.queues(self.connection, now=NOW)
+        self.assertEqual(today.suggested(self.connection, now=NOW, queued=queued), rows, "a read's queues are reused")
+
     def test_blocked_says_why_from_the_status_change_or_a_waiting_note(self):
         vendor = self.item("Vendor")
         transition(self.connection, vendor, "blocked", who="operator", reason="Waits on the vendor\nmore detail")
