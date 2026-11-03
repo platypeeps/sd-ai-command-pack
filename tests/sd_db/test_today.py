@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from sd_db import (
@@ -20,6 +21,8 @@ from sd_db import (
 )
 from sd_db.migrate import initialise
 from sd_db.writes import add_note, transition
+
+from .test_wire import Served
 
 #: A fixed instant, so windows and estimates do not depend on when the suite runs.
 NOW = "2026-09-06T12:00:00Z"
@@ -420,3 +423,34 @@ class TheRepositoryFilter(TodayCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSatellite(unittest.TestCase):
+    """pack sd:7357: a satellite's `sd today` reads the hub over the wire and lists its lanes' failure followups."""
+
+    def test_a_satellite_lists_the_open_followup_of_its_own_lane(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        served = Served(Path(tmp.name))
+        self.addCleanup(served.stop)
+        hub = connect(served.database)
+        try:
+            upsert_repo(hub, APP, remote="https://github.com/example-owner/app")
+            upsert_repo(hub, LIB, remote="https://github.com/example-owner/lib")
+            hub.execute("UPDATE repo SET lane_host = 'build-2' WHERE path = ?", (APP,))
+            mine = create_item(hub, kind="task", title="Mine", repo=APP)
+            theirs = create_item(hub, kind="task", title="Hub's", repo=LIB)
+            failed = add_note(hub, mine, "followup", "Lane failed in prepare at aaaaaaaaaaaa: a blocking finding")
+            add_note(hub, theirs, "followup", "Lane failed in merge at bbbbbbbbbbbb: refused")
+            closed = add_note(hub, mine, "followup", "Lane failed in prepare at cccccccccccc: an older failure")
+            hub.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (WHEN, closed))
+        finally:
+            hub.close()
+        satellite: Any = served.connect()  # `sd today` takes either kind of connection
+        self.addCleanup(satellite.close)
+        own = today.sections(satellite, repos=[APP], now=NOW)
+        self.assertEqual([(row["id"], row["note"], row["title"]) for row in own["followups"]],
+                         [(mine, failed, "Lane failed in prepare at aaaaaaaaaaaa: a blocking finding")])
+        self.assertEqual(own["summary"]["followups"], 1)
+        # `sd today` with no `--only` reads every repository: the hub's lane and the satellite's alike.
+        self.assertEqual({row["id"] for row in today.sections(satellite, now=NOW)["followups"]}, {mine, theirs})

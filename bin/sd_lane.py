@@ -34,7 +34,9 @@ database and runs it under one runner lock per repository:
            with `--retry-review` after an incomplete review, sd:3037),
            then `merge`; a failed entry is marked and the runner goes on.
            A failed or skipped entry notes each item it carries with its
-           step, reason and head (`note_ended`, sd:5963).
+           step, reason and head (`note_ended`, sd:5963): a comment on a
+           hub-hosted lane, an open followup on any other, which the
+           next passing entry for that item resolves (sd:7357).
            While one entry ships, the next one's gate runs on its predicted
            landing (sd:2586, below). After a merge it deletes the remote
            branch, notes the item with the worktree's removal command and
@@ -265,8 +267,9 @@ PLACES = ("up", "down", "top")
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
 Gate = Callable[[pathlib.Path, str, str], dict[str, Any]]
-#: `(item, body, main checkout) -> what happened`: the landing's item note (sd:2568).
-Note = Callable[[int, str, pathlib.Path], str]
+#: `(item, body, main checkout) -> what happened`: the landing's item note (sd:2568). `note_ended` also
+#: passes `kind=`, `comment` or `followup` (sd:7357).
+Note = Callable[..., str]
 #: The codes of an entry that stops `prepared` for want of merge authority (sd:3132).
 RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
@@ -284,6 +287,8 @@ NOT_PUT_BACK = frozenset({"gate_failed"})
 BLOCKED = ("failed", "skipped", "prepared")
 #: The ends whose entry notes each item it carries (`note_ended`, sd:5963), as the retired runner noted its runs.
 NOTED = ("failed", "skipped")
+#: How each `note_ended` body starts: a passing entry resolves the open followups that start so (sd:7357).
+LANE_ENDED = tuple(f"Lane {status} in " for status in NOTED)
 
 
 class LaneError(RuntimeError):
@@ -1143,7 +1148,7 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
         row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
         return row
     row = update(queue, mark, read_first)
-    noted = note_ended(row, root)  # a release at merge fails the entry
+    noted = note_ended(row, root, queue=queue)  # a release at merge fails the entry
     return {**row, "note": noted} if noted else row
 
 
@@ -1775,7 +1780,7 @@ def import_locked(root: pathlib.Path, queue: Queue, path: pathlib.Path) -> dict[
             kept = kept.with_name(f"{kept.name.split('~')[0]}~{count}")
         path.rename(kept)
     drop_imported_bodies(queue)
-    noted = [note_ended(row, root) for row in ended_on_import(rows, old, host, path, landed)]
+    noted = [note_ended(row, root, queue=queue) for row in ended_on_import(rows, old, host, path, landed)]
     return {"imported": written, "file": str(path), **({"noted": noted} if noted else {})}
 
 
@@ -2826,18 +2831,23 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
     return fields
 
 
-def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None) -> dict[str, str]:
+def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None, *,
+               queue: Queue) -> dict[str, str]:
     """Note each item `row` carries, its own and its `closes`, once it ends failed or skipped (sd:5963).
 
     The note names the step, the reason's first line, the head and the step's
-    log, where the full text is (sd:7133), as a `comment`: `sd task note`
-    writes no `exec` note. No item status changes; the entry holds that
-    state. A write that fails is kept in the answer, `{"sd:N": "written" or
-    "failed: ..."}`, and changes no outcome. `note`
-    defaults to `default_note`, read at the call, so a suite can replace it.
+    log, where the full text is (sd:7133). It is a `comment` on a hub-hosted
+    lane and an open `followup` on any other (`ended_kind`, sd:7357), so the
+    lane host's own sessions see it in `sd today` with no message sent; a
+    passing entry resolves it (`resolve_ended`). `sd task note` writes no
+    `exec` note. No item status changes; the entry holds that state. A write
+    that fails is kept in the answer, `{"sd:N": "written" or "failed: ..."}`,
+    and changes no outcome. `note` defaults to `default_note`, read at the
+    call, so a suite can replace it.
     """
     if row.get("status") not in NOTED:
         return {}
+    kind = ended_kind(queue)
     reason = next((line.strip() for line in str(row.get("reason") or "").splitlines() if line.strip()),
                   str(row.get("code") or "no reason recorded"))
     head = str(row.get("head") or row.get("expected_head") or "an unrecorded head")[:12]
@@ -2848,10 +2858,78 @@ def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None
     written: dict[str, str] = {}
     for item in dict.fromkeys([row.get("item"), *(row.get("closes") or ())]):
         try:
-            written[f"sd:{item}"] = (note or default_note)(int(item), body, sd_lib.main_worktree_root(root))
+            written[f"sd:{item}"] = (note or default_note)(int(item), body, sd_lib.main_worktree_root(root),
+                                                            kind=kind)
         except Exception as error:  # noqa: BLE001 -- the entry's end stands; the answer says the note did not land
             written[f"sd:{item}"] = f"failed: {type(error).__name__}: {error}"[:400]
     return written
+
+
+def ended_kind(queue: Queue) -> str:
+    """`comment` when the hub hosts `queue`'s lane, else `followup` (sd:7357).
+
+    The hub hosts it when `repo.lane_host` is NULL, or names this machine
+    and this machine is the hub. Every other answer, a host that does not
+    read included, is a `followup`: an open note costs one resolve, a
+    failure no session on the lane host sees costs more. A lane host that
+    names the hub read from another machine is a `followup` too, for the
+    same reason. Without `sd_db` there is no other host.
+    """
+    if sd_lib.import_sd_db().module is None:
+        return "comment"
+    import sd_gate_receipts  # noqa: PLC0415
+    from sd_db.database import connect  # noqa: PLC0415
+
+    try:
+        database = hub_database(queue.environ)
+        connection = connect(database, write=False)
+        try:
+            host = sd_lib.lane_host(connection, queue.repository)[0]
+        finally:
+            connection.close()
+        if host is None or (host == this_host() and sd_gate_receipts.served_hub(database) is None):
+            return "comment"
+    except Exception:  # noqa: BLE001 -- unknown is not the hub's: the failure stays open
+        return "followup"
+    return "followup"
+
+
+def resolve_ended(row: dict[str, Any], queue: Queue) -> dict[str, str]:
+    """Resolve the open lane followups on each item a passing entry carries (sd:7357).
+
+    A passing entry is `merged` or `prepared` (`GATE_PASSED`); a lane
+    followup is an open `followup` whose body starts as `note_ended`'s does
+    (`LANE_ENDED`). Other followups stay open. The answer is
+    `{"sd:N": "resolved #id, ..." or "failed: ..."}` for each item that had
+    one or whose read failed; a failure leaves the followup open on every
+    machine and changes no outcome.
+    """
+    if row.get("status") not in GATE_PASSED or sd_lib.import_sd_db().module is None:
+        return {}
+    from sd_db import writes  # noqa: PLC0415
+    from sd_db.database import connect  # noqa: PLC0415
+
+    items = [int(item) for item in dict.fromkeys([row.get("item"), *(row.get("closes") or ())])]
+    try:
+        connection = connect(hub_database(queue.environ), write=True)
+    except Exception as error:  # noqa: BLE001 -- the entry passed; its followups stay open
+        return {f"sd:{item}": f"failed: {type(error).__name__}: {error}"[:400] for item in items}
+    resolved: dict[str, str] = {}
+    try:
+        for item in items:
+            try:
+                open_ids = [found["id"] for found in connection.execute(
+                    "SELECT id, body FROM note WHERE item = ? AND kind = 'followup' AND resolved_at IS NULL"
+                    " ORDER BY id", (item,)) if str(found["body"]).startswith(LANE_ENDED)]
+                for number in open_ids:
+                    writes.resolve_note(connection, number)
+                if open_ids:
+                    resolved[f"sd:{item}"] = "resolved " + ", ".join(f"#{number}" for number in open_ids)
+            except Exception as error:  # noqa: BLE001 -- what is not resolved stays open
+                resolved[f"sd:{item}"] = f"failed: {type(error).__name__}: {error}"[:400]
+    finally:
+        connection.close()
+    return resolved
 
 
 def lane_host_reason(root: pathlib.Path, environ: dict[str, str] | None = None) -> str | None:
@@ -3607,7 +3685,7 @@ def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
         return settled
     reclaimed = runner_write(queue, reclaim_stopped)
     drop_hub_stops(queue, set(stops) - running)
-    noted = [note_ended(row, root) for row in ended]
+    noted = [note_ended(row, root, queue=queue) for row in ended]
     return {**({"import": imported} if imported else {}), **({"reclaimed": reclaimed} if reclaimed else {}),
             **({"noted": noted} if noted else {})}
 
@@ -3844,9 +3922,13 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
         outcome = {"status": "failed", **stage, "reason": f"{type(error).__name__}: {error}"[:600]}
     except Exception as error:  # a broken entry is marked; the next one still runs
         outcome = {"status": "failed", **stage, "reason": f"{type(error).__name__}: {error}"[:600]}
-    noted = note_ended({**entry, **outcome}, root, note)  # before the finish write, so a hub stop keeps it
+    # Before the finish write, so a hub stop keeps it.
+    noted = note_ended({**entry, **outcome}, root, note, queue=queue)
     if noted:
         outcome["note"] = noted
+    resolved = resolve_ended({**entry, **outcome}, queue)
+    if resolved:
+        outcome["resolved"] = resolved
     try:
         finish_entry(queue, entry, token, outcome)
     except Stop as error:
