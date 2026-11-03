@@ -665,11 +665,15 @@ DEEP: frozenset[str] = frozenset()
 
 #: Names the dead-code check must not flag, because something other than a
 #: call site reaches them -- a base class dispatching to a method by name, say.
-#: Empty since sd:719 step 3 deleted `dashboard/markup.py`, whose
-#: `html.parser.HTMLParser` handlers were the four entries. This is the whole
-#: exemption list; it is not a place to put a function nobody could find a
-#: caller for.
-DYNAMIC: frozenset[str] = frozenset()
+#: This is the whole exemption list; it is not a place to put a function
+#: nobody could find a caller for.
+DYNAMIC: frozenset[str] = frozenset({
+    # `html.parser.HTMLParser` calls its `handle_*` methods by name (sd:7258).
+    "bin/sd_research_highlight.py::Scan.handle_data",
+    "bin/sd_research_highlight.py::Scan.handle_endtag",
+    "bin/sd_research_highlight.py::Scan.handle_startendtag",
+    "bin/sd_research_highlight.py::Scan.handle_starttag",
+})
 
 #: Duplicate function pairs already in the tree, each as a sorted 2-tuple.
 CLONES = frozenset({
@@ -955,9 +959,9 @@ class CodeHealth(unittest.TestCase):
 
         The loop above checked only that each entry still exists. An entry
         whose function later gained a static reference stayed listed, and the
-        dead-code check went on skipping it. `DYNAMIC` is empty today, so this
-        lends it a function the corpus does reference and expects the stale
-        report the other baselines get.
+        dead-code check went on skipping it. This lends it a function the
+        corpus does reference and expects the stale report the other
+        baselines get.
         """
 
         referenced = next(

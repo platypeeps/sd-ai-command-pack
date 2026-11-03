@@ -479,6 +479,30 @@ Draining is six steps per request, and the order matters:
      under My Drive's root; create the repo folder when it is missing, and do
      not adopt a `Briefs` folder found somewhere else.
 
+     **An update marks what changed (sd:7252).** Where the request names a
+     `file` that is not in the trash, the reader has seen that copy, so mark
+     the paragraphs that differ from it. Read the Doc with
+     `get_doc_as_markdown` (`comment_mode: "none"`) into a file, write
+     `content` to a `.md` file, and run
+     `sd-research-kit highlight --previous <read-back.md> --since "<time>" <content.md> <out.html>`.
+     `<time>` is the file's last-modified time as Drive reports it, in local
+     time with its zone. Then replace the body with `update_drive_file`,
+     `file_path` the `<out.html>` and `source_format: "html"`: an HTML import
+     keeps headings, tables and code blocks as the Markdown one does. Each
+     changed paragraph, list item, heading, table cell and code block gets a
+     yellow background. One note opens the Doc: the count, how many earlier
+     paragraphs no longer appear, and their sections, or `No changes since`.
+     The read-back holds a reader's own edits, so they count as seen. A read
+     that fails, or a `highlight` that exits non-zero, leaves the request: an
+     unknown baseline would mark nothing or everything. Three writes carry
+     no mark. A create has nothing to compare against. A Notion mirror is out
+     of scope for now. And `sd-publish-drive`'s publishing folder is not a
+     mirror: a blog publishes from it, so a review mark there would ship.
+     The headless Publish now drain gets `get_doc_as_markdown`,
+     `update_drive_file`, `highlight` and Write to `sd-<run id>-*` names
+     at the top of the workspace-mcp attachments folder only for a run
+     that holds such an update, and its prompt names those paths.
+
    - `notion-row` -- the Notion connector, one database row. Run
      `sd-research-kit project` first, at the start of the drain, and drain
      experiments before tasks: a task's plan refuses while its experiment has

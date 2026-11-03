@@ -458,6 +458,34 @@ def unscheduled(connection: sqlite3.Connection, *, repos: Iterable[str | None] |
             for row in rows if row["id"] not in laned]
 
 
+def suggested(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None, now: str | None = None,
+              queued: list[dict] | None = None) -> list[dict]:
+    """What sd-next offers next (pack sd:7314), in its order: `queues`' ready items, then `planned` soonest first,
+    then `unscheduled` highest priority first. Each row is `id`, `repo`, `title`, `status`, `why` (`ready`,
+    `planned` or `unscheduled`), `due` and `priority`.
+
+    An item counts once, under its first reason. One with a lane entry or a build assignment is left out: the
+    Queue view shows it as a merging, next, blocked or working row. `queued` is `queues`' rows when the caller
+    read them already. Live items and the per-repo cap are the caller's: they depend on what it shows.
+    """
+    queued = queues(connection, repos=repos, now=now) if queued is None else queued
+    taken = {row["id"] for row in queued if row["queue"] in ("build", "lane")}
+    ready = [row for row in queued if row["queue"] == "ready"]
+    fields = {row["id"]: row for row in connection.execute(
+        f"SELECT id, due, priority FROM item WHERE id IN ({', '.join('?' for _ in ready)})",
+        [row["id"] for row in ready])} if ready else {}
+    found = []
+    for why, rows in (("ready", [{**row, **dict(fields[row["id"]])} for row in ready]),
+                      ("planned", planned(connection, repos=repos, now=now)),
+                      ("unscheduled", unscheduled(connection, repos=repos))):
+        for row in rows:
+            if row["id"] not in taken:
+                taken.add(row["id"])
+                found.append({"id": row["id"], "repo": row["repo"], "title": row["title"], "status": row["status"],
+                              "why": why, "due": row.get("due"), "priority": row.get("priority")})
+    return found
+
+
 def blocked(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
     """Open work items (`reads.WORK_KIND`) that are blocked or whose newest comment says they wait on someone:
     `status`, `why` (the reason on the newest move to blocked, else that comment), `since`."""
