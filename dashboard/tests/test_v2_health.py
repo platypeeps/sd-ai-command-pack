@@ -34,7 +34,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_dashboard import health_collectors, health_screen, runtime, server, v2
+from sd_dashboard import (
+    health_collectors,
+    health_screen,
+    operations_screen,
+    runtime,
+    server,
+    v2,
+)
 from sd_db import credentials, upsert_repo, writes
 from sd_db.writes import record_state, snooze
 from support import NOW, ScreenCase
@@ -1614,7 +1621,9 @@ class ThePage(Collectors, BrowserSession):
     def test_the_rail_opens_health_at_its_page(self):
         self.assertEqual(v2.SECTIONS["Health"], "/fleet-health")
         self.assertNotIn("Health", v2.CLASSIC)
-        self.assertIn("/operations?area=sessions", v2.SCREENS.values())
+        # Health's "Open Sessions in Operations" opens the Sessions view of the rail's Operations entry (pack sd:7266).
+        self.assertEqual(v2.CLASSIC.get("Operations"), "/operations")
+        self.assertIn("sessions", dict(operations_screen.AREAS))
 
 
 # Extras the Health script reads from the shell that the Tasks stand-in does not carry.

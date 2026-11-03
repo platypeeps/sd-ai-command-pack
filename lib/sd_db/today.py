@@ -29,12 +29,11 @@ from .reads import (
     today_items,
 )
 from .reporting import _current_basis
+from .runner import OWNING
 from .ship import this_host
 
 #: `sd_lane.KEY_PREFIX`: a lane entry is the newest `checkpoint` row of its key.
 LANE_KEY_PREFIX = "lane:v1:"
-#: `workflow.ACTIVE_ASSIGNMENTS`, copied because `workflow` imports `reads`, which this reads.
-ACTIVE_ASSIGNMENTS = ("queued", "running", "ending")
 #: Lane states in the order `landing` lists them; the queue holds the first two.
 LANE_ORDER = ("running", "pending", "prepared", "handed_back", "failed", "skipped")
 #: The section keys of `sections`, in the order every renderer prints them.
@@ -449,10 +448,10 @@ def unscheduled(connection: sqlite3.Connection, *, repos: Iterable[str | None] |
            AND item.kind NOT IN ({', '.join('?' for _ in _UNSCHEDULED_SKIPS)})
            AND {_unparked_clause(connection)} AND {where}
            AND NOT EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id
-                            AND assignment.status IN ({', '.join('?' for _ in ACTIVE_ASSIGNMENTS)}))
+                            AND assignment.status IN ({', '.join('?' for _ in OWNING)}))
          ORDER BY item.priority IS NULL, item.priority ASC, item.id ASC
         """,
-        (*_UNSCHEDULED_SKIPS, *values, *ACTIVE_ASSIGNMENTS),
+        (*_UNSCHEDULED_SKIPS, *values, *OWNING),
     ).fetchall()
     return [{"id": row["id"], "repo": row["repo"], "status": row["status"], "title": row["title"],
              "priority": row["priority"], "created_at": row["created_at"]}

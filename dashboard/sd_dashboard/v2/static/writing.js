@@ -115,7 +115,7 @@ addEventListener('DOMContentLoaded', () => {
 
   // ---------- Board ----------
   // selected is the piece the editor and the URL follow.
-  // parked: Open | Parked | All (sd:6701), kept as ?parked=.
+  // parked: Open | Parked (sd:6701), kept as ?parked=.
   let selected = null, parked = window.shell.aside.mode('parked'), view = 'board';
   const keep = () => { const v = window.shell.aside.param(parked); return v ? { parked: v } : {}; };
   function card(p) {
