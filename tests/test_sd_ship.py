@@ -3466,6 +3466,53 @@ roles:
                 self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
         self.assertFalse(self.remote.pull_requests)
 
+    def test_a_co_delivered_item_a_teammate_run_holds_refuses_prepare_and_the_merge_before_it_publishes(self):
+        """pack sd:7221: a lead's in-session builder may still write; only its lead's `--end` hands the item over."""
+        from sd_db import teammate
+
+        self.task_item("task")
+        other = self.closes_items()[0]
+
+        def start():
+            return teammate.start(self.connection, [other], worktree="/w/teammate", branch="feat/t",
+                                  budget_minutes=60, owner="lead")
+        start()
+        with self.assertRaises(ship.Refusal) as caught:
+            self.unanswered("--deliver", "--title", "A change", *self.also(other)).prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "teammate_held")
+        self.assertIn(f"sd assignments beat {other} --end", caught.exception.workflow["next_action"])
+        self.assertFalse(self.remote.pull_requests)
+        teammate.end(self.connection, other)
+        number = self.unanswered("--deliver", "--title", "A change", *self.also(other)).prepare()["pull_request"]["number"]
+
+        def started_during_the_gate(body):
+            start()
+            return []
+        with patch.object(ship.sd_lib, "demoted_trailers", side_effect=started_during_the_gate), \
+                patch.object(ship.time, "sleep"), self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "teammate_held")
+        self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
+
+    def test_a_held_item_refuses_prepare_before_it_commits_or_catches_up(self):
+        """pack sd:7221 round 4: the builder may still write its worktree, so prepare writes none of it first."""
+        from sd_db import teammate
+
+        before = self.shared_context()  # the branch is behind main, so --catch-up would merge
+        teammate.start(self.connection, [self.item], worktree="/w/teammate", branch="feat/t",
+                       budget_minutes=60, owner="lead")
+        message = self.directory / "message.txt"
+        message.write_text("focused change")
+        for extra in (["--catch-up"], ["--path", "src.py", "--message-file", str(message)]):
+            if "--path" in extra:
+                (self.root / "src.py").write_text("held edit\n")
+            status = _git(self.root, "status", "--porcelain")
+            with self.subTest(extra=extra), self.assertRaises(ship.Refusal) as caught:
+                self.prepare(*extra)
+            self.assertEqual(caught.exception.workflow["blocker"]["code"], "teammate_held")
+            self.assertEqual(_git(self.root, "rev-parse", "HEAD"), before)
+            self.assertEqual(_git(self.root, "status", "--porcelain"), status)
+
     def test_a_closing_set_read_at_another_head_refuses_the_merge(self):
         """Failure table, row 3: the stored set names the head it was read at."""
         self.task_item("task")

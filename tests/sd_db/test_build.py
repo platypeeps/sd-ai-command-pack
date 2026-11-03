@@ -1009,6 +1009,21 @@ class Backup(Case):
         self.assertFalse(backup._copy_runner_journal(self.database, directory, {"runner_run": 1}))
         backup._check_runner_records(self.db, directory)
 
+    def test_a_teammate_run_needs_no_journal(self):
+        """pack sd:7221: a lead's teammate run, open or released, has no runner journal, and the backup passes."""
+        item = self.item(status="in_progress")
+        for released in (None, "2026-11-02T11:00:00+00:00"):
+            self.db.execute("INSERT INTO assignment (item, role, status, scope) VALUES (?, 'author', 'in_session', "
+                            "'teammate')", (item,))
+            lead = self.db.execute("SELECT MAX(id) FROM assignment").fetchone()[0]
+            self.db.execute("INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, "
+                            "retained_path, created_at, updated_at, released_at) "
+                            "VALUES (?, ?, 1, ?, 'feat/x', 'lead', '/w', '/w', '', '', ?)",
+                            (f"teammate{lead}", lead, A, released))
+        directory = self.snapshot()
+        self.assertFalse(backup._copy_runner_journal(self.database, directory, {"runner_run": 2}))
+        backup._check_runner_records(self.db, directory)
+
     def test_a_runner_run_still_needs_its_journal(self):
         self.db.execute("INSERT INTO assignment (item, role, status, scope) VALUES (?, 'author', 'blocked', 'item')",
                         (self.item(status="planning"),))

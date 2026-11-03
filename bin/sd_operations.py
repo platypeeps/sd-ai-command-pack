@@ -110,6 +110,42 @@ def queue_builds(args: argparse.Namespace) -> int:
     return 0
 
 
+def beat_teammate(args: argparse.Namespace) -> int:
+    """`sd assignments beat ITEM`: a teammate run's beat; `--start` registers one, `--end` ends it (pack sd:7221)."""
+    sd_db = sd_handoff_rows.library()
+    try:
+        import sd_db.teammate as teammate
+    except ImportError:
+        raise WorkRefusal("update this pack checkout, whose lib/ is the sd_db bin/ runs for teammate runs") from None
+    if not args.start and (args.worktree or args.branch or args.budget is not None):
+        raise WorkRefusal("--worktree, --branch and --budget go with --start")
+    if args.start and (not args.worktree or not args.branch or args.budget is None):
+        raise WorkRefusal("--start needs --worktree, --branch and --budget")
+    if args.reason is not None and not args.end:
+        raise WorkRefusal("--reason goes with --end")
+    if not args.start and len(args.items) != 1:
+        raise WorkRefusal("a beat or an end names one item of the run")
+    connection = sd_handoff_rows.connect(sd_db, write=True)
+    try:
+        if args.start:
+            found = teammate.start(connection, args.items, worktree=str(Path(args.worktree).expanduser().resolve()),
+                                   branch=args.branch, budget_minutes=args.budget, owner=getpass.getuser())
+            result = {"run": found["id"], "due": found["due"], "items": [m["item"] for m in found["members"]]}
+            line = f"teammate run {found['id']} started; due {found['due']}"
+        elif args.end:
+            run = teammate.end(connection, args.items[0], reason=args.reason or "")
+            result, line = {"run": run, "ended": True}, f"teammate run {run} ended"
+        else:
+            run = teammate.beat(connection, args.items[0])
+            result, line = {"run": run, "beat": True}, f"teammate run {run} beat"
+    except (sd_db.SdDbError, ValueError) as error:
+        raise WorkRefusal(str(error)) from error
+    finally:
+        connection.close()
+    print(json.dumps(result, ensure_ascii=False) if args.json else line)
+    return 0
+
+
 def list_sessions(args: argparse.Namespace) -> int:
     """`sd assignments dispatch --sessions`: the live Claude sessions and the worktrees each holds (pack sd:6024).
 
@@ -454,4 +490,18 @@ def register(groups: Any) -> None:
                               help="supervise one build or draft run; the tick starts it")
             mode.add_argument("--sessions", action="store_true",
                               help="list the live Claude sessions and the worktrees each holds")
+            parser.add_argument("--json", action="store_true")
+            # One verb for an in-session builder (pack sd:7221, ruling note #41072): the beat, and with a flag the
+            # lead's start or end of the run.
+            parser = verbs.add_parser("beat", help="beat the teammate run that holds an item; --start or --end it")
+            parser.set_defaults(handler=beat_teammate)
+            parser.add_argument("items", nargs="+", type=item_id, help=ITEM_HELP)
+            mode = parser.add_mutually_exclusive_group()
+            mode.add_argument("--start", action="store_true",
+                              help="the lead registers a run for the items, the first its lead")
+            mode.add_argument("--end", action="store_true", help="the lead ends the run once the builder reported")
+            parser.add_argument("--worktree", help="with --start: the builder's worktree")
+            parser.add_argument("--branch", help="with --start: the builder's branch")
+            parser.add_argument("--budget", type=int, metavar="MINUTES", help="with --start: the builder's budget")
+            parser.add_argument("--reason", help="with --end: why it ended (default: ended by its lead)")
             parser.add_argument("--json", action="store_true")
