@@ -320,6 +320,30 @@ def role(connection, name=None) -> Role:
     return Role("elsewhere", holder, f"{HUB_NAME} names {holder}, and this node is {mine}", told)
 
 
+def satellite_role(home: Path | str | None = None) -> Role | None:
+    """`elsewhere` when this home names a hub (`hub.json`), else None.
+
+    A satellite holds no database and no role, whatever the hub's setting
+    says. A `hub.json` that does not parse raises `HubConfigError`, as `read`.
+    """
+    satellite = read(home)
+    if satellite is None:
+        return None
+    return Role("elsewhere", satellite.host, f"this machine is a satellite of {satellite.host} (hub.json)")
+
+
+def machine_role(connection, *, home: Path | str | None = None, name=None) -> Role:
+    """`sd-db fence`'s answer on an open connection: `satellite_role`, else `role`.
+
+    A `hub.json` that does not read is `unknown`, never a hub.
+    """
+    try:
+        found = satellite_role(home)
+    except HubConfigError as error:
+        return Role("unknown", None, str(error))
+    return found or role(connection, name)
+
+
 def role_at(path: Path, name=None) -> Role:
     """`role` on a fresh read-only connection to `path`; a database that does not open is `unknown`."""
     from .database import connect

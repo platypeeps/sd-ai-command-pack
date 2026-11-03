@@ -231,8 +231,8 @@ def writing_controls(connection, row, *, state=None):
             tag("ul", join(tag("li", problem) for problem in gates["problems"]))
             if gates["problems"] else tag("p", "Checks match the current draft.", class_="hint")]
     for publication in detail.get("publications", []):
-        phase = publication["phase"]
-        status = "Publication needs reconciliation" if publication.get("reconcile_required") else "Publication " + phase
+        phase = publication["phase"] if isinstance(publication["phase"], str) else ""  # a claim's JSON may hold any value
+        status = "Publication needs reconciliation" if publication.get("reconcile_required") else ("Publication " + phase).strip()
         body.append(tag("article", tag("h3", status),
             tag("p", "Claim " + publication["id"], class_="hint"),
             tag("p", "This receipt covers an earlier draft. Review the current draft before publishing again.", class_="hint")
