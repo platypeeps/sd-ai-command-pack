@@ -26,6 +26,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import subprocess
+import time
 from dataclasses import dataclass
 
 from .errors import SdDbError
@@ -35,6 +36,12 @@ TAILNET = ipaddress.IPv4Network("100.64.0.0/10")
 #: Seconds for one `tailscale` call. A stalled daemon refuses a session; it
 #: does not hold the listener's thread for a TCP timeout.
 TIMEOUT = 10.0
+#: Seconds `this_name` waits before each fresh read while the daemon runs
+#: but reads this node offline. A control-plane blip of a few seconds
+#: failed a lane merge, a prepare and an hourly backup that passed minutes
+#: later (pack sd:7281). Five seconds in all, well under the 120 s bound
+#: machine-setup gives `sd-db fence`; a node still offline then raises.
+ONLINE_PAUSES = (0.5, 1.0, 1.5, 2.0)
 
 
 class TailnetError(SdDbError):
@@ -141,24 +148,32 @@ def name(self_record) -> str | None:
     return self_record["DNSName"].strip().rstrip(".").lower() or None
 
 
-def this_name(run=run) -> str:
+def this_name(run=run, sleep=time.sleep) -> str:
     """This node's tailnet name: the one the console renames (hub failover D3).
 
     A stopped or logged-out daemon, one cut from the control plane, or one
     that names no node, raises `TailnetError`; the fence reads that as
     unknown, never as a name. Offline, `DNSName` comes from the cached
     netmap, so it can be a name the console has since given another node.
+    A running daemon that reads this node offline is read again after each
+    of `ONLINE_PAUSES`, so a short blip is not a refusal; only a fresh
+    online read names the node. Any other failure raises at once.
     """
-    try:
-        state = json.loads(run(["tailscale", "status", "--json"]))
-        backend, found = state.get("BackendState"), name(state.get("Self"))
-        online = state["Self"].get("Online")
-    except (KeyError, TypeError, ValueError, AttributeError) as error:
-        raise TailnetError("cannot read this Tailscale node's name") from error
-    if backend != "Running":
-        raise TailnetError(f"Tailscale is not running ({backend})")
-    if online is not True:
-        raise TailnetError("this node is not connected to the Tailscale control plane, so its name may be stale")
+    for pause in (*ONLINE_PAUSES, None):
+        try:
+            state = json.loads(run(["tailscale", "status", "--json"]))
+            backend, found = state.get("BackendState"), name(state.get("Self"))
+            online = state["Self"].get("Online")
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise TailnetError("cannot read this Tailscale node's name") from error
+        if backend != "Running":
+            raise TailnetError(f"Tailscale is not running ({backend})")
+        if online is True:
+            break
+        if pause is None:
+            raise TailnetError("this node is not connected to the Tailscale control plane, "
+                               "so its name may be stale")
+        sleep(pause)
     if found is None:
         raise TailnetError("Tailscale names no tailnet name for this node")
     return found
