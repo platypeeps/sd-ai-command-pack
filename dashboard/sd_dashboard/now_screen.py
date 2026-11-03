@@ -654,6 +654,8 @@ def lane_summary(queue: dict) -> dict:
     return {"merging": states.get("merging", 0), "next": states.get("next", 0), "blocked": states.get("blocked", 0),
             "landed": states.get("landed", 0), "landed_lanes": len(landed_in), "gates": queue.get("gates") or {},
             "load": queue.get("load") or {}, "unread": len(problems),
+            # Today's Retry claims a fresh read only for a checkout this list leaves out (pack sd:7315).
+            "unread_paths": [str(p["repo"]) for p in problems if p.get("repo")],
             "unread_why": "; ".join(f"{Path(str(p.get('repo') or '?')).name}: {p.get('error') or 'no reason given'}" for p in problems[:3])}
 
 

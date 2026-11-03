@@ -539,7 +539,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // A lane write that did not land, said one way on Queue and on Today (pack sd:7315). Only a 4xx wrote nothing
   // (queue_screen.move); a 502, another status or no answer may follow a landed write (sd:3339). A 409 is a queue that
   // changed since the read: the page has read it again, so the line drops the server's "Read it again, then retry", says
-  // when, and says a press acts on that read. `read` is false when that read failed: then nothing claims a fresh read.
+  // when, and says a press acts on that read. `read` is false when that read failed or left this repo's lane out: then
+  // nothing claims a fresh read.
   // `why` is the reason alone, for a toast that names the row.
   function notDone(repo, item, action, err, read = true) {
     const why = String(err.message).replace(/([^.!?])$/, '$1.'), known = err.status >= 400 && err.status < 500;
@@ -583,6 +584,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (action === 'reclaim' && !(await letGo(l, item, claim))) return;
     if (action === 'approve' && !(await grant(l, item, head))) return;
     QV.busy = true; queueView();
+    let failed = null;
     try {
       const body = { repo: l.path, item, action, revision: l.revision };
       if (action === 'retry' || action === 'approve' || action === 'requeue') body.head = head;
@@ -591,10 +593,15 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       const order = out.pending ? ` Order now: ${out.pending.map(n => `sd:${n}`).join(', ')}.` : '';
       qSaid = { ok: true, text: `${l.repo}: sd:${item} ${DONE[action]}.${order} ${out.edits || ''}` };
     } catch (err) {
-      qSaid = { ok: false, text: notDone(l.repo, item, action, err).text };
+      failed = err; qSaid = null;
     }
     QV.busy = false;
     await loadQueue();
+    // A failed write is said after the read again, and claims that read only when it listed this repo's lane.
+    if (failed) {
+      qSaid = { ok: false, text: notDone(l.repo, item, action, failed, !!(QV.lanes && QV.lanes.lanes.some(x => x.path === l.path))).text };
+      queueView();
+    }
   }
   async function buildAct(b) {
     if (QV.busy || !QV.built || QV.built.error) return;
@@ -793,8 +800,10 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
         await reading.reread();
         return out;
       } catch (err) {
-        const read = await Promise.resolve(load()).catch(() => false);
-        const said = notDone(o.repo, o.item, action, err, read !== false);
+        // The read again counts for this row only when it read this repo's lane too.
+        const read = await Promise.resolve(load()).catch(() => false) !== false && DOC && !DOC.sources.lane
+          && !((DOC.lane || {}).unread_paths || []).includes(o.repoPath);
+        const said = notDone(o.repo, o.item, action, err, read);
         needsSaid(said.text);
         throw new Error(said.why);
       }

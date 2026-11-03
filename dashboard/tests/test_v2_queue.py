@@ -312,6 +312,11 @@ class TheRows(Lane, ScreenCase):
         self.assertEqual(now_screen.lane_summary(doc)["blocked"], 1)
         self.assertEqual([row["item"] for row in now_screen.lane_rows(doc["lanes"])], [still])
 
+    def test_todays_lane_summary_names_each_checkout_whose_lane_was_not_read(self):
+        # Review of pack sd:7315: Today's Retry claims a fresh read only for a lane this list leaves out.
+        doc = {"lanes": [], "problems": [{"repo": "/repos/pack", "error": "sd-ship gave no answer"}, "malformed"]}
+        self.assertEqual(now_screen.lane_summary(doc)["unread_paths"], ["/repos/pack"])
+
     # sd:3398: a cancelled entry is a row, so Re-queue can name the head the operator cancelled.
     def test_a_cancelled_entry_carries_its_head_and_when_it_was_cancelled(self):
         cancelled = next(row for row in self.doc()["lanes"][0]["rows"] if row["state"] == "cancelled")
@@ -1523,6 +1528,23 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertRegex(out["R"]["said"], r"^system: sd:12 not moved up: The queue changed since the page read it\. "
                                            r"Read again at \d\d:\d\d; a press now acts on that read\.$")
         self.assertEqual(out["gets"].count("/api/queue"), 2)
+
+    def test_a_stale_write_whose_read_again_failed_claims_no_fresh_read(self):
+        # A 409, then a lane read that failed, or one that left this repo out, claims no read (review of pack sd:7315).
+        lost = queue_screen.document(self.connection, now=NOW)
+        lost = {**lost, "lanes": [x for x in lost["lanes"] if x["path"] != str(self.checkout)],
+                "problems": [{"repo": str(self.checkout), "error": "database is locked"}]}
+        for name, after in (("offline", [502, {"error": "offline"}]), ("left out", [200, lost])):
+            with self.subTest(name):
+                out = self.run_view("const A2 = ANSWER; let moved = false;"
+                                    f" ANSWER = (p, b) => {{ if (p === '/api/queue/move') moved = true;"
+                                    f" return moved && p === '/api/queue' ? {json.dumps(after)} : A2(p, b); }};"
+                                    f"open('system'); act('button[data-act]', {{ repo: {json.dumps(str(self.checkout))}, item: '12', act: 'up' }});"
+                                    " await flush(); await flush(); await flush(); R.said = ELS['queue-said'].textContent;",
+                                    answers={"/api/queue/move": [409, {"error": "The queue changed since the page read it. Read it"
+                                                                                " again, then retry.", "reload": True}]})
+                self.assertEqual(out["R"]["said"], "system: sd:12 not moved up: The queue changed since the page read it."
+                                                   " It was not read again: Read again tries it.")
 
     def test_a_build_run_cancel_asks_first_and_send_to_builder_asks_for_the_finding(self):
         out = self.run_view("window.shell.confirm = a => { OUT.asked = a; return Promise.resolve(true); };"

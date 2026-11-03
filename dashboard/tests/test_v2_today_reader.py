@@ -289,6 +289,20 @@ R.said = ELS['needs-said'].textContent;""")
         self.assertEqual(out["R"]["said"], "system: sd:5780 not queued again: The queue changed since the page read it."
                                            " It was not read again: Read again tries it.")
 
+    def test_a_stale_retry_whose_today_read_left_its_lane_out_claims_no_fresh_read(self):
+        # Review of pack sd:7315: Today was read again, but not this repo's lane; the line claims no fresh read.
+        for name, part in (("lane dark", {"sources": {**self.doc["sources"], "lane": "lane collector failed"}}),
+                           ("lane partial", {"lane": {**self.doc["lane"], "unread_paths": ["/repos/system"]}})):
+            with self.subTest(name):
+                out = self.run_page(self.DECLINE + f"""const DOC1 = {{ ...DOC0, ...{json.dumps(part)} }};
+ANSWER = (path, body) => path === '/api/queue/move' ? [409, {{ error: {json.dumps(self.STALE)}, reload: true }}]
+  : OUT.gets.length > 1 ? [200, DOC1] : [200, DOC0];
+shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.said = ELS['needs-said'].textContent;""")
+                self.assertEqual(out["gets"], ["/api/now", "/api/now"])
+                self.assertEqual(out["R"]["said"], "system: sd:5780 not queued again: The queue changed since the page read it."
+                                                   " It was not read again: Read again tries it.")
+
     def test_a_retry_with_no_answer_says_its_outcome_is_not_known(self):
         out = self.run_page(self.DECLINE + f"""ANSWER = (path, body) => path === '/api/queue/move' ? [502, {{ error: 'sd-ship lane gave no answer.' }}] : [200, DOC0];
 shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
