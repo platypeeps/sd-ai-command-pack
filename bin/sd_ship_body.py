@@ -189,7 +189,8 @@ def refuse_teammate_held(connection, items) -> None:
     once its cited closes are read, `sd-ship prepare`, and `sd-ship merge`
     at its closing check and again right before it publishes.
     """
-    from sd_db import teammate  # noqa: PLC0415 - every caller holds an sd_db connection
+    sd_lib.import_sd_db()  # every caller holds an sd_db connection, so this finds it
+    from sd_db import teammate  # noqa: PLC0415
     for number in dict.fromkeys(items):
         held = teammate.holding(connection, number)
         if held:
