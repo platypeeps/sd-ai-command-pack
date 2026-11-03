@@ -3,7 +3,7 @@
 // /classic/contributions renders, never sample data. The dashboard makes no GitHub call: the "Settled on GitHub" lamp, each
 // row's settle date and the settled-per-day chart read the dates the shadow collector records (sd:5301). Acknowledge, Make task and
 // Dismiss run through dashboard routes and ask first: none has a verb that reverses it. Open on GitHub opens a tab (sd:5628);
-// Re-run collector asks the server to run sd shadow sync (sd:2207). The reference's Trackers view is not ported: its switch opens the classic Operations > Trackers.
+// Re-run collector asks the server to run sd shadow sync (sd:2207).
 // build (sd:5486): Hide and Unhide post /api/contributions/view, the view state Designs' Hide writes, each with Undo. A hidden
 // row leaves the Open rows, the lamps, the tallies and the badge; Hidden, in the Open table's Open | Hidden, lists it with Unhide.
 // Hide persists until Unhide, where Dismiss ends on new activity. An unread store hides nothing and turns both commands off.
