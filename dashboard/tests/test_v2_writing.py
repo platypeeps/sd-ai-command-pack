@@ -136,6 +136,36 @@ class TheDocument(Pieces):
             ideas = writing_screen.document(self.connection, now=NOW)["ideas"]
         self.assertEqual((ideas["count"], [r["title"] for r in ideas["rows"]]), (3, ["High idea"]))
 
+    def test_an_ideas_score_or_date_that_is_no_finite_number_or_text_is_unset(self):
+        """pack sd:7244 review: the vault's fields are JSON that `json.loads` reads, so a score may be 'nan', 'inf',
+        '1e999', a NaN or Infinity literal, or true; a date may be any of those or an object. A score that is no finite
+        number and a date that is no text read as unset, so one idea cannot put NaN in /api/writing and fail the page's
+        JSON parse for every piece."""
+        from sd_db import create_item
+
+        bad = ("nan", "inf", "-inf", "1e999", float("nan"), float("inf"), True, [3], {"n": 3})
+        for n, value in enumerate(bad):
+            create_item(self.connection, kind="idea", title=f"Odd idea {n}", status="planning", source="vault",
+                        path=f"Blog Ideas/Odd idea {n}.md", stage="inbox",
+                        fields={"kind": "blog-idea", "score": value, "dateCreated": value})
+        with mock.patch.object(writing_screen, "IDEAS", len(bad)):
+            doc = writing_screen.document(self.connection, now=NOW)
+        json.dumps(doc, allow_nan=False)  # raises ValueError on NaN or Infinity
+        self.assertEqual([(r["score"], r["created"]) for r in doc["ideas"]["rows"]],
+                         [(None, value if isinstance(value, str) else None) for value in bad])
+
+    def test_a_publication_url_that_is_no_text_is_no_publication(self):
+        """pack sd:7242 review, same class: a claim's state is JSON that `json.loads` reads, so its url may be a
+        number: the claim table's json_valid check refuses a NaN literal, but 1e999 passes it and reads as inf. Such a
+        claim is no live publication, and the document stays plain JSON."""
+        claim = "INSERT INTO publication_claim (id, item, payload, state, created_at, updated_at) VALUES (?, ?, '{}', ?, ?, ?)"
+        for n, url in enumerate(("1e999", "-1e999", "7")):
+            self.connection.execute(claim, (f"c{n}aim0000000", self.ids["fixture"], '{"phase": "published", "url": %s}' % url, NOW, NOW))
+        self.connection.commit()
+        doc = writing_screen.document(self.connection, now=NOW)
+        json.dumps(doc, allow_nan=False)
+        self.assertIsNone({p["id"]: p for p in doc["pieces"]}[self.ids["fixture"]]["publication"])
+
     def test_a_failed_ideas_read_is_unknown_with_its_reason_and_the_pieces_still_read(self):
         with mock.patch.object(writing_screen, "read_ideas", side_effect=sqlite3.OperationalError("no such column: stage")):
             doc = writing_screen.document(self.connection, now=NOW)

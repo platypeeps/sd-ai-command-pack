@@ -9,6 +9,7 @@ walks the questions, and Apply answers waits until none is open. Its `ideas` are
 count, each with a link only for http. A failed read is unknown with its reason, never an empty inbox.
 """
 
+import math
 import re
 from pathlib import Path
 
@@ -67,10 +68,20 @@ def read_ideas(connection) -> list[dict]:
 
 
 def _score(value) -> float | None:
+    """A finite number, or None: the fields are JSON, so a score may be a bool, 'nan', 'inf', '1e999' or an inf
+    literal, and one NaN in /api/writing fails the page's JSON parse for every piece (pack sd:7244 review)."""
+    if isinstance(value, bool):
+        return None
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
+
+
+def _text(value) -> str | None:
+    """`value` when it is text, else None: a JSON field may hold any value, an inf number too."""
+    return value if isinstance(value, str) else None
 
 
 def _ideas(connection) -> dict:
@@ -82,9 +93,9 @@ def _ideas(connection) -> dict:
     rows = []
     for row in got:
         fields = row["fields"]
-        url = fields.get("url") if isinstance(fields.get("url"), str) else ""
+        url = _text(fields.get("url")) or ""
         rows.append({"item": row["id"], "title": row["title"], "score": _score(fields.get("score")), "url": url,
-                     "href": href(url) if url else None, "created": fields.get("dateCreated")})
+                     "href": href(url) if url else None, "created": _text(fields.get("dateCreated"))})
     rows.sort(key=lambda idea: (idea["score"] is None, -(idea["score"] or 0), idea["title"].casefold()))
     return {"state": "read", "reason": "", "count": len(rows), "rows": rows[:IDEAS]}
 
@@ -104,7 +115,7 @@ def document(connection, *, now):
         draft, cut, words = _draft(state["document"])
         gates = state["gates"]
         claims = state.get("publications") or []
-        live = next((claim for claim in reversed(claims) if claim["url"]), None)
+        live = next((claim for claim in reversed(claims) if _text(claim["url"])), None)
         pieces.append({
             "id": row["id"], "title": row["title"], "stage": row["stage"], "parked": state["parked"], "piece": row["piece"],
             "repo": Path(row["repo"]).name, "realm": realm_of(row["repo"], row["kind"], rules), "folder": "content-parked" if (row["path"] or "").startswith("content-parked/") else "content",
