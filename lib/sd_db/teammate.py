@@ -38,7 +38,7 @@ SCOPE = "teammate"
 #: A live teammate assignment's status: in `runner.OWNING`, so no pickup takes its item, and outside
 #: `workflow.ACTIVE_ASSIGNMENTS`, so the session's own status writes pass.
 STATUS = IN_SESSION
-#: Minutes past the budget a silent run lives before the reap ends it.
+#: Minutes past the budget a silent run waits before Today reads it overdue; it ends nothing.
 GRACE_MINUTES = 30
 #: The item statuses a run may not start on.
 CLOSED = ("done", "cancelled")
@@ -103,6 +103,9 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
             held = _holding(connection, item)
             if held:
                 raise TeammateRefused(f"item {item} is held by teammate run {held['id']}; end it first")
+            retained = build._held(connection, item)  # a build run not yet released, bundle members too
+            if retained:
+                raise TeammateRefused(retained)
             active = connection.execute(
                 f"SELECT id, status, scope FROM assignment WHERE item = ? AND status IN {build.ACTIVE} LIMIT 1",
                 (item,)).fetchone()
@@ -144,6 +147,21 @@ def run_state(connection, ident: str) -> dict:
     return found | {"due": due(found), "members": members(connection, found["assignment"])}
 
 
+def overdue(run: dict, now: str) -> str:
+    """Why Today reads `run` overdue: no beat for its budget plus `GRACE_MINUTES`; '' otherwise.
+
+    It ends nothing. A builder beats only at commits and reports, so silence
+    is no proof it stopped; only the lead's `--end` or every item done ends a run.
+    """
+    if not run.get("budget_minutes"):
+        return ""
+    quiet = build._age(run["heartbeat_at"] or run["created_at"], now)
+    if quiet < (run["budget_minutes"] + GRACE_MINUTES) * 60:
+        return ""
+    return (f"overdue: no beat for {int(quiet // 60)} min, past its {run['budget_minutes']} min budget and "
+            f"{GRACE_MINUTES} min grace; its lead ends it")
+
+
 def _open(connection, item: int) -> str:
     held = _holding(connection, item)
     if held is None:
@@ -180,34 +198,26 @@ def end(connection, item: int, *, reason: str = "") -> str:
         return run["id"]
 
 
-def reap(connection, *, now: str | None = None) -> list[dict]:
-    """End each open teammate run whose items are all done, or whose last beat is older than its budget plus
-    `GRACE_MINUTES`; each `{run, outcome, retry}`, as `build.reap` answers. A run without a budget ends on its items.
+def reap(connection) -> list[dict]:
+    """End each open teammate run whose items are all done; each `{run, outcome, retry}`, as `build.reap` answers.
 
-    Each end is a compare-and-set on the beat the reap read, so a beat in between keeps the run open.
+    Silence ends nothing (`overdue`): a builder beats only at commits and
+    reports. The close re-reads the run and its items in its own transaction.
     """
-    now = now or clock()
     ended: list[dict] = []
     if restoration_pending(connection):
         return ended
     for run in open_runs(connection):
-        statuses = [row["status"] for row in connection.execute(
-            "SELECT item.status FROM assignment JOIN item ON item.id = assignment.item "
-            "WHERE (assignment.id = ? OR assignment.parent = ?) AND assignment.scope = ?",
-            (run["assignment"], run["assignment"], SCOPE))]
-        quiet = build._age(run["heartbeat_at"] or run["created_at"], now)
-        if statuses and all(status == "done" for status in statuses):
-            outcome, detail, status = "done", "every item is done", "done"
-        elif run["budget_minutes"] and quiet >= (run["budget_minutes"] + GRACE_MINUTES) * 60:
-            outcome, status = "interrupted", "cancelled"
-            detail = (f"no beat for {int(quiet // 60)} min, past its {run['budget_minutes']} min budget "
-                      f"and {GRACE_MINUTES} min grace")
-        else:
-            continue
         with transaction(connection):
-            if connection.execute("SELECT 1 FROM runner_run WHERE id = ? AND released_at IS NULL AND outcome IS NULL "
-                                  "AND heartbeat_at IS ?", (run["id"], run["heartbeat_at"])).fetchone() is None:
+            if connection.execute("SELECT 1 FROM runner_run WHERE id = ? AND released_at IS NULL AND outcome IS NULL",
+                                  (run["id"],)).fetchone() is None:
                 continue
-            _close(connection, run, outcome, detail, status)
-        ended.append({"run": run["id"], "outcome": outcome, "retry": None, "blocked": None})
+            statuses = [row["status"] for row in connection.execute(
+                "SELECT item.status FROM assignment JOIN item ON item.id = assignment.item "
+                "WHERE (assignment.id = ? OR assignment.parent = ?) AND assignment.scope = ?",
+                (run["assignment"], run["assignment"], SCOPE))]
+            if not statuses or any(status != "done" for status in statuses):
+                continue
+            _close(connection, run, "done", "every item is done", "done")
+        ended.append({"run": run["id"], "outcome": "done", "retry": None, "blocked": None})
     return ended

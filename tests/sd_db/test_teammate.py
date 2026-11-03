@@ -99,13 +99,33 @@ class Start(Case):
         with self.assertRaisesRegex(teammate.TeammateRefused, "queued build assignment"):
             self.start([item])
 
+    def test_a_start_refuses_an_item_a_retained_build_run_holds(self):
+        """A blocked build whose run is not released still owns its items (`build._held`), bundle members too."""
+        lead_item, member_item = self.item(status="ready"), self.item(status="ready")
+        lead = create_assignment(self.db, item=lead_item, role="author", status="blocked", lane="parallel")
+        member = create_assignment(self.db, item=member_item, role="author", status="blocked", lane="parallel",
+                                   parent=lead)
+        self.db.execute("UPDATE assignment SET scope = 'build' WHERE id IN (?, ?)", (lead, member))
+        self.db.execute("INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, "
+                        "start_step, step, outcome, created_at, updated_at) VALUES ('kept', ?, 1, ?, 'build/sd-1', "
+                        "'fixture', '/w/a-build-1', '/w/a-build-1', 'claimed', 'building', 'interrupted', ?, ?)", (lead, A, clock(), clock()))
+        before = self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0]
+        for item in (lead_item, member_item):
+            with self.subTest(item=item), self.assertRaisesRegex(teammate.TeammateRefused,
+                                                                 f"item {item} is held by build run kept"):
+                self.start([self.item(status="ready"), item])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0], before)
+
     def test_a_restore_reimport_holds_a_start_and_the_reap(self):
         item = self.item()
         run = self.start([item])
         record_state(self.db, "restore", key="fixture", body={})
         with self.assertRaisesRegex(teammate.TeammateRefused, "restore"):
             self.start([self.item()])
-        self.assertEqual(teammate.reap(self.db, now=later(run["created_at"], 10 * 3600)), [])
+        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (item,))
+        self.assertEqual(teammate.reap(self.db), [])
+        self.assertIsNone(self.run_row(run["id"])["released_at"])
 
     def test_the_session_still_moves_its_items(self):
         """A running assignment refuses every status write (criterion 7.19); a teammate's does not."""
@@ -224,60 +244,65 @@ class End(Case):
 
 
 class Reap(Case):
-    def test_a_quiet_run_inside_its_budget_lives_past_the_build_stale_limit(self):
+    def test_a_quiet_run_lives_past_the_build_stale_limit(self):
         """The build reap ends a run after `build.STALE_SECONDS`; a builder beats only at checkpoints."""
         run = self.start([self.item()])
-        self.assertEqual(teammate.reap(self.db, now=later(run["created_at"], build.STALE_SECONDS * 6)), [])
+        self.db.execute("UPDATE runner_run SET heartbeat_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (run["id"],))
+        self.assertEqual(teammate.reap(self.db), [])
         self.assertIsNone(self.run_row(run["id"])["outcome"])
 
-    def test_a_run_silent_past_its_budget_and_grace_ends_interrupted(self):
-        item = self.item()
+    def test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue(self):
+        """A builder beats only at commits and reports, so silence is no proof it stopped: expiry ends nothing."""
+        item = self.item(status="ready")
         run = self.start([item])
-        edge = (90 + teammate.GRACE_MINUTES) * 60
-        self.assertEqual(teammate.reap(self.db, now=later(run["created_at"], edge - 1)), [])
-        ended = teammate.reap(self.db, now=later(run["created_at"], edge))
-        self.assertEqual(ended, [{"run": run["id"], "outcome": "interrupted", "retry": None, "blocked": None}])
+        edge = later(run["created_at"], (90 + teammate.GRACE_MINUTES) * 60)
+        self.assertEqual(teammate.reap(self.db), [])
         row = self.run_row(run["id"])
-        self.assertIn("no beat for 120 min", row["detail"])
-        self.assertIsNotNone(row["released_at"])
-        self.assertEqual(self.assignments(run["id"])[0][1], "cancelled")
-        self.assertEqual(workflow.item_state(self.db, item)["item"]["status"], "in_progress")
+        self.assertEqual((row["outcome"], row["released_at"]), (None, None))
+        self.assertEqual([status for _, status, *_ in self.assignments(run["id"])], ["in_session"])
+        open_run = teammate.open_runs(self.db)[0]
+        self.assertEqual(teammate.overdue(open_run, later(edge, -1)), "")
+        self.assertIn("overdue: no beat for 120 min", teammate.overdue(open_run, edge))
+        with self.assertRaisesRegex(build.BuildRefused, f"item {item} has in_session assignment"):
+            build.queue(self.db, [item], who="operator")
 
     def test_a_beat_restarts_the_silence(self):
         run = self.start([self.item()])
         beat = later(run["created_at"], 100 * 60)
         self.db.execute("UPDATE runner_run SET heartbeat_at = ? WHERE id = ?", (beat, run["id"]))
-        self.assertEqual(teammate.reap(self.db, now=later(run["created_at"], 150 * 60)), [])
-        self.assertEqual(len(teammate.reap(self.db, now=later(beat, 120 * 60))), 1)
+        open_run = teammate.open_runs(self.db)[0]
+        self.assertEqual(teammate.overdue(open_run, later(run["created_at"], 150 * 60)), "")
+        self.assertNotEqual(teammate.overdue(open_run, later(beat, 120 * 60)), "")
 
-    def test_a_beat_between_the_read_and_the_end_keeps_the_run(self):
-        """The end is a compare-and-set on the beat the reap read."""
-        run = self.start([self.item()])
+    def test_an_item_reopened_between_the_read_and_the_close_keeps_the_run(self):
+        """The close re-reads the items in its own transaction."""
+        item = self.item()
+        run = self.start([item])
+        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (item,))
         reads = teammate.open_runs
 
-        def read_then_beat(connection):
+        def read_then_reopen(connection):
             found = reads(connection)
-            connection.execute("UPDATE runner_run SET heartbeat_at = '2099-01-01T00:00:00+00:00' WHERE id = ?",
-                               (run["id"],))
+            connection.execute("UPDATE item SET status = 'in_progress' WHERE id = ?", (item,))
             return found
-        teammate.open_runs = read_then_beat
+        teammate.open_runs = read_then_reopen
         self.addCleanup(setattr, teammate, "open_runs", reads)
-        self.assertEqual(teammate.reap(self.db, now=later(run["created_at"], 10 * 3600)), [])
+        self.assertEqual(teammate.reap(self.db), [])
         self.assertIsNone(self.run_row(run["id"])["outcome"])
 
     def test_a_run_whose_items_all_landed_ends_done(self):
         first, second = self.item(), self.item()
         run = self.start([first, second])
         self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (first,))
-        self.assertEqual(teammate.reap(self.db, now=later(run["created_at"], 60)), [])
+        self.assertEqual(teammate.reap(self.db), [])
         self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (second,))
-        self.assertEqual(teammate.reap(self.db, now=later(run["created_at"], 60))[0]["outcome"], "done")
+        self.assertEqual(teammate.reap(self.db)[0]["outcome"], "done")
         self.assertEqual([status for _, status, *_ in self.assignments(run["id"])], ["done", "done"])
 
     def test_the_dispatch_tick_reaps_teammate_runs(self):
-        run = self.start([self.item()])
-        self.db.execute("UPDATE runner_run SET heartbeat_at = '2000-01-01T00:00:00+00:00', "
-                        "created_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (run["id"],))
+        item = self.item()
+        run = self.start([item])
+        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (item,))
         result = build_run.dispatch(self.db, owner="fixture", load=None, load_cap=None, interactive=None,
                                     spawn=lambda ident: None, lane=lambda row, items: None, why="fixture")
         self.assertIn(run["id"], [entry["run"] for entry in result["reaped"]])

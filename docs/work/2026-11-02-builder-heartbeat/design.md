@@ -27,9 +27,12 @@ claim already writes (note #40716): `assignment` and `runner_run`.
   branch. No lease and no process.
 - `beat ITEM`: the builder refreshes `heartbeat_at` after each commit and
   before its report (`agents/sd-slice-builder.md`, step 4).
-- `--end`: the lead ends the run on the builder's final report.
+- `--end`: the lead ends the run on the builder's final report, before
+  the lane enqueue, which refuses an item an open run holds.
 - `teammate.reap`, in the build-dispatch tick, ends a run whose items are
-  all done, and one with no beat for its budget plus 30 minutes.
+  all done. Silence ends nothing: a builder beats only at commits and
+  reports. Past its budget plus 30 minutes with no beat, Today reads the
+  run overdue (`teammate.overdue`), and the lead decides.
 - `now_screen.builders` and `builds.panel` read the open runs; the Queue
   view draws each as a working row with its worktree, branch, due time and
   last beat.
@@ -71,9 +74,9 @@ build run's exemption:
 | start | assignments and run, one transaction | stop or refusal | nothing written; the lead runs it again | `Start.test_a_start_refuses_and_writes_nothing` |
 | start twice | none | a second start on a held item | refused, names the run | same test, case `held` |
 | beat | `heartbeat_at` | no run registered | exit 1, nothing written; the builder goes on | `Beat.test_a_beat_with_no_open_run_refuses` |
-| reap | outcome, release, assignments, notes, one transaction | a beat between the read and the end | compare-and-set on the beat read; the run stays | `Reap.test_a_beat_between_the_read_and_the_end_keeps_the_run` |
-| reap | as above | a quiet builder inside its budget | the run lives past `STALE_SECONDS` | `Reap.test_a_quiet_run_inside_its_budget_lives_past_the_build_stale_limit` |
-| reap | as above | the lead never ends it | ended past budget plus grace, or once every item is done | `Reap.test_a_run_silent_past_its_budget_and_grace_ends_interrupted`, `test_a_run_whose_items_all_landed_ends_done` |
+| reap | outcome, release, assignments, notes, one transaction | an item reopened between the read and the close | the close re-reads the items in its transaction; the run stays | `Reap.test_an_item_reopened_between_the_read_and_the_close_keeps_the_run` |
+| reap | none | a quiet builder | the run lives past `STALE_SECONDS` | `Reap.test_a_quiet_run_lives_past_the_build_stale_limit` |
+| reap | none | the lead never ends it | stays open and reads overdue on Today; ends once every item is done | `Reap.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_a_run_whose_items_all_landed_ends_done` |
 | end | outcome, release, assignments, one transaction | the run already ended | refused, nothing written | `Beat.test_a_beat_with_no_open_run_refuses` |
 | restore | none | a reimport is pending | start refused, reap skips | `Start.test_a_restore_reimport_holds_a_start_and_the_reap` |
 
@@ -92,13 +95,28 @@ second writer on a teammate's item is the failure. Tests are in
 | skill proposals (`skills_catalog.apply_proposals`) | none | the source changed under the session | refused: reads `OWNING` | `test_a_skill_review_a_teammate_holds_takes_no_proposals` |
 | lane cleanup (`bin/sd_lane.builder_busy`) | none | the worktree removed under the session | kept: reads `OWNING` | `test_the_lane_keeps_a_teammates_worktree` |
 | status write and choices (`workflow.change_status`, `allowed_statuses`) | item status | the session's own write refused | not read: `ACTIVE_ASSIGNMENTS` | `Start.test_the_session_still_moves_its_items`, `test_the_sessions_own_status_cancel_and_edit_writes_pass` |
-| cancel (`progress.task_guard`, `_work_guard`) | item status | the operator cannot cancel | not read; the reap ends the run past budget and grace | `test_the_sessions_own_status_cancel_and_edit_writes_pass` |
+| cancel (`progress.task_guard`, `_work_guard`) | item status | the operator cannot cancel | not read; the lead ends the run | `test_the_sessions_own_status_cancel_and_edit_writes_pass` |
 | branch clear, kind change (`workflow._refuse_active_assignment`) | item fields | the session's own edit refused | not read; a lead item's branch clear still meets the unreleased-run check | same test |
 | Management page (`reads.assignment_ledger(live=True)`) | none | a teammate listed as lane order | not read; the Queue view lists it | same test |
-| restore (`recovery`, `queued`/`running` to `blocked`) | none | a live session's rows blocked | not read; a silent run ends past budget and grace | `Reap.test_a_run_silent_past_its_budget_and_grace_ends_interrupted` |
+| restore (`recovery`, `queued`/`running` to `blocked`) | none | a live session's rows blocked | not read; the run stays the session's, and the lead ends it | `Reap.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue` |
 | teammate start (`teammate.start`) | none | two teammates, or a teammate on a build | refused: `build.ACTIVE` plus `_holding` | `Start.test_a_start_refuses_and_writes_nothing`, `test_a_start_refuses_an_item_a_build_holds` |
 | build, draft and runner claims (`build.py` and `draft.py` and `runner.py` claim selects) | none | none: they read only `queued` rows of their scope | the queue checks above keep a teammate's item out | the queue tests above |
 | draft queue (`draft.queue_if_eligible`) | none | none: it queues at capture, before any start | `teammate.start` refuses the queued draft | `test_a_start_refuses_an_item_a_build_holds` |
+
+Ownership hand-offs. Each row is a place where a teammate run takes or
+gives up an item; the failure is a change of hands with no proof the
+other owner stopped.
+
+| Step | State moved | Failure | Recovery | Test |
+| --- | --- | --- | --- | --- |
+| start over a retained build run (`teammate.start`) | none | a teammate on an item a blocked build's unreleased run holds, a bundle member too | refused: `build._held` | `Start.test_a_start_refuses_an_item_a_retained_build_run_holds` |
+| start over a live build or teammate (`teammate.start`) | none | two owners | refused: `build.ACTIVE` and `_holding` | `Start.test_a_start_refuses_and_writes_nothing`, `test_a_start_refuses_an_item_a_build_holds` |
+| silence (`teammate.reap`) | none | the run released while the builder still runs | no release; Today reads it overdue | `Reap.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_build_panel` and `test_today_glance` teammate tests |
+| all items done (`teammate.reap`) | outcome, release, assignments | an item reopened before the close | re-read in the close's transaction | `Reap.test_an_item_reopened_between_the_read_and_the_close_keeps_the_run` |
+| lead's end (`teammate.end`) | outcome, release, assignments | the lead ends a live builder | the lead's word is the proof: it ends on the builder's final report | `End.test_an_end_releases_the_run_and_leaves_the_items_as_they_are` |
+| lane enqueue (`bin/sd_lane.refuse_teammate`) | none | the lane takes the branch while the builder writes | refused until `--end` | `test_sd_lane` `ItemChecks.test_an_item_a_teammate_run_holds_is_refused_before_any_push` |
+| lane merge (`ship.manual_merge_guard`) | none | none past the enqueue: a merge takes only an enqueued entry | the enqueue refusal above; the guard skips teammate runs so others' merges go on | `test_ship` `test_an_open_teammate_run_does_not_refuse_a_lane_merge` |
+| lane cleanup (`bin/sd_lane.builder_busy`) | worktree removal | the tree removed under the session | kept while `in_session` or a live session holds it | `Ownership.test_the_lane_keeps_a_teammates_worktree` |
 
 ## Acceptance criteria
 
@@ -115,6 +133,6 @@ a rollback, end every open run with `sd assignments beat N --end`, then
 delete the rows in one transaction:
 `DELETE FROM runner_run WHERE assignment IN (SELECT id FROM assignment WHERE scope = 'teammate'); DELETE FROM assignment WHERE scope = 'teammate';`.
 
-A builder that never beats is reaped only past its budget plus grace, so
-a lost teammate shows for up to that long. Past its due time the row reads
-`stalled`, so the operator sees it first.
+A lost builder's run stays open until its lead ends it: no silence
+proves a builder stopped. Past its due time the row reads `stalled`, and
+past its grace too it reads overdue, so the operator sees it.

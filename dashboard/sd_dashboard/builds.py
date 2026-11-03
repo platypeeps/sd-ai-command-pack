@@ -237,17 +237,19 @@ def _open_row(connection, run: dict, now: str) -> dict:
 
 def _teammate_row(connection, run: dict, now: str) -> dict:
     """One open teammate run (`sd_db.teammate`, pack sd:7221) in `_open_row`'s shape, `teammate` true, with its
-    budget's end as `due`: `stalled` once that has passed, else `working`. Its lead ends it; nothing here cancels it."""
+    budget's end as `due`: `stalled` once that has passed, else `working`, and overdue (`teammate.overdue`) past
+    its grace too. Its lead ends it; nothing here cancels it, and no silence ends it."""
     found = teammate.members(connection, run["assignment"])
     titles = reads.items_by_ids(connection, [row["item"] for row in found])
     members = [{"item": row["item"], "assignment": row["id"], "status": row["status"],
                 "title": titles[row["item"]]["title"] if row["item"] in titles else ""} for row in found]
     due, clock = _at(teammate.due(run)), _at(now)
     late = bool(due and clock and clock >= due)
+    overdue = teammate.overdue(run, now)
     first = members[0]["item"] if members else "<item>"
     return {"run": run["id"], "attempt": run["run"], "teammate": True, "repo": run["repo"],
             "name": Path(run["repo"]).name, "items": members, "model": "", "step": "building",
-            "state": "stalled" if late else "working", "why": "past its budget" if late else "",
+            "state": "stalled" if late else "working", "why": overdue or ("past its budget" if late else ""),
             "outcome": run["outcome"], "started": run["created_at"], "elapsed": _seconds(run["created_at"], now),
             "beat": _seconds(run["heartbeat_at"] or run["created_at"], now), "quiet": None, "usd": 0.0, "log": "",
             "branch": run["branch"] or "", "worktree": run["work_path"] or "", "due": teammate.due(run),

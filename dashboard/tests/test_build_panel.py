@@ -4,6 +4,7 @@
 """
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -148,6 +149,10 @@ class BuildsPanel(Fixture):
         self.assertIn(f"sd assignments beat {items[0]} --end", row["cancel"]["reason"])
         late = self.panel(run["due"])["runs"][0]
         self.assertEqual((late["state"], late["why"]), ("stalled", "past its budget"))
+        edge = (datetime.fromisoformat(run["created_at"]) + timedelta(minutes=90 + teammate.GRACE_MINUTES)).isoformat()
+        overdue = self.panel(edge)["runs"][0]
+        self.assertEqual(overdue["state"], "stalled")
+        self.assertTrue(overdue["why"].startswith("overdue: no beat for 120 min"), overdue["why"])
         teammate.end(self.connection, items[0])
         self.assertEqual(self.panel(run["created_at"])["runs"], [])
 

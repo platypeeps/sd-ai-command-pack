@@ -153,6 +153,12 @@ class TheBuilders(TodayCase):
         self.connection.execute("UPDATE runner_run SET created_at = ? WHERE id = ?", (ago(minutes=61), run["id"]))
         self.connection.commit()
         self.assertEqual(self.today()["builders"]["rows"][0]["state"], "stalled")
+        self.connection.execute("UPDATE runner_run SET created_at = ?, heartbeat_at = ? WHERE id = ?",
+                                (ago(minutes=91), ago(minutes=91), run["id"]))
+        self.connection.commit()
+        row = self.today()["builders"]["rows"][0]
+        self.assertEqual(row["state"], "stalled")
+        self.assertIn("overdue: no beat for 91 min", row["eta_why"])
 
     def test_a_build_read_that_failed_is_its_reason_never_no_builders(self):
         from sd_db import build

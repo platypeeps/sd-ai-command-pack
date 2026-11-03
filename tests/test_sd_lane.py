@@ -2491,6 +2491,22 @@ class ItemChecks(SharedQueue):
     def test_an_item_with_no_registered_repository_is_refused_before_any_push(self) -> None:
         self.assertIn("requires an item with a registered repository", str(self.refused(self.unregistered)))
 
+    def test_an_item_a_teammate_run_holds_is_refused_before_any_push(self) -> None:
+        """pack sd:7221: the lane takes the branch only once the lead ends the run, the proof the builder stopped."""
+        import sd_db
+        from sd_db import teammate
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            repo = connection.execute("SELECT repo FROM item WHERE id = ?", (self.own,)).fetchone()["repo"]
+            run = teammate.start(connection, [self.own], worktree=str(self.tree), branch="topic", budget_minutes=60,
+                                 owner="lead")
+            self.assertTrue(repo)
+        finally:
+            connection.close()
+        refused = self.refused(self.own)
+        self.assertIn(f"item sd:{self.own} is held by teammate run {run['id']}", str(refused))
+        self.assertIn(f"sd assignments beat {self.own} --end", str(refused))
+
     def test_a_body_closes_line_is_refused_before_any_push(self) -> None:
         """sd:3704: the --item list is the one closing set, so a body `Closes:` line waits for no prepare to refuse it."""
         refused = self.refused(self.own, "fix: t", f"Closes: sd:{self.own + 99}\n")

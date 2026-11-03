@@ -381,7 +381,7 @@ Workers:
   Then write one `sd task note` on each of its items: what stopped, its head and what is left (pack sd:5963).
   Only a read-only worker may be replaced on the deadline alone.
 - **Register each in-session builder so Today lists it** (pack sd:7221): on spawn run
-  `sd assignments beat <items> --start --worktree <path> --branch <branch> --budget <minutes>`; on its final report, `--end`.
+  `sd assignments beat <items> --start --worktree <path> --branch <branch> --budget <minutes>`; on its final report, `--end` before the lane enqueue, which refuses a held item. Silence ends no run.
 - **Fan out only when the targets are independent, share no mutable state, and are cheap to verify.**
 - **Batch a repository's ready items into one pull request per wave**, one commit per row; rows that change the same files always group.
   A wave is the round of builders the lead starts together (grill Q26, pack sd:6005).

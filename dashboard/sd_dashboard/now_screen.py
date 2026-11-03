@@ -876,7 +876,8 @@ def builders(connection: sqlite3.Connection, now: str) -> dict:
 
 def _teammate(connection: sqlite3.Connection, run: dict, clock: datetime) -> dict:
     """One open teammate run (`sd_db.teammate`, pack sd:7221) in a builder row's shape, `teammate` true, with its
-    worktree and branch, and its budget's end as `eta`. It is `stalled` once that end has passed."""
+    worktree and branch, and its budget's end as `eta`. It is `stalled` once that end has passed, and its
+    `eta_why` reads overdue (`teammate.overdue`) past its grace too."""
     from sd_db import teammate
 
     started, due = _at(run["created_at"]), _at(teammate.due(run))
@@ -892,7 +893,8 @@ def _teammate(connection: sqlite3.Connection, run: dict, clock: datetime) -> dic
             "stage": "building", "model": "", "started": _utc(started.timestamp()),
             "elapsed": active_sessions.elapsed(int((clock - started).total_seconds())),
             "eta": _utc(due.timestamp()) if due else None,
-            "eta_why": f"its lead's {run['budget_minutes']} min budget" if due else "no budget recorded",
+            "eta_why": teammate.overdue(run, clock.isoformat()) or (
+                f"its lead's {run['budget_minutes']} min budget" if due else "no budget recorded"),
             "state": "stalled" if due and clock >= due else "running",
             "quiet": int(quiet) if quiet is not None else None, "usd": 0.0,
             "worktree": run["work_path"], "branch": run["branch"]}
