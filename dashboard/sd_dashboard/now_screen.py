@@ -830,7 +830,8 @@ def queues(connection: sqlite3.Connection, now: str) -> dict:
 def builders(connection: sqlite3.Connection, now: str) -> dict:
     """The builder runs a live row's and a run's Details read (sd:6003): each open headless build run
     (`sd_db.build`), oldest first, with its items,
-    its stage, when it started, its ETA from past runs and what it spent so far.
+    its stage, when it started, its ETA from past runs and what it spent so far; then each open teammate run
+    (`_teammate`, pack sd:7221).
 
     The ETA is the start plus the median claim-to-release time of the last `done` runs, once there are `ETA_RUNS`;
     before that `eta` is None and `eta_why` says so. `state` comes from the run row, never from a quiet stream: an
@@ -840,7 +841,7 @@ def builders(connection: sqlite3.Connection, now: str) -> dict:
     """
     from statistics import median
 
-    from sd_db import build
+    from sd_db import build, teammate
 
     clock = _at(now)
     try:
@@ -867,9 +868,36 @@ def builders(connection: sqlite3.Connection, now: str) -> dict:
                          else f"{len(past)} done {plural(len(past), 'run', 'runs')} so far; an ETA needs {ETA_RUNS}",
                          "state": run["outcome"] or ("stalled" if stalled else "running"),
                          "quiet": int(quiet) if quiet is not None else None, "usd": round(build.run_spent(connection, run["id"]), 2)})
+        rows += [_teammate(connection, run, clock) for run in teammate.open_runs(connection)]
     except (SdDbError, sqlite3.Error, ValueError, TypeError, KeyError) as failure:
         return {"rows": [], "error": str(failure) or "the build runs could not be read"}
     return {"rows": rows, "error": ""}
+
+
+def _teammate(connection: sqlite3.Connection, run: dict, clock: datetime) -> dict:
+    """One open teammate run (`sd_db.teammate`, pack sd:7221) in a builder row's shape, `teammate` true, with its
+    worktree and branch, and its budget's end as `eta`. It is `stalled` once that end has passed, and its
+    `eta_why` reads overdue (`teammate.overdue`) past its grace too."""
+    from sd_db import teammate
+
+    started, due = _at(run["created_at"]), _at(teammate.due(run))
+    if started is None:
+        raise ValueError(f"teammate run {run['id']} has no start time")
+    beat = _at(run["heartbeat_at"] or run["created_at"])
+    quiet = (clock - beat).total_seconds() if beat else None
+    items = []
+    for member in teammate.members(connection, run["assignment"]):
+        item = reads.item_by_id(connection, member["item"])
+        items.append({"item": member["item"], "title": item["title"] if item else "", "assignment": member["id"]})
+    return {"run": run["id"], "teammate": True, "repo": Path(run["repo"]).name, "items": items, "step": "building",
+            "stage": "building", "model": "", "started": _utc(started.timestamp()),
+            "elapsed": active_sessions.elapsed(int((clock - started).total_seconds())),
+            "eta": _utc(due.timestamp()) if due else None,
+            "eta_why": teammate.overdue(run, clock.isoformat()) or (
+                f"its lead's {run['budget_minutes']} min budget" if due else "no budget recorded"),
+            "state": "stalled" if due and clock >= due else "running",
+            "quiet": int(quiet) if quiet is not None else None, "usd": 0.0,
+            "worktree": run["work_path"], "branch": run["branch"]}
 
 
 def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None, jev=None, herdr=None,

@@ -1220,6 +1220,23 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         kept = self.run_view("R.repos = repos();", search="?show=ended")
         self.assertIn("gamma:false", kept["R"]["repos"])
 
+    def test_a_teammate_run_is_a_working_row_with_its_worktree_due_time_and_beat(self):
+        """pack sd:7221: a lead's in-session builder shows beside the build runs, by repo, with its bundle's items."""
+        team = {**self.BUILDS["runs"][0], "run": "t1", "teammate": True, "state": "working", "model": "", "log": "",
+                "pull": "", "worktree": "/w/alpha-8", "branch": "feat/sd-8", "due": "2026-09-06T13:00:00Z", "beat": 300,
+                "items": [{"item": 8, "assignment": 8, "status": "in_session", "title": "Eight"},
+                          {"item": 9, "assignment": 9, "status": "in_session", "title": "Nine"}],
+                "cancel": {"assignment": 8, "allowed": False, "reason": "its lead ends it: sd assignments beat 8 --end",
+                           "revision": ""}}
+        builds = {**self.BUILDS, "runs": [*self.BUILDS["runs"], team]}
+        out = self.run_view("open('alpha'); R.alpha = ELS.queue.html;",
+                            answers={"/api/queue/builds?show=all": [200, builds]})
+        row = out["R"]["alpha"].split('<tr class="child" data-type="working" data-run="t1"')[1].split("</tr>")[0]
+        for text in ("#8 Eight", "#9 Nine", "<b>working</b> · teammate · worktree <code>/w/alpha-8</code>",
+                     "branch feat/sd-8", "beat 5m 0s ago", 'title="its lead ends it: sd assignments beat 8 --end"'):
+            self.assertIn(text, row)
+        self.assertRegex(row, r"due \d\d:\d\d")
+
     def test_the_working_rows_hold_live_items_build_runs_the_lane_builders_and_free_assignments(self):
         out = self.run_view("open('system'); R.system = ELS.queue.html; open('alpha'); R.alpha = ELS.queue.html;"
                             " open('sd'); R.sd = ELS.queue.html; R.count = OUT.counts.queue;")

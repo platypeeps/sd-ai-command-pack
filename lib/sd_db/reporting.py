@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from . import reads, ship, workflow
+from . import reads, runner, ship, workflow
 from .database import transaction
 from .writes import (
     STATUSES,
@@ -847,10 +847,11 @@ def clean_candidates(connection, *, before):
     """The reports retention's rule calls clean at `before`, in id order.
 
     `kind='report'`, `status='planning'`, `fields.attention` exactly 0 (JSON
-    false, or the number), `created_at` earlier than `before`, and no
-    unresolved followup. Retention settles these at seven days; the bulk
-    acknowledge starts from the same rows and refuses more, so the two cannot
-    drift apart.
+    false, or the number), `created_at` earlier than `before`, no
+    unresolved followup, and no assignment in `runner.OWNING`: a runner or
+    a teammate run still owns the report (pack sd:7284). Retention settles
+    these at seven days; the bulk acknowledge starts from the same rows and
+    refuses more, so the two cannot drift apart.
 
     `json_extract` sits inside `CASE WHEN json_valid(...)`, as in `_beat`: a
     `CASE` evaluates its branch only when the test is true, whatever order the
@@ -860,13 +861,16 @@ def clean_candidates(connection, *, before):
     No transaction and no savepoint: the caller owns the read. Retention reads
     under its write lock, the dry run under one snapshot.
     """
+    owning = ", ".join("?" for _ in runner.OWNING)
     return [row["id"] for row in connection.execute(
         "SELECT id FROM item WHERE kind='report' AND status='planning'"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.attention') END = 0"
         " AND created_at < ?"
         " AND NOT EXISTS (SELECT 1 FROM note WHERE note.item = item.id"
         "                 AND note.kind='followup' AND note.resolved_at IS NULL)"
-        " ORDER BY id", (before,))]
+        " AND NOT EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id"
+        f"                 AND assignment.status IN ({owning}))"
+        " ORDER BY id", (before, *runner.OWNING))]
 
 
 def cutoff(value):
@@ -979,7 +983,8 @@ def clean_reports(connection, *, before, now=None):
     `before` is the stamp `cutoff` returns, exactly, and may not be later
     than `now`, an aware `datetime` that defaults to the real clock. `selected` is
     `clean_candidates` less the refusals retention does not make: a record
-    marker, work in flight, a run newer than its job's recorded health.
+    marker, a run newer than its job's recorded health. Work in flight both
+    refuse; this read names it as the reason.
     `declined` is every other `planning` report created before `before`, with
     the first reason that applies; a later or already-moved report is in
     neither list.
@@ -998,7 +1003,7 @@ def clean_reports(connection, *, before, now=None):
     connection.execute("SAVEPOINT sd_clean_reports")
     try:
         candidates = set(clean_candidates(connection, before=before))
-        active = ", ".join("?" for _ in workflow.ACTIVE_ASSIGNMENTS)
+        active = ", ".join("?" for _ in runner.OWNING)
         # The first five reasons in one read. Every JSON function sits inside
         # `CASE WHEN json_valid(fields)`, so no row can fail the query.
         rows = connection.execute(
@@ -1014,7 +1019,7 @@ def clean_reports(connection, *, before, now=None):
             " EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id"
             f"         AND assignment.status IN ({active})) AS assignment"
             " FROM item WHERE kind='report' AND status='planning' AND created_at < ? ORDER BY id",
-            (*workflow.ACTIVE_ASSIGNMENTS, before)).fetchall()
+            (*runner.OWNING, before)).fetchall()
         beats = {}
         selected, declined = [], []
         for row in rows:
