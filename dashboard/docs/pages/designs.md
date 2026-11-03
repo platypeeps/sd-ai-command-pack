@@ -16,5 +16,11 @@ counts, the product as a pick, Show hidden as a toggle that lists the hidden
 rows instead (sd:5753; it was the Hidden view, and `#view=hidden`,
 `?show=hidden` and `?f=hidden` links land on it as `?hidden=1`), a pressed
 lamp and the query as tokens, then Clear all; the count sits on the title line.
+The lamp row starts with Open (sd:7361): it counts the rows not hidden, as
+the bar's Open does, and pressing it sets that same Open filter. It is no
+predicate of its own, so `?f=` never names it. It is pressed when the bar's
+Open is, the URL keeps `?hidden=1` for Hidden and nothing for Open, and a
+second press changes nothing, Open being the default. The other lamps count
+the rows the current view shows.
 Observed rereads `/api/designs`. The page reads through the shell's reader,
 `read.js`. The old listing was retired in sd:3402.

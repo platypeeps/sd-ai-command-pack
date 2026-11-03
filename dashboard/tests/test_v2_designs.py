@@ -228,10 +228,10 @@ class TheScript(unittest.TestCase):
         self.assertIn("v1 mockup · uncommitted change in the working tree", rows)
         self.assertIn("brief only · a brief and no page yet", rows)
         self.assertEqual(re.findall(r'data-filter="(\w+)" data-state="(\w+)"', lamps),
-                         [("recent", "ok"), ("stale", "caution"), ("noshot", "caution"), ("dirty", "caution"), ("brief", "ok")])
-        self.assertEqual(cell_grammar(self, lamps), [("button", s) for s in ("ok", "caution", "caution", "caution", "ok")])
+                         [("open", "ok"), ("recent", "ok"), ("stale", "caution"), ("noshot", "caution"), ("dirty", "caution"), ("brief", "ok")])
+        self.assertEqual(cell_grammar(self, lamps), [("button", s) for s in ("ok", "ok", "caution", "caution", "caution", "ok")])
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', lamps, re.S),
-                         [("recent", "2"), ("stale", "1"), ("noshot", "1"), ("dirty", "1"), ("brief", "1")])
+                         [("open", "5"), ("recent", "2"), ("stale", "1"), ("noshot", "1"), ("dirty", "1"), ("brief", "1")])
         self.assertEqual(out["text"]["sub"], "4 pages in 2 products")
         self.assertEqual(out["text"]["src"], "~/repos/example/ui-design at abc1234")
         self.assertEqual(out["page_attention"], {"state": "caution", "n": 3, "what": "pages uncommitted or without a current screenshot"})
@@ -255,7 +255,7 @@ class TheScript(unittest.TestCase):
                             " R.unhide = cmd('design.unhide').when(C.get('" + PAGES + "/tasks.html'));"
                             " R.hide = cmd('design.hide').when(C.get('" + PAGES + "/tasks.html'));", answer=f"(path) => [200, {json.dumps(self.hidden_doc())}]")
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', out["R"]["lamps"], re.S),
-                         [("recent", "2"), ("stale", "0"), ("noshot", "1"), ("dirty", "1"), ("brief", "1")])
+                         [("open", "4"), ("recent", "2"), ("stale", "0"), ("noshot", "1"), ("dirty", "1"), ("brief", "1")])
         self.assertNotIn(f"{PAGES}/tasks.html", out["R"]["rows"])
         self.assertEqual((out["R"]["counts"], out["counts"]), ({"pages": 4}, {"pages": 1}))
         seg = r'data-aside="hidden" data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
@@ -264,7 +264,7 @@ class TheScript(unittest.TestCase):
         self.assertIn("Clear all", out["R"]["bar2"])
         self.assertEqual(re.findall(r'<tr data-id="([^"]+)"', out["R"]["hidden"]), [f"{PAGES}/tasks.html"])
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', out["R"]["lamps2"], re.S),
-                         [("recent", "0"), ("stale", "1"), ("noshot", "0"), ("dirty", "0"), ("brief", "0")])
+                         [("open", "4"), ("recent", "0"), ("stale", "1"), ("noshot", "0"), ("dirty", "0"), ("brief", "0")])
         self.assertNotIn("data-show", json.dumps(out["html"]))
         self.assertEqual((out["R"]["unhide"], out["R"]["hide"]), (True, "already hidden"))
         self.assertEqual(out["page_attention"]["n"], 2)
@@ -322,6 +322,25 @@ class TheScript(unittest.TestCase):
         self.assertEqual(out["urls"][-1], {"f": "stale"})
         out = self.run_page("R.rows = ELS.rows.html;", search="?f=brief")
         self.assertEqual(re.findall(r'<tr data-id="([^"]+)"', out["R"]["rows"]), ["product:brand"])
+
+    def test_the_open_lamp_counts_the_open_rows_and_sets_the_filter_bars_open(self):
+        # sd:7361: Open is the filter bar's Open | Hidden shown as a lamp: no predicate of its own, so ?f= never names it.
+        def open_cell(html):
+            return re.search(r'<button[^>]*data-filter="open"[^>]*>.*?</button>', html, re.S).group(0)
+
+        press = " click({ s: '.annunciator .cell', dataset: { filter: 'open' } });"
+        out = self.run_page(f"R.l1 = ELS.annunciator.html; {self.SHOW_HIDDEN} R.l2 = ELS.annunciator.html; R.u2 = OUT.urls[OUT.urls.length - 1];"
+                            f"{press} R.l3 = ELS.annunciator.html; R.u3 = OUT.urls[OUT.urls.length - 1]; R.bar3 = ELS.filters.html; R.rows3 = ELS.rows.html;"
+                            f"{press} R.u4 = OUT.urls[OUT.urls.length - 1];",
+                            answer=f"(path) => [200, {json.dumps(self.hidden_doc())}]")
+        R = out["R"]
+        cells = [open_cell(R[k]) for k in ("l1", "l2", "l3")]
+        self.assertEqual([re.search(r"<b>(\d+)</b>", c).group(1) for c in cells], ["4", "4", "4"], "the lamp counts the rows Open lists, in either view")
+        self.assertEqual([re.search(r'aria-pressed="(\w+)"', c).group(1) for c in cells], ["true", "false", "true"], "pressed follows the bar's Open")
+        self.assertIn("Rows not hidden", cells[0])
+        self.assertEqual((R["u2"], R["u3"], R["u4"]), ({"hidden": "1"}, {}, {}), "the URL keeps ?hidden=1 for Hidden and nothing for Open")
+        self.assertIn('data-v="open" aria-pressed="true"', R["bar3"])
+        self.assertNotIn(f"{PAGES}/tasks.html", R["rows3"])
 
     def test_the_filters_are_activitys_bar_with_state_product_tokens_and_clear_all(self):
         """sd:5463: Activity's layout from shell.list.fbar: the state as a segment with its counts, the product as a pick,
