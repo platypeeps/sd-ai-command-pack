@@ -407,20 +407,26 @@ def _copy_runner_journal(source: Path, directory: Path, expected: dict[str, int]
     return True
 
 
-#: The runs the journal holds: every `runner_run` but a build or teammate run's.
-#: A build run (pack sd:6093) keeps no journal: its evidence is its worktree and
-#: branch on disk, and a restore blocks its assignment (`recovery`). A teammate
-#: run (pack sd:7221) is a lead's record of its in-session builder; no runner
-#: writes it, so it has no journal either.
-JOURNALED_RUNS = ("SELECT runner_run.* FROM runner_run LEFT JOIN assignment "
-                  "ON assignment.id = runner_run.assignment "
-                  "WHERE COALESCE(assignment.scope, '') NOT IN ('build', 'teammate')")
+def journaled_runs() -> str:
+    """The runs the journal holds: every `runner_run` a runner supervises (`runner.supervised`).
+
+    A build run (pack sd:6093) keeps no journal: its evidence is its worktree
+    and branch on disk, and a restore blocks its assignment (`recovery`). A
+    draft run (pack sd:6361, sd:7282) reads the checkout and writes its spec
+    through `draft.write`; a teammate run (pack sd:7221) is a lead's record of
+    its in-session builder. No runner writes either, so neither has a journal.
+    Imported here, not at the top: `runner` imports `ship` through `ledger`,
+    and this module loads first.
+    """
+    from .runner import supervised  # noqa: PLC0415
+    return ("SELECT runner_run.* FROM runner_run LEFT JOIN assignment "
+            f"ON assignment.id = runner_run.assignment WHERE {supervised('assignment.scope')}")
 
 
 def _journaled_runs_in(copy: Path) -> bool:
     connection = connect(copy, write=False)
     try:
-        return connection.execute(JOURNALED_RUNS + " LIMIT 1").fetchone() is not None
+        return connection.execute(journaled_runs() + " LIMIT 1").fetchone() is not None
     finally:
         connection.close()
 
@@ -435,7 +441,7 @@ def _check_runner_records(connection: sqlite3.Connection, directory: Path) -> No
     if "runner_run" not in set(tables(connection)):
         raise BackupError(f"a version {schema_version(connection)} database has no runner_run table; "
                           f"migration {RUNNER_RUN_VERSION:03d} creates it, so the copy is malformed")
-    rows = list(connection.execute(JOURNALED_RUNS))
+    rows = list(connection.execute(journaled_runs()))
     if not rows:
         return
     from .runner_journal import against, canonical

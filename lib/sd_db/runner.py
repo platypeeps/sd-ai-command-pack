@@ -58,6 +58,18 @@ IN_SESSION = "in_session"
 #: Pickup, queueing and claim read these; a status write reads only the runner's (criterion 7.19),
 #: so the session still moves its own items.
 OWNING = ("queued", "running", "ending", IN_SESSION)
+#: The assignment scopes whose runs no runner supervisor walks: a build run (pack sd:6093), a
+#: draft run (pack sd:6361) and a teammate run (pack sd:7221). None writes a runner journal, and
+#: none merges by hand, so `backup.journaled_runs` and `ship.manual_merge_guard` skip them
+#: through `supervised`, the one exemption (pack sd:7282).
+UNSUPERVISED_SCOPES = ("build", "draft", "teammate")
+
+
+def supervised(scope: str) -> str:
+    """A SQL condition, true when the assignment scope column `scope` is a runner's: none of
+    `UNSUPERVISED_SCOPES`. A run with no assignment (NULL) is a runner's."""
+    named = ", ".join(f"'{name}'" for name in UNSUPERVISED_SCOPES)
+    return f"COALESCE({scope}, '') NOT IN ({named})"
 
 
 def _item(connection, item: int, *, delivery=False) -> dict:

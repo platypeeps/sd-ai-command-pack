@@ -84,6 +84,19 @@ class ManualMergeGuard(unittest.TestCase):
         with self.assertRaisesRegex(WorkflowError, "manual merge authority"):
             ship.manual_merge_guard(self.connection, self.repo)
 
+    def test_an_open_draft_run_does_not_refuse_a_lane_merge(self):
+        """pack sd:7282: a draft run, running read-only in the checkout, holds no merge; it takes the build run's exemption."""
+        repo = str(self.root / "drafted")
+        upsert_repo(self.connection, repo, remote="git@github.com:Fixture/Repo.git", managed=1)
+        item = create_item(self.connection, kind="task", title="Drafted", repo=repo, status="planning")
+        draft = create_assignment(self.connection, item=item, role="author", status="running")
+        self.connection.execute("UPDATE assignment SET scope = 'draft' WHERE id = ?", (draft,))
+        self.connection.execute(
+            "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, "
+            "created_at, updated_at) VALUES ('draft-run', ?, 1, ?, ?, 'build-dispatch', ?, ?, 'now', 'now')",
+            (draft, repo, f"draft/sd-{item}", repo, repo))
+        ship.manual_merge_guard(self.connection, self.repo)
+
     def test_reassigned_item_cannot_hide_active_runner_ownership(self):
         item, run = self.claimed_run()
         unrelated = str(self.root / "unrelated")

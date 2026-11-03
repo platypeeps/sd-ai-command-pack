@@ -53,13 +53,21 @@ Rejected: scope `build` on the same rows. `build.reap` would end a quiet
 teammate after `STALE_SECONDS` (600 s), `_settle` would retry it as a
 headless run, and `claim` and `room` would count it.
 
-Two guards read every unreleased run whatever its scope, and both get the
-build run's exemption:
+Two guards read every unreleased run whatever its scope, and both read
+one exemption, `runner.supervised` over `runner.UNSUPERVISED_SCOPES`:
+the build, draft and teammate scopes. The draft scope joined in pack
+sd:7282: a draft run, too, writes no journal and merges nothing.
 
-- `ship.manual_merge_guard`: an open teammate run would refuse every lane
-  merge in its repository. Test: `test_ship` `test_an_open_teammate_run_does_not_refuse_a_lane_merge`.
-- `backup.JOURNALED_RUNS`: a teammate run has no runner journal, so every
-  backup would fail. Test: `test_build` `Backup.test_a_teammate_run_needs_no_journal`.
+- `ship.manual_merge_guard`: an open teammate or draft run would refuse
+  every lane merge in its repository. Tests: `test_ship`
+  `test_an_open_teammate_run_does_not_refuse_a_lane_merge`,
+  `test_an_open_draft_run_does_not_refuse_a_lane_merge`.
+- `backup.journaled_runs`: a teammate or draft run has no runner
+  journal, so every backup would fail. Tests: `test_build`
+  `Backup.test_a_teammate_run_needs_no_journal`,
+  `test_a_draft_run_needs_no_journal`, and
+  `test_the_unjournaled_scopes_are_the_build_draft_and_teammate_scopes`
+  pins the set to the modules' scopes.
 
 ## Non-goals
 
@@ -118,6 +126,8 @@ other owner stopped.
 | `sd-ship prepare` and the merge's closing check (`check_closes`, then `refuse_teammate_held`) | none | a run started after the enqueue | refused before the pull request or the merge | `test_sd_ship` `test_a_co_delivered_item_a_teammate_run_holds_refuses_prepare_and_the_merge_before_it_publishes` |
 | `sd-ship merge`, right before it publishes (`refuse_teammate_held` over `co_delivered`) | none | a run started during the gate | refused; nothing merged | same test; it fails with the line taken out |
 | lane merge (`ship.manual_merge_guard`) | none | none: the merge's own check above covers its set | the guard skips teammate runs so other items' merges go on | `test_ship` `test_an_open_teammate_run_does_not_refuse_a_lane_merge` |
+| lane merge during a draft (`ship.manual_merge_guard`, pack sd:7282) | none | a running draft refuses every lane merge in its repository | skipped through `runner.supervised`, as build and teammate runs are | `test_ship` `test_an_open_draft_run_does_not_refuse_a_lane_merge` |
+| backup during a draft (`backup.journaled_runs`, pack sd:7282) | none | the backup fails: a draft run has no journal | skipped through `runner.supervised` | `test_build` `Backup.test_a_draft_run_needs_no_journal` |
 | lane cleanup (`bin/sd_lane.builder_busy`) | worktree removal | the tree removed under the session | kept while `in_session` or a live session holds it | `Ownership.test_the_lane_keeps_a_teammates_worktree` |
 
 Every place that computes a delivered set, from `grep -n "closes\|cited"`
