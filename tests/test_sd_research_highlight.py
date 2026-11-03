@@ -158,6 +158,34 @@ class HighlightEdgeTests(unittest.TestCase):
         self.assertEqual(changed, 1)
         self.assertIn(f'<li style="{MARK}">Inner new', marked)
 
+    def test_a_changed_container_marks_only_its_own_text_not_its_nested_blocks(self) -> None:
+        """sd:7333: the mark went on the container's tag and covered its unchanged nested block."""
+        cases = (
+            ("li", "- Old outer\n  - Unchanged inner\n",
+             "<ul><li>New outer<ul><li>Unchanged inner</li></ul></li></ul>",
+             f'<ul><li><span style="{MARK}">New outer</span><ul><li>Unchanged inner</li></ul></li></ul>'),
+            ("div", "Old outer\n\nUnchanged inner\n",
+             "<div>New outer<p>Unchanged inner</p></div>",
+             f'<div><span style="{MARK}">New outer</span><p>Unchanged inner</p></div>'),
+            ("blockquote", "> Old outer\n>\n> Unchanged inner\n",
+             "<blockquote>New outer<p>Unchanged inner</p></blockquote>",
+             f'<blockquote><span style="{MARK}">New outer</span><p>Unchanged inner</p></blockquote>'),
+        )
+        for name, baseline, page, expected in cases:
+            with self.subTest(container=name):
+                marked, changed, gone, _ = self.highlight.highlight(
+                    page, self.highlight.Baseline(baseline, header=False), "t", header=False)
+                self.assertEqual((changed, gone), (1, 1))
+                self.assertTrue(marked.endswith(expected), marked)
+
+    def test_a_changed_unit_without_nested_blocks_keeps_the_mark_on_its_tag(self) -> None:
+        marked, changed, _, _ = self.highlight.highlight(
+            "<li>New <a href=\"https://example.test\">x</a></li><div>New div</div>",
+            self.highlight.Baseline("Old.\n", header=False), "t", header=False)
+        self.assertEqual(changed, 2)
+        self.assertIn(f'<li style="{MARK}">New <a href="https://example.test">x</a></li>'
+                      f'<div style="{MARK}">New div</div>', marked)
+
     def test_a_markdown_input_is_laid_out_and_has_no_header_block(self) -> None:
         fake = types.ModuleType("markdown")
         fake.markdown = lambda text, extensions: "<h2>Plan</h2>\n<hr />\n<p>New step.</p>\n<p>Old step.</p>"
