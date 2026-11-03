@@ -139,7 +139,7 @@
     cli: () => NO_CLI, sends: o => `POST /api/studio/view {file: ${o.file}, ${field}: ${to}}`,
     run: o => view(o, { [field]: to }).then(() => `${label} · ${o.label}`), undo: o => view(o, { [field]: !to }) });
   const register = () => window.shell.commands.register(
-    { id: 'studio.stage', on: 'project', label: 'Next stage', key: 's', risk: 'confirm', executes: true, primary: () => true,
+    { id: 'studio.stage', on: 'project', label: 'Next stage', key: 's', icon: 'chevron-right', risk: 'confirm', executes: true, primary: () => true,
       does: o => o.next ? `Moves #${o.item} from ${o.stage || 'no stage'} to ${o.next}, with a note.` : 'Moves the project\'s item one stage along its strip.',
       when: o => !o.kind ? 'its project.json names no kind' : !o.item ? 'its project.json names no sd item'
         : !o.revision ? `item sd:${o.item} was not read` : o.next ? true
