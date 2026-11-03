@@ -22,8 +22,12 @@ read.
 Details shows each root's images, audio and video, listed from disk: the
 media is untracked, so git is never asked. Each file is served at
 `/studio/files/<repo>/<path in the repository>` under `designs.resolve`'s
-rules (every segment a name, the file inside the repository) and only
+rules (every folder a name, the file inside the repository) and only
 inside a root a project names; each answer carries a sandbox policy.
+A file's own name may hold spaces and punctuation, such as
+`Song Title!.mp4` (sd:7395): the link encodes it and the server decodes
+it. A name that starts with a dot, or holds a `/` or a control
+character, is never listed or served.
 `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and
 `Content-Range`, so a player seeks; a range past the end is 416, and a
 header that does not parse gets the whole file.

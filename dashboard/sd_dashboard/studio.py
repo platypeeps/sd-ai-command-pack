@@ -15,8 +15,9 @@ from a role (`reference`, `candidates`, ...) to a folder relative to the project
 with its error; a root that leaves the project folder, or names an unknown role, is dropped with its reason.
 
 **The gallery.** Each root's files, listed from disk (the media is untracked: git is never asked), served at
-`/studio/files/<repo key>/<path in the repository>` by `designs.resolve`'s rules with `TYPES` here: every segment a
-name, the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
+`/studio/files/<repo key>/<path in the repository>`, each segment percent-encoded, by `designs.resolve`'s rules with
+`TYPES` here: every folder a name, the file's own name a `file_name` (a title with spaces and `!` is one, sd:7395),
+the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
 file answers under `POLICY`, a sandbox, so an opened SVG runs nothing.
 
 **Seeking.** `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and `Content-Range` (`byte_range`): past the end
@@ -38,8 +39,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from . import designs
 
@@ -93,6 +96,14 @@ STAGES = {
 
 #: The first segment of a studio file's view key, so it shares no key with a Documents root.
 VIEW_ROOT = "studio"
+
+
+def file_name(name: str) -> bool:
+    """Whether a gallery file may carry `name` (sd:7395): a render is named like its title (`Song Title!.mp4`), so any
+    name but one that starts with a dot (`.`, `..`, a hidden file), holds a `/`, or holds a control or format character
+    (NUL, a tab, a right-to-left override). Its folders stay `designs.SEGMENT`s."""
+    return (bool(name) and not name.startswith(".") and "/" not in name
+            and not any(unicodedata.category(c) in ("Cc", "Cf") for c in name))
 
 
 def _repo_root(repo_root: Path | None = None) -> Path:
@@ -158,7 +169,7 @@ def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
         folders[:] = sorted(f for f in folders if designs.SEGMENT.fullmatch(f))
         for name in sorted(names):
             relative = (Path(current) / name).relative_to(checkout).as_posix()
-            found = designs.resolve(relative, checkout, TYPES)
+            found = designs.resolve(quote(relative), checkout, TYPES, file_name)
             if found is None or not found[0].is_relative_to(root):
                 continue
             if len(out) >= FILES:
@@ -359,7 +370,7 @@ def view_request(payload: dict):
     file = payload["file"]
 
     def write(connection):
-        if located(connection, file) is None:
+        if located(connection, quote(file)) is None:
             raise ValueError(f"No studio file {file} is served: read the projects again.")
         return {"file": file, **writes.set_view(connection, view_key(file), **fields)}
     return write
@@ -367,12 +378,13 @@ def view_request(payload: dict):
 
 def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path, str] | None:
     """The file `/studio/files/<tail>` names and its type, or None: in a registered repository, inside a root a project
-    of that repository names now, and passing `designs.resolve` with `TYPES`."""
+    of that repository names now, and passing `designs.resolve` with `TYPES` and `file_name`. `tail` is percent-encoded,
+    as the URL carries it; a caller holding a file's plain path quotes it first."""
     key, _, rest = tail.partition("/")
     checkout = repositories(connection, repo_root)[0].get(key)
     if checkout is None or not rest:
         return None
-    found = designs.resolve(rest, checkout, TYPES)
+    found = designs.resolve(rest, checkout, TYPES, file_name)
     if found is None:
         return None
     target = found[0]

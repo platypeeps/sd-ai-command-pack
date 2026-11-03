@@ -201,6 +201,31 @@ class TheProjects(ScreenCase):
         self.assertEqual((doc["projects"], doc["repositories"]), ([], 0))
         self.assertRegex(doc["problems"][0], r"^art could not be read: .*Permission denied")
 
+    def test_a_media_name_with_spaces_and_punctuation_lists_and_resolves(self):
+        """sd:7395: a final render is named like a title; the gallery lists it and the file route finds it."""
+        media = self.root / "example" / "art" / "shirts" / "cat" / "media"
+        (media / "Song Title!.mp4").write_bytes(MEDIA)
+        roots = {r["role"]: r for r in self.read()["projects"][0]["roots"]}
+        self.assertIn("shirts/cat/media/Song Title!.mp4", [f["path"] for f in roots["media"]["files"]])
+        found = studio.located(self.connection, "art/shirts/cat/media/Song%20Title%21.mp4", self.root)
+        self.assertEqual(found, ((media / "Song Title!.mp4").resolve(), "video/mp4"))
+
+    def test_a_dot_a_hidden_or_a_control_name_still_never_lists_or_resolves(self):
+        """sd:7395: the looser last-segment rule still refuses '..', a leading dot, a control or format character."""
+        media = self.root / "example" / "art" / "shirts" / "cat" / "media"
+        for name in (".hidden.mp4", "bell\x07.mp4", "rtl\u202egnp.mp4"):
+            (media / name).write_bytes(MEDIA)
+        listed = [f["name"] for r in self.read()["projects"][0]["roots"] for f in r["files"]]
+        self.assertEqual(sorted(listed), ["clip.mp4", "one.png", "take.wav"])
+        for tail in ("art/shirts/cat/media/.hidden.mp4", "art/shirts/cat/media/bell%07.mp4", "art/shirts/cat/media/rtl%E2%80%AEgnp.mp4",
+                     "art/shirts/cat/media/..", "art/shirts/cat/media/%2E%2E%2Fclip.mp4", "art/shirts/cat/media/..%2F..%2Fstray.png",
+                     "art/shirts/cat/media/a%00.mp4"):
+            with self.subTest(tail=tail):
+                self.assertIsNone(studio.located(self.connection, tail, self.root))
+        for name in ("..", ".", ".mp4", "a/b.mp4", "a\x00.mp4", "tab\t.mp4", "", "Song Title!.mp4"):
+            with self.subTest(name=name):
+                self.assertEqual(studio.file_name(name), name == "Song Title!.mp4")
+
 def name_item(root: Path, item: int, folder: str = "shirts/cat") -> None:
     """The project at `folder` names `item` as its sd item."""
     manifest = root / "example" / "art" / folder / "project.json"
@@ -523,6 +548,21 @@ class TheServer(BrowserSession):
         self.assertEqual((status, headers["Content-Range"], headers["Accept-Ranges"], body), (206, "bytes 0-99/1000", "bytes", MEDIA[:100]))
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/take.wav", Range="bytes=-10")
         self.assertEqual((status, headers["Content-Range"], body), (206, "bytes 990-999/1000", MEDIA[990:]))
+
+    def test_a_media_name_with_spaces_and_punctuation_is_linked_encoded_and_served_with_a_range(self):
+        """sd:7395: studio.js links 'Song Title!.mp4' encoded; the server decodes it and answers 200 and a 206 Range."""
+        (self.root / "example" / "art" / "shirts" / "cat" / "media" / "Song Title!.mp4").write_bytes(MEDIA)
+        doc = json.loads(self.fetch("/api/studio")[2])
+        details = self.run_page(doc, "window.PAGE_LIST.select('art/shirts/cat'); R.details = ELS.details.html;")["R"]["details"]
+        self.assertIn('src="/studio/files/art/shirts/cat/media/Song%20Title!.mp4"', details)
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/Song%20Title!.mp4")
+        self.assertEqual((status, headers["Content-Type"], body), (200, "video/mp4", MEDIA))
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/Song%20Title%21.mp4", Range="bytes=10-19")
+        self.assertEqual((status, headers["Content-Range"], body), (206, "bytes 10-19/1000", MEDIA[10:20]))
+        self.post("/api/studio/view", {"file": "art/shirts/cat/media/Song Title!.mp4", "pinned": True})
+        doc = json.loads(self.fetch("/api/studio")[2])
+        media = {f["name"]: f for r in doc["projects"][0]["roots"] for f in r["files"]}
+        self.assertTrue(media["Song Title!.mp4"]["pinned"])
 
     def test_a_range_past_the_end_is_416_and_one_that_does_not_parse_gets_the_whole_file(self):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=1000-")
