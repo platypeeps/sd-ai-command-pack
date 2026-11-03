@@ -21,6 +21,7 @@ from sd_db import (
     reporting,
     retention,
     runner,
+    ship,
     skills_catalog,
     teammate,
     today,
@@ -180,6 +181,38 @@ class Start(Case):
                         teammate.TeammateRefused, f"item {number} is delivered by pending lane entry e8 of sd:{item}"):
                     self.start(items)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
+
+    def test_a_start_refuses_an_item_a_failed_entry_may_have_published(self):
+        """pack sd:7295: a failed delivering entry whose ship receipt reached `merge_dispatch` may have published, so
+        it owes the close as a merged entry does; one that never dispatched holds nothing."""
+        merge = "b" * 40
+        dispatched, merged, paid, unread, unsent, associated = (self.item(status="ready") for _ in range(6))
+
+        def failed(ident, item, receipt, claim="deliver"):
+            branch = f"feat/{ident}"
+            self.lane(ident, {"id": ident, "item": item, "status": "failed", "step": "merge", "claim": claim,
+                              "closes": [], "repository": "Fixture/Repo", "branch": branch})
+            if receipt is not None:
+                self.db.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                                (ship.receipt_key("Fixture/Repo", branch, item), clock(),
+                                 receipt if isinstance(receipt, str) else json.dumps({"protocol": 1, **receipt})))
+        failed("f1", dispatched, {"phase": "merge_dispatch"})
+        failed("f2", merged, {"phase": "merged", "merge_commit": merge})
+        failed("f3", paid, {"phase": "merged", "merge_commit": merge})
+        transition(self.db, paid, "done", who="sd-ship", reason=f"delivered at {merge} on origin/main")
+        transition(self.db, paid, "ready", who="operator", reason="reopened")
+        failed("f4", unread, "{not json")
+        failed("f5", unsent, {"phase": "ready_to_send"})
+        failed("f6", associated, {"phase": "merged", "merge_commit": merge}, claim="associate-only")
+        cases = {dispatched: "close owed by failed lane entry f1 of sd:{n} at an unrecorded commit",
+                 merged: f"close owed by failed lane entry f2 of sd:{{n}} at {merge}",
+                 unread: "failed lane entry f4 of sd:{n} cannot be read"}
+        for item, why in cases.items():
+            with self.subTest(item=item), self.assertRaisesRegex(teammate.TeammateRefused,
+                                                                 f"item {item}.*{why.format(n=item)}"):
+                self.start([item])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
+        self.start([paid, unsent, associated])
 
     def test_a_start_refuses_when_a_lane_entry_is_unreadable(self):
         """An entry that does not parse may deliver the item: unknown is not "no" (pack sd:7288)."""
