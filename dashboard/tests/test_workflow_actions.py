@@ -5,21 +5,24 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
 from sd_dashboard import server
-from sd_db import reads, set_item_fields, upsert_repo, upsert_shadow, workflow
+from sd_db import database, reads, set_item_fields, upsert_repo, upsert_shadow, workflow
 from sd_db.testing import patience
 from support import ScreenCase
 
 
 class BrowserSession(ScreenCase):
     #: Seconds one request waits for the in-process server on a quiet machine; a class whose server runs real
-    #: subprocesses sets more. `patience` scales it by the load at the request (sd:6158).
-    http_timeout = 5
+    #: subprocesses sets more. `patience` scales it by the load at the request (sd:6158). The server may wait out
+    #: one lock for `BUSY_TIMEOUT` before it answers, so the client waits that and 10 s more: at 5 s, requests that
+    #: take 0.16 s idle timed out in gates whose one-minute load read about one per core (sd:7289).
+    http_timeout = database.BUSY_TIMEOUT / 1000 + 10
 
     def setUp(self):
         super().setUp()
@@ -389,3 +392,19 @@ class TheWaitBudget(BrowserSession):
                 patch.object(urllib.request, "urlopen", urlopen):
             self.assertEqual(self.request("/health")[0], 200)
         self.assertEqual(seen, [self.http_timeout * 5])
+
+    def test_a_request_outwaits_one_lock_the_server_waits_out(self):
+        """sd:7289: a server statement may wait `BUSY_TIMEOUT` for a lock and still answer; on a machine whose
+        load reads quiet, the client waits for that answer instead of timing out first."""
+        held = database.BUSY_TIMEOUT / 1000 + 1
+
+        def slow(*_, **__):
+            def action(connection):
+                time.sleep(held)
+                return {"ok": True}
+            return action
+
+        with patch("os.getloadavg", return_value=(0.0, 0.0, 0.0)), patch.object(server, "action_route", slow):
+            status, _, answer = self.post("/api/items", {"title": "held"})
+        self.assertEqual((status, answer), (201, {"ok": True}))
+        self.assertGreater(self.http_timeout, held)

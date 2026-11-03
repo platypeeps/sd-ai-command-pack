@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import studio, v2
+from sd_db.testing import patience
 from support import ScreenCase
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
@@ -309,7 +310,7 @@ class TheServer(BrowserSession):
         """(status, headers, bytes) for a GET with the session's cookie and `headers`."""
         request = urllib.request.Request(self.base + path, headers={"Cookie": self.cookie, **headers})
         try:
-            answer = urllib.request.urlopen(request, timeout=5)
+            answer = urllib.request.urlopen(request, timeout=patience(self.http_timeout))
         except urllib.error.HTTPError as error:
             answer = error
         with answer:
@@ -491,7 +492,7 @@ class TheServer(BrowserSession):
     def test_a_file_without_a_session_is_refused(self):
         request = urllib.request.Request(self.base + "/studio/files/art/shirts/cat/candidates/one.png")
         with self.assertRaises(urllib.error.HTTPError) as refused:
-            urllib.request.urlopen(request, timeout=5)
+            urllib.request.urlopen(request, timeout=patience(self.http_timeout))
         refused.exception.close()
         self.assertEqual(refused.exception.code, 403)
 
