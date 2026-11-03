@@ -107,7 +107,7 @@ IMAGE = ("- Step 3, the image: a request with `image` follows the contract's \"A
          "URL and the authorization header it returned, and write the content with the line `upload` printed in place "
          "of the line `{marker}`. An upload that fails leaves the request; never write the page with the marker in it.\n")
 #: For a drain that holds a Drive update (sd:7252): the contract's "An update marks what changed", with the kit spelled out.
-UPDATE = ("- Step 3, a Drive request that names its `file`: follow the contract's \"An update marks what changed\". Read "
+DRIVE_UPDATE_STEP = ("- Step 3, a Drive request that names its `file`: follow the contract's \"An update marks what changed\". Read "
           "the Doc with `get_doc_as_markdown` (`comment_mode: \"none\"`) and Write it to `{work}previous.md`, Write the "
           "request's `content` to `{work}content.md`, run `{kit} highlight --previous {work}previous.md --since "
           "\"<time>\" {work}content.md {work}marked.html`, then replace the body with `update_drive_file`, `file_path` "
@@ -222,7 +222,7 @@ def start(connection, checkout: Path, out: str, *, brief: bool = False, now: dat
             step5=STEP5_BRIEF if brief else STEP5_DOC.format(conf=checkout / "research.conf.py"),
             never=NEVER_BUT_TRASH if trash else NEVER,
             image=IMAGE.format(kit=script, marker=kit.IMAGE_MARKER) if image else "",
-            update=UPDATE.format(kit=script, work=work) if work else ""), encoding="utf-8")
+            update=DRIVE_UPDATE_STEP.format(kit=script, work=work) if work else ""), encoding="utf-8")
         document = {"id": run_id, "state": "queued", "reason": None, "checkout": str(checkout), "out": out,
                     "queue": str(queue), "receipts": str(kit.receipts()), "references": str(contract.parent),
                     "requests": requests, "results": None, "prompt": str(prompt),
