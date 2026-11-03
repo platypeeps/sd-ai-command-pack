@@ -85,8 +85,8 @@
   }
 
   // sd:6164: a realm place's Tasks also lists the realm's open GitHub and Jira issues (places.realm_issues), each marked by
-  // its source and linked to its tracker in a new tab. An issue Hide hid (sd:6175) shows under Hidden or All in the list's
-  // Open | Hidden | All (sd:6701), kept as ?issues-hidden=.
+  // its source and linked to its tracker in a new tab. An issue Hide hid (sd:6175) shows under Hidden in the list's
+  // Open | Hidden (sd:6701), kept as ?issues-hidden=.
   let issuesHid = null;  // read from the URL at the first draw: shell.js loads after this script
   function issuesHTML(doc) {
     if (!doc.issues) return '';
