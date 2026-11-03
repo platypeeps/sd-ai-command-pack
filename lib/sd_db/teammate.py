@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timedelta
+from typing import Literal
 
 from . import build, reads
 from .database import transaction
@@ -91,8 +92,11 @@ def lane_holding(connection, item: int) -> str | None:
     (`reads.lane_delivered`). A merged entry that claimed delivery owes each
     of them a close until a status note on it records `delivered at` the
     merge commit, the sentence every delivering transition writes
-    (`workflow.DELIVERED_AT`); a reopen after that close owes nothing. An
-    entry that does not parse may deliver the item, so it refuses too.
+    (`workflow.DELIVERED_AT`); a reopen after that close owes nothing. A
+    failed delivering entry whose ship receipt reached `merge_dispatch` may
+    have published, so it owes the close the same way, at the receipt's
+    commit (`_dispatched`, pack sd:7295). An entry or a receipt that does
+    not parse may deliver the item, so it refuses too.
     """
     for row in reads.lane_entries(connection):
         try:
@@ -106,15 +110,46 @@ def lane_holding(connection, item: int) -> str | None:
         status, where = entry.get("status"), f"lane entry {entry.get('id')} of sd:{entry.get('item')}"
         if status in LANE_LIVE:
             return f"item {item} is delivered by {status} {where}; wait for it to merge or end"
-        if status == "merged" and entry.get("claim") == "deliver":
-            commit = entry.get("merge_commit")
-            paid = isinstance(commit, str) and commit and connection.execute(
-                "SELECT 1 FROM note WHERE item = ? AND kind = 'status_change' AND instr(body, ?) > 0 LIMIT 1",
-                (item, f"delivered at {commit}")).fetchone()
-            if not paid:
-                return (f"item {item} has its close owed by merged {where} at {commit or 'an unrecorded commit'}; "
-                        "settle it with `sd-ship reconcile` first")
+        if entry.get("claim") != "deliver" or status not in ("merged", "failed"):
+            continue
+        commit = entry.get("merge_commit")
+        if status == "failed":
+            receipt = _dispatched(connection, entry)
+            if receipt is None:
+                continue
+            if receipt is False:
+                return (f"item {item}: the ship receipt of failed {where} cannot be read, so whether it "
+                        "published is unknown; settle it with `sd-ship reconcile` first")
+            commit = receipt.get("merge_commit")
+        paid = isinstance(commit, str) and commit and connection.execute(
+            "SELECT 1 FROM note WHERE item = ? AND kind = 'status_change' AND instr(body, ?) > 0 LIMIT 1",
+            (item, f"delivered at {commit}")).fetchone()
+        if not paid:
+            return (f"item {item} has its close owed by {status} {where} at {commit or 'an unrecorded commit'}; "
+                    "settle it with `sd-ship reconcile` first")
     return None
+
+
+def _dispatched(connection, entry: dict) -> dict | Literal[False] | None:
+    """The ship receipt of a failed `entry` that reached `merge_dispatch`, so may have published (pack sd:7295).
+
+    None when its receipt never dispatched, or when the entry has no branch,
+    which no pull request merges. False when the receipt cannot be read:
+    unknown, not "never published". The lane's `check_unmerged` reads the
+    same receipt and the same two phases.
+    """
+    # Read at the call: `ship` reaches `runner` through `ledger`.
+    from . import ship  # noqa: PLC0415
+    branch, repository, number = entry.get("branch"), entry.get("repository"), entry.get("item")
+    if not isinstance(branch, str) or not branch:
+        return None
+    if not isinstance(repository, str) or type(number) is not int:
+        return False
+    try:
+        receipt = ship.read(connection, ship.receipt_key(repository, branch, number))[1]
+    except ship.WorkflowError:
+        return False
+    return receipt if receipt.get("phase") in ("merge_dispatch", "merged") else None
 
 
 def start(connection, items: list[int], *, worktree: str, branch: str, budget_minutes: int, owner: str) -> dict:

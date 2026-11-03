@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from . import paths, runner_journal
+from . import paths, runner, runner_journal
 from .database import connect, served_by, transaction
 from .errors import SdDbError
 from .workflow import WorkflowError, item_state
@@ -72,8 +72,9 @@ def manual_merge_guard(connection: sqlite3.Connection, repo: str, *, repository:
     # bound to the repository claimed by the run and lease until each releases.
     # A build run (scope `build`) lands only through the lane, whose merge this
     # guard would otherwise refuse while the run waits on it (pack sd:6094); a
-    # teammate run (`sd_db.teammate`, pack sd:7221) lands the same way.
-    lane = "COALESCE(a.scope, '') NOT IN ('build', 'teammate')"
+    # teammate run (`sd_db.teammate`, pack sd:7221) lands the same way, and a
+    # draft run (`sd_db.draft`) only reads the checkout (pack sd:7282).
+    lane = runner.supervised("a.scope")
     active = connection.execute(
         "WITH ownership(id,status,repo,source) AS ("
         "SELECT a.id, a.status, i.repo, 'assignment' FROM assignment a JOIN item i ON a.item=i.id "

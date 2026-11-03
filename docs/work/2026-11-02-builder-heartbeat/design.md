@@ -53,13 +53,21 @@ Rejected: scope `build` on the same rows. `build.reap` would end a quiet
 teammate after `STALE_SECONDS` (600 s), `_settle` would retry it as a
 headless run, and `claim` and `room` would count it.
 
-Two guards read every unreleased run whatever its scope, and both get the
-build run's exemption:
+Two guards read every unreleased run whatever its scope, and both read
+one exemption, `runner.supervised` over `runner.UNSUPERVISED_SCOPES`:
+the build, draft and teammate scopes. The draft scope joined in pack
+sd:7282: a draft run, too, writes no journal and merges nothing.
 
-- `ship.manual_merge_guard`: an open teammate run would refuse every lane
-  merge in its repository. Test: `test_ship` `test_an_open_teammate_run_does_not_refuse_a_lane_merge`.
-- `backup.JOURNALED_RUNS`: a teammate run has no runner journal, so every
-  backup would fail. Test: `test_build` `Backup.test_a_teammate_run_needs_no_journal`.
+- `ship.manual_merge_guard`: an open teammate or draft run would refuse
+  every lane merge in its repository. Tests: `test_ship`
+  `test_an_open_teammate_run_does_not_refuse_a_lane_merge`,
+  `test_an_open_draft_run_does_not_refuse_a_lane_merge`.
+- `backup.journaled_runs`: a teammate or draft run has no runner
+  journal, so every backup would fail. Tests: `test_build`
+  `Backup.test_a_teammate_run_needs_no_journal`,
+  `test_a_draft_run_needs_no_journal`, and
+  `test_the_unjournaled_scopes_are_the_build_draft_and_teammate_scopes`
+  pins the set to the modules' scopes.
 
 ## Non-goals
 
@@ -91,6 +99,7 @@ second writer on a teammate's item is the failure. Tests are in
 | runner delivery (`runner.delivery_candidates`) | none | a merge while the builder works | skipped until the run ends | same test |
 | Unscheduled (`today.unscheduled`) | none | the item offered for pickup | skipped: reads `OWNING` | `test_unscheduled_and_the_report_clean_skip_a_teammates_item` |
 | report clean (`reporting.clean_reports`) | none | a held report closed | declined: reads `OWNING` | same test |
+| report retention (`reporting.clean_candidates`, `retention.settle_clean_reports`, pack sd:7284) | item status | a report a runner or teammate run owns moved to `done` | not a candidate: reads `OWNING` | `test_retention_leaves_a_clean_report_a_runner_or_teammate_owns` |
 | skill proposals (`skills_catalog.apply_proposals`) | none | the source changed under the session | refused: reads `OWNING` | `test_a_skill_review_a_teammate_holds_takes_no_proposals` |
 | lane cleanup (`bin/sd_lane.builder_busy`) | none | the worktree removed under the session | kept: reads `OWNING` | `test_the_lane_keeps_a_teammates_worktree` |
 | status write and choices (`workflow.change_status`, `allowed_statuses`) | item status | the session's own write refused | not read: `ACTIVE_ASSIGNMENTS` | `Start.test_the_session_still_moves_its_items`, `test_the_sessions_own_status_cancel_and_edit_writes_pass` |
@@ -112,6 +121,7 @@ other owner stopped.
 | start over a live build or teammate (`teammate.start`) | none | two owners | refused: `build.ACTIVE` and `_holding` | `Start.test_a_start_refuses_and_writes_nothing`, `test_a_start_refuses_an_item_a_build_holds` |
 | start over a lane entry (`teammate.start`, `lane_holding`, pack sd:7288) | none | a teammate on an item a pending, running or prepared entry delivers, as its item or a close | refused: names the entry | `Start.test_a_start_refuses_an_item_a_lane_entry_still_delivers`, `test_a_start_refuses_an_item_a_prepared_lane_entry_delivers`, `test_a_start_refuses_a_pending_entrys_explicit_and_cited_closes_in_any_position` |
 | start after a merge whose close is owed (`teammate.lane_holding`) | none | a teammate on an item a merged delivering entry has not closed | refused until a status note records `delivered at` the merge commit; a later reopen starts | same test |
+| start after a failed entry that may have published (`teammate._dispatched`, pack sd:7295) | none | a teammate on an item whose failed delivering entry reached `merge_dispatch` | refused until a status note records `delivered at` the receipt's commit; a receipt that never dispatched holds nothing; an unreadable one refuses | `Start.test_a_start_refuses_an_item_a_failed_entry_may_have_published` |
 | start over an unreadable lane entry (`teammate.lane_holding`) | none | the entry may deliver the item | refused: unknown, names the key | `Start.test_a_start_refuses_when_a_lane_entry_is_unreadable` |
 | silence (dispatch tick, `teammate.overdue`) | none | the run released while the builder still runs | no release; Today reads it overdue | `Release.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_build_panel` and `test_today_glance` teammate tests |
 | every item done (dispatch tick) | none | the run released while the builder still writes | no release: no reap path exists | `Release.test_a_run_whose_items_are_all_done_stays_held_until_its_lead_ends_it` |
@@ -122,6 +132,8 @@ other owner stopped.
 | `sd-ship prepare` and the merge's closing check (`check_closes`, then `refuse_teammate_held`) | none | a run started after the enqueue | refused before the pull request or the merge | `test_sd_ship` `test_a_co_delivered_item_a_teammate_run_holds_refuses_prepare_and_the_merge_before_it_publishes` |
 | `sd-ship merge`, right before it publishes (`refuse_teammate_held` over `co_delivered`) | none | a run started during the gate | refused; nothing merged | same test; it fails with the line taken out |
 | lane merge (`ship.manual_merge_guard`) | none | none: the merge's own check above covers its set | the guard skips teammate runs so other items' merges go on | `test_ship` `test_an_open_teammate_run_does_not_refuse_a_lane_merge` |
+| lane merge during a draft (`ship.manual_merge_guard`, pack sd:7282) | none | a running draft refuses every lane merge in its repository | skipped through `runner.supervised`, as build and teammate runs are | `test_ship` `test_an_open_draft_run_does_not_refuse_a_lane_merge` |
+| backup during a draft (`backup.journaled_runs`, pack sd:7282) | none | the backup fails: a draft run has no journal | skipped through `runner.supervised` | `test_build` `Backup.test_a_draft_run_needs_no_journal` |
 | lane cleanup (`bin/sd_lane.builder_busy`) | worktree removal | the tree removed under the session | kept while `in_session` or a live session holds it | `Ownership.test_the_lane_keeps_a_teammates_worktree` |
 
 Every place that computes a delivered set, from `grep -n "closes\|cited"`
