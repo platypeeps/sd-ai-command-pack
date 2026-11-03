@@ -110,6 +110,9 @@ other owner stopped.
 | --- | --- | --- | --- | --- |
 | start over a retained build run (`teammate.start`) | none | a teammate on an item a blocked build's unreleased run holds, a bundle member too | refused: `build._held` | `Start.test_a_start_refuses_an_item_a_retained_build_run_holds` |
 | start over a live build or teammate (`teammate.start`) | none | two owners | refused: `build.ACTIVE` and `_holding` | `Start.test_a_start_refuses_and_writes_nothing`, `test_a_start_refuses_an_item_a_build_holds` |
+| start over a lane entry (`teammate.start`, `lane_holding`, pack sd:7288) | none | a teammate on an item a pending or running entry delivers, as its item or a close | refused: names the entry | `Start.test_a_start_refuses_an_item_a_lane_entry_still_delivers` |
+| start after a merge whose close is owed (`teammate.lane_holding`) | none | a teammate on an item a merged delivering entry has not closed | refused until a status note records `delivered at` the merge commit; a later reopen starts | same test |
+| start over an unreadable lane entry (`teammate.lane_holding`) | none | the entry may deliver the item | refused: unknown, names the key | `Start.test_a_start_refuses_when_a_lane_entry_is_unreadable` |
 | silence (dispatch tick, `teammate.overdue`) | none | the run released while the builder still runs | no release; Today reads it overdue | `Release.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_build_panel` and `test_today_glance` teammate tests |
 | every item done (dispatch tick) | none | the run released while the builder still writes | no release: no reap path exists | `Release.test_a_run_whose_items_are_all_done_stays_held_until_its_lead_ends_it` |
 | assignment cancel (`operations.cancel_assignment`) | none | a cancelled row leaves `OWNING` under a live builder | refused: only queued, or blocked with the item done | `Release.test_an_assignment_cancel_does_not_release_a_teammate_run` |
@@ -139,9 +142,9 @@ over `bin/sd_lane.py`, `bin/sd-ship`, `bin/sd_ship_body.py` and
   preflight; `open_cited` and `cited_sources` run only inside
   `cited_closes`.
 
-Gaps this table shows, not fixed here: `teammate.start` reads no lane
-entry, so it takes an item a pending or running entry delivers, or one
-whose merge published but whose close is still owed (pack sd:7288).
+`teammate.start` reads the same set the other way round (pack sd:7288):
+`teammate.lane_holding` reads every lane entry (`reads.lane_entries`)
+and its `reads.lane_delivered` set, which `refuse_teammate` checks too.
 
 ## Acceptance criteria
 
