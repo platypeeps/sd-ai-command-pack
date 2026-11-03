@@ -640,6 +640,17 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
                 if set(values) != {"stage"}:
                     raise ValueError("A base row's stage move takes the stage only.")
                 return _edit_base_row(connection, number, revision, values)
+            # A Studio project's item (sd:6921) moves along its kind's strip; a writing piece never does, whatever names it.
+            row = workflow.item_state(connection, number)["item"]
+            if not (row["kind"] == "idea" and row["piece"]):
+                from . import studio
+
+                project = studio.naming(connection, number)
+                if project is not None:
+                    if set(values) != {"stage"} or not isinstance(values["stage"], str):
+                        raise ValueError("A Studio stage move takes the stage only.")
+                    return studio.move_stage(connection, number, project, values["stage"], who="dashboard",
+                                             expected_revision=revision)
             if values["stage"] == "published":
                 raise ValueError("Publication uses the reviewed publishing workflow.")
             return writing.change_stage(connection, number, values["stage"],

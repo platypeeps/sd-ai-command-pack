@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import test_v2_queue
 import test_v2_today_reader
 from fleet_support import FleetCase
 from sd_dashboard import active_sessions, fix_session, fleet, now_screen
@@ -423,6 +424,7 @@ class TodayDraws(ScreenCase):
         self.doc["queues"] = {"rows": [ready(21, "/repos/alpha"), *[ready(n, "/repos/beta") for n in (31, 32, 33, 34)],
                                        ready(41, "/repos/gamma"),
                                        {**ready(51, "/repos/alpha"), "queue": "build", "status": "queued"}], "error": ""}
+        self.doc["queues"]["suggested"] = test_v2_queue.as_suggested(self.doc["queues"]["rows"])
 
     #: The Queue view's first show (pack sd:7234), which folded In motion in; its other reads answer 404 here.
     SHOW = ("document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: 'queue', first: true } }));\n"
@@ -433,8 +435,9 @@ class TodayDraws(ScreenCase):
             "const repos = () => [...ELS.queue.html.matchAll(/<tr class=\"repo\" data-repo=\"([^\"]*)\"/g)].map(m => m[1]);\n")
     AFTER = "\nANSWER = p => p === '/api/now' ? [200, DOC0] : [404, { error: 'not served here' }];\n"
 
-    def draw(self, body):
-        return self.run_page(self.SHOW + body, after=self.AFTER)
+    def draw(self, body, search="?show="):
+        # pack sd:7314: Suggested is on with no `show` key; these draws start from every filter off, as `?show=` keeps it.
+        return self.run_page(self.SHOW + body, search=search, after=self.AFTER)
 
     def test_rows_from_two_repos_form_two_groups_and_a_no_repo_row_lands_in_unassociated_last(self):
         # pack sd:7222, now the Queue view's: one parent row per repo; an item with no repo is Unassociated, last.
@@ -448,7 +451,7 @@ class TodayDraws(ScreenCase):
 
     def test_suggested_adds_each_repos_ready_items_that_the_default_hides(self):
         # pack sd:7222's Live + next is the Suggested filter: each repo's ready items, at most 3, in their order; a repo
-        # with only ready items gets its row too. Off, the start, shows none.
+        # with only ready items gets its row too. Off (`?show=` empty) shows none.
         self.grouped()
         out = self.draw("R.before = repos(); press('suggested'); R.after = repos(); R.bar = ELS['queue-filters'].html;"
                         " open('beta'); R.beta = ELS.queue.html; open('alpha'); R.alpha = ELS.queue.html;")
@@ -462,9 +465,9 @@ class TodayDraws(ScreenCase):
 
     def test_ready_items_that_could_not_be_read_say_so(self):
         self.grouped()
-        self.doc["queues"] = {"rows": [], "error": "database is locked"}
+        self.doc["queues"] = {"rows": [], "suggested": [], "error": "database is locked"}
         out = self.draw("press('suggested'); R.note = ELS['queue-note'].textContent;")
-        self.assertIn("Ready items not read: database is locked", out["R"]["note"])
+        self.assertIn("Suggested items not read: database is locked", out["R"]["note"])
 
     def test_an_items_sessions_are_one_row_and_an_unread_source_is_said(self):
         self.doc["active"] = {"rows": [self.session(7, "worktree", "Worktree wt-7"),

@@ -35,7 +35,7 @@ Stage strips, one per kind, in order:
 
 | Kind | Stages |
 | --- | --- |
-| shirt | brief, candidates, selected, print export, approved, ordered |
+| shirt | brief, candidates, selected, print_export, approved, ordered |
 | song | lyrics, suno, selections, film, delivered |
 | episode | idea, outlined, scripted, in_production, published |
 
