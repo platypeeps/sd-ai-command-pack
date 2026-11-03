@@ -75,7 +75,7 @@ function renderBoard() {
       <td class="g g-${p.s}" title="${p.s}: ${STATE_WORDS[p.s]}"><span aria-hidden="true">${GLYPH[p.s]}</span><span class="sr">${p.s}: ${STATE_WORDS[p.s]}</span></td>
       <td class="what"><button type="button">${p.label}</button><span class="path">${p.path}</span></td>
       <td class="stage" data-l="Stage">${stageCell(p)}</td>
-      <td class="render" data-l="Render"><span class="d"><span class="g-${p.render.s}">${GLYPH[p.render.s]}</span> ${p.render.txt}<span class="sub">${p.render.sub}</span></span></td>
+      <td class="render" data-l="Render"><span class="d"><span class="g-${p.render.s}">${GLYPH[p.render.s]}</span> ${p.render.txt}<span class="sub">${p.render.sub}</span></span>${runLine(p)}</td>
       <td class="rnd" data-l="Rounds">${roundsCell(p)}</td>
       <td class="last"><span class="d">${p.git?.last_iso ? html`<time class="rel" datetime="${p.git.last_iso}"></time>` : 'no commit read'}<span class="sub">${gitSub(p.git)}</span></span></td>
       <td class="acts">${shell.commands.rowActions(p.key)}</td></tr>`)}`);
@@ -158,7 +158,7 @@ function slidesLine(p) {
 }
 function linksCell(p) {
   const x = p.experiment;
-  return html`<span class="links">${x.links.map(l => ext(l.url, l.text))}${x.deck_url ? ext(x.deck_url, 'Deck') : ''}${deckLine(p)}${slidesLine(p)}</span>`;
+  return html`<span class="links">${x.links.map(l => ext(l.url, l.text))}${x.deck_url ? ext(x.deck_url, 'Deck') : ''}${runLine(p)}${deckLine(p)}${slidesLine(p)}</span>`;
 }
 // The selected experiment's Details carry its deck line and Act bar (sd:5747), so they redraw with the row.
 function renderExperiments() {
@@ -167,7 +167,7 @@ function renderExperiments() {
   put(xpBody, html`${list.map(p => { const x = p.experiment;
     if (x.error) return html`<tr data-id="${p.key}" aria-selected="${String(p.key === selected)}"><td class="g g-unknown"><span aria-hidden="true">▨</span><span class="sr">unknown</span></td>
       <td class="what" colspan="3"><button type="button">${p.label}</button><span class="line">The status brief was not read: ${x.error.replace(/\.$/, '')}.</span></td>
-      <td class="lnk" data-l="Links"><span class="links">${deckLine(p)}</span></td><td class="acts">${shell.commands.rowActions(p.key, { icons: true })}</td></tr>`;
+      <td class="lnk" data-l="Links"><span class="links">${runLine(p)}${deckLine(p)}</span></td><td class="acts">${shell.commands.rowActions(p.key, { icons: true })}</td></tr>`;
     return html`<tr data-id="${p.key}" aria-selected="${String(p.key === selected)}">
       <td class="g g-${x.tone}" title="${XP_WORDS[x.tone]}"><span aria-hidden="true">${GLYPH[x.tone]}</span><span class="sr">${XP_WORDS[x.tone]}</span></td>
       <td class="what"><button type="button">${p.label}</button><span class="path">${x.state || 'no State row'}</span><span class="line">${x.line}</span></td>
@@ -483,7 +483,7 @@ function showProject(key, read = true) {
     <dl><dt>Checkout</dt><dd>${p.path}</dd><dt>Branch</dt><dd>${p.git ? `${p.git.branch || '?'}${p.git.dirty ? ` · ${p.git.dirty} dirty` : ' · clean'}${p.git.behind ? ` · ${p.git.behind} behind` : ''}` : 'not a git checkout'}</dd>
       <dt>Last commit</dt><dd>${p.git?.last_iso ? html`<time class="rel" datetime="${p.git.last_iso}"></time> · ${p.git.subject}` : 'not read'}</dd>
       <dt>Stage</dt><dd>${p.dirs ? (p.dirs.join(' · ') || 'numbered layout, no Markdown yet') : 'no numbered layout'}</dd>
-      <dt>Render</dt><dd>${p.render.txt}${p.render.sub ? ` · ${p.render.sub}` : ''}</dd>
+      <dt>Render</dt><dd>${p.render.txt}${p.render.sub ? ` · ${p.render.sub}` : ''}${runLine(p)}</dd>
       <dt>Documents</dt><dd>${plural(p.docs_total ?? p.docs.length, 'document')} in research.conf.py${p.docs.length < (p.docs_total ?? 0) ? ` · ${p.docs.length} listed: the board passed its print bound` : ''} · <a href="/documents">Documents</a></dd>
       <dt>Architecture</dt><dd>${architecture(p)}</dd>
       <dt>Rounds</dt><dd>${ROUNDS}</dd></dl>
@@ -658,17 +658,48 @@ tbody.addEventListener('click', e => { if (e.target.closest('.rowact, a')) retur
 // ---------- Commands (products/system/commands.md) ----------
 // Each board row is a research project. Labels are CLI verbs; the shell renders every button, menu entry and CLI line.
 // Render (sd:5632) and Review (sd:5655) run through the deck runner's lock, as dashboard runs.
-// One poll per run until it settles; a render that is done reads the board again, a failed one says the kit's reason.
-// A review keeps its report, pass or fail, and the project's Details show it under Last review.
+// One poll per run until it settles. A review keeps its report, pass or fail, and the project's Details show it under
+// Last review. sd:7273: while a run goes, the project's rows and Details say so; a render that ends, done or failed,
+// reads the board again, since either may have written the checkout, and a failed one keeps its reason on the rows. A
+// poll that does not read is not an end: the rows say so and the next poll tries again, as Build deck's does.
 const REVIEWS = {};
 // sd:6698: the last render per project, for its queued Notion mirrors in Details.
 const RENDERS = {};
-const followRun = (run, o, verb) => (['done', 'failed'].includes(run.state)
-  ? (verb === 'review' ? (REVIEWS[o.key] = run, shownProject === o.key && showProject(o.key, false),
-      shell.toast(run.state === 'done' ? `Reviewed · ${o.label}: every check passed` : `Review · ${o.label}: ${run.reason || 'no reason recorded'}`))
-    : (RENDERS[o.key] = run, shownProject === o.key && showProject(o.key, false), shell.toast(run.state === 'done' ? `Rendered · ${o.label}` : `Render failed · ${o.label}: ${run.reason || 'no reason recorded'}`), run.state === 'done' && load()))
-  : setTimeout(() => window.shell.getJSON(`/api/research/deck/${encodeURIComponent(run.id)}`).then(next => followRun(next, o, verb),
-    e => shell.toast(`${verb === 'review' ? 'Review' : 'Render'} ${run.id}: not read (${e.message}); whether it ended is not known`)), DECK_POLL));
+// sd:7273: each project's render or review run that has not settled, by checkout key.
+const RUNNING = {};
+function runLine(p) {
+  const r = RUNNING[p.key], last = RENDERS[p.key];
+  if (r) return html`<span class="d run"><span class="g-queued" aria-hidden="true">◌</span> ${r.verb === 'review' ? 'Reviewing' : 'Rendering'}: run ${r.id} is ${r.state}${r.unread ? `; its state was not read: ${r.unread}` : ''}</span>`;
+  if (last?.state === 'failed') return html`<span class="d run"><span class="g-warning" aria-hidden="true">■</span> Last render failed: ${last.reason || 'no reason recorded'}</span>`;
+  return '';
+}
+function redrawRun(key) {
+  renderBoard(); // the board's rows, then the Experiments rows, and an experiment's Details with them
+  if (shownProject === key) showProject(key, false);
+}
+const verbOf = run => (/^review-/.test(run?.id || '') ? 'review' : 'render');
+function followRun(run, key, verb) {
+  const label = () => PROJECTS.find(p => p.key === key)?.label || key;
+  if (!settled(run)) {
+    // Drawn again only when the line changes, so a long run does not redraw Details every poll.
+    const was = RUNNING[key];
+    RUNNING[key] = { ...run, verb };
+    if (!was || was.state !== run.state || was.unread !== run.unread) redrawRun(key);
+    setTimeout(() => window.shell.getJSON(`/api/research/deck/${encodeURIComponent(run.id)}`).then(next => followRun(next, key, verb),
+      e => followRun({ ...run, unread: e.message }, key, verb)), DECK_POLL);
+    return;
+  }
+  delete RUNNING[key];
+  if (verb === 'review') {
+    REVIEWS[key] = run;
+    shell.toast(run.state === 'done' ? `Reviewed · ${label()}: every check passed` : `Review · ${label()}: ${run.reason || 'no reason recorded'}`);
+    redrawRun(key); return;
+  }
+  RENDERS[key] = run;
+  shell.toast(run.state === 'done' ? `Rendered · ${label()}` : `Render failed · ${label()}: ${run.reason || 'no reason recorded'}`);
+  redrawRun(key);
+  load();
+}
 // Draft experiment is a page action (the Experiments tab's header, sd:5631): it names its project, the one shown first. The server refuses a linked one (409).
 const PAGE = { id: 'research:page', type: 'research page', label: 'Research' };
 const CREATE = { id: 'experiment.create', on: 'research page', label: 'Draft experiment', does: 'Drafts a new experiment from a description; Apply writes it after you read it.', risk: 'safe', executes: true,
@@ -699,10 +730,10 @@ function registerCommands() {
   C.register(
     { id: 'research.render', on: 'research project', label: 'Render', does: 'Renders in its checkout and queues the Notion mirror; a session writes it later.', key: 'r', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: o => o.s === 'caution',
       cli: o => `cd ${shPath(o.path)} && sd-research-kit render`, sends: o => `POST /api/research/render {"repo": "${o.key}"}`,
-      run: o => window.shell.post('/api/research/render', { repo: o.key }).then(run => { followRun(run, o, 'render'); return `Rendering ${o.label} · run ${run.id}`; }, refused) },
+      run: o => window.shell.post('/api/research/render', { repo: o.key }).then(run => { followRun(run, o.key, 'render'); return `Rendering ${o.label} · run ${run.id}`; }, refused) },
     { id: 'research.review', on: 'research project', label: 'Review', does: 'Runs the research kit\'s mechanical pre-publication checks here; Details show the report.', key: 'v', icon: 'shield-check', risk: 'safe', executes: true,
       cli: o => `cd ${shPath(o.path)} && sd-research-kit review`, sends: o => `POST /api/research/review {"repo": "${o.key}"}`,
-      run: o => window.shell.post('/api/research/review', { repo: o.key }).then(run => { followRun(run, o, 'review'); return `Reviewing ${o.label} · run ${run.id}`; }, refused) },
+      run: o => window.shell.post('/api/research/review', { repo: o.key }).then(run => { followRun(run, o.key, 'review'); return `Reviewing ${o.label} · run ${run.id}`; }, refused) },
     START,
     CREATE,
     REFRESH,
@@ -877,6 +908,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   load();
   // A build already running when the page opens is followed too.
-  window.shell.getJSON('/api/research/deck/status').then(d => followBuild(/^(render|review)-/.test(d.run?.id || '') ? null : d.run, false), e => { BUILD_UNREAD = e.message; renderExperiments(); });
+  // sd:7273: so is a render or review: its rows say so, and its end reads the board again. One that ended before the
+  // page opened is not shown: a render by hand since then is not in the deck runner's record.
+  window.shell.getJSON('/api/research/deck/status').then(d => {
+    const run = d.run, other = /^(render|review)-/.test(run?.id || '');
+    if (other && !settled(run) && run.repo) followRun(run, run.repo, verbOf(run));
+    followBuild(other ? null : run, false);
+  }, e => { BUILD_UNREAD = e.message; renderExperiments(); });
   readSlides();
 });

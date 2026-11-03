@@ -629,8 +629,9 @@ class EveryDialogHasAClose(unittest.TestCase):
                 if not self.X.search(m.group(0)) or len(cancels) != 1:
                     wrong.append(f"{name}: {m.group(0)[:100]}")
         self.assertEqual(wrong, [])
-        # Confirm and capture, Start next, Build, Writing's correction, the three Tasks prompts and Quick notes.
-        self.assertEqual(sorted(forms), sorted(["shell.js"] * 2 + ["tasks.js"] * 2 + ["writing.js", "notes.html"] + ["task-details.js"] * 3))
+        # Confirm and capture, Start next, Build (commands.js, Tasks' and Today's, pack sd:7271), Writing's correction, the
+        # three Tasks prompts and Quick notes.
+        self.assertEqual(sorted(forms), sorted(["shell.js"] * 2 + ["tasks.js", "commands.js", "writing.js", "notes.html"] + ["task-details.js"] * 3))
         # The key sheet is the shell's one dialog without a form; its Close is the Cancel the X presses.
         keys = re.search(r"put\(keys, html`(.*?)`\);", SHELL_JS, re.S).group(1)
         self.assertRegex(keys, self.X)
@@ -638,7 +639,7 @@ class EveryDialogHasAClose(unittest.TestCase):
 
     def test_every_file_that_opens_a_dialog_is_swept(self):
         opens = {name for name, text in self.SOURCES.items() if re.search(r"showModal\(|createElement\('dialog'\)|<dialog\b", text)}
-        self.assertEqual(opens, {"shell.js", "tasks.js", "writing.js", "notes.html", "notes.js", "task-details.js"})
+        self.assertEqual(opens, {"shell.js", "tasks.js", "commands.js", "writing.js", "notes.html", "notes.js", "task-details.js"})
 
     def test_the_x_presses_the_dialogs_cancel_and_closes_nothing_itself(self):
         block = re.search(r"// dlgx:start\n(.*?)// dlgx:end", SHELL_JS, re.S)
@@ -1343,7 +1344,8 @@ class EveryToolbarHasOneOrder(unittest.TestCase):
 class EverySetAsideIsOneSegmentGroup(unittest.TestCase):
     """sd:6701 (operator, 2026-10-29): "I want one consistent way everywhere". Writing's Parked chip, the Show hidden toggles
     (Contributions, Designs, GitHub's issues, a place's issues), Documents' Hidden chip and Tasks' Parked only in Scope each
-    set rows aside their own way. Every one is now shell.aside: a .vseg of Open | Parked or Hidden | All with its counts."""
+    set rows aside their own way. Every one is now shell.aside: a .vseg of Open | Parked or Hidden with its counts.
+    Pack sd:7263 (operator 2026-11-02) dropped All; an older <key>=all link lands on Open."""
 
     PAGES = {"writing.js": "parked", "contributions.js": "hidden", "designs.js": "hidden", "issues.js": "hidden",
              "places.js": "issues-hidden", "documents.js": "hidden", "tasks.js": "parked"}
@@ -1353,14 +1355,14 @@ class EverySetAsideIsOneSegmentGroup(unittest.TestCase):
         self.assertIsNotNone(found, "shell.js has no aside block")
         out = run_js(found.group(1) + """
   R.modes = ['', '?hidden=1', '?hidden=all', '?hidden=x'].map(s => { location.search = s; return aside.mode('hidden'); });
-  R.shows = [['open', true], ['open', false], ['aside', true], ['aside', false], ['all', true]].map(([m, a]) => aside.shows(m, a));
-  R.params = ['open', 'aside', 'all'].map(aside.param);
+  R.shows = [['open', true], ['open', false], ['aside', true], ['aside', false]].map(([m, a]) => aside.shows(m, a));
+  R.params = ['open', 'aside'].map(aside.param);
   R.seg = aside.seg('parked', 'Parked', 'aside', { open: 4, aside: 2 }).text;""")
-        self.assertEqual(out["modes"], ["open", "aside", "all", "open"])
-        self.assertEqual(out["shows"], [False, True, True, False, True])
-        self.assertEqual(out["params"], [None, "1", "all"])
+        self.assertEqual(out["modes"], ["open", "aside", "open", "open"])
+        self.assertEqual(out["shows"], [False, True, True, False])
+        self.assertEqual(out["params"], [None, "1"])
         self.assertEqual(re.findall(r'data-v="(\w+)" aria-pressed="(\w+)">(\w+) <span class="n">(\d+)</span>', out["seg"]),
-                         [("open", "false", "Open", "4"), ("aside", "true", "Parked", "2"), ("all", "false", "All", "6")])
+                         [("open", "false", "Open", "4"), ("aside", "true", "Parked", "2")])
         self.assertTrue(out["seg"].startswith('<div class="vseg" role="group" aria-label="Parked rows">'))
 
     def test_no_page_keeps_a_set_aside_toggle_of_its_own(self):

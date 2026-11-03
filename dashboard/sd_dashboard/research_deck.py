@@ -212,7 +212,8 @@ def run(record: Path, lock: int | None = None) -> int:
         document["output"] = log.read_text(encoding="utf-8", errors="replace")[-REPORT_CHARS:]
     elif document.get("verb") == "render":
         # A render queues the Notion mirrors and a session writes them later (sd:6698): the page lists what it queued.
-        document["mirrors"] = [line for line in said if line.startswith("mirror: ")][:50]
+        # The kit indents each line under its checkout's heading (sd:7273), so the page saw none until they were stripped.
+        document["mirrors"] = [line.strip() for line in said if line.strip().startswith("mirror: ")][:50]
     document.update(state="failed" if reason else "done", reason=reason,
                     finished=_iso(datetime.datetime.now(datetime.timezone.utc)))
     if lock is not None:

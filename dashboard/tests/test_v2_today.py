@@ -23,6 +23,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from sd_dashboard import now_screen, server, v2
+from sd_db.testing import patience
 from test_now_screen import JobsBackend, fleet_document, repo
 from test_v2_registry import Registers
 from test_workflow_actions import BrowserSession
@@ -116,7 +117,7 @@ class ThePage(BrowserSession):
     def test_every_file_the_page_names_is_served(self):
         _, _, body = self.request("/today")
         named = re.findall(r'(?:src|href)="(/ui/[^"]+)"', body)
-        self.assertEqual(len(named), 16)  # six stylesheets, ten scripts
+        self.assertEqual(len(named), 18)  # seven stylesheets, eleven scripts
         for path in named:
             status, headers, _ = self.request(path)
             self.assertEqual(status, 200, path)
@@ -125,7 +126,7 @@ class ThePage(BrowserSession):
     def test_data_and_page_script_load_before_the_shell_and_the_shell_loads_last(self):
         _, _, body = self.request("/today")
         scripts = re.findall(r'<script src="/ui/([^"?]+)', body)
-        self.assertEqual(scripts, ["theme.js", "markup.js", "annunciator-strip.js", "icons.js", "sections.js", "read.js", "snooze.js", "commands.js", "today.js", "shell.js"])
+        self.assertEqual(scripts, ["theme.js", "markup.js", "annunciator-strip.js", "icons.js", "sections.js", "read.js", "snooze.js", "commands.js", "task-details.js", "today.js", "shell.js"])
         self.assertLess(body.index('src="/ui/markup.js?v='), body.index("</head>"))
         self.assertGreater(body.index('src="/ui/icons.js?v='), body.index("<body"))
 
@@ -156,7 +157,7 @@ class TheAssets(BrowserSession):
                          for path in (V2 / "static").rglob("*") if path.is_file())
         self.assertEqual(sorted(v2.ASSETS), sorted(on_disk))
         for name in v2.ASSETS:
-            with urllib.request.urlopen(f"{self.base}/ui/{name}", timeout=5) as answer:
+            with urllib.request.urlopen(f"{self.base}/ui/{name}", timeout=patience(self.http_timeout)) as answer:
                 status, headers, body = answer.status, answer.headers, answer.read()
             self.assertEqual(status, 200, name)
             # A stylesheet's references carry their digests (sd:2141); with those taken out it is the file.
@@ -206,7 +207,7 @@ class TheAssets(BrowserSession):
         captions = [" ".join(Parsed(m.group(1)).text) if (m := re.search(r"<caption>(.*?)</caption>", t, re.S)) else None
                     for t in tables]
         self.assertEqual(captions, [
-            "One row per repo; open one for its working, merging, next, blocked, suggested and ended rows."])
+            "One row per repo; open one for its working, merging, next, blocked, suggested, open and ended rows."])
 
 class TheShellPort(BrowserSession):
     def test_the_shell_builds_nothing_the_policy_refuses(self):

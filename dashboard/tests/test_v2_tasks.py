@@ -1729,16 +1729,15 @@ R.after = ELS.details.html; R.views2 = views(); R.obj = C.get(String(ITEM)) && C
         return parked
 
     # sd:3012: triage's Parked view. A parked row stays off every other view, the badge and the count; the toolbar's
-    # Open | Parked | All (sd:6701) shows the parked rows alone or with the rest, and Unpark runs on each picked one.
+    # Open | Parked (sd:6701) shows the parked rows alone, and Unpark runs on each picked one. Pack sd:7263 dropped All.
     PARK_SEG = ("ELS['parked-seg'].listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"parked\"]'"
                 " ? { dataset: { v: '%s' } } : null } });")
 
-    def test_a_parked_row_shows_only_under_parked_or_all(self):
+    def test_a_parked_row_shows_only_under_parked(self):
         self.park()
         out = self.run_page(f"""R.sub = ELS.subhead.html; R.board = ELS['view-board'].html; R.filters = ELS.filters.html;
 R.seg = ELS['parked-seg'].html; {self.PARK_SEG % 'aside'}
-R.parked = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1];
-{self.PARK_SEG % 'all'} R.all = ELS['view-board'].html; R.urlAll = OUT.urls[OUT.urls.length - 1];""")
+R.parked = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1];""")
         self.assertIn("1 parked · read", out["R"]["sub"])
         self.assertEqual(out["counts"]["personal"], 3)
         self.assertNotIn("Parked by the prune", out["R"]["board"])
@@ -1751,9 +1750,7 @@ R.parked = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1];
         self.assertIn("Parked by the prune", out["R"]["parked"])
         self.assertNotIn("Plan the review", out["R"]["parked"])
         self.assertIn("parked=1", out["R"]["url"])
-        self.assertIn("Parked by the prune", out["R"]["all"])
-        self.assertIn("Plan the review", out["R"]["all"])
-        self.assertIn("parked=all", out["R"]["urlAll"])
+        self.assertNotIn('data-v="all"', out["R"]["seg"])
         self.assertEqual(out["attention"][-1], self.doc["attention"])
 
     def test_parked_is_read_from_the_address_old_and_new(self):
@@ -2101,6 +2098,14 @@ R.shown = D.html; R.before = OUT.posts.length; D.returnValue = 'start'; D.onclos
     BUILD = """shellRun(cmd('item.build'), C.get('ITEM')); await flush();
 const D = MADE.find(e => /id="build-h"/.test(e.html || '')); R.shown = D ? D.html : null; R.before = OUT.posts.length;
 if (D) { D.returnValue = 'build'; D.onclose(); await flush(); }"""
+
+    def test_build_refuses_a_ready_item_with_no_repository(self):
+        """Pack sd:7275. The row's repo reads 'no repo' (TD.shape), so the check reads repo_path."""
+        ask = self.ids["ask"]
+        workflow.change_status(self.connection, ask, "ready", who="test")
+        self.doc = tasks_screen.document(self.connection, now=NOW)
+        out = self.run_page(f"R.off = cmd('item.build').when(C.get('{ask}'));", "() => [404, {}]")
+        self.assertEqual(out["R"]["off"], "a build needs a repository")
 
     def test_build_shows_the_bundles_first_then_posts_the_items_with_the_revisions_it_read(self):
         """Pack sd:6095. Build on a ready row reads the plan, shows its bundle, and posts only on Build."""

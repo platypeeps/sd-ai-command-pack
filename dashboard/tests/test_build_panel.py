@@ -4,6 +4,7 @@
 """
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -132,6 +133,28 @@ class BuildsPanel(Fixture):
         self.assertIsNotNone(build.run(self.connection, run["id"])["cancel_requested"])
         again = builds.panel(self.connection, now=run["created_at"])["runs"][0]["cancel"]
         self.assertFalse(again["allowed"])
+
+    def test_a_teammate_run_is_a_working_row_with_its_worktree_due_time_and_no_cancel(self):
+        """pack sd:7221: a lead's in-session builder shows beside the headless runs; past its budget it is stalled."""
+        from sd_db import teammate
+
+        items = [self.ready(status="in_progress"), self.ready(status="in_progress")]
+        run = teammate.start(self.connection, items, worktree="/w/pack-7221", branch="feat/x", budget_minutes=90,
+                             owner="lead")
+        [row] = self.panel(run["created_at"])["runs"]
+        self.assertEqual((row["run"], row["teammate"], [m["item"] for m in row["items"]], row["state"], row["worktree"],
+                          row["branch"], row["due"], row["budget"]),
+                         (run["id"], True, items, "working", "/w/pack-7221", "feat/x", run["due"], 90))
+        self.assertFalse(row["cancel"]["allowed"])
+        self.assertIn(f"sd assignments beat {items[0]} --end", row["cancel"]["reason"])
+        late = self.panel(run["due"])["runs"][0]
+        self.assertEqual((late["state"], late["why"]), ("stalled", "past its budget"))
+        edge = (datetime.fromisoformat(run["created_at"]) + timedelta(minutes=90 + teammate.GRACE_MINUTES)).isoformat()
+        overdue = self.panel(edge)["runs"][0]
+        self.assertEqual(overdue["state"], "stalled")
+        self.assertTrue(overdue["why"].startswith("overdue: no beat for 120 min"), overdue["why"])
+        teammate.end(self.connection, items[0])
+        self.assertEqual(self.panel(run["created_at"])["runs"], [])
 
     def test_a_silent_supervisor_is_lost_and_a_quiet_builder_log_is_stalled(self):
         run = self.claimed([self.ready()])

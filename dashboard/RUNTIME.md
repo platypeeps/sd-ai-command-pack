@@ -81,7 +81,7 @@ notes (sd:2549) and daily note (sd:3426) need; `install` prints one line for eac
 still installs. Service controls on Management, Operations > Services and Health's
 Services rows (sd:3707) act only on eligible user LaunchAgents; system daemons and
 dashboard/access services remain read-only. Health's dashboard row shows the
-kickstart line to copy when the served commit is not the checkout's. See [README.md](README.md) for the Operations tabs, one per entry of
+kickstart line to copy when the served commit is not the checkout's. See [README.md](README.md) for the Operations views, one per entry of
 `operations_screen.AREAS`, and their scope. Today's Now section reads the fleet
 (both areas), the shadow table and the launchd jobs on each `/api/now`
 request a page makes, not on the page render; a fleet child or a jobs read that
@@ -206,7 +206,8 @@ assignment is cancelled through
 `/api/assignments/<id>/cancel`, the route `sd assignments cancel` matches,
 bound to the assignment's revision; Queue's Builds panel posts it.
 
-Operations renders one area per entry of `operations_screen.AREAS`.
+Operations renders one area per entry of `operations_screen.AREAS`, the area `?area=` names,
+into its view's panel; `/ui/operations.js` declares the views and loads the address of one not drawn.
 [README.md](README.md) names them, and no list here repeats that inventory.
 Usage's month section and `/api/usage` (`usage_screen.py`) read
 `sd_db.usage.read` -- `reads.usage_month` under the registry's merged caps, so

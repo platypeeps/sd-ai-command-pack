@@ -40,7 +40,7 @@ from pathlib import Path
 from . import paths, reads
 from .database import transaction
 from .errors import SdDbError
-from .runner import RUNNABLE_KINDS, queue_state, restoration_pending
+from .runner import IN_SESSION, OWNING, RUNNABLE_KINDS, queue_state, restoration_pending
 from .writes import (
     add_note,
     cancel_done_blocked,
@@ -148,7 +148,7 @@ def _item(connection, item: int) -> dict:
     if refused:
         raise BuildRefused(refused)
     active = connection.execute(
-        f"SELECT id, status FROM assignment WHERE item = ? AND status IN {ACTIVE} LIMIT 1", (item,)).fetchone()
+        f"SELECT id, status FROM assignment WHERE item = ? AND status IN {OWNING} LIMIT 1", (item,)).fetchone()
     if active:
         raise BuildRefused(f"item {item} has {active['status']} assignment {active['id']}")
     held = _held(connection, item)
@@ -309,7 +309,9 @@ def _held(connection, item: int) -> str | None:
     """Why no build of `item` may start while a run holds it, or None."""
     run = connection.execute(_holding("?") + " LIMIT 1", (item,)).fetchone()
     if run is None:
-        return None
+        session = connection.execute("SELECT id FROM assignment WHERE item = ? AND status = ? LIMIT 1",
+                                     (item, IN_SESSION)).fetchone()
+        return f"item {item} has in_session assignment {session['id']}: a teammate builds it" if session else None
     return (f"item {item} is held by build run {run['id']} ({run['outcome'] or 'open'}), which releases once "
             f"its process groups read gone")
 
@@ -317,7 +319,7 @@ def _held(connection, item: int) -> str | None:
 _RECHECK = (f"EXISTS (SELECT 1 FROM item WHERE item.id = assignment.item AND item.status = 'ready' "
             f"AND item.kind IN ({', '.join(repr(kind) for kind in RUNNABLE_KINDS)})) "
             f"AND NOT EXISTS (SELECT 1 FROM assignment other WHERE other.item = assignment.item "
-            f"AND other.id != assignment.id AND other.status IN {ACTIVE}) "
+            f"AND other.id != assignment.id AND other.status IN {OWNING}) "
             f"AND NOT EXISTS ({_holding('assignment.item')})")
 
 

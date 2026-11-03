@@ -31,13 +31,18 @@ on the open repo closes it. The rows, in order:
 
 - working: the live items of `/api/now` (a worktree, a lane entry, a running `sd-*` command, a herdr agent or a Fix
   note, pack sd:3466), the open build runs of `GET /api/queue/builds?show=all` (`builds.panel`: working, waiting,
-  stalled or lost), a builder's gate in the lane, and the runner's queued and running assignments no run holds
+  stalled or lost), the lead's teammate runs with worktree, branch, due time and last beat (pack sd:7221),
+  a builder's gate in the lane, and the runner's queued and running assignments no run holds
   (`GET /api/queue/runner`, pack sd:7115 and sd:7217);
 - merging, next and blocked: the lane entries of `GET /api/queue` (`queue_screen.document`);
 - suggested: each repo's ready items from the `/api/now` queues rows, at most three (pack sd:7222);
 - ended: ended build runs, and the cancelled and landed lane entries.
 
 Each row's marker is its state glyph and its type in words; a repo's glyph is its worst row's.
+A repo row's detail holds three boxes, merging, next and blocked, as Queue's lane ledger drew them (pack sd:7272).
+They count all the repo's rows of those types, so a filter hides no count. A box is lit only when its count is not
+zero; blocked lights the warning lamp; the cell's label says all three in words. A repo whose lane was not read says
+"lane not read" in place of the boxes, not 0.
 Suggested and Ended builds are off by default. On, a repo that has only those rows shows too, and `?show=` keeps them.
 The view reads its three documents when it first shows, on each Today read after, and every 30 s while it shows.
 A source that was not read is named under the table.

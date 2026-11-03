@@ -75,8 +75,10 @@ if mode == "fail":
 if mode == "sleep":
     time.sleep(30)
 if mode == "mirror":
-    print("mirror: queued 10-notes/notes.md -> notion:abc")
-    print("mirror: 20-report/report.md: unchanged since it was last mirrored; not queued again")
+    # As the kit prints them: indented under the checkout's heading (sd:7273).
+    print("research  ->  docs/dashboard/")
+    print("  mirror: queued 10-notes/notes.md -> notion:abc")
+    print("  mirror: 20-report/report.md: unchanged since it was last mirrored; not queued again")
 if mode not in ("silent", "mirror"):
     os.makedirs("docs/dashboard", exist_ok=True)
     open("docs/dashboard/deck.pptx", "wb").write(b"pptx")

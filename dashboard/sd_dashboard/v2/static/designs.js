@@ -2,8 +2,8 @@
 // Designs (sd:2126). Built from the design source's products/system/designs/pages/designs.js at 2729265.
 // build: the ledger comes from /api/designs through shell.read, not from data/designs-data.js; links open /designs/<path>.
 // build (sd:3447): Hide and Unhide post /api/designs/view, the workflow database's view state that Documents' Hide writes.
-// A hidden row leaves the ledger, its lamps and the badge. Open | Hidden | All in the filter bar (sd:5753, sd:6701) lists
-// the hidden rows alone, kept as ?hidden=1, or every row, as ?hidden=all. An older ?show=hidden, ?f=hidden or #view=hidden link (Hidden was a view, sd:5064)
+// A hidden row leaves the ledger, its lamps and the badge. Open | Hidden in the filter bar (sd:5753, sd:6701) lists
+// the hidden rows alone, kept as ?hidden=1; an older ?hidden=all lands on Open. An older ?show=hidden, ?f=hidden or #view=hidden link (Hidden was a view, sd:5064)
 // lands on it. The lamps count the rows the ledger draws, and a lamp narrows them further. An unread store hides nothing and
 // turns both commands off with its reason. One view, so the tab carries the ledger's count (sd:5524), as on Documents.
 window.PAGE_VIEWS = [{ id: 'pages', label: 'Pages' }];
@@ -100,7 +100,7 @@ function renderRows() {
   document.getElementById('src').textContent = `${D.root} at ${D.head || 'no commit'}`;
 }
 // The filter bar (sd:5463), Activity's layout from shell.list: the state as a segment with its counts, the product as a
-// pick, Open | Hidden | All with its counts at the left (sd:5753, sd:6701), a pressed lamp and the query as removable tokens, then Clear
+// pick, Open | Hidden with its counts at the left (sd:5753, sd:6701), a pressed lamp and the query as removable tokens, then Clear
 // all. A lamp already filters by kind, so it has no chip.
 const STATES = [['caution', 'needs a look'], ['ok', 'ok'], ['queued', 'brief only']];
 function renderFilters() {

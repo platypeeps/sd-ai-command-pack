@@ -237,7 +237,7 @@ class TheScript(unittest.TestCase):
         self.assertEqual(out["page_attention"], {"state": "caution", "n": 3, "what": "pages uncommitted or without a current screenshot"})
 
     PRESS = "ELS.filters.listeners.click[0]({ target: { closest: s => s === '[data-fclear], [data-f], [data-aside]' ? { dataset: { aside: 'hidden', v: '%s' } } : null } });"
-    SHOW_HIDDEN, SHOW_ALL = PRESS % "aside", PRESS % "all"
+    SHOW_HIDDEN = PRESS % "aside"
 
     def hidden_doc(self):
         """The ledger with the stale page hidden."""
@@ -249,21 +249,18 @@ class TheScript(unittest.TestCase):
 
     def test_a_hidden_row_leaves_the_ledger_the_lamps_and_the_badge_and_show_hidden_lists_it(self):
         # sd:3447: the stale page is hidden, so the Shot stale lamp and the badge drop it. sd:5753, sd:6701: Hidden, in the
-        # filter bar's Open | Hidden | All, lists the hidden rows alone; the lamps and the Pages tab count the rows drawn.
+        # filter bar's Open | Hidden, lists the hidden rows alone; the lamps and the Pages tab count the rows drawn.
         out = self.run_page(f"R.lamps = ELS.annunciator.html; R.rows = ELS.rows.html; R.counts = {{ ...OUT.counts }}; R.bar = ELS.filters.html; {self.SHOW_HIDDEN}"
                             " R.hidden = ELS.rows.html; R.lamps2 = ELS.annunciator.html; R.bar2 = ELS.filters.html;"
                             " R.unhide = cmd('design.unhide').when(C.get('" + PAGES + "/tasks.html'));"
-                            " R.hide = cmd('design.hide').when(C.get('" + PAGES + "/tasks.html'));"
-                            f" {self.SHOW_ALL} R.all = ELS.rows.html; R.url3 = OUT.urls[OUT.urls.length - 1];", answer=f"(path) => [200, {json.dumps(self.hidden_doc())}]")
+                            " R.hide = cmd('design.hide').when(C.get('" + PAGES + "/tasks.html'));", answer=f"(path) => [200, {json.dumps(self.hidden_doc())}]")
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', out["R"]["lamps"], re.S),
                          [("recent", "2"), ("stale", "0"), ("noshot", "1"), ("dirty", "1"), ("brief", "1")])
         self.assertNotIn(f"{PAGES}/tasks.html", out["R"]["rows"])
-        self.assertEqual((out["R"]["counts"], out["counts"]), ({"pages": 4}, {"pages": 5}))
+        self.assertEqual((out["R"]["counts"], out["counts"]), ({"pages": 4}, {"pages": 1}))
         seg = r'data-aside="hidden" data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
-        self.assertEqual(re.findall(seg, out["R"]["bar"]), [("open", "true", "4"), ("aside", "false", "1"), ("all", "false", "5")])
+        self.assertEqual(re.findall(seg, out["R"]["bar"]), [("open", "true", "4"), ("aside", "false", "1")])
         self.assertEqual(re.findall(seg, out["R"]["bar2"])[1], ("aside", "true", "1"))
-        self.assertEqual(len(re.findall(r'<tr data-id="([^"]+)"', out["R"]["all"])), 5)
-        self.assertEqual(out["R"]["url3"], {"hidden": "all"})
         self.assertIn("Clear all", out["R"]["bar2"])
         self.assertEqual(re.findall(r'<tr data-id="([^"]+)"', out["R"]["hidden"]), [f"{PAGES}/tasks.html"])
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', out["R"]["lamps2"], re.S),
@@ -341,7 +338,7 @@ class TheScript(unittest.TestCase):
                             + " R.rows5 = ELS.rows.html; R.url5 = OUT.urls[OUT.urls.length - 1];",
                             search="?f=stale&q=tasks")
         R = out["R"]
-        # sd:6701: Open | Hidden | All sits at the bar's left, then the state.
+        # sd:6701: Open | Hidden sits at the bar's left, then the state.
         self.assertTrue(R["bar"].startswith('<div class="fbar" role="group" aria-label="Filters"><div class="vseg" role="group" aria-label="Hidden rows">'), R["bar"][:120])
         self.assertIn('</div>\n    <div class="fseg" role="group" aria-label="State">', R["bar"])
         self.assertEqual(re.findall(r'data-f="state" data-v="(\w+)" aria-pressed="false" title="[^"]*: (\d+)"', R["bar"]),
