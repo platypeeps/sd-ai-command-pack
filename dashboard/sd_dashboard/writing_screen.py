@@ -68,13 +68,14 @@ def read_ideas(connection) -> list[dict]:
 
 
 def _score(value) -> float | None:
-    """A finite number, or None: the fields are JSON, so a score may be a bool, 'nan', 'inf', '1e999' or an inf
-    literal, and one NaN in /api/writing fails the page's JSON parse for every piece (pack sd:7244 review)."""
+    """A finite number, or None: the fields are JSON, so a score may be a bool, 'nan', 'inf', '1e999', an inf literal
+    or 10**400, which float() refuses with OverflowError. One NaN in /api/writing fails the page's JSON parse, and one
+    raise fails the reply, for every piece (pack sd:7244 review)."""
     if isinstance(value, bool):
         return None
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
 

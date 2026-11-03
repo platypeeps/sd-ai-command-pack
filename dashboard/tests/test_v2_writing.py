@@ -138,15 +138,16 @@ class TheDocument(Pieces):
 
     def test_an_ideas_score_or_date_that_is_no_finite_number_or_text_is_unset(self):
         """pack sd:7244 review: the vault's fields are JSON that `json.loads` reads, so a score may be 'nan', 'inf',
-        '1e999', a NaN or Infinity literal, or true; a date may be any of those or an object. A score that is no finite
+        '1e999', a NaN or Infinity literal, 10**400 or true; a date may be any of those or an object. A score that is no finite
         number and a date that is no text read as unset, so one idea cannot put NaN in /api/writing and fail the page's
         JSON parse for every piece."""
         from sd_db import create_item
 
-        bad = ("nan", "inf", "-inf", "1e999", float("nan"), float("inf"), True, [3], {"n": 3})
+        # 10**400 is a valid JSON integer that float() refuses with OverflowError.
+        bad = ("nan", "inf", "-inf", "1e999", float("nan"), float("inf"), True, [3], {"n": 3}, 10**400, -10**400)
         for n, value in enumerate(bad):
-            create_item(self.connection, kind="idea", title=f"Odd idea {n}", status="planning", source="vault",
-                        path=f"Blog Ideas/Odd idea {n}.md", stage="inbox",
+            create_item(self.connection, kind="idea", title=f"Odd idea {n:02}", status="planning", source="vault",
+                        path=f"Blog Ideas/Odd idea {n:02}.md", stage="inbox",
                         fields={"kind": "blog-idea", "score": value, "dateCreated": value})
         with mock.patch.object(writing_screen, "IDEAS", len(bad)):
             doc = writing_screen.document(self.connection, now=NOW)
