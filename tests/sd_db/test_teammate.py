@@ -167,6 +167,18 @@ class Start(Case):
                 self.start([number])
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
 
+    def test_a_start_refuses_a_pending_entrys_explicit_and_cited_closes_in_any_position(self):
+        """Enqueue stores each cited close in `closes`; a start checks every requested item (pack sd:7288)."""
+        item, explicit, cited = (self.item(status="ready") for _ in range(3))
+        self.lane("e8", {"id": "e8", "item": item, "status": "pending", "claim": "deliver",
+                         "closes": [explicit, cited], "cited": [{"item": cited, "source": "commit abc"}]})
+        for number in (item, explicit, cited):
+            for items in ([number], [self.item(status="ready"), number]):
+                with self.subTest(item=number, lead=items[0] == number), self.assertRaisesRegex(
+                        teammate.TeammateRefused, f"item {number} is delivered by pending lane entry e8 of sd:{item}"):
+                    self.start(items)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
+
     def test_a_start_refuses_when_a_lane_entry_is_unreadable(self):
         """An entry that does not parse may deliver the item: unknown is not "no" (pack sd:7288)."""
         self.lane("bad", "{not json")
