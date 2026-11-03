@@ -223,6 +223,8 @@ HUB_NAME = "sd.hub_name"
 #: Seconds a failed read of this node's name stands: `lane run` asks once per
 #: repository, and a stalled daemon must not cost each one its timeout.
 #: A name is never held: a rename must refuse the next check (sd:4044).
+#: A blip shorter than `tailnet.ONLINE_PAUSES` raises nothing, so it is
+#: never held; a node offline past them is, as a stall is (pack sd:7281).
 NAME_SECONDS = 30.0
 
 _name_failed: tuple[float, Exception] | None = None
