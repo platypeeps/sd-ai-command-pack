@@ -12,8 +12,10 @@ never named its hub) go on; `elsewhere` (another node holds the name) and
 
 from __future__ import annotations
 
+import functools
 import io
 import ipaddress
+import json
 import os
 import socket
 import sqlite3
@@ -69,6 +71,8 @@ class StubCase(unittest.TestCase):
         self.stubs = Stubs(self.root / "stubs", names=("tailscale",))
         self.enterContext(mock.patch.dict(os.environ, self.stubs.environment()))
         self.enterContext(mock.patch.object(hub, "_name_failed", None, create=True))
+        # An offline node is read again after each pause; in-process tests do not wait (pack sd:7281).
+        self.enterContext(mock.patch.object(tailnet, "ONLINE_PAUSES", (0.0, 0.0), create=True))
         self.path = self.root / "sd.db"
         initialise(self.path)
 
@@ -654,6 +658,82 @@ class TheName(StubCase):
     def test_this_name_is_the_magicdns_name_without_its_dot(self):
         self.node("Hub.Example.Test.")
         self.assertEqual(tailnet.this_name(), HUB_NAME)
+
+
+def status(online=True, backend="Running") -> str:
+    return json.dumps({"BackendState": backend, "Self": {"DNSName": HUB_NAME + ".", "Online": online}})
+
+
+class Reads:
+    """A `tailscale status --json` that answers `answers` in turn, the last one ever after."""
+
+    def __init__(self, *answers):
+        self.answers, self.argv = list(answers), []
+
+    def __call__(self, argv):
+        self.argv.append(argv)
+        answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+class TheBlip(unittest.TestCase):
+    """Pack sd:7281: a control-plane blip of seconds failed a lane merge, a prepare and a backup."""
+
+    def setUp(self):
+        self.slept = []
+
+    def test_a_node_back_within_the_window_is_named(self):
+        reads = Reads(status(False), status(True))
+        with mock.patch.object(tailnet, "ONLINE_PAUSES", (0.0, 0.0), create=True):
+            self.assertEqual(tailnet.this_name(reads), HUB_NAME)
+        self.assertEqual(len(reads.argv), 2)
+
+    def test_each_pause_comes_before_the_next_read(self):
+        reads = Reads(status(False), status(False), status(True))
+        self.assertEqual(tailnet.this_name(reads, sleep=self.slept.append), HUB_NAME)
+        self.assertEqual(self.slept, list(tailnet.ONLINE_PAUSES[:2]))
+        self.assertEqual(len(reads.argv), 3)
+
+    def test_a_node_offline_past_the_window_still_raises(self):
+        reads = Reads(status(False))
+        with self.assertRaisesRegex(tailnet.TailnetError, "not connected to the Tailscale control plane"):
+            tailnet.this_name(reads, sleep=self.slept.append)
+        self.assertEqual(self.slept, list(tailnet.ONLINE_PAUSES))
+        self.assertEqual(len(reads.argv), len(tailnet.ONLINE_PAUSES) + 1)
+
+    def test_the_window_stays_well_under_the_fence_callers_bound(self):
+        """machine-setup bounds `sd-db fence` at 120 s; each read may take `TIMEOUT` too."""
+        pauses = tailnet.ONLINE_PAUSES
+        self.assertTrue(pauses and all(pause > 0 for pause in pauses), pauses)
+        self.assertLessEqual(sum(pauses), 5.0)
+        self.assertLess(sum(pauses) + (len(pauses) + 1) * tailnet.TIMEOUT, 120)
+
+    def test_a_stopped_daemon_raises_at_once(self):
+        for answer in (status(backend="Stopped"), status(online=False, backend="NeedsLogin"),
+                       tailnet.TailnetError("tailscale status failed: Tailscale is stopped."), "not json"):
+            with self.subTest(answer=answer):
+                reads, self.slept = Reads(answer), []
+                with self.assertRaises(tailnet.TailnetError):
+                    tailnet.this_name(reads, sleep=self.slept.append)
+                self.assertEqual((len(reads.argv), self.slept), (1, []))
+
+    def test_a_daemon_that_stops_during_the_window_raises_its_own_reason(self):
+        reads = Reads(status(False), status(backend="Stopped"))
+        with self.assertRaisesRegex(tailnet.TailnetError, r"Tailscale is not running \(Stopped\)"):
+            tailnet.this_name(reads, sleep=self.slept.append)
+        self.assertEqual(len(reads.argv), 2)
+
+    def test_a_blip_is_never_held_by_the_fence(self):
+        """`_this_name` holds a failure for `NAME_SECONDS`; a blip inside the window raises none to hold."""
+        reads = Reads(status(False), status(True))
+        named = functools.partial(tailnet.this_name, reads, sleep=self.slept.append)
+        with mock.patch.object(hub, "_name_failed", None), mock.patch.object(hub.tailnet, "this_name", named):
+            self.assertEqual(hub._this_name(), HUB_NAME)
+            self.assertIsNone(hub._name_failed)
+            self.assertEqual(hub._this_name(), HUB_NAME)
+        self.assertEqual(len(reads.argv), 3, "the next check asks again")
 
 
 if __name__ == "__main__":
