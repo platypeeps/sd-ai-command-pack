@@ -1,7 +1,7 @@
 """Metrics (sd:2119): spend against budget, the week, providers, the month's usage and age in status, from
 the reads the classic Usage area and the retired Progress area make. Its Cap and Configure post the routes the classic
-Usage area's forms post (sd:3387). That area stays in the palette: its month picker reads any past month; this page
-reads the current month, and with `?range=6mo` the last six months by bill (pack sd:7208)."""
+Usage area's forms post (sd:3387). That area stays as Operations' Usage view (pack sd:7266): its month picker reads
+any past month; this page reads the current month, and with `?range=6mo` the last six months by bill (pack sd:7208)."""
 
 from __future__ import annotations
 
@@ -25,5 +25,4 @@ PAGE = Page(
     item="sd:2119",
     api=(Api("/api/metrics", _read, query=True),),
     count="/api/metrics",
-    classic={"Usage (classic)": "/operations?area=usage"},
 )

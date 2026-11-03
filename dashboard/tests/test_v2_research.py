@@ -753,10 +753,11 @@ class ThePage(BrowserSession):
         for path in re.findall(r'(?:src|href)="(/ui/[^"]+)"', body):
             self.assertEqual(self.request(path)[0], 200, path)
 
-    def test_the_rail_opens_the_new_page_and_the_old_views_stay_in_the_palette(self):
+    def test_the_rail_opens_the_new_page_and_the_old_view_stays_under_operations(self):
         self.assertEqual(v2.SECTIONS.get("Research"), "/research")
         self.assertNotIn("Research", v2.CLASSIC)
-        self.assertIn("/operations?area=resources", v2.SCREENS.values())
+        # pack sd:7266: Resources is a view of Operations, which the rail opens.
+        self.assertEqual(v2.CLASSIC.get("Operations"), "/operations")
 
     def test_the_data_routes_need_a_session_take_no_query_and_name_an_unknown_checkout(self):
         cookie = {"Cookie": self.cookie}

@@ -851,7 +851,10 @@ class TheRealLaneBound(unittest.TestCase):
         self.assertEqual(self.waited(TheRealRelease), waited)
 
     def test_a_stand_in_lane_keeps_the_short_bound(self):
-        self.assertEqual(self.waited(TheMove), 5)
+        # A stand-in lane runs no `sd-ship`: it keeps the base bound, not the real lane's list-and-verb one (sd:7289).
+        waited = self.waited(TheMove)
+        self.assertEqual(waited, BrowserSession.http_timeout)
+        self.assertLess(waited, self.waited(TheRealLane))
 
 
 class TheRealLane(RealLane):
@@ -1303,6 +1306,15 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["R"]["before"], 0, "Build posts nothing before the dialog's Build")
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/tasks/build", {"items": [item], "revisions": {str(item): "c" * 64}}]])
 
+    def test_build_on_an_unread_suggested_row_reads_the_queue_rows_repository(self):
+        """Pack sd:7275. Before Details load, Build reads the queue row: its repo path allows, a null one refuses."""
+        item, answers = self.suggested()
+        on = self.run_view(f"R.on = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
+        self.assertIs(on["R"]["on"], True)
+        self.doc["queues"]["rows"][0]["repo"] = None
+        off = self.run_view(f"R.off = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
+        self.assertEqual(off["R"]["off"], "a build needs a repository")
+
     # pack sd:7271 (#40961): All items adds the repo's other open items, read from /api/tasks only while it is on. Each
     # is an item row as a suggested one is, and its act is the one Tasks' list row offers: the move to its next status.
     def open_items(self):
@@ -1347,6 +1359,55 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
             self.assertIn(f"/api/tasks/{n}", out["gets"])
             self.assertIn('id="det-status"', out["R"]["details"])
             self.assertEqual(out["R"]["primary"], move, status)
+
+    # pack sd:7251: a read that stops listing a lane entry or an open item retires its command object, as the reader
+    # retires a Needs you row: it becomes 'not listed', so no row menu or Details bar runs on it.
+    def test_a_read_that_drops_an_entry_or_an_open_row_retires_its_commands(self):
+        made, answers = self.open_items()
+        n, gone, kept = made["blocked"], f"entry:{self.checkout}:9", f"entry:{self.checkout}:12"
+        out = self.run_view(f"press('open'); await flush(); await flush(); R.before = [C.get('{gone}').type, C.get('{n}').type];"
+                            " const L = QDOCS['/api/queue'][1].lanes[0]; L.rows = L.rows.filter(r => r.item !== 9);"
+                            " refresh(); await flush(); await flush(); await flush();"
+                            f" R.entry = [C.get('{gone}').type, C.get('{kept}').type];"
+                            f" press('open'); await flush(); await flush(); R.open = C.get('{n}').type;", answers=answers)
+        self.assertEqual(out["R"]["before"], ["entry", "item"])
+        self.assertEqual(out["R"]["entry"], ["not listed", "entry"])
+        self.assertEqual(out["R"]["open"], "not listed")
+
+    # pack sd:7251: a filter's count counts its rows in every repo, also a repo that shows only while the filter is on.
+    def test_each_filter_counts_the_rows_of_repos_it_would_add(self):
+        out = self.run_view("R.filters = ELS['queue-filters'].html;")
+        counts = dict(re.findall(r'data-v="(\w+)" aria-pressed="false">[^<]+<span class="n">(\d+)</span>', out["R"]["filters"]))
+        self.assertEqual(counts, {"suggested": "4", "open": "0", "ended": "3"})
+
+    # pack sd:7251 (#41066): with Suggested off, All items shows the ready items Suggested would; on, each shows once.
+    def test_all_items_alone_shows_the_ready_items_suggested_holds(self):
+        from sd_dashboard import tasks_screen
+        item, answers = self.suggested()
+        answers["/api/tasks"] = [200, tasks_screen.document(self.connection, now=NOW)]
+        out = self.run_view("open('system'); R.alone = ELS.queue.html; press('suggested'); await flush(); await flush();"
+                            " R.both = ELS.queue.html;", search="?show=open", answers=answers)
+        self.assertIn(f'data-type="open" data-item="{item}"', out["R"]["alone"])
+        self.assertIn(f'data-type="suggested" data-item="{item}"', out["R"]["both"])
+        self.assertNotIn(f'data-type="open" data-item="{item}"', out["R"]["both"])
+
+    # pack sd:7251 (#41066): a task selected once keeps its read row; a later read at another revision replaces it, so
+    # its actions follow the fresh status, not the one it had when it was selected.
+    def test_an_open_row_selected_before_acts_on_the_fresh_row_after_a_read(self):
+        from sd_dashboard import tasks_screen
+        from sd_db import workflow
+        made, answers = self.open_items()
+        n = made["blocked"]
+        workflow.change_status(self.connection, n, "in_progress", who="test", reason="test")
+        moved = tasks_screen.document(self.connection, now=NOW)
+        click = "ELS.queue.listeners.click[0]({ target: { closest: s => s === 'tr[data-id]' ? { dataset: { id: 'ID' } } : null } }); await flush(); await flush();"
+        primary = (f"(() => {{ const o = C.get('{n}'), on = REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true));"
+                   " return (on.find(c => c.primary && c.primary(o)) || {}).id; })()")
+        out = self.run_view(f"open('system'); {click.replace('ID', str(n))} R.before = {primary}; {click.replace('ID', 'live:40')}"
+                            f" QDOCS['/api/tasks'] = [200, {json.dumps(moved)}]; refresh(); await flush(); await flush(); await flush();"
+                            f" R.after = {primary};", search="?show=open", answers=answers)
+        self.assertEqual(out["R"]["before"], "item.status.ready")
+        self.assertEqual(out["R"]["after"], "item.status.done")
 
     def test_a_next_row_moves_with_the_lanes_revision(self):
         out = self.run_view(f"open('system'); act('button[data-act]', {{ repo: {json.dumps(str(self.checkout))}, item: '12', act: 'up' }});"
