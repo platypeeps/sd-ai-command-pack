@@ -267,6 +267,23 @@ def piece_files(row) -> dict[str, dict | None]:
     return found
 
 
+def read_report(connection: sqlite3.Connection, item: int, gate: str, limit: int) -> str | None:
+    """Up to `limit` + 1 characters of piece `item`'s report for `gate`, a REPORTS key, so a caller can tell a cut; None
+    for one absent or outside the repository. A non-piece raises WorkflowError; any other read failure raises OSError:
+    neither is a missing file."""
+    row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
+    if row is None or row["kind"] != "idea" or not row["piece"]:
+        raise WorkflowError(f"item {item} is not a writing piece")
+    candidate = _path(row["repo"], row["piece"], row["path"]).with_name(REPORTS[gate])
+    try:
+        if not candidate.resolve(strict=True).is_relative_to(_disk(row["repo"])):
+            return None
+    except FileNotFoundError:
+        return None
+    with candidate.open(encoding="utf-8", errors="replace") as handle:
+        return handle.read(limit + 1)
+
+
 def piece_for_key(connection: sqlite3.Connection, repo: str, piece: str) -> sqlite3.Row | None:
     probe = sdpaths.keys(repo)
     return connection.execute(
@@ -304,8 +321,11 @@ def _problems(row, snapshot: dict) -> list[str]:
     if len(matched) != 1 or matched[0].group(1) != digest:
         problems.append("research.md is missing, unstamped or stale against this draft")
     else:
+        # int() refuses a string past 4,300 digits with ValueError, and piece_state runs this for every piece on
+        # /api/writing: a stamp past 18 digits is no current generation, unconverted (pack sd:7242).
         stamped_generation = re.search(r"\bgen=(\d+)\b", matched[0].group(2))
-        if (int(stamped_generation.group(1)) if stamped_generation else 0) != generation:
+        digits = stamped_generation.group(1) if stamped_generation else "0"
+        if len(digits) > 18 or int(digits) != generation:
             problems.append("research.md belongs to an earlier gate generation")
     gates = _fields(row["fields"]).get("writing_gates") or {}
     for name in ("fact-check", "adversarial"):
@@ -744,7 +764,9 @@ def readiness(connection: sqlite3.Connection, item: int) -> dict:
 COMPANIONS = {"adversarial": REPORTS["adversarial"], "research": REPORTS["research"]}
 _STAMP_LINE = re.compile(r"(?m)^<!-- reconciled-with-draft: ([0-9a-f]{12}) .*-->$")
 #: The sentences an adversarial run read, so a later reconcile can tell how much is new.
-_REVIEWED = re.compile(r"(?m)^<!-- adversarial-reviewed: words=(\d+) sentences=([0-9a-f,]*) -->$")
+#: A run record. Its word count takes at most 18 digits, so int() never meets one past its 4,300-digit limit: a
+#: longer count is no record, and a reconcile then refuses (pack sd:7242).
+_REVIEWED = re.compile(r"(?m)^<!-- adversarial-reviewed: words=(\d{1,18}) sentences=([0-9a-f,]*) -->$")
 #: A reconcile stamps prose the run never read; past this share of the draft it refuses (sd:2025).
 REWRITE_LIMIT = 0.25
 #: A shorter draft is not ready for a hostile reader.

@@ -751,6 +751,24 @@ class ReviewCompanions(WritingCase):
         with self.assertRaisesRegex(WorkflowError, "26% of the draft"):
             self.reconcile()
 
+    def test_a_research_generation_past_the_int_digit_limit_is_an_earlier_generation(self):
+        """pack sd:7242 review: int() refuses a digit string past 4,300 digits with ValueError. A research stamp is
+        file text, and piece_state reads it for every piece on /api/writing, so such a stamp is an old generation."""
+        stamp = f"<!-- reconciled-with-draft: {self.digest} on 2026-09-08 gen={'9' * 5000} -->"
+        (self.folder / "research.md").write_text(f"{stamp}\nSource.\n")
+        self.assertIn("research.md belongs to an earlier gate generation", readiness(self.db, self.item)["problems"])
+
+    def test_reconcile_refuses_a_run_record_past_the_int_digit_limit(self):
+        """pack sd:7242 review, same class: a run record's word count is file text, so one past 4,300 digits is no
+        run record; the reconcile then cannot tell what the run read and refuses as a WorkflowError."""
+        self.write_draft(SENTENCES)
+        digest = readiness(self.db, self.item)["digest"]
+        record = f"<!-- adversarial-reviewed: words={'9' * 5000} sentences=0000aaaa -->"
+        (self.folder / "adversarial.md").write_text(f"<!-- reconciled-with-draft: 000000000000 on 2026-09-08 -->\n\n{record}\n\n# Old review\n")
+        self.assertNotEqual(digest, "000000000000")
+        with self.assertRaisesRegex(WorkflowError, "cannot tell how much of the draft the last run read"):
+            self.reconcile()
+
     def test_research_reconcile_stamps_the_draft_and_generation(self):
         self.write_draft(SENTENCES)
         self.assertIn("research.md is missing, unstamped or stale against this draft", readiness(self.db, self.item)["problems"])
