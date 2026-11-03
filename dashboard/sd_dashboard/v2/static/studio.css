@@ -1,5 +1,6 @@
 /* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4
- * Studio (sd:6920): the Documents ledger grammar (documents.css) and, in Details, each root's files as a gallery.
+ * Studio (sd:6920, sd:6921): the Documents ledger grammar (documents.css) and, in Details, the stage strip and each
+ * root's files as a gallery.
  * Route: locked to foundation/ and the v2 shell.css; every value is a token. */
 
 /* Gallery: one block per root, its files in a grid; an image fits its cell, a player takes the row. */
@@ -15,3 +16,18 @@
 .details .gallery video, .details .gallery audio { display: block; width: 100%; }
 .details .gallery span { display: block; margin-top: var(--space-2xs); font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-muted); overflow-wrap: anywhere; }
 .details ul.problems { margin: var(--space-xs) 0 var(--space-md); padding-left: var(--space-md); font-size: var(--text-sm); }
+
+/* sd:6921 · Stage strip: the kind's stages in a row of hairline steps. Done steps read muted, the item's own stage
+ * carries the accent wash and weight; a phone wraps the row. */
+.details ol.strip { display: flex; flex-wrap: wrap; gap: var(--space-2xs); margin: var(--space-xs) 0 var(--space-sm); padding: 0; list-style: none; }
+.details ol.strip li { margin: 0; padding: var(--space-3xs) var(--space-xs); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-sm);
+  font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); white-space: nowrap; }
+.details ol.strip li.done { color: var(--color-muted); }
+.details ol.strip li.now { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-ink); font-weight: 600; }
+
+/* Pin and Hide sit under each tile; the hidden files fold under the root, closed until opened. */
+.details .gallery .rowact { display: flex; gap: var(--space-3xs); margin-top: var(--space-3xs); }
+.details .gallery .pinmark { font-weight: 600; color: var(--color-ink-2); }
+.details details.aside { margin: var(--space-xs) 0 0; }
+.details details.aside summary { cursor: pointer; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-muted); }
+.details details.aside summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }

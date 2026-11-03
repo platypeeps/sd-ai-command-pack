@@ -21,5 +21,20 @@ inside a root a project names; each answer carries a sandbox policy.
 `Content-Range`, so a player seeks; a range past the end is 416, and a
 header that does not parse gets the whole file.
 
-The page writes nothing. The stage strip, pin and hide are slice 3
-(sd:6921); the `studio.*` actions are slice 4 (sd:6922).
+Details draws the kind's stage strip (sd:6921): shirt is brief,
+candidates, selected, print_export, approved, ordered; song is lyrics,
+suno, selections, film, delivered; episode is idea, outlined, scripted,
+in_production, published. The stage is the `stage` of the item the
+`project.json` names. Next stage posts `/api/items/<n>/stage` with the
+revision the page read, the route Writing and Watches post: the server
+sends an item that is no writing piece and that one project names to
+`studio.move_stage`. It moves one stage forward and writes a comment
+note in the same transaction. A stale revision answers 409, any other
+stage 400, and neither writes. An item at a stage off its strip is
+refused and listed as a problem; the shell moves it.
+
+Each gallery file has Pin and Hide, Documents' view state keyed
+`studio/<repo>/<path>` and written by `POST /api/studio/view`
+(`{"file", "pinned" | "hidden"}`). A pinned file leads its root; a
+hidden one folds under the root's Hidden. A file the gallery does not
+serve is refused. The `studio.*` actions are slice 4 (sd:6922).
