@@ -258,6 +258,44 @@ decline(cmd('today.lane.approve'), o); await flush(); R.said = (cmd('today.lane.
         self.assertEqual(out["confirms"], [])
         self.assertEqual([(path, body["action"]) for path, body, _ in out["posts"]], [("/api/queue/move", "retry")])
 
+    STALE = "The queue changed since the page read it. Read it again, then retry."
+
+    def test_a_stale_retry_reads_today_again_and_says_so_until_the_next_press(self):
+        # pack sd:7315: a 409 left only a passing toast, and the row looked the same. Today reads again, then a lasting
+        # line above the list says the queue changed and that a press acts on the fresh read; it retries nothing itself.
+        # The next press clears the line, and one that lands leaves it hidden.
+        out = self.run_page(self.DECLINE + f"""let answer = [409, {{ error: {json.dumps(self.STALE)}, reload: true }}];
+ANSWER = (path, body) => path === '/api/queue/move' ? answer : [200, DOC0];
+const said = () => [ELS['needs-said'].hidden, ELS['needs-said'].textContent];
+shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.stale = said(); R.gets = OUT.gets.slice(); R.toast = OUT.toasts[OUT.toasts.length - 1].msg;
+answer = [200, {{ ok: true }}]; shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.landed = said();""")
+        self.assertEqual([body["action"] for _, body, _ in out["posts"]], ["retry", "retry"], "nothing retries by itself")
+        self.assertEqual(out["R"]["gets"], ["/api/now", "/api/now"])
+        hidden, text = out["R"]["stale"]
+        self.assertFalse(hidden)
+        self.assertRegex(text, r"^system: sd:5780 not queued again: The queue changed since the page read it\. "
+                               r"Read again at \d\d:\d\d; a press now acts on that read\.$")
+        self.assertIn("Read again at", out["R"]["toast"])
+        self.assertTrue(out["R"]["landed"][0], "a press that lands hides the line")
+
+    def test_a_stale_retry_whose_read_again_failed_claims_no_fresh_read(self):
+        out = self.run_page(self.DECLINE + f"""ANSWER = (path, body) => path === '/api/queue/move' ? [409, {{ error: {json.dumps(self.STALE)}, reload: true }}]
+  : OUT.gets.length > 1 ? [500, {{ error: 'fleet collection was stopped' }}] : [200, DOC0];
+shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.said = ELS['needs-said'].textContent;""")
+        self.assertEqual(out["gets"], ["/api/now", "/api/now"])
+        self.assertEqual(out["R"]["said"], "system: sd:5780 not queued again: The queue changed since the page read it."
+                                           " It was not read again: Read again tries it.")
+
+    def test_a_retry_with_no_answer_says_its_outcome_is_not_known(self):
+        out = self.run_page(self.DECLINE + f"""ANSWER = (path, body) => path === '/api/queue/move' ? [502, {{ error: 'sd-ship lane gave no answer.' }}] : [200, DOC0];
+shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.said = [ELS['needs-said'].hidden, ELS['needs-said'].textContent];""")
+        self.assertEqual(out["R"]["said"], [False, "system: not known whether sd:5780 was queued again: sd-ship lane gave no"
+                                                   " answer. The lane was read again; check sd:5780 there before you act again."])
+
     def test_a_group_act_past_the_bulk_limit_asks_first_and_a_small_one_runs(self):
         out = self.run_page(self.DECLINE + """decline(cmd('today.group.snooze'), C.get('group:late'));
 decline(cmd('today.group.seen'), C.get('group:briefs')); await flush();

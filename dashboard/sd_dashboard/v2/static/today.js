@@ -531,6 +531,19 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
 
   const DONE = { up: 'moved up', down: 'moved down', top: 'moved to the top', hold: 'held', release: 'released', cancel: 'cancelled',
     retry: 'queued again', approve: 'approved and queued again', requeue: 're-queued', reclaim: 'released from its holder' };
+  // A lane write that did not land, said one way on Queue and on Today (pack sd:7315). Only a 4xx wrote nothing
+  // (queue_screen.move); a 502, another status or no answer may follow a landed write (sd:3339). A 409 is a queue that
+  // changed since the read: the page has read it again, so the line drops the server's "Read it again, then retry", says
+  // when, and says a press acts on that read. `read` is false when that read failed: then nothing claims a fresh read.
+  // `why` is the reason alone, for a toast that names the row.
+  function notDone(repo, item, action, err, read = true) {
+    const why = String(err.message).replace(/([^.!?])$/, '$1.'), known = err.status >= 400 && err.status < 500;
+    const again = read ? `Read again at ${HM.format(new Date())}; a press now acts on that read.` : 'It was not read again: Read again tries it.';
+    const after = err.stale ? `${why.replace(/\s*Read it again, then retry\.$/, '')} ${again}`
+      : known ? `${why} The queue is unchanged.`
+      : `${why} The lane was ${read ? '' : 'not '}read again; check sd:${item} there before you act again.`;
+    return { why: after, text: known ? `${repo}: sd:${item} not ${DONE[action]}: ${after}` : `${repo}: not known whether sd:${item} was ${DONE[action]}: ${after}` };
+  }
   // Cancel, Approve and Release are the writes no verb undoes; each dialog names the entry and the command it runs.
   function grant(l, item, head) {
     const r = l.rows.find(x => x.state === 'blocked' && x.item === item);
@@ -573,11 +586,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       const order = out.pending ? ` Order now: ${out.pending.map(n => `sd:${n}`).join(', ')}.` : '';
       qSaid = { ok: true, text: `${l.repo}: sd:${item} ${DONE[action]}.${order} ${out.edits || ''}` };
     } catch (err) {
-      // Only a 4xx wrote nothing (queue_screen.move); a 502, another status or no answer may follow a landed write (sd:3339).
-      const why = String(err.message).replace(/([^.!?])$/, '$1.');
-      qSaid = { ok: false, text: err.status >= 400 && err.status < 500
-        ? `${l.repo}: sd:${item} not ${DONE[action]}: ${why}${err.stale ? '' : ' The queue is unchanged.'}`
-        : `${l.repo}: not known whether sd:${item} was ${DONE[action]}: ${why} The lane was read again; check sd:${item} there before you act again.` };
+      qSaid = { ok: false, text: notDone(l.repo, item, action, err).text };
     }
     QV.busy = false;
     await loadQueue();
@@ -769,7 +778,22 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       .then(() => reading.reread(), err => { load(); throw err; });
     const week = () => new Date(Date.now() + 7 * 864e5).toISOString();
     const BULK = 25; // shell.js asks first for a bulk act on more rows than this; a group act on more members asks too
-    const lane = action => o => post('/api/queue/move', { repo: o.repoPath, item: o.item, action, revision: o.laneRevision, head: o.head });
+    // A lane row's Retry and Approve (pack sd:7315): a press clears the line above Needs you; a write that did not land
+    // reads Today again first, then says why on that line, as Queue's does, until the next press. Nothing retries itself.
+    const needsSaid = text => { const s = $('needs-said'); s.hidden = !text; s.textContent = text || ''; s.setAttribute('role', text ? 'alert' : 'status'); };
+    const lane = action => async o => {
+      needsSaid('');
+      try {
+        const out = await window.shell.post('/api/queue/move', { repo: o.repoPath, item: o.item, action, revision: o.laneRevision, head: o.head });
+        await reading.reread();
+        return out;
+      } catch (err) {
+        const read = await Promise.resolve(load()).catch(() => false);
+        const said = notDone(o.repo, o.item, action, err, read !== false);
+        needsSaid(said.text);
+        throw new Error(said.why);
+      }
+    };
     const go = (href, said) => () => { location.href = href; return said; };
     // pack sd:7271: an item row's Details, fields and item commands are the Tasks page's (task-details.js), read from
     // /api/tasks/<id>; a write folds into the row, then Today reads again. A ready row's act is Tasks' Build

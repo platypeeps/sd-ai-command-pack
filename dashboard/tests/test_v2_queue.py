@@ -1465,6 +1465,16 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["R"]["said"], "system: sd:12 not moved up: sd:3 is running; the queue changes only between items."
                                            " The queue is unchanged.")
 
+    def test_a_stale_write_reads_the_lane_again_and_says_a_press_acts_on_that_read(self):
+        # pack sd:7315: Queue and Today say a 409 the same way: the page already read the lane again.
+        out = self.run_view(f"open('system'); act('button[data-act]', {{ repo: {json.dumps(str(self.checkout))}, item: '12', act: 'up' }});"
+                            " await flush(); await flush(); R.said = ELS['queue-said'].textContent;",
+                            answers={"/api/queue/move": [409, {"error": "The queue changed since the page read it. Read it"
+                                                                        " again, then retry.", "reload": True}]})
+        self.assertRegex(out["R"]["said"], r"^system: sd:12 not moved up: The queue changed since the page read it\. "
+                                           r"Read again at \d\d:\d\d; a press now acts on that read\.$")
+        self.assertEqual(out["gets"].count("/api/queue"), 2)
+
     def test_a_build_run_cancel_asks_first_and_send_to_builder_asks_for_the_finding(self):
         out = self.run_view("window.shell.confirm = a => { OUT.asked = a; return Promise.resolve(true); };"
                             "window.shell.ask = a => { OUT.ask = a; return Promise.resolve({ yes: true, values: { finding: 'Fix the label' } }); };"

@@ -17,6 +17,9 @@ keyed `today:item:<id>`, and the item shows again early when its status or due d
 Retry on a failed or interrupted job posts `/api/jobs/<job>/retry` with the job's revision from the same read, as
 Management does (sd:3386); a job that changed since is refused and Now is read again.
 After exit 127, command not found, Retry asks first and names the exit (sd:3392).
+A blocked lane entry's Retry and Approve post `/api/queue/move` as Queue's do. A refused or unanswered one reads
+Today again, then a line above Needs you says why until the next press: for a 409, that the queue changed, when it
+was read again, and that a press now acts on that read (pack sd:7315). Nothing retries by itself.
 A job row also has Show log, which opens the job on Management > Schedules, and Print, the `launchctl print` line to
 copy; Print is the row's act after exit 127. Both are the declarations Management and Activity use (sd:3449).
 
@@ -53,7 +56,7 @@ Up, down, top, hold, release and cancel, a blocked row's Retry and Approve, a ca
 row's Release post `/api/queue/move`, which runs `sd-ship lane move|hold|release|cancel|retry` and nothing else.
 Each write carries the revision, head or claim the view showed, and the verb checks it again under the queue's lock,
 so a stale write is refused (409). A failure that is not a refusal answers 502 with an unknown outcome, and the view
-reads the lane again. The full rules are in `queue_screen`'s docstring.
+reads the lane again. The line above the table says the outcome in the words Needs you uses (pack sd:7315). The full rules are in `queue_screen`'s docstring.
 A build run's Cancel asks first and posts `/api/assignments/<id>/cancel`; an ended blocked or cancelled bundle's Retry
 and Send to builder post `/api/queue/builds/retry` (pack sd:6020).
 Queue's Last 7 days moved to Metrics' Lane times view (pack sd:7233).
