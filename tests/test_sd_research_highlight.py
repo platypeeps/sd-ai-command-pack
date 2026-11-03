@@ -428,5 +428,25 @@ class PagesAreReadByTheHtmlParser(unittest.TestCase):
         self.assertEqual(text("a <b>bold</b> c < d"), "a bold c < d")
 
 
+class WrappedListItems(unittest.TestCase):
+    """sd:7262: a list item wrapped over several Markdown lines is one baseline unit."""
+
+    def setUp(self) -> None:
+        self.highlight = load_highlight()
+
+    def mark(self, baseline: str, page: str) -> tuple[int, int]:
+        _, changed, gone, _ = self.highlight.highlight(page, self.highlight.Baseline(baseline, header=False), "T",
+                                                       header=False)
+        return changed, gone
+
+    def test_a_wrapped_item_matches_its_list_item(self) -> None:
+        baseline = "- [ ] One two\n  three.\n1. Next\nlazy wrap.\n  - Inner\n    wrapped.\n"
+        page = "<ul><li>One two three.</li></ul><ol><li>Next lazy wrap.<ul><li>Inner wrapped.</li></ul></li></ol>"
+        self.assertEqual(self.mark(baseline, page), (0, 0))
+
+    def test_an_edited_wrapped_item_is_one_change_and_one_gone(self) -> None:
+        self.assertEqual(self.mark("- One two\n  three.\n", "<ul><li>One two four.</li></ul>"), (1, 1))
+
+
 if __name__ == "__main__":
     unittest.main()

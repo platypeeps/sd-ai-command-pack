@@ -209,9 +209,9 @@ def markdown_text(line: str) -> str:
 class Baseline:
     """The previous copy's units, each matched at most once.
 
-    A unit is a heading, a list item, a table cell, a fenced block, or a run of plain lines (one
-    paragraph, however Drive wrapped it). Drive may also end a paragraph at a single newline, so a
-    run's lines can match one by one. Each unit is one multiset of lines: a whole match takes every
+    A unit is a heading, a list item with the lines that wrap it, a table cell, a fenced block, or
+    a run of plain lines (one paragraph, however Drive wrapped it). Drive may also end a paragraph
+    at a single newline, so a paragraph's lines can match one by one; a list item matches whole. Each unit is one multiset of lines: a whole match takes every
     line and needs all of them left, and a line match takes that line alone, so what no match took
     stays unmatched and counts as gone.
     """
@@ -226,6 +226,7 @@ class Baseline:
         rows = self._after_header(rows) if header else self._after_note(rows)
         section, fence = "Opening", None
         run: list[str] = []
+        item = False  # whether `run` is a list item and its wrapped lines
         code: list[str] = []
         for row in rows + [""]:
             if fence is not None:
@@ -238,23 +239,24 @@ class Baseline:
             opened = FENCE.match(row)
             structural = opened or not row.strip() or HEADING.match(row) or ITEM.match(row) or ROW.match(row)
             if structural and run:
-                self._add(markdown_text("\n".join(run)), section, [markdown_text(line) for line in run])
-                run = []
+                lines = [] if item else [markdown_text(line) for line in run]
+                self._add(markdown_text("\n".join(run)), section, lines)
+                run, item = [], False
             if opened:
                 fence = opened.group(1)
+            elif ITEM.match(row):
+                run, item = [row], True
             elif structural:
                 section = self._structural(row, section)
             elif not RULE.match(row):
                 run.append(row)
 
     def _structural(self, row: str, section: str) -> str:
-        """Add a heading, list item or table row's units; the section that follows."""
+        """Add a heading or table row's units; the section that follows."""
 
         if HEADING.match(row):
             section = markdown_text(row) or section
             self._add(section, section, [])
-        elif ITEM.match(row):
-            self._add(markdown_text(row), section, [])
         elif ROW.match(row):
             for cell in re.split(r"(?<!\\)\|", row.strip().strip("|")):
                 if not re.fullmatch(r"\s*:?-+:?\s*", cell):
