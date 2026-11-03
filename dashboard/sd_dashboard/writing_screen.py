@@ -21,7 +21,8 @@ from .markup import href
 from .places import realm_of, realms
 
 #: Draft characters a piece carries to the editor, whole paragraphs only: the longest draft measured 2026-11-02 held
-#: 19,347 bytes and all 28 held 310,061, so a draft past this is cut and says so (pack sd:7242).
+#: 19,347 bytes and all 28 held 310,061, so a draft past this is cut and says so (pack sd:7242). A first paragraph
+#: past it keeps an excerpt cut at a word, so a long draft never reads as no draft.
 DRAFT_CHARS = 64_000
 
 
@@ -33,9 +34,13 @@ def _draft(document: str | None) -> tuple[list[str], bool, int]:
     for paragraph in paragraphs:
         size += len(paragraph)
         if size > DRAFT_CHARS:
-            break
+            if not kept:  # pack sd:7242 review: an excerpt, cut at the last word that fits, or mid-word if none does
+                excerpt = paragraph[:DRAFT_CHARS]
+                at_word = paragraph[DRAFT_CHARS] == " " or " " not in excerpt
+                kept.append(excerpt if at_word else excerpt.rsplit(" ", 1)[0])
+            return kept, True, len(prose.split())
         kept.append(paragraph)
-    return kept, len(kept) < len(paragraphs), len(prose.split())
+    return kept, False, len(prose.split())
 
 
 #: A gate's view icon reads its report at /api/writing/<item>/<gate> (pack sd:7242), cut at REPORT_CHARS: of the 60

@@ -112,6 +112,20 @@ class TheDocument(Pieces):
             piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
         self.assertEqual((piece["draft"], piece["draft_cut"], piece["words"]), (paragraphs[:3], True, 54))
 
+    def test_a_first_paragraph_past_the_bound_keeps_an_excerpt_cut_at_a_word(self):
+        """pack sd:7242 review: a first paragraph longer than DRAFT_CHARS left no paragraph, so Show draft said "no
+        draft yet". Its excerpt, cut at the last word boundary within the bound, stands in, and the draft says cut."""
+        index = self.root / "content" / "2026" / "fixture" / "index.md"
+        words = [f"word{n:04}" for n in range(1000)]
+        index.write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\n" + " ".join(words) + "\n\nA second one.\n")
+        with mock.patch.object(writing_screen, "DRAFT_CHARS", 95):
+            piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
+        # 10 words of 8 characters and their 9 spaces take 89; an eleventh would take 98.
+        self.assertEqual((piece["draft"], piece["draft_cut"], piece["words"]), ([" ".join(words[:10])], True, 1003))
+        with mock.patch.object(writing_screen, "DRAFT_CHARS", 5):  # no word fits: the excerpt is cut mid-word
+            piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
+        self.assertEqual((piece["draft"], piece["draft_cut"]), (["word0"], True))
+
     def test_the_ideas_are_the_inbox_blog_ideas_highest_score_first(self):
         """pack sd:7244: the Ideas column reads the `sdw.blog-idea` rows through `records.list_rows`: inbox only, highest
         score first, a link only for http, at most IDEAS of them beside the inbox count."""
