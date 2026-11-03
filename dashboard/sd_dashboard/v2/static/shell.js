@@ -1662,20 +1662,20 @@
   const rowParam = () => new URLSearchParams(location.search).get('row');
   // aside:start
   // sd:6701: one set-aside pattern on every page that sets rows aside (Writing's parked pieces, the hidden contributions,
-  // designs, issues and documents, Tasks' parked tasks): a .vseg of Open | <Parked or Hidden> | All, each with its count.
+  // designs, issues and documents, Tasks' parked tasks): a .vseg of Open | <Parked or Hidden>, each with its count.
   // The URL keeps the choice in the page's key: <key>=1 is the set-aside rows alone, as the older Show hidden toggle kept it,
-  // so an older link still lands there; <key>=all is every row; Open keeps no key.
-  //   shell.aside.mode(key)                the choice the URL names: 'open', 'aside' or 'all'
+  // so an older link still lands there; Open keeps no key. Pack sd:7263 (operator 2026-11-02) dropped All, so an older
+  // <key>=all link lands on Open.
+  //   shell.aside.mode(key)                the choice the URL names: 'open' or 'aside'
   //   shell.aside.seg(key, word, mode, n)  the group; n = { open, aside }; a button carries data-aside="<key>" data-v
   //   shell.aside.buttons(…)               the same buttons, for a .vseg the page's markup holds
   //   shell.aside.shows(mode, setAside)    whether a row, set aside or not, shows under the choice
   //   shell.aside.param(mode)              the URL value for the choice, or null for Open
-  const ASIDE_V = { 1: 'aside', all: 'all' };
   const aside = {
-    mode: (key, q = new URLSearchParams(location.search)) => ASIDE_V[q.get(key)] || 'open',
-    shows: (mode, setAside) => mode === 'all' || (mode === 'aside') === !!setAside,
-    param: mode => ({ aside: '1', all: 'all' })[mode] || null,
-    buttons: (key, word, mode, n) => html`${[['open', 'Open', n.open], ['aside', word, n.aside], ['all', 'All', n.open + n.aside]].map(([v, label, c]) =>
+    mode: (key, q = new URLSearchParams(location.search)) => q.get(key) === '1' ? 'aside' : 'open',
+    shows: (mode, setAside) => (mode === 'aside') === !!setAside,
+    param: mode => mode === 'aside' ? '1' : null,
+    buttons: (key, word, mode, n) => html`${[['open', 'Open', n.open], ['aside', word, n.aside]].map(([v, label, c]) =>
       html`<button type="button" data-aside="${key}" data-v="${v}" aria-pressed="${String(v === mode)}">${label} <span class="n">${String(c)}</span></button>`)}`,
   };
   aside.seg = (key, word, mode, n) => html`<div class="vseg" role="group" aria-label="${word} rows">${aside.buttons(key, word, mode, n)}</div>`;
