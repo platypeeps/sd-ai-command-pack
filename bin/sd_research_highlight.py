@@ -12,7 +12,9 @@ reviewer's own edits count as already seen.
 as HTML first, as a mirror's `content` is. Each unit whose text is not in the
 baseline gets `background-color:#fff2a8`: a paragraph, list item, heading, table
 cell or code block, and any text outside those, such as a list item's tail after
-its nested list. One note, highlighted the same way, says "Changed since
+its nested list. A unit that holds other blocks, such as a list item with a
+nested list, gets the mark on a span around its own text alone, so its
+unchanged nested blocks stay unmarked. One note, highlighted the same way, says "Changed since
 <time>": the count, how many earlier units no longer appear (reworded or
 removed), and the sections of both. With neither it says "No changes since".
 The previous push's note is not compared: the baseline's first paragraph in
@@ -60,7 +62,7 @@ from typing import NamedTuple
 
 MARK = "background-color:#fff2a8"
 USAGE = "usage: sd-research-kit highlight --previous <baseline.md> [--since <time>] [--skip-header] <in> <out.html>"
-#: Tags that hold a unit's text; a changed one gets the mark on its opening tag.
+#: Tags that hold a unit's text; a changed one gets the mark on its opening tag, or on a span when it holds blocks.
 UNIT = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "pre", "dt", "dd", "caption",
         "figcaption", "blockquote", "div"}
 #: Every block tag: a unit's text runs from one of these to the next. Inline tags (a, code, br) do not cut it.
@@ -384,7 +386,11 @@ def _note(changed: int, gone: int, sections: list[str], since: str) -> str:
 
 
 def _units(scan: Scan, start: int, end_of_page: int) -> list[tuple[int, int, Tag | None, str, str]]:
-    """Each text segment between block tags: `(begin, end, unit tag or None, section, text)`."""
+    """Each text segment between block tags: `(begin, end, unit tag or None, section, text)`.
+
+    The unit tag is set only when the segment runs to that tag's own end tag: a segment cut by
+    a nested block (`<li>New<ul>`) gets None, so a mark covers its text and not the nested block.
+    """
 
     tags = [tag for tag in scan.tags if tag.start >= start and tag.name in BLOCK]
     units: list[tuple[int, int, Tag | None, str, str]] = []
@@ -398,7 +404,8 @@ def _units(scan: Scan, start: int, end_of_page: int) -> list[tuple[int, int, Tag
         name = tag.name if tag is not None and not tag.closing else ""
         if re.fullmatch(r"h[1-6]", name):
             section = text
-        units.append((begin, end, tag if name in UNIT else None, section, text))
+        nested = index >= len(tags) or tags[index].name != name or not tags[index].closing
+        units.append((begin, end, tag if name in UNIT and not nested else None, section, text))
     return units
 
 
@@ -424,7 +431,7 @@ def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str,
         if tag is not None:
             out += [page[at:tag.start], _marked(tag.raw)]
             at = tag.end
-        else:  # text outside any unit tag, such as a list item's tail after its nested list
+        else:  # text outside a unit tag, or a unit's own text before a nested block (sd:7333)
             out += [page[at:begin], f'<span style="{MARK}">', page[begin:end], "</span>"]
             at = end
     out.append(page[at:])
