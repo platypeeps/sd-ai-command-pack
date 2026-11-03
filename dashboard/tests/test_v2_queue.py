@@ -1253,6 +1253,15 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["R"]["before"], 0, "Build posts nothing before the dialog's Build")
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/tasks/build", {"items": [item], "revisions": {str(item): "c" * 64}}]])
 
+    def test_build_on_an_unread_suggested_row_reads_the_queue_rows_repository(self):
+        """Pack sd:7275. Before Details load, Build reads the queue row: its repo path allows, a null one refuses."""
+        item, answers = self.suggested()
+        on = self.run_view(f"R.on = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
+        self.assertIs(on["R"]["on"], True)
+        self.doc["queues"]["rows"][0]["repo"] = None
+        off = self.run_view(f"R.off = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
+        self.assertEqual(off["R"]["off"], "a build needs a repository")
+
     # pack sd:7271 (#40961): All items adds the repo's other open items, read from /api/tasks only while it is on. Each
     # is an item row as a suggested one is, and its act is the one Tasks' list row offers: the move to its next status.
     def open_items(self):
