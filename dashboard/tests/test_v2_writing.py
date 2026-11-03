@@ -723,6 +723,22 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         self.assertIn('aria-pressed="true">Adversarial</button>', out["R"]["editor"])
         self.assertIn("/api/writing/11/adversarial", out["gets"])
 
+    def test_a_reread_drops_the_cached_reports_so_two_versions_in_one_second_differ(self):
+        """pack sd:7328: a report is cached per piece, file and whole-second change time. Two versions written in one
+        second share a key, so Draft's refresh kept the old text beside the new gate state. Every read of the pieces
+        drops the cache, so the open report reads again."""
+        answer = ("(path) => path === '/api/writing' ? [200, DOC] : path === '/api/writing/11/adversarial'"
+                  " ? [200, { item: 11, name: 'adversarial.md', text: BODY, cut: false }] : [200, {}]")
+        out = self.run_page("open('11'); await flush();"
+                            " const view = { target: { closest: s => s === '[data-gate-view]' ? { dataset: { gateView: 'adversarial' } } : null } };"
+                            " ELS.details.listeners.click.forEach(f => f(view)); await flush(); await flush(); R.first = ELS['view-editor'].html;"
+                            " BODY = 'Report version two';"
+                            " const again = { target: { closest: s => s === '[data-gate-again]' ? {} : null } };"
+                            " ELS.details.listeners.click.forEach(f => f(again)); await flush(); await flush(); R.second = ELS['view-editor'].html;",
+                            answer=answer, prelude="var BODY = 'Report version one';\n")
+        self.assertIn("Report version one", out["R"]["first"])
+        self.assertIn("Report version two", out["R"]["second"])
+
     def test_the_details_link_the_claims_url(self):
         # sd:3465: "Already published" named the claim only; the Details now link where it went, http and https only.
         claim = {"claim": "c1aim0000000", "url": "https://example.test/p", "phase": "published", "href": "https://example.test/p"}
