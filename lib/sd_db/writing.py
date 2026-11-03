@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 
 from . import paths as sdpaths
 from .database import refuse_hub_only, transaction
-from .progress import _fields, _git
+from .progress import _fields, _git, small_int
 from .sources.frontmatter import split as split_frontmatter
 from .workflow import StaleItem, WorkflowError, _checked_state, _text, item_state
 from .writes import (
@@ -327,7 +327,7 @@ def _problems(row, snapshot: dict) -> list[str]:
         digits = stamped_generation.group(1) if stamped_generation else "0"
         if len(digits) > 18 or int(digits) != generation:
             problems.append("research.md belongs to an earlier gate generation")
-    gates = _fields(row["fields"]).get("writing_gates") or {}
+    gates = _fields(row["fields"], readable=True).get("writing_gates") or {}
     for name in ("fact-check", "adversarial"):
         gate = gates.get(name) if isinstance(gates, dict) else None
         if name not in snapshot["files"]:
@@ -373,7 +373,7 @@ def piece_state(connection: sqlite3.Connection, item: int) -> dict:
         stages, corrections = [], []
     state["writing"] = {"stage": row["stage"], "available_stages": stages, "correction_stages": corrections,
                         "owner": owner, "parked": row["parked_at"] is not None,
-                        "metadata": _fields(row["fields"]).get("writing") or {},
+                        "metadata": _fields(row["fields"], readable=True).get("writing") or {},
                         "document": document,
                         "gates": {"ok": not problems, "digest": digest,
                                   "generation": row["gate_generation"], "problems": problems,
@@ -381,7 +381,7 @@ def piece_state(connection: sqlite3.Connection, item: int) -> dict:
     if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='publication_claim'").fetchone():
         claims = []
         for claim in connection.execute("SELECT id,active_item,state FROM publication_claim WHERE item=? ORDER BY created_at", (item,)):
-            progress = json.loads(claim["state"])
+            progress = json.loads(claim["state"], parse_int=small_int)
             claims.append({"id": claim["id"], "active": claim["active_item"] is not None,
                            "phase": progress["phase"], "document_id": progress.get("document_id"),
                            "url": progress.get("url"), "current_draft_published": progress.get("current_draft_published"),
