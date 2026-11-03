@@ -654,6 +654,8 @@ def lane_summary(queue: dict) -> dict:
     return {"merging": states.get("merging", 0), "next": states.get("next", 0), "blocked": states.get("blocked", 0),
             "landed": states.get("landed", 0), "landed_lanes": len(landed_in), "gates": queue.get("gates") or {},
             "load": queue.get("load") or {}, "unread": len(problems),
+            # Today's Retry claims a fresh read only for a checkout this list leaves out (pack sd:7315).
+            "unread_paths": [str(p["repo"]) for p in problems if p.get("repo")],
             "unread_why": "; ".join(f"{Path(str(p.get('repo') or '?')).name}: {p.get('error') or 'no reason given'}" for p in problems[:3])}
 
 
@@ -818,13 +820,15 @@ ETA_RUNS = 3
 
 def queues(connection: sqlite3.Connection, now: str) -> dict:
     """The Queues panel (pack sd:6946): `sd_db.today.queues`, ready items, builds and the lane in one list, as
-    `sd today` prints it. A read that failed is `error`, so the page says the queues were not read, never empty."""
+    `sd today` prints it, and `suggested`, what sd-next offers next, which the Queue view's Suggested rows show
+    (pack sd:7314). A read that failed is `error`, so the page says the queues were not read, never empty."""
     from sd_db import today
 
     try:
-        return {"rows": today.queues(connection, now=now), "error": ""}
+        rows = today.queues(connection, now=now)
+        return {"rows": rows, "suggested": today.suggested(connection, now=now, queued=rows), "error": ""}
     except (SdDbError, sqlite3.Error, ValueError, TypeError, KeyError) as failure:
-        return {"rows": [], "error": str(failure) or "the queues could not be read"}
+        return {"rows": [], "suggested": [], "error": str(failure) or "the queues could not be read"}
 
 
 def builders(connection: sqlite3.Connection, now: str) -> dict:

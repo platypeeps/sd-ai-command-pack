@@ -182,11 +182,22 @@ class TheQueues(TodayCase):
         rows = self.today()["queues"]["rows"]
         self.assertIn(("ready", ready, "P1"), [(row["queue"], row["id"], row["detail"]) for row in rows])
 
+    def test_the_queues_carry_what_sd_next_suggests_in_its_order(self):
+        """Pack sd:7314: the Queue view's Suggested rows are `sd_db.today.suggested`: ready, planned, unscheduled."""
+        from sd_db import create_item
+
+        loose = create_item(self.connection, kind="task", title="Loose", priority=2)
+        dated = create_item(self.connection, kind="task", title="Dated", due="2026-09-20")
+        ready = create_item(self.connection, kind="task", title="Build me next", status="ready", priority=1)
+        found = self.today()["queues"]["suggested"]
+        self.assertEqual([(row["id"], row["why"]) for row in found if row["id"] in (loose, dated, ready)],
+                         [(ready, "ready"), (dated, "planned"), (loose, "unscheduled")])
+
     def test_a_queues_read_that_failed_is_its_reason_never_empty(self):
         from sd_db import today
 
         with mock.patch.object(today, "queues", side_effect=sqlite3.OperationalError("database is locked")):
-            self.assertEqual(self.today()["queues"], {"rows": [], "error": "database is locked"})
+            self.assertEqual(self.today()["queues"], {"rows": [], "suggested": [], "error": "database is locked"})
 
 
 QUEUED = [{"queue": "ready", "id": 7, "repo": "~/repos/pack", "title": "Port the page", "status": "ready",

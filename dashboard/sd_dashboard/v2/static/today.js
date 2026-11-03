@@ -298,12 +298,12 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // Queue (pack sd:7234): Queue's Overview, Today's Queues and In motion in one view. One parent row per repo; a click opens
   // its child rows under it and closes the row that was open, and a click on the open row closes it. The children, in order:
   // working (the live items of `active`, the build runs of /api/queue/builds, a builder's gate in the lane and the runner's
-  // assignments no run holds), merging, next and blocked (the lane entries of /api/queue), suggested (the repo's ready items
-  // from `queues`, at most three, as pack sd:7222's Live + next reads them), open (All items: its other open tasks, from
+  // assignments no run holds), merging, next and blocked (the lane entries of /api/queue), suggested (what sd-next offers next,
+  // from `queues.suggested`, at most three, pack sd:7222 and sd:7314), open (All items: its other open tasks, from
   // /api/tasks) and ended (ended build runs, and the cancelled
   // and landed lane entries). Each row's marker is its state glyph and its type in words; the parent's glyph is its worst
-  // child's. Suggested, All items and Ended builds are off by default; on, a repo with only those rows shows too; ?show=
-  // keeps them.
+  // child's. Suggested is on by default (pack sd:7314), All items and Ended builds are off; on, a repo with only those rows
+  // shows too. ?show= keeps the choice: no key is the default, and an empty one is every filter off.
   // The lane's writes are Queue's (sd:2585): up, down, top, hold, release and cancel post /api/queue/move with the lane's
   // revision; the server runs sd-ship lane move|hold|release|cancel|retry and refuses a stale revision. Cancel asks first
   // (sd:3012). A cancelled row offers Re-queue (sd:3398) when the installed pack's retry takes a cancelled entry
@@ -400,19 +400,24 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       <td class="detail"><ul class="sessions">${rows.map(r => html`<li>${r.verified ? '' : html`<span class="g-unknown" title="not confirmed">${GLYPH.unknown} </span>`}${r.session}<span class="via">${r.via}</span></li>`)}</ul></td>
       <td class="num">${top.elapsed || 'not known'}</td><td class="act">${shell.commands.rowActions(id)}</td></tr>`];
   }
-  // A suggested row (pack sd:7271) is a task: a click shows the Tasks page's Details, and its act is Build.
+  // A suggested row (pack sd:7271) is a task: a click shows the Tasks page's Details, and its act is Build on a ready one,
+  // else its next status, as on Tasks. Its detail says why it is suggested (pack sd:7314): ready, planned for its due
+  // date, or unscheduled, with its priority; a row that is not ready shows its status too.
+  const P = r => r.priority == null ? '' : `P${r.priority}`;
+  const WHY = { ready: r => ['ready', P(r)], planned: r => [`planned for ${r.due}`, P(r), r.status], unscheduled: r => [`unscheduled ${P(r)}`.trim(), r.status] };
   const suggestRow = r => ['suggested', 'queued', html`<tr class="child" data-type="suggested" data-item="${r.id}" data-id="${String(r.id)}" aria-selected="${String(row() === String(r.id))}">${marker('queued', 'suggested')}
     <td class="what"><a href="${shell.itemHref(r.id)}">#${r.id} ${r.title}</a></td>
-    <td class="detail">ready${r.detail && r.detail !== '-' ? ` · ${r.detail}` : ''}</td><td class="num">${r.since ? age(r.since) : ''}</td><td class="act">${shell.commands.rowActions(String(r.id))}</td></tr>`];
-  // The repo's ready items no live item holds, at most NEXT per repo, in the read's order (pack sd:7222's Live + next).
+    <td class="detail">${(WHY[r.why] || WHY.ready)(r).filter(Boolean).join(' · ')}</td><td class="num">${r.since ? age(r.since) : ''}</td><td class="act">${shell.commands.rowActions(String(r.id))}</td></tr>`];
+  // What sd-next offers next (pack sd:7314): the read's `queues.suggested`, ranked by sd_db.today.suggested (ready, then
+  // planned, then unscheduled), less the items live now, at most NEXT per repo, in that order.
   function suggested(doc) {
     const live = new Set(((doc.active || {}).rows || []).map(r => r.item)), counted = {}, found = new Map();
-    ((doc.queues || {}).rows || []).filter(r => r.queue === 'ready' && !live.has(r.id)).forEach(r => {
+    ((doc.queues || {}).suggested || []).filter(r => !live.has(r.id)).forEach(r => {
       const k = repoKey(r.repo); counted[k] = (counted[k] || 0) + 1; if (counted[k] <= NEXT) found.set(String(r.id), r); });
     return found;
   }
   // All items (#40961): an open task of a repo, as Tasks reads it, that is no suggested row while Suggested shows (pack
-  // sd:7251), so All items alone keeps a repo's first ready tasks. Its act is Tasks' list row's.
+  // sd:7251), so All items alone keeps a repo's first suggested tasks. Its act is Tasks' list row's.
   const OPENS = { blocked: 'caution', in_progress: 'ok' }; // a blocked task is a look, not a lane's needs-you
   const openRow = t => ['open', OPENS[t.status] || 'queued', html`<tr class="child" data-type="open" data-item="${t.key}" data-id="${t.key}" aria-selected="${String(row() === t.key)}">${marker(OPENS[t.status] || 'queued', 'open')}
     <td class="what"><a href="${shell.itemHref(t.id)}">#${t.id} ${t.title}</a></td>
@@ -447,15 +452,16 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     }).sort((a, b) => (a.key === '') - (b.key === '') || RANK[a.s] - RANK[b.s] || a.key.localeCompare(b.key));
   }
   const tally = rows => QTYPES.map(t => [t, rows.filter(c => c.type === t).length]).filter(([, n]) => n);
-  // A repo row's three boxes (pack sd:7272, Queue's lane ledger until #1768): merging, next and blocked, counted from all
-  // the repo's rows, so a filter hides no count. A box is lit only when its count is not zero; blocked lights the warning
-  // lamp; the label says all three in words. A lane that was not read counts nothing: the cell says so, not 0.
+  // A repo row's five boxes: merging, next and blocked (pack sd:7272, Queue's lane ledger until #1768), with working
+  // before them and suggested after (pack sd:7314), counted from all the repo's rows, so a filter hides no count. A box is
+  // lit only when its count is not zero; blocked lights the warning lamp; the label says all five in words. A lane that
+  // was not read counts nothing: the cell says so, not 0.
   const pip = (n, on) => html`<span class="pip${n ? on : ''}">${String(n)}</span>`;
   function pips(g) {
     if (g.key && (!QV.lanes || QV.lanes.problems.some(p => repoKey(p.repo) === g.key)))
       return html`<td class="detail"><span class="g-unknown" aria-hidden="true">${GLYPH.unknown}</span> lane not read</td>`;
-    const [m, n, b] = ['merging', 'next', 'blocked'].map(t => g.rows.filter(c => c.type === t).length);
-    return html`<td class="detail pipe" aria-label="${m} merging, ${n} next, ${b} blocked">${pip(m, ' on')}${pip(n, ' on')}${pip(b, ' warn')}</td>`;
+    const [w, m, n, b, s] = ['working', 'merging', 'next', 'blocked', 'suggested'].map(t => g.rows.filter(c => c.type === t).length);
+    return html`<td class="detail pipe" aria-label="${w} working, ${m} merging, ${n} next, ${b} blocked, ${s} suggested">${pip(w, ' on')}${pip(m, ' on')}${pip(n, ' on')}${pip(b, ' warn')}${pip(s, ' on')}</td>`;
   }
   function queueView() {
     const unread = [];
@@ -467,7 +473,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (!QV.runner) unread.push(`Runner assignments not read: ${QV.runnerErr || 'no answer yet'}`);
     Object.entries((ACTIVE || {}).sources || {}).filter(([, why]) => why).forEach(([k, why]) => unread.push(`${SOURCE[k] || k} not read: ${why}`));
     if (ACTIVE && ACTIVE.error) unread.push(`Sessions not read: ${ACTIVE.error}`);
-    if (qShow.has('suggested') && (DOC.queues || {}).error) unread.push(`Ready items not read: ${DOC.queues.error}`);
+    if (qShow.has('suggested') && (DOC.queues || {}).error) unread.push(`Suggested items not read: ${DOC.queues.error}`);
     if (qShow.has('open') && !QV.tasks) unread.push(`Open items not read: ${QV.tasksErr || 'no answer yet'}`);
     // pack sd:7251: a filter counts its rows in every repo, before a repo with no row shown is left out.
     const all = qGroups(), every = all.flatMap(g => g.rows), groups = all.filter(g => g.shown.length), active = every.filter(c => !QSHOW.includes(c.type)).length;
@@ -530,6 +536,20 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
 
   const DONE = { up: 'moved up', down: 'moved down', top: 'moved to the top', hold: 'held', release: 'released', cancel: 'cancelled',
     retry: 'queued again', approve: 'approved and queued again', requeue: 're-queued', reclaim: 'released from its holder' };
+  // A lane write that did not land, said one way on Queue and on Today (pack sd:7315). Only a 4xx wrote nothing
+  // (queue_screen.move); a 502, another status or no answer may follow a landed write (sd:3339). A 409 is a queue that
+  // changed since the read: the page has read it again, so the line drops the server's "Read it again, then retry", says
+  // when, and says a press acts on that read. `read` is false when that read failed or left this repo's lane out: then
+  // nothing claims a fresh read.
+  // `why` is the reason alone, for a toast that names the row.
+  function notDone(repo, item, action, err, read = true) {
+    const why = String(err.message).replace(/([^.!?])$/, '$1.'), known = err.status >= 400 && err.status < 500;
+    const again = read ? `Read again at ${HM.format(new Date())}; a press now acts on that read.` : 'It was not read again: Read again tries it.';
+    const after = err.stale ? `${why.replace(/\s*Read it again, then retry\.$/, '')} ${again}`
+      : known ? `${why} The queue is unchanged.`
+      : `${why} The lane was ${read ? '' : 'not '}read again; check sd:${item} there before you act again.`;
+    return { why: after, text: known ? `${repo}: sd:${item} not ${DONE[action]}: ${after}` : `${repo}: not known whether sd:${item} was ${DONE[action]}: ${after}` };
+  }
   // Cancel, Approve and Release are the writes no verb undoes; each dialog names the entry and the command it runs.
   function grant(l, item, head) {
     const r = l.rows.find(x => x.state === 'blocked' && x.item === item);
@@ -564,6 +584,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (action === 'reclaim' && !(await letGo(l, item, claim))) return;
     if (action === 'approve' && !(await grant(l, item, head))) return;
     QV.busy = true; queueView();
+    let failed = null;
     try {
       const body = { repo: l.path, item, action, revision: l.revision };
       if (action === 'retry' || action === 'approve' || action === 'requeue') body.head = head;
@@ -572,14 +593,15 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       const order = out.pending ? ` Order now: ${out.pending.map(n => `sd:${n}`).join(', ')}.` : '';
       qSaid = { ok: true, text: `${l.repo}: sd:${item} ${DONE[action]}.${order} ${out.edits || ''}` };
     } catch (err) {
-      // Only a 4xx wrote nothing (queue_screen.move); a 502, another status or no answer may follow a landed write (sd:3339).
-      const why = String(err.message).replace(/([^.!?])$/, '$1.');
-      qSaid = { ok: false, text: err.status >= 400 && err.status < 500
-        ? `${l.repo}: sd:${item} not ${DONE[action]}: ${why}${err.stale ? '' : ' The queue is unchanged.'}`
-        : `${l.repo}: not known whether sd:${item} was ${DONE[action]}: ${why} The lane was read again; check sd:${item} there before you act again.` };
+      failed = err; qSaid = null;
     }
     QV.busy = false;
     await loadQueue();
+    // A failed write is said after the read again, and claims that read only when it listed this repo's lane.
+    if (failed) {
+      qSaid = { ok: false, text: notDone(l.repo, item, action, failed, !!(QV.lanes && QV.lanes.lanes.some(x => x.path === l.path))).text };
+      queueView();
+    }
   }
   async function buildAct(b) {
     if (QV.busy || !QV.built || QV.built.error) return;
@@ -768,7 +790,24 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       .then(() => reading.reread(), err => { load(); throw err; });
     const week = () => new Date(Date.now() + 7 * 864e5).toISOString();
     const BULK = 25; // shell.js asks first for a bulk act on more rows than this; a group act on more members asks too
-    const lane = action => o => post('/api/queue/move', { repo: o.repoPath, item: o.item, action, revision: o.laneRevision, head: o.head });
+    // A lane row's Retry and Approve (pack sd:7315): a press clears the line above Needs you; a write that did not land
+    // reads Today again first, then says why on that line, as Queue's does, until the next press. Nothing retries itself.
+    const needsSaid = text => { const s = $('needs-said'); s.hidden = !text; s.textContent = text || ''; s.setAttribute('role', text ? 'alert' : 'status'); };
+    const lane = action => async o => {
+      needsSaid('');
+      try {
+        const out = await window.shell.post('/api/queue/move', { repo: o.repoPath, item: o.item, action, revision: o.laneRevision, head: o.head });
+        await reading.reread();
+        return out;
+      } catch (err) {
+        // The read again counts for this row only when it read this repo's lane too.
+        const read = await Promise.resolve(load()).catch(() => false) !== false && DOC && !DOC.sources.lane
+          && !((DOC.lane || {}).unread_paths || []).includes(o.repoPath);
+        const said = notDone(o.repo, o.item, action, err, read);
+        needsSaid(said.text);
+        throw new Error(said.why);
+      }
+    };
     const go = (href, said) => () => { location.href = href; return said; };
     // pack sd:7271: an item row's Details, fields and item commands are the Tasks page's (task-details.js), read from
     // /api/tasks/<id>; a write folds into the row, then Today reads again. A ready row's act is Tasks' Build
@@ -776,7 +815,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     // build holding it. Build registers ahead of TD's commands, so it is the act wherever it is on; elsewhere the act is
     // the move to the next status, as on Tasks' list (view 'list').
     const sel = () => isItem(row()) ? row() : null;
-    const ready = o => taskOf(o.id) || (SUGG.has(o.id) ? { id: SUGG.get(o.id).id, status: 'ready', repo: SUGG.get(o.id).repo, repo_path: SUGG.get(o.id).repo, assignment: null } : null);
+    const ready = o => taskOf(o.id) || (SUGG.has(o.id) ? { id: SUGG.get(o.id).id, status: SUGG.get(o.id).status, repo: SUGG.get(o.id).repo, repo_path: SUGG.get(o.id).repo, assignment: null } : null);
     C.register(K.build({ row: ready, reread: () => reading.reread(), primary: () => true }));
     TD = window.taskDetails.attach({ details: $('details'), rows: () => [...new Map([...OPENI, ...SROW]).values()], byKey: taskOf, selected: sel,
       read: () => DOC && DOC.now, view: () => 'list', render: () => { if (sel()) TD.renderDetails(); }, reread: () => reading.reread(),
@@ -881,11 +920,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     $('queue-filters').addEventListener('click', e => {
       const b = e.target.closest('button[data-f="qshow"]'); if (!b) return;
       if (!qShow.delete(b.dataset.v)) qShow.add(b.dataset.v);
-      shell.url(qShow.size ? { show: QSHOW.filter(v => qShow.has(v)).join(',') } : {});
+      // An empty show= is every filter off (pack sd:7314): no key would turn Suggested back on at the next load.
+      shell.url({ show: QSHOW.filter(v => qShow.has(v)).join(',') });
       // All items reads /api/tasks, or drops its rows; Suggested moves the ready rows All items shows (pack sd:7251).
       if (b.dataset.v === 'open') loadQueue(); else if (b.dataset.v === 'suggested') qAdopt(); else queueView();
     });
-    (new URLSearchParams(location.search).get('show') || '').split(',').filter(v => QSHOW.includes(v)).forEach(v => qShow.add(v));
+    const showKey = new URLSearchParams(location.search).get('show');
+    (showKey === null ? 'suggested' : showKey).split(',').filter(v => QSHOW.includes(v)).forEach(v => qShow.add(v));
     document.addEventListener('shell:view', e => { if (e.detail.id === 'queue' && !QV.seen) loadQueue(); });
     if (typeof setInterval === 'function') setInterval(() => { if (QV.seen && !document.hidden && !QV.busy && shell.view.current() === 'queue') loadQueue(); }, 30000);
     // sd:6714: a plain click on a row of the Queue view or the day track selects it, as a Needs you row's
