@@ -39,11 +39,12 @@ on the open repo closes it. The rows, in order:
 - ended: ended build runs, and the cancelled and landed lane entries.
 
 Each row's marker is its state glyph and its type in words; a repo's glyph is its worst row's.
-A repo row's detail holds three boxes, merging, next and blocked, as Queue's lane ledger drew them (pack sd:7272).
-They count all the repo's rows of those types, so a filter hides no count. A box is lit only when its count is not
-zero; blocked lights the warning lamp; the cell's label says all three in words. A repo whose lane was not read says
+A repo row's detail holds four boxes: merging, next and blocked, as Queue's lane ledger drew them (pack sd:7272),
+then suggested (pack sd:7314). They count all the repo's rows of those types, so a filter hides no count. A box is lit
+only when its count is not zero; blocked lights the warning lamp; the cell's label says all four in words. A repo whose lane was not read says
 "lane not read" in place of the boxes, not 0.
-Suggested and Ended builds are off by default. On, a repo that has only those rows shows too, and `?show=` keeps them.
+Suggested is on by default (pack sd:7314); All items and Ended builds are off. On, a repo that has only those rows
+shows too. `?show=` keeps the choice: no key is the default, and an empty `show=` keeps every filter off.
 The view reads its three documents when it first shows, on each Today read after, and every 30 s while it shows.
 A source that was not read is named under the table.
 

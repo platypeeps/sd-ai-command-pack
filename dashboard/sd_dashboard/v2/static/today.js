@@ -302,8 +302,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // from `queues`, at most three, as pack sd:7222's Live + next reads them), open (All items: its other open tasks, from
   // /api/tasks) and ended (ended build runs, and the cancelled
   // and landed lane entries). Each row's marker is its state glyph and its type in words; the parent's glyph is its worst
-  // child's. Suggested, All items and Ended builds are off by default; on, a repo with only those rows shows too; ?show=
-  // keeps them.
+  // child's. Suggested is on by default (pack sd:7314), All items and Ended builds are off; on, a repo with only those rows
+  // shows too. ?show= keeps the choice: no key is the default, and an empty one is every filter off.
   // The lane's writes are Queue's (sd:2585): up, down, top, hold, release and cancel post /api/queue/move with the lane's
   // revision; the server runs sd-ship lane move|hold|release|cancel|retry and refuses a stale revision. Cancel asks first
   // (sd:3012). A cancelled row offers Re-queue (sd:3398) when the installed pack's retry takes a cancelled entry
@@ -447,15 +447,16 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     }).sort((a, b) => (a.key === '') - (b.key === '') || RANK[a.s] - RANK[b.s] || a.key.localeCompare(b.key));
   }
   const tally = rows => QTYPES.map(t => [t, rows.filter(c => c.type === t).length]).filter(([, n]) => n);
-  // A repo row's three boxes (pack sd:7272, Queue's lane ledger until #1768): merging, next and blocked, counted from all
-  // the repo's rows, so a filter hides no count. A box is lit only when its count is not zero; blocked lights the warning
-  // lamp; the label says all three in words. A lane that was not read counts nothing: the cell says so, not 0.
+  // A repo row's four boxes (pack sd:7272, Queue's lane ledger until #1768): merging, next, blocked and (pack sd:7314)
+  // suggested, counted from all the repo's rows, so a filter hides no count. A box is lit only when its count is not zero;
+  // blocked lights the warning lamp; the label says all four in words. A lane that was not read counts nothing: the cell
+  // says so, not 0.
   const pip = (n, on) => html`<span class="pip${n ? on : ''}">${String(n)}</span>`;
   function pips(g) {
     if (g.key && (!QV.lanes || QV.lanes.problems.some(p => repoKey(p.repo) === g.key)))
       return html`<td class="detail"><span class="g-unknown" aria-hidden="true">${GLYPH.unknown}</span> lane not read</td>`;
-    const [m, n, b] = ['merging', 'next', 'blocked'].map(t => g.rows.filter(c => c.type === t).length);
-    return html`<td class="detail pipe" aria-label="${m} merging, ${n} next, ${b} blocked">${pip(m, ' on')}${pip(n, ' on')}${pip(b, ' warn')}</td>`;
+    const [m, n, b, s] = ['merging', 'next', 'blocked', 'suggested'].map(t => g.rows.filter(c => c.type === t).length);
+    return html`<td class="detail pipe" aria-label="${m} merging, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on')}${pip(n, ' on')}${pip(b, ' warn')}${pip(s, ' on')}</td>`;
   }
   function queueView() {
     const unread = [];
@@ -881,11 +882,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     $('queue-filters').addEventListener('click', e => {
       const b = e.target.closest('button[data-f="qshow"]'); if (!b) return;
       if (!qShow.delete(b.dataset.v)) qShow.add(b.dataset.v);
-      shell.url(qShow.size ? { show: QSHOW.filter(v => qShow.has(v)).join(',') } : {});
+      // An empty show= is every filter off (pack sd:7314): no key would turn Suggested back on at the next load.
+      shell.url({ show: QSHOW.filter(v => qShow.has(v)).join(',') });
       // All items reads /api/tasks, or drops its rows; Suggested moves the ready rows All items shows (pack sd:7251).
       if (b.dataset.v === 'open') loadQueue(); else if (b.dataset.v === 'suggested') qAdopt(); else queueView();
     });
-    (new URLSearchParams(location.search).get('show') || '').split(',').filter(v => QSHOW.includes(v)).forEach(v => qShow.add(v));
+    const showKey = new URLSearchParams(location.search).get('show');
+    (showKey === null ? 'suggested' : showKey).split(',').filter(v => QSHOW.includes(v)).forEach(v => qShow.add(v));
     document.addEventListener('shell:view', e => { if (e.detail.id === 'queue' && !QV.seen) loadQueue(); });
     if (typeof setInterval === 'function') setInterval(() => { if (QV.seen && !document.hidden && !QV.busy && shell.view.current() === 'queue') loadQueue(); }, 30000);
     // sd:6714: a plain click on a row of the Queue view or the day track selects it, as a Needs you row's

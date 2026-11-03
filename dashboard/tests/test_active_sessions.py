@@ -433,8 +433,9 @@ class TodayDraws(ScreenCase):
             "const repos = () => [...ELS.queue.html.matchAll(/<tr class=\"repo\" data-repo=\"([^\"]*)\"/g)].map(m => m[1]);\n")
     AFTER = "\nANSWER = p => p === '/api/now' ? [200, DOC0] : [404, { error: 'not served here' }];\n"
 
-    def draw(self, body):
-        return self.run_page(self.SHOW + body, after=self.AFTER)
+    def draw(self, body, search="?show="):
+        # pack sd:7314: Suggested is on with no `show` key; these draws start from every filter off, as `?show=` keeps it.
+        return self.run_page(self.SHOW + body, search=search, after=self.AFTER)
 
     def test_rows_from_two_repos_form_two_groups_and_a_no_repo_row_lands_in_unassociated_last(self):
         # pack sd:7222, now the Queue view's: one parent row per repo; an item with no repo is Unassociated, last.
@@ -448,7 +449,7 @@ class TodayDraws(ScreenCase):
 
     def test_suggested_adds_each_repos_ready_items_that_the_default_hides(self):
         # pack sd:7222's Live + next is the Suggested filter: each repo's ready items, at most 3, in their order; a repo
-        # with only ready items gets its row too. Off, the start, shows none.
+        # with only ready items gets its row too. Off (`?show=` empty) shows none.
         self.grouped()
         out = self.draw("R.before = repos(); press('suggested'); R.after = repos(); R.bar = ELS['queue-filters'].html;"
                         " open('beta'); R.beta = ELS.queue.html; open('alpha'); R.alpha = ELS.queue.html;")
