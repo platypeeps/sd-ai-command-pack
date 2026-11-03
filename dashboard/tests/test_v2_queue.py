@@ -851,7 +851,10 @@ class TheRealLaneBound(unittest.TestCase):
         self.assertEqual(self.waited(TheRealRelease), waited)
 
     def test_a_stand_in_lane_keeps_the_short_bound(self):
-        self.assertEqual(self.waited(TheMove), 5)
+        # A stand-in lane runs no `sd-ship`: it keeps the base bound, not the real lane's list-and-verb one (sd:7289).
+        waited = self.waited(TheMove)
+        self.assertEqual(waited, BrowserSession.http_timeout)
+        self.assertLess(waited, self.waited(TheRealLane))
 
 
 class TheRealLane(RealLane):
