@@ -23,6 +23,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from sd_dashboard import now_screen, server, v2
+from sd_db.testing import patience
 from test_now_screen import JobsBackend, fleet_document, repo
 from test_v2_registry import Registers
 from test_workflow_actions import BrowserSession
@@ -156,7 +157,7 @@ class TheAssets(BrowserSession):
                          for path in (V2 / "static").rglob("*") if path.is_file())
         self.assertEqual(sorted(v2.ASSETS), sorted(on_disk))
         for name in v2.ASSETS:
-            with urllib.request.urlopen(f"{self.base}/ui/{name}", timeout=5) as answer:
+            with urllib.request.urlopen(f"{self.base}/ui/{name}", timeout=patience(self.http_timeout)) as answer:
                 status, headers, body = answer.status, answer.headers, answer.read()
             self.assertEqual(status, 200, name)
             # A stylesheet's references carry their digests (sd:2141); with those taken out it is the file.

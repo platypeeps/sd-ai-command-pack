@@ -18,6 +18,7 @@ import urllib.request
 from pathlib import Path
 
 from sd_dashboard import v2
+from sd_db.testing import patience
 from test_workflow_actions import BrowserSession
 
 IMMUTABLE = "private, max-age=31536000, immutable"
@@ -27,7 +28,8 @@ class WhatTheServerCaches(BrowserSession):
     def fetch(self, path, **headers):
         """Status, headers and the raw bytes: `request` decodes text, and a gzipped body is not text."""
         try:
-            answer = urllib.request.urlopen(urllib.request.Request(self.base + path, headers=headers), timeout=5)
+            answer = urllib.request.urlopen(urllib.request.Request(self.base + path, headers=headers),
+                                            timeout=patience(self.http_timeout))
         except urllib.error.HTTPError as error:
             answer = error
         with answer:

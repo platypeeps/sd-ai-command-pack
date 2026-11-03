@@ -58,9 +58,6 @@ class SlowDraft(FakeWorkspace):
 
 
 class DraftCase(BrowserSession):
-    #: A hung run spends its stall, its 1 s bound and the kill inside one request; 5 s left a loaded gate no room (sd:6468).
-    http_timeout = 12
-
     def setUp(self):
         super().setUp()
         root = Path(self.tmp.name)
