@@ -297,6 +297,45 @@ class TheSteps(ScreenCase):
                                                  writes.now(), {"linked": True}))
         self.assertIsNotNone(command_journal.command("/api/research/experiments/act", {"verb": "list"}))
 
+    def test_the_lane_build_github_and_drive_routes_are_commands_with_their_targets(self):
+        """sd:7274: each starts a process or calls out (sd-ship lane, launchctl kickstart, GitHub, Drive)."""
+        cases = (("/api/queue/move", {"repo": "/r/system", "item": 12, "action": "hold", "revision": "r"}, "Lane · hold sd:12"),
+                 ("/api/queue/builds/retry", {"assignment": 7, "revision": "r"}, "Retry build · assignment 7"),
+                 ("/api/queue/builds/retry", {"assignment": 7, "revision": "r", "finding": "Fix the test"},
+                  "Retry build · assignment 7 with a finding"),
+                 ("/api/tasks/build", {"items": [12, 13], "revisions": {}}, "Build · sd:12, sd:13"),
+                 ("/api/today/github/copilot-review", {"repo": "example-org/system", "number": 41},
+                  "Request Copilot · example-org/system 41"),
+                 ("/api/hoa/attach", {"asset": "pump-2", "link": "https://drive.google.com/x", "name": "Manual"},
+                  "Attach · pump-2 Manual"))
+        for path, payload, label in cases:
+            with self.subTest(path=path, label=label):
+                note = command_journal.record(self.path, self.connection, path, payload, "local", writes.now(), {"ok": True})
+                self.assertIsNotNone(note, path)
+                self.assertEqual(json.loads(self.connection.execute("SELECT body FROM note WHERE id=?", (note,)).fetchone()[0])["command"], label)
+
+    def test_activity_shows_how_a_pages_command_ended_not_the_holders_title(self):
+        """sd:7274: a failed run's detail is its reason, a failed answer's its error; a success at once has none, and a
+        log that does not read says so."""
+        reason = "sd-research-kit render exited 1: dashboard: no command by hand has executed this research.conf.py"
+        failed = self.opened("/api/research/render", answer=(202, {"id": "render-20261020T120000Z"}))
+        self.deck_run("render-20261020T120000Z", "failed", reason=reason)
+        self.assertTrue(command_journal.settle(self.connection, failed))
+        raised = command_journal.record(self.path, self.connection, "/api/research/slides", {"repo": "research/alpha"},
+                                        "local", writes.now(), failure=OSError("Slides did not answer"))
+        fine = command_journal.record(self.path, self.connection, "/api/research/slides", {"repo": "research/alpha"},
+                                      "local", writes.now(), {"url": "https://example.test/deck"})
+        gone = command_journal.record(self.path, self.connection, "/api/research/slides", {"repo": "research/beta"},
+                                      "local", writes.now(), failure=OSError("Drive did not answer"))
+        Path(runner_exec.read_execution(self.connection, gone)["output_path"]).unlink()
+        doc = activity_screen.document(self.connection, now=writes.now(), jobs_backend=FakeBackend())
+        detail = {event["note"]: event["detail"] for event in doc["events"] if event["k"] == "command"}
+        self.assertEqual(detail[failed], f"run render-20261020T120000Z failed: {reason}")
+        self.assertEqual(detail[raised], "raised OSError: Slides did not answer")
+        self.assertEqual(detail[fine], "")
+        self.assertEqual(detail[gone], "its log is empty or gone, so how it ended is not read")
+        self.assertNotIn(command_journal.HOLDER_TITLE, detail.values())
+
     def test_a_route_that_journals_itself_or_runs_nothing_is_no_command(self):
         """Home writes its own record on its own item (`home_screen._journal`); a chat question runs nothing."""
         for path in ("/api/home/service", "/api/chat", "/api/palette/prepare"):
