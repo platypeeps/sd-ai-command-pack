@@ -13,6 +13,7 @@ from pathlib import Path
 
 from sd_db import (
     build,
+    operations,
     progress,
     reads,
     reporting,
@@ -117,15 +118,10 @@ class Start(Case):
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0], before)
 
-    def test_a_restore_reimport_holds_a_start_and_the_reap(self):
-        item = self.item()
-        run = self.start([item])
+    def test_a_restore_reimport_holds_a_start(self):
         record_state(self.db, "restore", key="fixture", body={})
         with self.assertRaisesRegex(teammate.TeammateRefused, "restore"):
             self.start([self.item()])
-        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (item,))
-        self.assertEqual(teammate.reap(self.db), [])
-        self.assertIsNone(self.run_row(run["id"])["released_at"])
 
     def test_the_session_still_moves_its_items(self):
         """A running assignment refuses every status write (criterion 7.19); a teammate's does not."""
@@ -243,12 +239,12 @@ class End(Case):
         self.start([first])  # ended, the items take a new run
 
 
-class Reap(Case):
+class Release(Case):
     def test_a_quiet_run_lives_past_the_build_stale_limit(self):
         """The build reap ends a run after `build.STALE_SECONDS`; a builder beats only at checkpoints."""
         run = self.start([self.item()])
         self.db.execute("UPDATE runner_run SET heartbeat_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (run["id"],))
-        self.assertEqual(teammate.reap(self.db), [])
+        self.assertEqual(self.tick()["reaped"], [])
         self.assertIsNone(self.run_row(run["id"])["outcome"])
 
     def test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue(self):
@@ -256,7 +252,7 @@ class Reap(Case):
         item = self.item(status="ready")
         run = self.start([item])
         edge = later(run["created_at"], (90 + teammate.GRACE_MINUTES) * 60)
-        self.assertEqual(teammate.reap(self.db), [])
+        self.assertEqual(self.tick()["reaped"], [])
         row = self.run_row(run["id"])
         self.assertEqual((row["outcome"], row["released_at"]), (None, None))
         self.assertEqual([status for _, status, *_ in self.assignments(run["id"])], ["in_session"])
@@ -274,40 +270,33 @@ class Reap(Case):
         self.assertEqual(teammate.overdue(open_run, later(run["created_at"], 150 * 60)), "")
         self.assertNotEqual(teammate.overdue(open_run, later(beat, 120 * 60)), "")
 
-    def test_an_item_reopened_between_the_read_and_the_close_keeps_the_run(self):
-        """The close re-reads the items in its own transaction."""
-        item = self.item()
-        run = self.start([item])
-        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (item,))
-        reads = teammate.open_runs
-
-        def read_then_reopen(connection):
-            found = reads(connection)
-            connection.execute("UPDATE item SET status = 'in_progress' WHERE id = ?", (item,))
-            return found
-        teammate.open_runs = read_then_reopen
-        self.addCleanup(setattr, teammate, "open_runs", reads)
-        self.assertEqual(teammate.reap(self.db), [])
-        self.assertIsNone(self.run_row(run["id"])["outcome"])
-
-    def test_a_run_whose_items_all_landed_ends_done(self):
+    def test_a_run_whose_items_are_all_done_stays_held_until_its_lead_ends_it(self):
+        """An item done is no proof its builder stopped (round 4): only the lead's `--end` releases the run."""
         first, second = self.item(), self.item()
         run = self.start([first, second])
-        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (first,))
-        self.assertEqual(teammate.reap(self.db), [])
-        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (second,))
-        self.assertEqual(teammate.reap(self.db)[0]["outcome"], "done")
-        self.assertEqual([status for _, status, *_ in self.assignments(run["id"])], ["done", "done"])
+        self.db.execute("UPDATE item SET status = 'done' WHERE id IN (?, ?)", (first, second))
+        result = self.tick()
+        self.assertNotIn(run["id"], [entry["run"] for entry in result["reaped"]])
+        self.assertEqual(result["spawned"], [])
+        self.assertEqual(teammate.holding(self.db, second), {"id": run["id"]})
+        self.assertEqual((self.run_row(run["id"])["outcome"], self.run_row(run["id"])["released_at"]), (None, None))
+        self.assertEqual([status for _, status, *_ in self.assignments(run["id"])], ["in_session", "in_session"])
+        teammate.end(self.db, first)
+        self.assertIsNone(teammate.holding(self.db, second))
 
-    def test_the_dispatch_tick_reaps_teammate_runs(self):
+    def test_an_assignment_cancel_does_not_release_a_teammate_run(self):
+        """A cancelled row would leave `runner.OWNING` while the builder still writes: only `end` releases."""
         item = self.item()
         run = self.start([item])
-        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (item,))
-        result = build_run.dispatch(self.db, owner="fixture", load=None, load_cap=None, interactive=None,
-                                    spawn=lambda ident: None, lane=lambda row, items: None, why="fixture")
-        self.assertIn(run["id"], [entry["run"] for entry in result["reaped"]])
-        self.assertEqual(result["spawned"], [])
+        state = operations.assignment_state(self.db, run["assignment"])
+        self.assertFalse(state["capabilities"]["cancel"]["allowed"])
+        with self.assertRaises(workflow.WorkflowError):
+            operations.cancel_assignment(self.db, run["assignment"], expected_revision=state["revision"], who="op")
+        self.assertEqual(teammate.holding(self.db, item), {"id": run["id"]})
 
+    def tick(self):
+        return build_run.dispatch(self.db, owner="fixture", load=None, load_cap=None, interactive=None,
+                                  spawn=lambda ident: None, lane=lambda row, items: None, why="fixture")
 
 if __name__ == "__main__":
     unittest.main()

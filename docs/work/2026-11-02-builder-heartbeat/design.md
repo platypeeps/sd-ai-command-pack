@@ -29,10 +29,10 @@ claim already writes (note #40716): `assignment` and `runner_run`.
   before its report (`agents/sd-slice-builder.md`, step 4).
 - `--end`: the lead ends the run on the builder's final report, before
   the lane enqueue, which refuses an item an open run holds.
-- `teammate.reap`, in the build-dispatch tick, ends a run whose items are
-  all done. Silence ends nothing: a builder beats only at commits and
-  reports. Past its budget plus 30 minutes with no beat, Today reads the
-  run overdue (`teammate.overdue`), and the lead decides.
+- Only `--end` releases a run. Silence and a done item prove nothing:
+  a builder beats only at commits and reports, and may still write after
+  its item lands. Past its budget plus 30 minutes with no beat, Today
+  reads the run overdue (`teammate.overdue`), and the lead decides.
 - `now_screen.builders` and `builds.panel` read the open runs; the Queue
   view draws each as a working row with its worktree, branch, due time and
   last beat.
@@ -64,7 +64,7 @@ build run's exemption:
 ## Non-goals
 
 - Counting teammate runs in `build.room`'s machine and repository caps.
-- A dashboard control to end a run: the lead ends it, and the reap backs it up.
+- A dashboard control to end a run: the lead ends it.
 - Cleaning a teammate's worktree: `build_run.sweep` reads scope `build` only.
 
 ## Failure table
@@ -74,11 +74,10 @@ build run's exemption:
 | start | assignments and run, one transaction | stop or refusal | nothing written; the lead runs it again | `Start.test_a_start_refuses_and_writes_nothing` |
 | start twice | none | a second start on a held item | refused, names the run | same test, case `held` |
 | beat | `heartbeat_at` | no run registered | exit 1, nothing written; the builder goes on | `Beat.test_a_beat_with_no_open_run_refuses` |
-| reap | outcome, release, assignments, notes, one transaction | an item reopened between the read and the close | the close re-reads the items in its transaction; the run stays | `Reap.test_an_item_reopened_between_the_read_and_the_close_keeps_the_run` |
-| reap | none | a quiet builder | the run lives past `STALE_SECONDS` | `Reap.test_a_quiet_run_lives_past_the_build_stale_limit` |
-| reap | none | the lead never ends it | stays open and reads overdue on Today; ends once every item is done | `Reap.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_a_run_whose_items_all_landed_ends_done` |
+| dispatch tick | none | a quiet builder | the run lives past `STALE_SECONDS` | `Release.test_a_quiet_run_lives_past_the_build_stale_limit` |
+| dispatch tick | none | the lead never ends it | stays open and reads overdue on Today, its items done or not | `Release.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_a_run_whose_items_are_all_done_stays_held_until_its_lead_ends_it` |
 | end | outcome, release, assignments, one transaction | the run already ended | refused, nothing written | `Beat.test_a_beat_with_no_open_run_refuses` |
-| restore | none | a reimport is pending | start refused, reap skips | `Start.test_a_restore_reimport_holds_a_start_and_the_reap` |
+| restore | none | a reimport is pending | start refused | `Start.test_a_restore_reimport_holds_a_start` |
 
 Ownership readers. Each row is a check that reads assignment status; a
 second writer on a teammate's item is the failure. Tests are in
@@ -98,7 +97,7 @@ second writer on a teammate's item is the failure. Tests are in
 | cancel (`progress.task_guard`, `_work_guard`) | item status | the operator cannot cancel | not read; the lead ends the run | `test_the_sessions_own_status_cancel_and_edit_writes_pass` |
 | branch clear, kind change (`workflow._refuse_active_assignment`) | item fields | the session's own edit refused | not read; a lead item's branch clear still meets the unreleased-run check | same test |
 | Management page (`reads.assignment_ledger(live=True)`) | none | a teammate listed as lane order | not read; the Queue view lists it | same test |
-| restore (`recovery`, `queued`/`running` to `blocked`) | none | a live session's rows blocked | not read; the run stays the session's, and the lead ends it | `Reap.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue` |
+| restore (`recovery`, `queued`/`running` to `blocked`) | none | a live session's rows blocked | not read; the run stays the session's, and the lead ends it | `Release.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue` |
 | teammate start (`teammate.start`) | none | two teammates, or a teammate on a build | refused: `build.ACTIVE` plus `_holding` | `Start.test_a_start_refuses_and_writes_nothing`, `test_a_start_refuses_an_item_a_build_holds` |
 | build, draft and runner claims (`build.py` and `draft.py` and `runner.py` claim selects) | none | none: they read only `queued` rows of their scope | the queue checks above keep a teammate's item out | the queue tests above |
 | draft queue (`draft.queue_if_eligible`) | none | none: it queues at capture, before any start | `teammate.start` refuses the queued draft | `test_a_start_refuses_an_item_a_build_holds` |
@@ -111,10 +110,12 @@ other owner stopped.
 | --- | --- | --- | --- | --- |
 | start over a retained build run (`teammate.start`) | none | a teammate on an item a blocked build's unreleased run holds, a bundle member too | refused: `build._held` | `Start.test_a_start_refuses_an_item_a_retained_build_run_holds` |
 | start over a live build or teammate (`teammate.start`) | none | two owners | refused: `build.ACTIVE` and `_holding` | `Start.test_a_start_refuses_and_writes_nothing`, `test_a_start_refuses_an_item_a_build_holds` |
-| silence (`teammate.reap`) | none | the run released while the builder still runs | no release; Today reads it overdue | `Reap.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_build_panel` and `test_today_glance` teammate tests |
-| all items done (`teammate.reap`) | outcome, release, assignments | an item reopened before the close | re-read in the close's transaction | `Reap.test_an_item_reopened_between_the_read_and_the_close_keeps_the_run` |
+| silence (dispatch tick, `teammate.overdue`) | none | the run released while the builder still runs | no release; Today reads it overdue | `Release.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_build_panel` and `test_today_glance` teammate tests |
+| every item done (dispatch tick) | none | the run released while the builder still writes | no release: no reap path exists | `Release.test_a_run_whose_items_are_all_done_stays_held_until_its_lead_ends_it` |
+| assignment cancel (`operations.cancel_assignment`) | none | a cancelled row leaves `OWNING` under a live builder | refused: only queued, or blocked with the item done | `Release.test_an_assignment_cancel_does_not_release_a_teammate_run` |
 | lead's end (`teammate.end`) | outcome, release, assignments | the lead ends a live builder | the lead's word is the proof: it ends on the builder's final report | `End.test_an_end_releases_the_run_and_leaves_the_items_as_they_are` |
 | lane enqueue, the whole delivered set (`enqueue_entry` then `refuse_teammate`, which calls `sd_ship_body.refuse_teammate_held`) | none | the lane takes an item the builder still writes: the claimed item, a later `--item`, or a cited close | refused before any push, once the cited closes are read | `test_sd_lane` `ItemChecks.test_an_item_a_teammate_run_holds_is_refused_before_any_push`, `test_an_explicit_close_a_teammate_run_holds_is_refused_before_any_push`, `CitedCloses.test_a_cited_close_a_teammate_run_holds_is_refused_before_any_push` |
+| `sd-ship prepare`, before it writes (`check_held` over the item and `--item`) | the builder's worktree: a `--path` commit, a `--catch-up` merge | a write into a worktree the builder still writes | refused before `commit_paths` and `catch_up` | `test_sd_ship` `test_a_held_item_refuses_prepare_before_it_commits_or_catches_up` |
 | `sd-ship prepare` and the merge's closing check (`check_closes`, then `refuse_teammate_held`) | none | a run started after the enqueue | refused before the pull request or the merge | `test_sd_ship` `test_a_co_delivered_item_a_teammate_run_holds_refuses_prepare_and_the_merge_before_it_publishes` |
 | `sd-ship merge`, right before it publishes (`refuse_teammate_held` over `co_delivered`) | none | a run started during the gate | refused; nothing merged | same test; it fails with the line taken out |
 | lane merge (`ship.manual_merge_guard`) | none | none: the merge's own check above covers its set | the guard skips teammate runs so other items' merges go on | `test_ship` `test_an_open_teammate_run_does_not_refuse_a_lane_merge` |
@@ -128,7 +129,8 @@ over `bin/sd_lane.py`, `bin/sd-ship`, `bin/sd_ship_body.py` and
   the cited closes are known; `refuse_before_push` adds `cited_closes`,
   then checks the whole set through `refuse_teammate_held`.
 - `prepare_step` passes the entry's set as `--item` to `sd-ship prepare`,
-  whose `check_closes` calls `refuse_teammate_held`.
+  which checks it before it writes the worktree, and again in
+  `check_closes`; both call `refuse_teammate_held`.
 - `sd-ship merge`: `check_closing` calls `check_closes`, and the
   pre-publish check reads `co_delivered`; both call `refuse_teammate_held`.
 - `deliver_closes`, `pay_closes` and `settle_closes` close the stored set
@@ -139,7 +141,7 @@ over `bin/sd_lane.py`, `bin/sd-ship`, `bin/sd_ship_body.py` and
 
 Gaps this table shows, not fixed here: `teammate.start` reads no lane
 entry, so it takes an item a pending or running entry delivers, or one
-whose merge published but whose close is still owed.
+whose merge published but whose close is still owed (pack sd:7288).
 
 ## Acceptance criteria
 
