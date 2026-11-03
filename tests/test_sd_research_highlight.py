@@ -321,6 +321,13 @@ class ChangesTheComparisonMustSee(unittest.TestCase):
         self.assertIn("--skip-header: no <hr", done.stderr)
         self.assertFalse(out.exists())
 
+    def test_a_rule_of_spaced_stars_or_dashes_is_not_a_list_item(self) -> None:
+        """Class pass after 8d78d8307: `* * *` and `- - -` read as items, a false gone paragraph."""
+        for rule in ("* * *", "- - -", "***", "___"):
+            with self.subTest(rule=rule):
+                said, _ = self.check(f"One.\n\n{rule}\n\nTwo.\n", "<p>One.</p>\n<hr />\n<p>Two.</p>\n")
+                self.assertEqual(said, "changed: 0 since T\n")
+
     def test_a_rule_after_a_heading_is_not_a_header_block(self) -> None:
         said, _ = self.check("## Plan\n\nOriginal.\n\n---\n\nSame.\n",
                              "<h2>Plan</h2>\n<p>Edited.</p>\n<hr />\n<p>Same.</p>\n")

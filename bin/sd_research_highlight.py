@@ -237,18 +237,21 @@ class Baseline:
                     code.append(row)
                 continue
             opened = FENCE.match(row)
-            structural = opened or not row.strip() or HEADING.match(row) or ITEM.match(row) or ROW.match(row)
+            rule = RULE.match(row)  # before ITEM: `* * *` and `- - -` are rules, not items
+            structural = opened or rule or not row.strip() or HEADING.match(row) or ITEM.match(row) or ROW.match(row)
             if structural and run:
                 lines = [] if item else [markdown_text(line) for line in run]
                 self._add(markdown_text("\n".join(run)), section, lines)
                 run, item = [], False
             if opened:
                 fence = opened.group(1)
+            elif rule:
+                continue
             elif ITEM.match(row):
                 run, item = [row], True
             elif structural:
                 section = self._structural(row, section)
-            elif not RULE.match(row):
+            else:
                 run.append(row)
 
     def _structural(self, row: str, section: str) -> str:
