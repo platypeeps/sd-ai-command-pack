@@ -2099,6 +2099,14 @@ R.shown = D.html; R.before = OUT.posts.length; D.returnValue = 'start'; D.onclos
 const D = MADE.find(e => /id="build-h"/.test(e.html || '')); R.shown = D ? D.html : null; R.before = OUT.posts.length;
 if (D) { D.returnValue = 'build'; D.onclose(); await flush(); }"""
 
+    def test_build_refuses_a_ready_item_with_no_repository(self):
+        """Pack sd:7275. The row's repo reads 'no repo' (TD.shape), so the check reads repo_path."""
+        ask = self.ids["ask"]
+        workflow.change_status(self.connection, ask, "ready", who="test")
+        self.doc = tasks_screen.document(self.connection, now=NOW)
+        out = self.run_page(f"R.off = cmd('item.build').when(C.get('{ask}'));", "() => [404, {}]")
+        self.assertEqual(out["R"]["off"], "a build needs a repository")
+
     def test_build_shows_the_bundles_first_then_posts_the_items_with_the_revisions_it_read(self):
         """Pack sd:6095. Build on a ready row reads the plan, shows its bundle, and posts only on Build."""
         plan, port = self.ids["plan"], self.ids["port"]
