@@ -2271,7 +2271,7 @@ def builder_busy(connection: Any, tree: pathlib.Path, item: int) -> str:
     held = sessions.describe(sessions.holders(connection, str(tree), machine=this_host()))
     # Filtered here, not in SQL: bin/'s bandit audit refuses an interpolated query.
     active = next((row for row in connection.execute("SELECT id, status FROM assignment WHERE item = ?", (item,))
-                   if row["status"] in build.ACTIVE), None)
+                   if row["status"] in build.OWNING), None)
     return held or (f"build assignment {active['id']} of item {item} is active" if active else "") or (
         build._held(connection, item) or "")
 

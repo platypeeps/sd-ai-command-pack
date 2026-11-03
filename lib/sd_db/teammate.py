@@ -30,13 +30,14 @@ from datetime import datetime, timedelta
 from . import build
 from .database import transaction
 from .errors import SdDbError
-from .runner import restoration_pending
+from .runner import IN_SESSION, restoration_pending
 from .writes import add_note, create_assignment
 from .writes import now as clock
 
 SCOPE = "teammate"
-#: A live teammate assignment's status: outside `workflow.ACTIVE_ASSIGNMENTS`, so no runner guard reads it.
-STATUS = "in_session"
+#: A live teammate assignment's status: in `runner.OWNING`, so no pickup takes its item, and outside
+#: `workflow.ACTIVE_ASSIGNMENTS`, so the session's own status writes pass.
+STATUS = IN_SESSION
 #: Minutes past the budget a silent run lives before the reap ends it.
 GRACE_MINUTES = 30
 #: The item statuses a run may not start on.

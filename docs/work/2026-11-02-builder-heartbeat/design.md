@@ -39,6 +39,13 @@ assignment means the runner owns the item: `workflow.change_status`
 refuses every status write, and the cancel and work guards refuse too, so
 the builder's own `sd task status` would fail. No new table or column.
 
+So ownership has two sets. `runner.OWNING` adds `in_session` to the
+runner's three statuses: every pickup, queue and claim reads it, so no
+second builder takes a teammate's item. `workflow.ACTIVE_ASSIGNMENTS`
+keeps the runner's three: the status, cancel and edit guards read it, so
+the session's own writes pass. "Ownership readers" in the failure table
+names each reader and its set.
+
 Rejected: scope `build` on the same rows. `build.reap` would end a quiet
 teammate after `STALE_SECONDS` (600 s), `_settle` would retry it as a
 headless run, and `claim` and `room` would count it.
@@ -69,6 +76,29 @@ build run's exemption:
 | reap | as above | the lead never ends it | ended past budget plus grace, or once every item is done | `Reap.test_a_run_silent_past_its_budget_and_grace_ends_interrupted`, `test_a_run_whose_items_all_landed_ends_done` |
 | end | outcome, release, assignments, one transaction | the run already ended | refused, nothing written | `Beat.test_a_beat_with_no_open_run_refuses` |
 | restore | none | a reimport is pending | start refused, reap skips | `Start.test_a_restore_reimport_holds_a_start_and_the_reap` |
+
+Ownership readers. Each row is a check that reads assignment status; a
+second writer on a teammate's item is the failure. Tests are in
+`test_teammate.py` class `Ownership` unless named.
+
+| Step | State moved | Failure | Recovery | Test |
+| --- | --- | --- | --- | --- |
+| auto-pickup and Build press (`build._item`) | none | a second builder | refused: reads `OWNING` | `test_auto_pickup_and_the_build_press_skip_a_teammates_item` |
+| build claim (`build._RECHECK`, `_held`) | the queued build ends `blocked` | a build queued before the start | not claimed; the reason names the teammate | `test_a_queued_build_of_a_teammates_item_is_not_claimed` |
+| runner queue (`runner.enqueue`) | none | a second author | refused: reads `OWNING` | `test_the_runner_queue_and_its_delivery_skip_a_teammates_item` |
+| runner delivery (`runner.delivery_candidates`) | none | a merge while the builder works | skipped until the run ends | same test |
+| Unscheduled (`today.unscheduled`) | none | the item offered for pickup | skipped: reads `OWNING` | `test_unscheduled_and_the_report_clean_skip_a_teammates_item` |
+| report clean (`reporting.clean_reports`) | none | a held report closed | declined: reads `OWNING` | same test |
+| skill proposals (`skills_catalog.apply_proposals`) | none | the source changed under the session | refused: reads `OWNING` | `test_a_skill_review_a_teammate_holds_takes_no_proposals` |
+| lane cleanup (`bin/sd_lane.builder_busy`) | none | the worktree removed under the session | kept: reads `OWNING` | `test_the_lane_keeps_a_teammates_worktree` |
+| status write and choices (`workflow.change_status`, `allowed_statuses`) | item status | the session's own write refused | not read: `ACTIVE_ASSIGNMENTS` | `Start.test_the_session_still_moves_its_items`, `test_the_sessions_own_status_cancel_and_edit_writes_pass` |
+| cancel (`progress.task_guard`, `_work_guard`) | item status | the operator cannot cancel | not read; the reap ends the run past budget and grace | `test_the_sessions_own_status_cancel_and_edit_writes_pass` |
+| branch clear, kind change (`workflow._refuse_active_assignment`) | item fields | the session's own edit refused | not read; a lead item's branch clear still meets the unreleased-run check | same test |
+| Management page (`reads.assignment_ledger(live=True)`) | none | a teammate listed as lane order | not read; the Queue view lists it | same test |
+| restore (`recovery`, `queued`/`running` to `blocked`) | none | a live session's rows blocked | not read; a silent run ends past budget and grace | `Reap.test_a_run_silent_past_its_budget_and_grace_ends_interrupted` |
+| teammate start (`teammate.start`) | none | two teammates, or a teammate on a build | refused: `build.ACTIVE` plus `_holding` | `Start.test_a_start_refuses_and_writes_nothing`, `test_a_start_refuses_an_item_a_build_holds` |
+| build, draft and runner claims (`build.py` and `draft.py` and `runner.py` claim selects) | none | none: they read only `queued` rows of their scope | the queue checks above keep a teammate's item out | the queue tests above |
+| draft queue (`draft.queue_if_eligible`) | none | none: it queues at capture, before any start | `teammate.start` refuses the queued draft | `test_a_start_refuses_an_item_a_build_holds` |
 
 ## Acceptance criteria
 

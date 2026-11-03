@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from . import reads, ship, workflow
+from . import reads, runner, ship, workflow
 from .database import transaction
 from .writes import (
     STATUSES,
@@ -998,7 +998,7 @@ def clean_reports(connection, *, before, now=None):
     connection.execute("SAVEPOINT sd_clean_reports")
     try:
         candidates = set(clean_candidates(connection, before=before))
-        active = ", ".join("?" for _ in workflow.ACTIVE_ASSIGNMENTS)
+        active = ", ".join("?" for _ in runner.OWNING)
         # The first five reasons in one read. Every JSON function sits inside
         # `CASE WHEN json_valid(fields)`, so no row can fail the query.
         rows = connection.execute(
@@ -1014,7 +1014,7 @@ def clean_reports(connection, *, before, now=None):
             " EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id"
             f"         AND assignment.status IN ({active})) AS assignment"
             " FROM item WHERE kind='report' AND status='planning' AND created_at < ? ORDER BY id",
-            (*workflow.ACTIVE_ASSIGNMENTS, before)).fetchall()
+            (*runner.OWNING, before)).fetchall()
         beats = {}
         selected, declined = [], []
         for row in rows:

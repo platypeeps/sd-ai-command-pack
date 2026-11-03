@@ -5,19 +5,33 @@ these tests. The merge guard's and the backup's are in `test_ship.py` and
 `test_build.py`, the CLI's in `tests/test_sd_operations.py`, and the
 readers' in the dashboard's `test_build_panel.py` and `test_now_screen.py`.
 """
+import sys
 import tempfile
 import unittest
 from importlib import import_module
 from pathlib import Path
 
-from sd_db import build, teammate, workflow
+from sd_db import (
+    build,
+    progress,
+    reads,
+    reporting,
+    runner,
+    skills_catalog,
+    teammate,
+    today,
+    workflow,
+)
 from sd_db.database import connect
 from sd_db.migrate import initialise
-from sd_db.writes import create_item, record_state, upsert_repo
+from sd_db.writes import create_assignment, create_item, record_state, upsert_repo
+from sd_db.writes import now as clock
 
 from .test_build import later
 
 build_run = import_module("sd_db.build_run")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
+sd_lane = import_module("sd_lane")
 A, B = "/fixture/a", "/fixture/b"
 REMOTE = "git@github.com:Fixture/Repo.git"
 
@@ -99,6 +113,80 @@ class Start(Case):
         self.start([item])
         workflow.change_status(self.db, item, "in_progress", who="builder")
         self.assertEqual(workflow.item_state(self.db, item)["item"]["status"], "in_progress")
+
+
+class Ownership(Case):
+    """An open teammate run owns its items against every pickup; the session's own writes still pass.
+
+    The design's failure table, "Ownership readers", names each reader and
+    whether it reads `in_session`; these tests pin each decision.
+    """
+
+    def held(self, status="ready", **fields):
+        item = self.item(status=status)
+        if fields:
+            self.db.execute("UPDATE item SET " + ", ".join(f"{key} = ?" for key in fields) + " WHERE id = ?",
+                            (*fields.values(), item))
+        return item, self.start([item])
+
+    def test_auto_pickup_and_the_build_press_skip_a_teammates_item(self):
+        item, _ = self.held()
+        free = self.item(status="ready")
+        self.assertEqual([row["id"] for row in build.eligible(self.db)], [free])
+        with self.assertRaisesRegex(build.BuildRefused, f"item {item} has in_session assignment"):
+            build.queue(self.db, [item], who="operator")
+
+    def test_a_queued_build_of_a_teammates_item_is_not_claimed(self):
+        item, _ = self.held()
+        queued = create_assignment(self.db, item=item, role="author", status="queued", lane="parallel")
+        self.db.execute("UPDATE assignment SET scope = 'build', queued_at = ? WHERE id = ?", (clock(), queued))
+        self.assertIsNone(build.claim(self.db, owner="fixture", root=self.root / "worktrees", load=1.0,
+                                      load_cap=40.0, interactive=[]))
+        row = self.db.execute("SELECT status, result FROM assignment WHERE id = ?", (queued,)).fetchone()
+        self.assertEqual(row["status"], "blocked")
+        self.assertIn("a teammate builds it", row["result"])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM runner_run").fetchone()[0], 1, "no second builder")
+
+    def test_the_runner_queue_and_its_delivery_skip_a_teammates_item(self):
+        item, _ = self.held(branch="feat/x")
+        with self.assertRaisesRegex(runner.RunnerRefused, f"item {item} already has queued work"):
+            runner.enqueue(self.db, [item], who="operator")
+        sent, _ = self.held(status="ready_to_send", branch="feat/x")
+        self.assertNotIn(sent, [row["id"] for row in runner.delivery_candidates(self.db)])
+
+    def test_unscheduled_and_the_report_clean_skip_a_teammates_item(self):
+        item, _ = self.held()
+        self.assertNotIn(item, [row["id"] for row in today.unscheduled(self.db)])
+        report = create_item(self.db, kind="report", title="A clean report", repo=A, status="planning",
+                             fields={"attention": 0})
+        self.db.execute("UPDATE item SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?", (report,))
+        self.start([report])
+        found = reporting.clean_reports(self.db, before=reporting.cutoff("2026-02-01"))
+        self.assertEqual([row["id"] for row in found["selected"]], [])
+        self.assertEqual(found["declined"], [{"id": report, "why": "work on it is queued, running or ending"}])
+
+    def test_a_skill_review_a_teammate_holds_takes_no_proposals(self):
+        review = create_item(self.db, kind="task", title="Review a skill", repo=A, status="ready",
+                             source="skill-request", fields={"skill_review": {"action": "review", "review_result": "x"}})
+        self.start([self.item(status="ready"), review])  # a member: the lead's item has the run's row
+        revision = workflow.item_state(self.db, review)["revision"]
+        with self.assertRaisesRegex(workflow.WorkflowError, "wait for the reviewer"):
+            skills_catalog.apply_proposals(self.db, review, [1], expected_revision=revision, who="operator")
+
+    def test_the_lane_keeps_a_teammates_worktree(self):
+        item, _ = self.held()
+        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (item,))
+        self.assertIn(f"of item {item} is active", sd_lane.builder_busy(self.db, self.root / "w", item))
+
+    def test_the_sessions_own_status_cancel_and_edit_writes_pass(self):
+        """Criterion 7.19 guards the runner's rows; a teammate's are the session's, so it reads `ACTIVE_ASSIGNMENTS`."""
+        item, _ = self.held()
+        self.assertIn("in_progress", workflow.allowed_statuses(self.db, item))
+        self.assertEqual(progress.task_guard(self.db, workflow.item_state(self.db, item)["item"]), "")
+        workflow._refuse_active_assignment(self.db, item)
+        self.assertNotIn(teammate.STATUS, workflow.ACTIVE_ASSIGNMENTS)
+        self.assertEqual([row["item"] for row in reads.assignment_ledger(self.db, live=True)], [],
+                         "the Management page lists the lane's order; the Queue view lists teammate runs")
 
 
 class Beat(Case):

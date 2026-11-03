@@ -286,8 +286,9 @@ class TheSections(TodayCase):
         self.assertEqual(list(found), ["summary", *today.ORDER, "closed_by_hand", "grill"])
         self.assertEqual((found["summary"]["planned"], found["summary"]["planned_this_week"]), (2, 1))
 
-    def test_the_active_assignment_states_match_the_workflow(self):
-        self.assertEqual(today.ACTIVE_ASSIGNMENTS, workflow.ACTIVE_ASSIGNMENTS)
+    def test_the_owning_assignment_states_are_the_workflows_and_a_teammates(self):
+        """Unscheduled skips an item the runner or a teammate run owns (pack sd:7221)."""
+        self.assertEqual(today.OWNING, (*workflow.ACTIVE_ASSIGNMENTS, "in_session"))
 
 
 class TheOperations(TodayCase):
