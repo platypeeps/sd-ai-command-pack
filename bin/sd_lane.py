@@ -751,7 +751,6 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     closes = tuple(dict.fromkeys(number for number in closes if number != item))
     def checked(connection: Any) -> str | None:
         check_item(connection, worktree, item, body, claim, closes, title)
-        refuse_teammate(connection, item)
         return forwarded_to(connection, queue)
     forwarded = on_hub(queue, checked)
     entry = {"id": entry_id(), "repository": queue.repository, "item": item, "branch": branch, "expected_head": head,
@@ -775,19 +774,22 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
                 entry["cited"] = cited
                 entry["body"] = sd_ship_body.with_cited(
                     body, [f"- {repo} sd:{row['item']}: {row['source']}" for row in cited])
+        on_hub(queue, lambda connection: refuse_teammate(connection, [item, *entry["closes"]]))  # the whole set
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}", refuse_before_push,
                       lambda tip: tip_past(worktree, branch, tip, head))
     return add_entry(queue, entry)
 
 
-def refuse_teammate(connection: Any, item: int) -> None:
-    """Refuse an item an open teammate run holds (pack sd:7221): the lane takes its branch only after the lead's
-    `--end`, the proof the builder stopped; a builder beats only at commits, so no silence proves it."""
-    from sd_db import teammate  # noqa: PLC0415 - on_hub required sd_db
-    held = teammate._holding(connection, item)
-    if held:
-        raise LaneError(f"item sd:{item} is held by teammate run {held['id']}; once its builder stops, "
-                        f"end it with `sd assignments beat {item} --end`, then enqueue")
+def refuse_teammate(connection: Any, items: list[int]) -> None:
+    """Refuse an entry delivering an item an open teammate run holds (`sd_ship_body.refuse_teammate_held`, pack sd:7221):
+    the claimed item, each `--item` and each cited close; `sd-ship merge` checks the set again before it publishes."""
+    import sd_ship_body  # noqa: PLC0415
+    from sd_ship_remote import Refusal  # noqa: PLC0415
+    try:
+        sd_ship_body.refuse_teammate_held(connection, items)
+    except Refusal as error:
+        raise LaneError(f"{error}; {error.workflow['next_action']} Nothing was queued.",
+                        code=error.workflow["blocker"]["code"]) from None
 
 
 def forwarded_to(connection: Any, queue: Queue) -> str | None:

@@ -3466,6 +3466,34 @@ roles:
                 self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
         self.assertFalse(self.remote.pull_requests)
 
+    def test_a_co_delivered_item_a_teammate_run_holds_refuses_prepare_and_the_merge_before_it_publishes(self):
+        """pack sd:7221: a lead's in-session builder may still write; only its lead's `--end` hands the item over."""
+        from sd_db import teammate
+
+        self.task_item("task")
+        other = self.closes_items()[0]
+
+        def start():
+            return teammate.start(self.connection, [other], worktree="/w/teammate", branch="feat/t",
+                                  budget_minutes=60, owner="lead")
+        start()
+        with self.assertRaises(ship.Refusal) as caught:
+            self.unanswered("--deliver", "--title", "A change", *self.also(other)).prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "teammate_held")
+        self.assertIn(f"sd assignments beat {other} --end", caught.exception.workflow["next_action"])
+        self.assertFalse(self.remote.pull_requests)
+        teammate.end(self.connection, other)
+        number = self.unanswered("--deliver", "--title", "A change", *self.also(other)).prepare()["pull_request"]["number"]
+
+        def started_during_the_gate(body):
+            start()
+            return []
+        with patch.object(ship.sd_lib, "demoted_trailers", side_effect=started_during_the_gate), \
+                patch.object(ship.time, "sleep"), self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "teammate_held")
+        self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
+
     def test_a_closing_set_read_at_another_head_refuses_the_merge(self):
         """Failure table, row 3: the stored set names the head it was read at."""
         self.task_item("task")

@@ -180,6 +180,25 @@ def items_closed(named, item: int, deliver: bool) -> tuple[int, ...]:
     return tuple(dict.fromkeys(number for number in named if number != item))
 
 
+def refuse_teammate_held(connection, items) -> None:
+    """Refuse delivering any of `items` while an open teammate run holds it (pack sd:7221).
+
+    A lead's in-session builder may still write its branch, and it beats
+    only at commits and reports, so no silence proves it stopped: the lead's
+    `--end` does. The one check of the delivered set: `sd-ship lane enqueue`
+    once its cited closes are read, `sd-ship prepare`, and `sd-ship merge`
+    at its closing check and again right before it publishes.
+    """
+    from sd_db import teammate  # noqa: PLC0415 - every caller holds an sd_db connection
+    for number in dict.fromkeys(items):
+        held = teammate.holding(connection, number)
+        if held:
+            raise Refusal(f"sd:{number} is held by teammate run {held['id']}, whose builder may still write",
+                          code="teammate_held", boundary="input", state="operator_decision",
+                          next_action=f"Once its builder stops, end the run with `sd assignments beat {number} "
+                                      "--end`, then deliver.")
+
+
 def refuse_unclosable(connection, item: int, repo: str, named, deliver: bool) -> None:
     """Refuse a co-delivered item the merge could not close; `repo` is `item`'s registered path.
 

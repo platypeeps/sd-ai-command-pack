@@ -70,7 +70,7 @@ def due(run: dict) -> str | None:
     return (datetime.fromisoformat(run["created_at"]) + timedelta(minutes=run["budget_minutes"])).isoformat()
 
 
-def _holding(connection, item: int) -> dict | None:
+def holding(connection, item: int) -> dict | None:
     """The open teammate run that holds `item`, as its lead's or a member's item, or None."""
     row = connection.execute(
         "SELECT runner_run.id FROM assignment holder JOIN runner_run "
@@ -100,7 +100,7 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
                 raise TeammateRefused(f"item {item} needs a registered repository")
             if row["status"] in CLOSED:
                 raise TeammateRefused(f"item {item} is {row['status']}")
-            held = _holding(connection, item)
+            held = holding(connection, item)
             if held:
                 raise TeammateRefused(f"item {item} is held by teammate run {held['id']}; end it first")
             retained = build._held(connection, item)  # a build run not yet released, bundle members too
@@ -163,7 +163,7 @@ def overdue(run: dict, now: str) -> str:
 
 
 def _open(connection, item: int) -> str:
-    held = _holding(connection, item)
+    held = holding(connection, item)
     if held is None:
         raise TeammateRefused(f"no open teammate run holds item {item}")
     return held["id"]

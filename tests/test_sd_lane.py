@@ -2504,8 +2504,25 @@ class ItemChecks(SharedQueue):
         finally:
             connection.close()
         refused = self.refused(self.own)
-        self.assertIn(f"item sd:{self.own} is held by teammate run {run['id']}", str(refused))
+        self.assertEqual(refused.code, "teammate_held")
+        self.assertIn(f"sd:{self.own} is held by teammate run {run['id']}", str(refused))
         self.assertIn(f"sd assignments beat {self.own} --end", str(refused))
+
+    def test_an_explicit_close_a_teammate_run_holds_is_refused_before_any_push(self) -> None:
+        """pack sd:7221: each later `--item` is delivered too, so it is checked as the claimed item is."""
+        import sd_db
+        from sd_db import teammate
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            repo = connection.execute("SELECT repo FROM item WHERE id = ?", (self.own,)).fetchone()["repo"]
+            other = sd_db.create_item(connection, kind="task", title="a teammate's", status="in_progress", repo=repo)
+            run = teammate.start(connection, [other], worktree="/w/teammate", branch="feat/t", budget_minutes=60,
+                                 owner="lead")
+        finally:
+            connection.close()
+        refused = self.refused(self.own, closes=(other,))
+        self.assertEqual(refused.code, "teammate_held")
+        self.assertIn(f"sd:{other} is held by teammate run {run['id']}", str(refused))
 
     def test_a_body_closes_line_is_refused_before_any_push(self) -> None:
         """sd:3704: the --item list is the one closing set, so a body `Closes:` line waits for no prepare to refuse it."""
@@ -2683,6 +2700,24 @@ class CitedCloses(SharedQueue):
         [prepare] = [call for call in self.calls if call[2] == "prepare"]
         self.assertEqual([prepare[i + 1] for i, part in enumerate(prepare) if part == "--item"],
                          [str(self.own), str(a), str(b), str(e)])
+
+    def test_a_cited_close_a_teammate_run_holds_is_refused_before_any_push(self) -> None:
+        """pack sd:7221: a cited close is delivered too, and the cited set is known only before the push."""
+        import sd_db
+        from sd_db import teammate
+        a = self.open[0]
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            run = teammate.start(connection, [a], worktree="/w/teammate", branch="feat/t", budget_minutes=60,
+                                 owner="lead")
+        finally:
+            connection.close()
+        before = len(self.entries())
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            self.enqueue("## Summary\n\nWords.\n", f"fix(lane): the slice\n\nCloses: sd:{a}")
+        self.assertEqual(refused.exception.code, "teammate_held")
+        self.assertIn(f"sd:{a} is held by teammate run {run['id']}", str(refused.exception))
+        self.assertEqual((len(self.entries()), "push" in self.git_verbs), (before, False))
 
     def test_each_cited_close_is_listed_in_the_body_and_noted_on_its_item(self) -> None:
         """Lane review of sd:5999, operator ruling: a reader sees every close by citation, so a wrong one is one reopen."""

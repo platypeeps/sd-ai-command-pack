@@ -114,9 +114,32 @@ other owner stopped.
 | silence (`teammate.reap`) | none | the run released while the builder still runs | no release; Today reads it overdue | `Reap.test_a_run_silent_past_its_budget_and_grace_stays_open_and_reads_overdue`, `test_build_panel` and `test_today_glance` teammate tests |
 | all items done (`teammate.reap`) | outcome, release, assignments | an item reopened before the close | re-read in the close's transaction | `Reap.test_an_item_reopened_between_the_read_and_the_close_keeps_the_run` |
 | lead's end (`teammate.end`) | outcome, release, assignments | the lead ends a live builder | the lead's word is the proof: it ends on the builder's final report | `End.test_an_end_releases_the_run_and_leaves_the_items_as_they_are` |
-| lane enqueue (`bin/sd_lane.refuse_teammate`) | none | the lane takes the branch while the builder writes | refused until `--end` | `test_sd_lane` `ItemChecks.test_an_item_a_teammate_run_holds_is_refused_before_any_push` |
-| lane merge (`ship.manual_merge_guard`) | none | none past the enqueue: a merge takes only an enqueued entry | the enqueue refusal above; the guard skips teammate runs so others' merges go on | `test_ship` `test_an_open_teammate_run_does_not_refuse_a_lane_merge` |
+| lane enqueue, the whole delivered set (`enqueue_entry` then `refuse_teammate`, which calls `sd_ship_body.refuse_teammate_held`) | none | the lane takes an item the builder still writes: the claimed item, a later `--item`, or a cited close | refused before any push, once the cited closes are read | `test_sd_lane` `ItemChecks.test_an_item_a_teammate_run_holds_is_refused_before_any_push`, `test_an_explicit_close_a_teammate_run_holds_is_refused_before_any_push`, `CitedCloses.test_a_cited_close_a_teammate_run_holds_is_refused_before_any_push` |
+| `sd-ship prepare` and the merge's closing check (`check_closes`, then `refuse_teammate_held`) | none | a run started after the enqueue | refused before the pull request or the merge | `test_sd_ship` `test_a_co_delivered_item_a_teammate_run_holds_refuses_prepare_and_the_merge_before_it_publishes` |
+| `sd-ship merge`, right before it publishes (`refuse_teammate_held` over `co_delivered`) | none | a run started during the gate | refused; nothing merged | same test; it fails with the line taken out |
+| lane merge (`ship.manual_merge_guard`) | none | none: the merge's own check above covers its set | the guard skips teammate runs so other items' merges go on | `test_ship` `test_an_open_teammate_run_does_not_refuse_a_lane_merge` |
 | lane cleanup (`bin/sd_lane.builder_busy`) | worktree removal | the tree removed under the session | kept while `in_session` or a live session holds it | `Ownership.test_the_lane_keeps_a_teammates_worktree` |
+
+Every place that computes a delivered set, from `grep -n "closes\|cited"`
+over `bin/sd_lane.py`, `bin/sd-ship`, `bin/sd_ship_body.py` and
+`bin/sd_operations.py`:
+
+- `enqueue_entry`: `check_item` reads the explicit `--item` set before
+  the cited closes are known; `refuse_before_push` adds `cited_closes`,
+  then checks the whole set through `refuse_teammate_held`.
+- `prepare_step` passes the entry's set as `--item` to `sd-ship prepare`,
+  whose `check_closes` calls `refuse_teammate_held`.
+- `sd-ship merge`: `check_closing` calls `check_closes`, and the
+  pre-publish check reads `co_delivered`; both call `refuse_teammate_held`.
+- `deliver_closes`, `pay_closes` and `settle_closes` close the stored set
+  after the publish: no hand-off past the pre-publish check.
+- `note_cited` notes; `sd_operations.cited` is the builder's read-only
+  preflight; `open_cited` and `cited_sources` run only inside
+  `cited_closes`.
+
+Gaps this table shows, not fixed here: `teammate.start` reads no lane
+entry, so it takes an item a pending or running entry delivers, or one
+whose merge published but whose close is still owed.
 
 ## Acceptance criteria
 
