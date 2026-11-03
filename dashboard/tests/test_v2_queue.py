@@ -1169,16 +1169,19 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         found = re.search(rf'<tr class="repo" data-repo="{key}".*?<td class="detail([^"]*)"([^>]*)>(.*?)</td>', html, re.S)
         return found.group(1, 2, 3)
 
-    def test_each_repo_row_counts_merging_next_blocked_and_suggested_in_four_boxes(self):
+    def test_each_repo_row_counts_working_merging_next_blocked_and_suggested_in_five_boxes(self):
         # pack sd:7272: the lane ledger's three boxes (#1768 removed them) stand in the parent row's detail cell, in place
-        # of the text tally: merging, next, blocked and (pack sd:7314) suggested, from every row of the repo, so a filter
-        # hides no count. A box is lit only when its count is not zero; blocked is the warning lamp; the label says all four
-        # in words. Suggested is off in the first read and on in the second: its count is 3 in both.
+        # of the text tally. Pack sd:7314 adds working first and suggested last (operator 07:10 MST: a repo with five
+        # working rows read 0 0 0). Each counts every row of the repo, so a filter hides no count. A box is lit only when
+        # its count is not zero; blocked is the warning lamp; the label says all five in words. Suggested is off in the
+        # first read and on in the second: its count is 3 in both.
         out = self.run_view("R.closed = ELS.queue.html; press('ended'); press('suggested'); open('system');"
                             " R.open = ELS.queue.html; R.tally = ELS['queue-tally'].html;")
-        system = ' aria-label="1 merging, 2 next, 2 blocked, 3 suggested"', \
-            '<span class="pip on">1</span><span class="pip on">2</span><span class="pip warn">2</span><span class="pip on">3</span>'
-        alpha = ' aria-label="0 merging, 0 next, 0 blocked, 0 suggested"', '<span class="pip">0</span>' * 4
+        system = ' aria-label="3 working, 1 merging, 2 next, 2 blocked, 3 suggested"', \
+            ('<span class="pip on">3</span><span class="pip on">1</span><span class="pip on">2</span><span class="pip warn">2</span>'
+             '<span class="pip on">3</span>')
+        alpha = ' aria-label="1 working, 0 merging, 0 next, 0 blocked, 0 suggested"', \
+            '<span class="pip on">1</span>' + '<span class="pip">0</span>' * 4
         for html in (out["R"]["closed"], out["R"]["open"]):
             self.assertEqual(self.repo_detail(html, "system"), (" pipe", *system))
             self.assertEqual(self.repo_detail(html, "alpha"), (" pipe", *alpha))
