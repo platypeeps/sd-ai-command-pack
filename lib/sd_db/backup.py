@@ -407,11 +407,14 @@ def _copy_runner_journal(source: Path, directory: Path, expected: dict[str, int]
     return True
 
 
-#: The runs the journal holds: every `runner_run` but a build run's. A build
-#: run (pack sd:6093) keeps no journal: its evidence is its worktree and
-#: branch on disk, and a restore blocks its assignment (`recovery`).
+#: The runs the journal holds: every `runner_run` but a build or teammate run's.
+#: A build run (pack sd:6093) keeps no journal: its evidence is its worktree and
+#: branch on disk, and a restore blocks its assignment (`recovery`). A teammate
+#: run (pack sd:7221) is a lead's record of its in-session builder; no runner
+#: writes it, so it has no journal either.
 JOURNALED_RUNS = ("SELECT runner_run.* FROM runner_run LEFT JOIN assignment "
-                  "ON assignment.id = runner_run.assignment WHERE assignment.scope IS NOT 'build'")
+                  "ON assignment.id = runner_run.assignment "
+                  "WHERE COALESCE(assignment.scope, '') NOT IN ('build', 'teammate')")
 
 
 def _journaled_runs_in(copy: Path) -> bool:

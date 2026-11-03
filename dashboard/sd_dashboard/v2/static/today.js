@@ -153,9 +153,9 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   }
   function runDetails(b) {
     const s = BSTATE[b.state] || 'warning';
-    return html`<p class="kind"><span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span> Builder run · ${b.state}</p>
+    return html`<p class="kind"><span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span> ${b.teammate ? 'Teammate' : 'Builder'} run · ${b.state}</p>
       <h2>${b.repo} · ${b.stage}</h2>
-      <dl><dt>Run</dt><dd>${b.run}</dd><dt>Stage</dt><dd>${b.stage} · step ${b.step}</dd><dt>Started</dt><dd>${clock(b.started)} · ${b.elapsed} ago</dd>
+      <dl><dt>Run</dt><dd>${b.run}</dd>${b.worktree ? html`<dt>Worktree</dt><dd>${b.worktree}</dd>` : ''}<dt>Stage</dt><dd>${b.stage} · step ${b.step}</dd><dt>Started</dt><dd>${clock(b.started)} · ${b.elapsed} ago</dd>
         <dt>ETA</dt><dd>${b.eta ? clock(b.eta) : 'not known'} · ${b.eta_why}</dd><dt>Model</dt><dd>${b.model || 'not recorded'}</dd><dt>Spent</dt><dd>${usd(b.usd)}</dd></dl>
       <h3>Items</h3><ul class="members">${b.items.map(it => html`<li><a href="${shell.itemHref(it.item)}">#${it.item} ${it.title}</a>${it.assignment ? html`<span class="via">assignment #${String(it.assignment)}</span>` : ''}</li>`)}</ul>
       <p><a href="#view=queue">Open the builds in Queue</a></p>`;
@@ -350,11 +350,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   const prLink = r => r.pull ? html`<a class="btn quiet sm" href="${r.pull}" target="_blank" rel="noopener noreferrer" aria-label="Open the pull request of run ${r.run} on GitHub">Open PR</a>` : '';
   const logBtn = r => r.log ? html`<button class="btn quiet sm" type="button" data-copy="${`tail -f ${shell.shq(r.log)}`}" aria-label="Copy the command that follows the log of run ${r.run}">Log</button>` : '';
   const asgBtn = n => html`<button class="btn quiet sm" type="button" data-copy="sd assignments get ${String(n)}" aria-label="Copy the command that shows assignment ${String(n)}">Show assignment</button>`;
+  // A lead's in-session builder (pack sd:7221): its worktree, branch, budget's end and last beat; its lead ends it.
+  const teamFacts = r => html`<b>${r.state}</b> · teammate · worktree <code>${r.worktree}</code> · branch ${r.branch || 'not recorded'} · due ${at(r.due)} · ${r.beat == null ? 'no beat yet' : `beat ${dur(r.beat)} ago`}`;
   function runRow(r) {
     const s = RUNSTATE[r.state] || 'unknown', id = `run:${r.run}`;
     return ['working', s, html`<tr class="child" data-type="working" data-run="${r.run}" data-id="${id}" aria-selected="${String(row() === id)}">${marker(s, 'working')}
       <td class="what">${names(r)}</td>
-      <td class="detail"><b>${r.state}</b> · build ${r.run} · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${r.quiet == null ? 'no output yet' : `output ${dur(r.quiet)} ago`} · ${usd(r.usd || 0)} so far${r.why ? ` · ${r.why}` : ''}</td>
+      <td class="detail">${r.teammate ? teamFacts(r) : html`<b>${r.state}</b> · build ${r.run} · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${r.quiet == null ? 'no output yet' : `output ${dur(r.quiet)} ago`} · ${usd(r.usd || 0)} so far`}${r.why ? ` · ${r.why}` : ''}</td>
       <td class="num">${dur(r.elapsed)}</td>
       <td class="act"><div class="ctl" role="group" aria-label="Run ${r.run}">${bb('cancel', r, 'Cancel…', `Cancel build run ${r.run}`, r.cancel.allowed ? '' : r.cancel.reason || 'cancel is off')}${prLink(r)}${logBtn(r)}</div></td></tr>`];
   }

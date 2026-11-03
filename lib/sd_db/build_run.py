@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import build, draft, paths, sessions
+from . import build, draft, paths, sessions, teammate
 from .build import Probe
 from .database import Patient
 from .ship import this_host
@@ -389,7 +389,8 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     a reason the caller found (such as an unwritable log folder).
     """
     record_state(connection, "heartbeat", key=HEARTBEAT, body={"pid": os.getpid(), "owner": owner})
-    reaped = build.reap(connection, probe=probe, kill=kill) + draft.reap(connection, probe=probe, kill=kill)
+    reaped = (build.reap(connection, probe=probe, kill=kill) + draft.reap(connection, probe=probe, kill=kill)
+              + teammate.reap(connection))
     moved = watch(connection, lane=lane, probe=probe)
     swept = sweep(connection)
     claimed: list[str] = []

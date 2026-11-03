@@ -31,7 +31,8 @@ on the open repo closes it. The rows, in order:
 
 - working: the live items of `/api/now` (a worktree, a lane entry, a running `sd-*` command, a herdr agent or a Fix
   note, pack sd:3466), the open build runs of `GET /api/queue/builds?show=all` (`builds.panel`: working, waiting,
-  stalled or lost), a builder's gate in the lane, and the runner's queued and running assignments no run holds
+  stalled or lost), the lead's teammate runs with worktree, branch, due time and last beat (pack sd:7221),
+  a builder's gate in the lane, and the runner's queued and running assignments no run holds
   (`GET /api/queue/runner`, pack sd:7115 and sd:7217);
 - merging, next and blocked: the lane entries of `GET /api/queue` (`queue_screen.document`);
 - suggested: each repo's ready items from the `/api/now` queues rows, at most three (pack sd:7222);

@@ -65,6 +65,25 @@ class ManualMergeGuard(unittest.TestCase):
         with self.assertRaisesRegex(WorkflowError, "manual merge authority"):
             ship.manual_merge_guard(self.connection, self.repo)
 
+    def test_an_open_teammate_run_does_not_refuse_a_lane_merge(self):
+        """pack sd:7221: a lead's teammate run lands through the lane, as a build run does; any other open run holds."""
+        repo = str(self.root / "teamed")
+        upsert_repo(self.connection, repo, remote="git@github.com:Fixture/Repo.git", managed=1)
+
+        def run(scope):
+            item = create_item(self.connection, kind="task", title="Teamed", repo=repo, status="in_progress")
+            lead = create_assignment(self.connection, item=item, role="author", status="in_session")
+            self.connection.execute("UPDATE assignment SET scope = ? WHERE id = ?", (scope, lead))
+            self.connection.execute(
+                "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, "
+                "created_at, updated_at) VALUES (?, ?, 1, ?, 'feat/x', 'lead', '/w', '/w', 'now', 'now')",
+                (f"run-{lead}", lead, repo))
+        run("teammate")
+        ship.manual_merge_guard(self.connection, self.repo)
+        run("item")
+        with self.assertRaisesRegex(WorkflowError, "manual merge authority"):
+            ship.manual_merge_guard(self.connection, self.repo)
+
     def test_reassigned_item_cannot_hide_active_runner_ownership(self):
         item, run = self.claimed_run()
         unrelated = str(self.root / "unrelated")

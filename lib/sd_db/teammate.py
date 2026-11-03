@@ -1,0 +1,212 @@
+"""Teammate runs: an in-session builder a lead spawned, on the build run's rows (pack sd:7221).
+
+Design: `docs/work/2026-11-02-builder-heartbeat/design.md`.
+
+A lead's Claude Code teammate builds in its own worktree and writes no row,
+so Today could not list it beside the headless build runs. `start` writes
+what a build claim writes, with no lease and no process: one `assignment`
+per item (scope `teammate`, lead first, each member's `parent` the lead,
+`budget_minutes` the lead's budget) and one `runner_run` on the lead, with
+the worktree and branch the lead named. `beat` refreshes the run's
+`heartbeat_at`; the builder calls it at its own checkpoints (a commit, a
+report). `end` closes the run once the lead has the builder's report.
+
+The assignments hold `STATUS`, not `running`: a running assignment means
+the runner owns the item, so every status write, cancel and merge guard
+refuses it. A teammate's item stays the session's to move.
+
+`reap`, from the build-dispatch tick, ends a run whose every item is done,
+and one with no beat for its budget plus `GRACE_MINUTES`: a builder beats
+only at checkpoints, so the build reap's `build.STALE_SECONDS` would end a
+live one. Each write is one transaction, so a stop between two leaves
+either the old row or the new one.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta
+
+from . import build
+from .database import transaction
+from .errors import SdDbError
+from .runner import restoration_pending
+from .writes import add_note, create_assignment
+from .writes import now as clock
+
+SCOPE = "teammate"
+#: A live teammate assignment's status: outside `workflow.ACTIVE_ASSIGNMENTS`, so no runner guard reads it.
+STATUS = "in_session"
+#: Minutes past the budget a silent run lives before the reap ends it.
+GRACE_MINUTES = 30
+#: The item statuses a run may not start on.
+CLOSED = ("done", "cancelled")
+
+
+class TeammateRefused(SdDbError):
+    """A start, beat or end refused, with nothing written."""
+
+
+def open_runs(connection) -> list[dict]:
+    """Every unreleased teammate run, oldest first, with its lead's budget."""
+    return [dict(row) for row in connection.execute(
+        "SELECT runner_run.*, assignment.budget_minutes FROM runner_run JOIN assignment "
+        "ON assignment.id = runner_run.assignment WHERE runner_run.released_at IS NULL AND assignment.scope = ? "
+        "ORDER BY runner_run.created_at, runner_run.id", (SCOPE,))]
+
+
+def members(connection, lead: int) -> list[dict]:
+    """The run's assignments, the lead first, each with its item."""
+    return [dict(row) for row in connection.execute(
+        "SELECT id, item, status FROM assignment WHERE (id = ? OR parent = ?) AND scope = ? ORDER BY id = ? DESC, id",
+        (lead, lead, SCOPE, lead))]
+
+
+def due(run: dict) -> str | None:
+    """When the run's budget ends: its start plus the lead's `budget_minutes`; None without a budget."""
+    if not run.get("budget_minutes"):
+        return None
+    return (datetime.fromisoformat(run["created_at"]) + timedelta(minutes=run["budget_minutes"])).isoformat()
+
+
+def _holding(connection, item: int) -> dict | None:
+    """The open teammate run that holds `item`, as its lead's or a member's item, or None."""
+    row = connection.execute(
+        "SELECT runner_run.id FROM assignment holder JOIN runner_run "
+        "ON runner_run.assignment = COALESCE(holder.parent, holder.id) WHERE holder.item = ? AND holder.scope = ? "
+        "AND runner_run.released_at IS NULL AND runner_run.outcome IS NULL LIMIT 1", (item, SCOPE)).fetchone()
+    return dict(row) if row else None
+
+
+def start(connection, items: list[int], *, worktree: str, branch: str, budget_minutes: int, owner: str) -> dict:
+    """Register one teammate run for `items`, the first its lead; the run, as `build.run` reads it."""
+    if not items or len(set(items)) != len(items) or any(type(item) is not int for item in items):
+        raise TeammateRefused("name one or more distinct items")
+    if type(budget_minutes) is not int or budget_minutes <= 0:
+        raise TeammateRefused("the budget is a positive number of minutes")
+    for name, value in (("worktree", worktree), ("branch", branch), ("owner", owner)):
+        if not isinstance(value, str) or not value.strip():
+            raise TeammateRefused(f"a teammate run names its {name}")
+    with transaction(connection):
+        if restoration_pending(connection):
+            raise TeammateRefused("database restore reimport is incomplete; teammate runs are held")
+        repos = set()
+        for item in items:
+            row = connection.execute(build._REPO, (item,)).fetchone()
+            if row is None:
+                raise TeammateRefused(f"no item {item}")
+            if row["repo_path"] is None:
+                raise TeammateRefused(f"item {item} needs a registered repository")
+            if row["status"] in CLOSED:
+                raise TeammateRefused(f"item {item} is {row['status']}")
+            held = _holding(connection, item)
+            if held:
+                raise TeammateRefused(f"item {item} is held by teammate run {held['id']}; end it first")
+            active = connection.execute(
+                f"SELECT id, status, scope FROM assignment WHERE item = ? AND status IN {build.ACTIVE} LIMIT 1",
+                (item,)).fetchone()
+            if active:
+                raise TeammateRefused(f"item {item} has {active['status']} {active['scope']} assignment {active['id']}")
+            repos.add(row["repo"])
+        if len(repos) != 1:
+            raise TeammateRefused("a teammate run's items share one repository")
+        stamp = clock()
+        lead = None
+        for item in items:
+            ident = create_assignment(connection, item=item, role="author", status=STATUS, lane="parallel",
+                                      parent=lead, budget_minutes=budget_minutes)
+            connection.execute("UPDATE assignment SET scope = ?, started = ?, run_count = 1 WHERE id = ?",
+                               (SCOPE, stamp, ident))
+            lead = lead or ident
+        run = uuid.uuid4().hex
+        connection.execute(
+            "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, start_step, "
+            "step, heartbeat_at, created_at, updated_at) "
+            "VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'building', 'building', ?, ?, ?)",
+            (run, lead, repos.pop(), branch, owner, worktree, worktree, stamp, stamp, stamp))
+        for item in items:
+            add_note(connection, item, "comment",
+                     f"Teammate run {run} started by {owner}: worktree {worktree}, branch {branch}, "
+                     f"budget {budget_minutes} min")
+        return run_state(connection, run)
+
+
+def run_state(connection, ident: str) -> dict:
+    """One teammate run with its lead's budget, its due time and its members, the lead first."""
+    row = connection.execute(
+        "SELECT runner_run.*, assignment.budget_minutes FROM runner_run JOIN assignment "
+        "ON assignment.id = runner_run.assignment WHERE runner_run.id = ? AND assignment.scope = ?",
+        (ident, SCOPE)).fetchone()
+    if row is None:
+        raise TeammateRefused(f"no teammate run {ident}")
+    found = dict(row)
+    return found | {"due": due(found), "members": members(connection, found["assignment"])}
+
+
+def _open(connection, item: int) -> str:
+    held = _holding(connection, item)
+    if held is None:
+        raise TeammateRefused(f"no open teammate run holds item {item}")
+    return held["id"]
+
+
+def beat(connection, item: int) -> str:
+    """Refresh the beat of the open teammate run that holds `item`; the run's id."""
+    with transaction(connection):
+        run = _open(connection, item)
+        stamp = clock()
+        connection.execute("UPDATE runner_run SET heartbeat_at = ?, updated_at = ? WHERE id = ? "
+                           "AND released_at IS NULL AND outcome IS NULL", (stamp, stamp, run))
+        return run
+
+
+def _close(connection, run: dict, outcome: str, detail: str, status: str) -> None:
+    """End and release `run`, and its assignments `status`, in the caller's transaction: one write."""
+    stamp = clock()
+    connection.execute("UPDATE runner_run SET outcome = ?, detail = ?, released_at = ?, updated_at = ? WHERE id = ?",
+                       (outcome, detail, stamp, stamp, run["id"]))
+    for member in members(connection, run["assignment"]):
+        connection.execute("UPDATE assignment SET status = ?, ended = ?, result = ? WHERE id = ? AND status = ?",
+                           (status, stamp, detail, member["id"], STATUS))
+        add_note(connection, member["item"], "comment", f"Teammate run {run['id']} ended {outcome}: {detail}")
+
+
+def end(connection, item: int, *, reason: str = "") -> str:
+    """End the open teammate run that holds `item`, `done`; the run's id. The items keep their status."""
+    with transaction(connection):
+        run = connection.execute("SELECT * FROM runner_run WHERE id = ?", (_open(connection, item),)).fetchone()
+        _close(connection, dict(run), "done", reason.strip() or "ended by its lead", "done")
+        return run["id"]
+
+
+def reap(connection, *, now: str | None = None) -> list[dict]:
+    """End each open teammate run whose items are all done, or whose last beat is older than its budget plus
+    `GRACE_MINUTES`; each `{run, outcome, retry}`, as `build.reap` answers. A run without a budget ends on its items.
+
+    Each end is a compare-and-set on the beat the reap read, so a beat in between keeps the run open.
+    """
+    now = now or clock()
+    ended: list[dict] = []
+    if restoration_pending(connection):
+        return ended
+    for run in open_runs(connection):
+        statuses = [row["status"] for row in connection.execute(
+            "SELECT item.status FROM assignment JOIN item ON item.id = assignment.item "
+            "WHERE (assignment.id = ? OR assignment.parent = ?) AND assignment.scope = ?",
+            (run["assignment"], run["assignment"], SCOPE))]
+        quiet = build._age(run["heartbeat_at"] or run["created_at"], now)
+        if statuses and all(status == "done" for status in statuses):
+            outcome, detail, status = "done", "every item is done", "done"
+        elif run["budget_minutes"] and quiet >= (run["budget_minutes"] + GRACE_MINUTES) * 60:
+            outcome, status = "interrupted", "cancelled"
+            detail = (f"no beat for {int(quiet // 60)} min, past its {run['budget_minutes']} min budget "
+                      f"and {GRACE_MINUTES} min grace")
+        else:
+            continue
+        with transaction(connection):
+            if connection.execute("SELECT 1 FROM runner_run WHERE id = ? AND released_at IS NULL AND outcome IS NULL "
+                                  "AND heartbeat_at IS ?", (run["id"], run["heartbeat_at"])).fetchone() is None:
+                continue
+            _close(connection, run, outcome, detail, status)
+        ended.append({"run": run["id"], "outcome": outcome, "retry": None, "blocked": None})
+    return ended

@@ -24,7 +24,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from sd_db import build, operations, reads, runner, workflow
+from sd_db import build, operations, reads, runner, teammate, workflow
 from sd_db import repos as sd_repos
 from sd_db.config import label_prefix
 from sd_db.database import transaction
@@ -235,6 +235,28 @@ def _open_row(connection, run: dict, now: str) -> dict:
             "cancel": cancel}
 
 
+def _teammate_row(connection, run: dict, now: str) -> dict:
+    """One open teammate run (`sd_db.teammate`, pack sd:7221) in `_open_row`'s shape, `teammate` true, with its
+    budget's end as `due`: `stalled` once that has passed, else `working`. Its lead ends it; nothing here cancels it."""
+    found = teammate.members(connection, run["assignment"])
+    titles = reads.items_by_ids(connection, [row["item"] for row in found])
+    members = [{"item": row["item"], "assignment": row["id"], "status": row["status"],
+                "title": titles[row["item"]]["title"] if row["item"] in titles else ""} for row in found]
+    due, clock = _at(teammate.due(run)), _at(now)
+    late = bool(due and clock and clock >= due)
+    first = members[0]["item"] if members else "<item>"
+    return {"run": run["id"], "attempt": run["run"], "teammate": True, "repo": run["repo"],
+            "name": Path(run["repo"]).name, "items": members, "model": "", "step": "building",
+            "state": "stalled" if late else "working", "why": "past its budget" if late else "",
+            "outcome": run["outcome"], "started": run["created_at"], "elapsed": _seconds(run["created_at"], now),
+            "beat": _seconds(run["heartbeat_at"] or run["created_at"], now), "quiet": None, "usd": 0.0, "log": "",
+            "branch": run["branch"] or "", "worktree": run["work_path"] or "", "due": teammate.due(run),
+            "budget": run["budget_minutes"],
+            "pull": build.pull_url(connection, run["repo"], run["branch"], [member["item"] for member in members]),
+            "cancel": {"assignment": run["assignment"], "allowed": False, "revision": "",
+                       "reason": f"its lead ends it: sd assignments beat {first} --end"}}
+
+
 def _retry_state(connection, run: dict) -> dict:
     """Retry on an ended run: only the lead's latest run, released, whose bundle ended blocked or cancelled.
 
@@ -256,13 +278,14 @@ def _retry_state(connection, run: dict) -> dict:
 
 
 def panel(connection, *, now: str, show: str = "active") -> dict:
-    """Queue's Builds panel: `runs`, each open build run; `recent`, under `show` "all" only, the ended runs, newest
+    """Queue's Builds panel: `runs`, each open build run, then each open teammate run (`_teammate_row`); `recent`, under `show` "all" only, the ended runs, newest
     first, up to `ENDED_MAX` (pack sd:6834).
 
     A read that failed is `error`, so the page says the builds were not read, never that none run.
     """
     try:
         rows = [_open_row(connection, run, now) for run in build.open_runs(connection)]
+        rows += [_teammate_row(connection, run, now) for run in teammate.open_runs(connection)]
         recent = []
         for row in build.ended_runs(connection, limit=ENDED_MAX) if show == "all" else []:
             members = _members(connection, row)
