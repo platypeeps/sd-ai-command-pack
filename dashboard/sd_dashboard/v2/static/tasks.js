@@ -147,7 +147,7 @@ addEventListener('DOMContentLoaded', () => {
       combo('due', 'Due', DUE_OPTS, html`<button class="help" type="button" aria-label="Help: due filter" data-help="Buckets count from today. <b>≤ 7 days</b> is the same window the matrix calls urgent. An old link may name two buckets; they widen the view, and filters narrow it.">${ICON('circle-help')}</button>`)}${
       combo('age', 'In status', AGES.map(a => [a.key, a.label]), html`<button class="help" type="button" aria-label="Help: in status filter" data-help="Days since the task's last status change, in the buckets the Operations Progress histogram counts (<code>reads.age_bucket</code>). A bar there opens its bucket here.">${ICON('circle-help')}</button>`)}${
       // sd:5643: Scope is one choice: open and done (the default) or open only; sd:5649: or Scheduled only, the repeating
-      // tasks' next rows that have not opened yet. Parked left it for the toolbar's Open | Parked | All (sd:6701).
+      // tasks' next rows that have not opened yet. Parked left it for the toolbar's Open | Parked (sd:6701).
       combo('active', 'Scope', [['1', 'Open only'], ['scheduled', 'Scheduled only']], html`<button class="help" type="button" aria-label="Help: scope filter" data-help="<b>Open only</b> hides Done tasks, as the Operations histogram counts only open ones. The nightly prune parks an open P4 task untouched for 30 days, and a planning task that never ran untouched for 90 days; parked tasks show under the toolbar's <b>Parked</b> or <b>All</b>, and <b>Unpark</b> brings one back with its fields and history. Completing a repeating task opens its next row at once; it stays off every other scope, and off Today, until its due date less its lead. <b>Scheduled only</b> lists those rows with the day each opens.">${ICON('circle-help')}</button>`, 'Open and done')}${
       // sd:5649: the list's optional columns, hidden by default. Not a filter: no chip, and Clear all keeps it.
       view === 'list' && LEAD ? window.shell.list.pick('cols', 'Columns', COL_OPTS, SHOW.cols, { all: 'Default', multi: true }) : ''}${
@@ -359,8 +359,7 @@ addEventListener('DOMContentLoaded', () => {
   startDlg.className = 'palette date-dlg start-dlg'; startDlg.setAttribute('aria-labelledby', 'start-h');
   document.body.append(startDlg);
   const unread = v => v === null || v === undefined ? '▨' : v;
-  const kickText = k => !k ? '' : k.ok ? ' · the dispatcher was started' : ` · the dispatcher starts at its next slot (${k.why})`;
-  const queuedText = out => `Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${kickText(out.kickstart)}`;
+  const queuedText = out => `Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${window.commands.kickText(out.kickstart)}`;
   async function askStart() {
     let P;
     try { P = await window.shell.getJSON('/api/tasks/start-next'); } catch (err) { toast(`Start next not read: ${err.message}`); return; }
@@ -397,57 +396,8 @@ addEventListener('DOMContentLoaded', () => {
   }
   document.addEventListener('tasks:start-next', askStart);
   document.getElementById('start-next')?.addEventListener('click', askStart);
-  // Build (pack sd:6095): the press queues a headless build of each picked ready item (`sd assignments build`). The
-  // dialog reads the server's plan first (builds.plan): each repository's bundles of up to 3 items, the model, the
-  // room now, and every item the press would refuse with why. One refusal refuses the whole press, so the dialog then
-  // offers no Build. Build posts the items with the revisions the plan read; a 409 changed nothing. The dispatcher claims
-  // a bundle when there is room; until then each row shows its assignment as queued.
-  const buildDlg = document.createElement('dialog');
-  buildDlg.className = 'palette date-dlg start-dlg'; buildDlg.setAttribute('aria-labelledby', 'build-h');
-  document.body.append(buildDlg);
-  async function askBuild(objs, done) {
-    const rows = objs.map(o => byKey(o.id)).filter(Boolean);
-    if (!rows.length) { toast('Build: no listed task is selected'); return; }
-    let P;
-    try { P = await window.shell.getJSON(`/api/tasks/build/plan?items=${rows.map(t => t.id).join(',')}`); }
-    catch (err) { toast(`Build plan not read: ${err.message}`); return; }
-    const room = P.room.why ? `No builder starts now: ${P.room.why}. The press still queues; a claim waits for room.`
-      : `${P.room.machine} of ${P.room.cap} builders free now · at most ${P.room.repo_cap} per repository`;
-    const items = P.bundles.flatMap(b => b.items), ok = !P.refused.length && items.length;
-    put(buildDlg, html`<form method="dialog" class="date-form">
-      <h2 id="build-h">Build ${plural(rows.length, 'task')}</h2>${window.shell.closeX}
-      <p class="why">${room}</p>
-      ${P.refused.length ? html`<p class="why">▲ Nothing can be queued while one item is refused:</p>
-        <ul class="start-list">${P.refused.map(r => html`<li><code>#${String(r.id)}</code> ${r.why}</li>`)}</ul>` : ''}
-      ${P.bundles.map(b => html`<section class="build-bundle" aria-label="Bundle in ${b.name}"><h3>${b.name} <small>${b.model} · branch ${b.branch} · ${b.room ? `${b.room} may start now` : 'waits for room'}</small></h3>
-        <ol class="start-list">${b.items.map(r => html`<li><code>#${String(r.id)}</code> ${r.title}</li>`)}</ol></section>`)}
-      <p class="why">One run per bundle, ${String(P.budget_minutes)} min each. The items lock until each run ends; Cancel on Queue › Builds stops one.</p>
-      <div class="actions">
-        ${ok ? html`<button class="btn" value="build" type="submit">Build</button>` : ''}
-        <button class="btn quiet" value="cancel" type="submit" formnovalidate data-cancel>Cancel</button>
-      </div></form>`);
-    buildDlg.onclose = () => {
-      if (buildDlg.returnValue !== 'build' || !ok) return;
-      const revisions = Object.fromEntries(items.map(r => [String(r.id), r.revision]));
-      window.shell.post('/api/tasks/build', { items: items.map(r => r.id), revisions }).then(out => {
-        toast(`Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${kickText(out.kickstart)}`); done?.(); reread();
-      }, err => {
-        // A 409 is a refused press that changed nothing; no status is no answer, so whether it queued is not known.
-        toast(err.status === 409 ? err.message : err.status ? `Nothing queued: ${err.message}` : `Build got no answer, so what queued is not known: read the tasks again (${err.message})`);
-        reread();
-      });
-    };
-    buildDlg.returnValue = '';
-    buildDlg.showModal(); (buildDlg.querySelector('[value="build"]') || buildDlg.querySelector('[value="cancel"]'))?.focus();
-  }
-  C.register({ id: 'item.build', on: 'item', label: 'Build', icon: 'rocket', risk: 'safe', bulk: true, executes: true,
-    does: 'Queues a headless build per item; the dispatcher bundles them by repository.',
-    when: o => { const t = byKey(o.id); return !t ? 'the task is no longer listed' : t.status !== 'ready' ? `a build takes a ready task; this one is ${slabel(t.status).toLowerCase()}`
-      : !t.repo_path ? 'a build needs a repository' : t.assignment === 'running' || t.assignment === 'queued' ? `a runner assignment is ${t.assignment}` : true; },
-    cli: o => `sd assignments build ${byKey(o.id)?.id ?? o.id}`,
-    sends: () => 'POST /api/tasks/build {items, revisions}',
-    batch: (objs, done) => askBuild(objs, done),
-    run: o => { askBuild([o]); return null; } });
+  // Build (pack sd:6095): commands.build, the one declaration Today's suggested Queue rows register too (pack sd:7271).
+  C.register(window.commands.build({ row: o => byKey(o.id), reread }));
   // ---------- Pointer drag (mouse and pen; touch uses Move to) ----------
   let drag = null, suppressClick = false;
   const verdict = (t, target) => {
