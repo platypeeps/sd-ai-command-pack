@@ -53,7 +53,7 @@ class TheRetiredScreens(ScreenCase):
         self.assertEqual([entry.path for page in v2.registry.PAGES for entry in page.takes], ["/classic/contributions"])
 
     def test_no_page_script_or_module_links_to_a_retired_address(self):
-        # A bare "/classic/" or "?area=" names no screen. Operations' own nav is built from AREAS, the kept areas.
+        # A bare "/classic/" or "?area=" names no screen. Operations' views are AREAS, the kept areas.
         self.assertEqual(tuple(key for key, _ in operations_screen.AREAS), KEPT_AREAS)
         found = []
         for path in sources():
@@ -62,7 +62,8 @@ class TheRetiredScreens(ScreenCase):
                 if match[1] not in KEPT_CLASSIC:
                     found.append(f"{name}: {match[0]}")
             for match in re.finditer(r"/operations\?area=([^\"'&#\s`).]+)", text):
-                if match[1] not in KEPT_AREAS and (name, match[1]) != ("operations_screen.py", "{key}"):
+                # operations.js loads a view's area by its PAGE_VIEWS id, which the shell keeps to the declared views.
+                if match[1] not in KEPT_AREAS and (name, match[1]) != ("v2/static/operations.js", "${id}"):
                     found.append(f"{name}: {match[0]}")
         self.assertEqual(found, [])
 
@@ -77,18 +78,15 @@ class TheRetiredScreens(ScreenCase):
                 self.assertIn("<title>Operations · system</title>", self.render("/operations", {"area": [area]}))
         self.assertIn("<title>Operations · system</title>", self.render("/operations"))
 
-    def test_every_kept_area_renders_inside_the_v2_shell_under_its_section(self):
-        """sd:3586 PR 5: Usage under Metrics, Services under Management and Resources under Research join Trackers and
-        Sessions under Today."""
+    def test_every_kept_area_renders_inside_the_v2_shell_under_operations(self):
+        """sd:3586 PR 5 drew every area inside the v2 shell; pack sd:7266 puts them all under Fleet's Operations."""
         patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
         patcher.start()
         self.addCleanup(patcher.stop)
-        sections = {"usage": "Metrics", "services": "Management", "resources": "Research", "trackers": "Today",
-                    "sessions": "Today"}
         for area in KEPT_AREAS:
             with self.subTest(area=area):
                 body = self.render("/operations", {"area": [area]})
-                self.assertIn(f'<body data-page="{sections[area]}" data-scope="{sections[area].lower()}">', body)
+                self.assertIn('<body data-page="Operations" data-scope="operations">', body)
                 self.assertIn('<div class="shell"><main id="main" class="classic">', body)
                 self.assertNotIn("/static/dashboard.css", body)
                 self.assertEqual(body.count("<h1>"), 1)

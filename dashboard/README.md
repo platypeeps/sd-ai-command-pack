@@ -132,7 +132,7 @@ A `/v2/` address that names a page or an asset answers 301 with its new one (`/v
 `/today`, `/v2/static/<file>` to `/ui/<file>`); any other `/v2/` path is a 404.
 One map, built from the page registry and served as `/ui/sections.js`, says
 where each rail section goes: `SECTIONS` for ported pages, `CLASSIC` for the
-old screen an unported section opens (tagged "classic" on the rail), and
+server-drawn screen a section opens (Operations, drawn as any other section), and
 `SCREENS` for old screens without a section, which the palette lists under
 Classic screens. `./dashboard.sh pages` prints that map, one line per section
 or screen; a section in none of the three, such as Notes or HOA, has no old
@@ -274,8 +274,9 @@ post the routes the classic screen posted; Re-import and Evaluate run
 Rollback swaps back to the copy the last install replaced (system sd:5779); Run,
 Schedule, Adopt and Scan are copy only. The classic screen was retired in sd:3402; [`docs/pages/skills.md`](docs/pages/skills.md) has the detail.
 
-**Operations** has five tabs (`operations_screen.AREAS`). Usage is the default;
-the selected tab travels in the URL, for example `/operations?area=services`.
+**Operations** sits in the rail's Fleet group (pack sd:7266), its five areas
+(`operations_screen.AREAS`) the shell's views, listed under it as the other pages' are.
+Usage is the default; the shown area travels in the URL, for example `/operations?area=services`.
 Services stays for each service's last request and Sessions for the live worktree rows, which no new page shows yet.
 sd:3402 retired the other six, and each one's controls live on a new page:
 Jobs on Management and Activity, a queued assignment's cancel on its Item page,

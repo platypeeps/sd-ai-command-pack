@@ -15,11 +15,12 @@ The assignments hold `STATUS`, not `running`: a running assignment means
 the runner owns the item, so every status write, cancel and merge guard
 refuses it. A teammate's item stays the session's to move.
 
-`reap`, from the build-dispatch tick, ends a run whose every item is done,
-and one with no beat for its budget plus `GRACE_MINUTES`: a builder beats
-only at checkpoints, so the build reap's `build.STALE_SECONDS` would end a
-live one. Each write is one transaction, so a stop between two leaves
-either the old row or the new one.
+Only the lead's `end` releases a run. Neither silence nor every item done
+proves the builder stopped: it beats only at checkpoints, and may still
+write after its item lands. A run silent past its budget plus
+`GRACE_MINUTES` reads `overdue` on Today and stays held. Each write is one
+transaction, so a stop between two leaves either the old row or the new
+one.
 """
 
 from __future__ import annotations
@@ -191,7 +192,7 @@ def overdue(run: dict, now: str) -> str:
     """Why Today reads `run` overdue: no beat for its budget plus `GRACE_MINUTES`; '' otherwise.
 
     It ends nothing. A builder beats only at commits and reports, so silence
-    is no proof it stopped; only the lead's `--end` or every item done ends a run.
+    is no proof it stopped; only the lead's `--end` ends a run.
     """
     if not run.get("budget_minutes"):
         return ""
@@ -219,45 +220,19 @@ def beat(connection, item: int) -> str:
         return run
 
 
-def _close(connection, run: dict, outcome: str, detail: str, status: str) -> None:
-    """End and release `run`, and its assignments `status`, in the caller's transaction: one write."""
-    stamp = clock()
-    connection.execute("UPDATE runner_run SET outcome = ?, detail = ?, released_at = ?, updated_at = ? WHERE id = ?",
-                       (outcome, detail, stamp, stamp, run["id"]))
-    for member in members(connection, run["assignment"]):
-        connection.execute("UPDATE assignment SET status = ?, ended = ?, result = ? WHERE id = ? AND status = ?",
-                           (status, stamp, detail, member["id"], STATUS))
-        add_note(connection, member["item"], "comment", f"Teammate run {run['id']} ended {outcome}: {detail}")
-
-
 def end(connection, item: int, *, reason: str = "") -> str:
-    """End the open teammate run that holds `item`, `done`; the run's id. The items keep their status."""
+    """End and release the open teammate run that holds `item`, `done`, in one write; the run's id.
+
+    The one release: the items keep their status.
+    """
+    detail = reason.strip() or "ended by its lead"
     with transaction(connection):
         run = connection.execute("SELECT * FROM runner_run WHERE id = ?", (_open(connection, item),)).fetchone()
-        _close(connection, dict(run), "done", reason.strip() or "ended by its lead", "done")
+        stamp = clock()
+        connection.execute("UPDATE runner_run SET outcome = 'done', detail = ?, released_at = ?, updated_at = ? "
+                           "WHERE id = ?", (detail, stamp, stamp, run["id"]))
+        for member in members(connection, run["assignment"]):
+            connection.execute("UPDATE assignment SET status = 'done', ended = ?, result = ? WHERE id = ? AND status = ?",
+                               (stamp, detail, member["id"], STATUS))
+            add_note(connection, member["item"], "comment", f"Teammate run {run['id']} ended done: {detail}")
         return run["id"]
-
-
-def reap(connection) -> list[dict]:
-    """End each open teammate run whose items are all done; each `{run, outcome, retry}`, as `build.reap` answers.
-
-    Silence ends nothing (`overdue`): a builder beats only at commits and
-    reports. The close re-reads the run and its items in its own transaction.
-    """
-    ended: list[dict] = []
-    if restoration_pending(connection):
-        return ended
-    for run in open_runs(connection):
-        with transaction(connection):
-            if connection.execute("SELECT 1 FROM runner_run WHERE id = ? AND released_at IS NULL AND outcome IS NULL",
-                                  (run["id"],)).fetchone() is None:
-                continue
-            statuses = [row["status"] for row in connection.execute(
-                "SELECT item.status FROM assignment JOIN item ON item.id = assignment.item "
-                "WHERE (assignment.id = ? OR assignment.parent = ?) AND assignment.scope = ?",
-                (run["assignment"], run["assignment"], SCOPE))]
-            if not statuses or any(status != "done" for status in statuses):
-                continue
-            _close(connection, run, "done", "every item is done", "done")
-        ended.append({"run": run["id"], "outcome": "done", "retry": None, "blocked": None})
-    return ended

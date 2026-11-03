@@ -192,7 +192,7 @@
     return { id: 'item.build', on: 'item', label: 'Build', icon: 'rocket', risk: 'safe', bulk: true, executes: true, primary,
       does: 'Queues a headless build per item; the dispatcher bundles them by repository.',
       when: o => { const t = row(o); return !t ? 'the task is no longer listed' : t.status !== 'ready' ? `a build takes a ready task; this one is ${String(t.status || '').replace(/_/g, ' ').toLowerCase()}`
-        : !t.repo ? 'a build needs a repository' : t.assignment === 'running' || t.assignment === 'queued' ? `a runner assignment is ${t.assignment}` : true; },
+        : !t.repo_path ? 'a build needs a repository' : t.assignment === 'running' || t.assignment === 'queued' ? `a runner assignment is ${t.assignment}` : true; },
       cli: o => `sd assignments build ${row(o)?.id ?? o.id}`,
       sends: () => 'POST /api/tasks/build {items, revisions}',
       batch: (objs, done) => ask(objs, done),
