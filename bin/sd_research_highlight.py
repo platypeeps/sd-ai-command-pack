@@ -24,8 +24,10 @@ baseline, is a header block (a review copy's title, repository and push time,
 which changes every push), and the note goes at its end. A page with no `<hr` is
 refused under that flag. Otherwise the note opens the body.
 
-A unit is unchanged when its text, tags stripped and whitespace collapsed,
-equals an unmatched unit of the baseline with Markdown syntax taken away: links
+The page is read as the stdlib `html.parser` reads it: quotes, comments,
+declarations and the raw text of `<script>` and `<style>` follow its rules, and
+only text a reader sees is compared. A unit is unchanged when that text,
+whitespace collapsed, equals an unmatched unit of the baseline with Markdown syntax taken away: links
 keep their text, images go, bold and italic marks go, and heading, quote and
 list markers go, with the `[ ]` checkbox Drive adds to an imported list. Code
 spans, code blocks and escaped characters keep their characters literally.
@@ -41,10 +43,20 @@ file or an empty baseline.
 
 from __future__ import annotations
 
+import bisect
 import html
 import re
 import sys
+
+# `attrfind_tolerant` and `tagfind_tolerant` are undocumented, so typeshed omits them; they are the
+# parser's own rules, so `_marked` reads a tag as `Scan` did. A Python without them fails here.
+from html.parser import (  # type: ignore[attr-defined]
+    HTMLParser,
+    attrfind_tolerant,
+    tagfind_tolerant,
+)
 from pathlib import Path
+from typing import NamedTuple
 
 MARK = "background-color:#fff2a8"
 USAGE = "usage: sd-research-kit highlight --previous <baseline.md> [--since <time>] [--skip-header] <in> <out.html>"
@@ -53,13 +65,9 @@ UNIT = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "pre", "dt", 
         "figcaption", "blockquote", "div"}
 #: Every block tag: a unit's text runs from one of these to the next. Inline tags (a, code, br) do not cut it.
 BLOCK = UNIT | {"ul", "ol", "hr", "table", "thead", "tbody", "tfoot", "tr", "dl", "figure", "body", "html",
-                "section", "article", "main", "header", "footer"}
-#: A tag's attributes, quote-aware: a `>` inside a quoted value does not end the tag.
-ATTRS = r"""(?:"[^"]*"|'[^']*'|[^'">])*"""
-#: A comment (no name) or a tag `(closing slash, name)`; every tag read in this file goes through it.
-TAG = re.compile(rf"<!--.*?-->|<(/?)([a-zA-Z][a-zA-Z0-9]*)\b{ATTRS}>", re.S)
-#: One attribute inside a tag: `(name, value as written, quotes kept)`.
-ATTR = re.compile(r"""([^\s"'>/=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+))?""")
+                "section", "article", "main", "header", "footer", "head", "title"}
+#: Elements whose text a reader never sees: it is not compared and never marked.
+HIDDEN = {"script", "style", "template", "title"}
 LINK = re.compile(r"\[((?:[^\[\]]|\[[^\]]*\])*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+\"[^\"]*\")?\)")
 IMAGE = re.compile(r"!\[[^\]]*\]\((?:[^()]|\([^)]*\))*\)")
 LEAD = re.compile(r"^\s*(?:#{1,6}\s+|>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s+)?")
@@ -82,22 +90,89 @@ def _collapse(text: str) -> str:
     return " ".join(text.split())
 
 
-def _name(tag: re.Match[str]) -> str:
-    """A tag's lower-case name; empty for a comment."""
+class Tag(NamedTuple):
+    """One tag of a page: where it starts and ends, its lower-case name, and its text as written."""
 
-    return (tag.group(2) or "").lower()
+    start: int
+    end: int
+    name: str
+    closing: bool
+    raw: str
 
 
-def _strip(fragment: str) -> str:
-    """`fragment` with tags and comments taken out and `<br>` a space; entities still escaped."""
+class Scan(HTMLParser):
+    """A page as `html.parser` reads it: every tag with its offsets, and the text a reader sees.
 
-    return TAG.sub(lambda tag: " " if _name(tag) == "br" else "", fragment)
+    A start tag ends where its text ends; an end tag ends where the next tag or text begins, so it
+    takes in any comment or declaration the parser read after it, none of which holds text. Text
+    inside `HIDDEN` elements is left out, and `<br>` is a space. `html.parser` calls the
+    `handle_*` methods by name.
+    """
+
+    def __init__(self, page: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows = [0] + [found.end() for found in re.finditer("\n", page)]
+        self.tags: list[Tag] = []
+        self.text: list[tuple[int, str]] = []  # (offset, text), in page order
+        self.hidden: list[str] = []
+        self.pending: Tag | None = None  # an end tag waiting for the next tag or text
+        self.feed(page)
+        self.close()
+        self._event(len(page))
+
+    def _event(self, at: int | None = None) -> int:
+        """The offset of the tag or text now handled; it ends the end tag read before it."""
+
+        if at is None:
+            line, column = self.getpos()
+            at = self.rows[line - 1] + column
+        if self.pending is not None:
+            self.tags.append(self.pending._replace(end=at))
+            self.pending = None
+        return at
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        at, raw = self._event(), self.get_starttag_text() or ""
+        self.tags.append(Tag(at, at + len(raw), tag, False, raw))
+        if tag == "br" and not self.hidden:
+            self.text.append((at, " "))
+        elif tag in HIDDEN:
+            self.hidden.append(tag)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        at, raw = self._event(), self.get_starttag_text() or ""
+        self.tags.append(Tag(at, at + len(raw), tag, False, raw))
+        if tag == "br" and not self.hidden:
+            self.text.append((at, " "))
+
+    def handle_endtag(self, tag: str) -> None:
+        self.pending = Tag(self._event(), -1, tag, True, "")
+        if tag in self.hidden:
+            del self.hidden[len(self.hidden) - 1 - self.hidden[::-1].index(tag):]
+
+    def handle_data(self, data: str) -> None:
+        at = self._event()
+        if not self.hidden:
+            self.text.append((at, data))
+
+    def text_between(self, begin: int = 0, end: int | None = None) -> str:
+        """The text a reader sees between two offsets, whitespace collapsed."""
+
+        offsets = [at for at, _ in self.text]
+        low = bisect.bisect_left(offsets, begin)
+        high = len(offsets) if end is None else bisect.bisect_left(offsets, end)
+        return _collapse("".join(text for _, text in self.text[low:high]))
+
+    def first(self, name: str) -> Tag | None:
+        """The first opening `<name>` tag."""
+
+        return next((tag for tag in self.tags if tag.name == name and not tag.closing), None)
 
 
 def html_text(fragment: str) -> str:
-    """A fragment's text: tags stripped, `<br>` a space, entities read. Literal characters stay."""
+    """A fragment's text as a reader sees it: tags gone, `<br>` a space, entities read."""
 
-    return _collapse(html.unescape(_strip(fragment)))
+    return Scan(fragment).text_between()
 
 
 def markdown_text(line: str) -> str:
@@ -124,7 +199,9 @@ def markdown_text(line: str) -> str:
             text, count = pattern.subn(lambda m: m.group(m.lastindex or 1), text)
             if not count:
                 break
-    text = html.unescape(_strip(text))
+    # Markdown keeps a `<` that no `>` follows as text, where an HTML parser would drop it.
+    cut = text.rfind(">") + 1
+    text = Scan(text[:cut] + text[cut:].replace("<", "&lt;")).text_between()
     text = re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], text)
     return _collapse(text)
 
@@ -257,31 +334,31 @@ class Baseline:
 def _marked(tag: str) -> str:
     """The opening tag `tag` with the highlight added to its style."""
 
-    named = re.match(r"<[a-zA-Z0-9]+", tag)
-    for attr in ATTR.finditer(tag, named.end() if named else 1, len(tag) - 1):
+    named = tagfind_tolerant.match(tag, 1)
+    at = named.end() if named else len(tag)
+    while at < len(tag) - 1:  # the attributes as `html.parser` reads them
+        attr = attrfind_tolerant.match(tag, at)
+        if not attr:
+            break
+        at = attr.end()
         if attr.group(1).lower() != "style":
             continue
-        if attr.group(2) is None:  # a bare `style`
-            return tag[: attr.start()] + f'style="{MARK}"' + tag[attr.end():]
-        value = attr.group(2)
-        quote = value[0] if value[0] in "\"'" else '"'
-        style = value.strip(quote).rstrip().rstrip(";") if value[0] == quote else value.rstrip(";")
+        if not attr.group(2):  # a bare `style`
+            return tag[: attr.start(1)] + f'style="{MARK}"' + tag[attr.end(1):]
+        value = attr.group(3)
+        quote = value[0] if value[:1] in ("\"", "'") and value[-1:] == value[:1] and len(value) > 1 else ""
+        style = (value[1:-1] if quote else value).rstrip().rstrip(";")
         style = f"{style};{MARK}" if style else MARK
-        return tag[: attr.start(2)] + f"{quote}{style}{quote}" + tag[attr.end(2):]
+        quote = quote or '"'
+        return tag[: attr.start(3)] + f"{quote}{style}{quote}" + tag[attr.end(3):]
     return tag[:-1].rstrip("/ ") + f' style="{MARK}">'
 
 
-def _first(page: str, name: str) -> re.Match[str] | None:
-    """The page's first opening `<name>` tag, outside comments and other tags' attributes."""
-
-    return next((tag for tag in TAG.finditer(page) if _name(tag) == name and not tag.group(1)), None)
-
-
-def _header_end(page: str) -> int | None:
+def _header_end(scan: Scan) -> int | None:
     """Where `--skip-header`'s header block ends: the page's first `<hr`, or None without one."""
 
-    rule = _first(page, "hr")
-    return rule.start() if rule else None
+    rule = scan.first("hr")
+    return rule.start if rule else None
 
 
 def _note(changed: int, gone: int, sections: list[str], since: str) -> str:
@@ -301,18 +378,19 @@ def _note(changed: int, gone: int, sections: list[str], since: str) -> str:
     return note
 
 
-def _units(page: str, start: int, tags: list[re.Match[str]]) -> list[tuple[int, int, re.Match[str] | None, str, str]]:
+def _units(scan: Scan, start: int, end_of_page: int) -> list[tuple[int, int, Tag | None, str, str]]:
     """Each text segment between block tags: `(begin, end, unit tag or None, section, text)`."""
 
-    units: list[tuple[int, int, re.Match[str] | None, str, str]] = []
+    tags = [tag for tag in scan.tags if tag.start >= start and tag.name in BLOCK]
+    units: list[tuple[int, int, Tag | None, str, str]] = []
     section = "Opening"
-    bounds = [(start, None)] + [(tag.end(), tag) for tag in tags]
+    bounds: list[tuple[int, Tag | None]] = [(start, None)] + [(tag.end, tag) for tag in tags]
     for index, (begin, tag) in enumerate(bounds):
-        end = tags[index].start() if index < len(tags) else len(page)
-        text = html_text(page[begin:end])
+        end = tags[index].start if index < len(tags) else end_of_page
+        text = scan.text_between(begin, end)
         if not text:
             continue
-        name = _name(tag) if tag is not None and not tag.group(1) else ""
+        name = tag.name if tag is not None and not tag.closing else ""
         if re.fullmatch(r"h[1-6]", name):
             section = text
         units.append((begin, end, tag if name in UNIT else None, section, text))
@@ -322,12 +400,12 @@ def _units(page: str, start: int, tags: list[re.Match[str]]) -> list[tuple[int, 
 def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str, int, int, list[str]]:
     """`page` marked, with its note: the count changed, the count gone, and the sections of both."""
 
-    start = (_header_end(page) or 0) if header else 0
+    scan = Scan(page)
+    start = (_header_end(scan) or 0) if header else 0
     if not start:
-        body = _first(page, "body")
-        start = body.end() if body else 0
-    tags = [tag for tag in TAG.finditer(page, start) if _name(tag) in BLOCK]
-    units = _units(page, start, tags)
+        body = scan.first("body")
+        start = body.end if body else 0
+    units = _units(scan, start, len(page))
     # Whole matches first, then lines: which paragraph comes first must not decide what matches.
     found = [seen.match_whole(text) for _, _, _, _, text in units]
     found = [hit or seen.match_line(text) for hit, (_, _, _, _, text) in zip(found, units, strict=True)]
@@ -339,8 +417,8 @@ def highlight(page: str, seen: Baseline, since: str, header: bool) -> tuple[str,
         if section not in sections:
             sections.append(section)
         if tag is not None:
-            out += [page[at:tag.start()], _marked(tag.group(0))]
-            at = tag.end()
+            out += [page[at:tag.start], _marked(tag.raw)]
+            at = tag.end
         else:  # text outside any unit tag, such as a list item's tail after its nested list
             out += [page[at:begin], f'<span style="{MARK}">', page[begin:end], "</span>"]
             at = end
@@ -410,7 +488,7 @@ def highlight_main(argv: list[str]) -> int:
               "upload without highlight", file=sys.stderr)
         return 2
     page = _layout(page) if markdown_in else page
-    if skip_header and _header_end(page) is None:
+    if skip_header and _header_end(Scan(page)) is None:
         print(f"sd-research-kit highlight: --skip-header: no <hr> in {source} ends a header block", file=sys.stderr)
         return 2
     marked, changed, gone, sections = highlight(page, seen, since, header=skip_header)

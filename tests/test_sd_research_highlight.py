@@ -375,5 +375,58 @@ class TagsAreReadWithTheirQuotes(unittest.TestCase):
         self.assertIn(f'<p>New.</p>\n<p style="{MARK}"><strong>No changes since T', marked)
 
 
+class PagesAreReadByTheHtmlParser(unittest.TestCase):
+    """The tag class after review on 8d78d8307: the page is read as `html.parser` reads it (sd:7258).
+
+    One test per failure-table row the quote-aware regex still missed.
+    """
+
+    def setUp(self) -> None:
+        self.highlight = load_highlight()
+
+    def mark(self, page: str, baseline: str = "Old.\n") -> tuple[str, int]:
+        marked, changed, _, _ = self.highlight.highlight(page, self.highlight.Baseline(baseline, header=False), "T",
+                                                         header=False)
+        return marked, changed
+
+    def body(self, marked: str) -> str:
+        """`marked` without the note the verb adds."""
+
+        return re.sub(r'<p style="[^"]*"><strong>(?:Changed|No changes) since T</strong>.*?</p>\n', "", marked, count=1)
+
+    def test_script_and_style_text_is_not_compared(self) -> None:
+        for page in ("<html><head><style>p{color:red}</style></head><body><script>var a = '<p>';</script>"
+                     "<p>Old.</p></body></html>",
+                     "<head><style>p{color:red}</style></head><p>Old.</p>"):
+            with self.subTest(page=page):
+                marked, changed = self.mark(page)
+                self.assertEqual((changed, self.body(marked)), (0, page))
+
+    def test_declarations_and_instructions_are_not_text(self) -> None:
+        page = "<!DOCTYPE html><?xml version='1.0'?><p>Old.</p><![CDATA[ x > y ]]>"
+        marked, changed = self.mark(page)
+        self.assertEqual((changed, self.body(marked)), (0, page))
+
+    def test_an_unquoted_value_holding_a_quote_ends_at_its_bracket(self) -> None:
+        marked, changed = self.mark('<p title=a"b>New.</p><p>Old.</p>')
+        self.assertEqual(changed, 1)
+        self.assertIn(f'<p title=a"b style="{MARK}">New.</p><p>Old.</p>', marked)
+        marked, changed = self.mark('<p>Old.</p title="a>b"><p>New.</p>')
+        self.assertEqual(changed, 1)
+        self.assertIn(f'<p>Old.</p title="a>b"><p style="{MARK}">New.</p>', marked)
+
+    def test_a_comment_closed_with_a_bang_is_not_text(self) -> None:
+        marked, changed = self.mark("<p>Old.</p><!-- a --!> <p>New.</p>")
+        self.assertEqual(changed, 1)
+        self.assertIn(f'<p>Old.</p><!-- a --!> <p style="{MARK}">New.</p>', marked)
+
+    def test_a_markdown_bracket_that_opens_no_tag_stays_text(self) -> None:
+        """A guard, not a fail-first: Markdown keeps a `<` that never closes, where an HTML parser drops it."""
+
+        text = self.highlight.markdown_text
+        self.assertEqual(text("Use x<y here"), "Use x<y here")
+        self.assertEqual(text("a <b>bold</b> c < d"), "a bold c < d")
+
+
 if __name__ == "__main__":
     unittest.main()
