@@ -157,6 +157,16 @@ class Start(Case):
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0], before)
         self.start([paid, associated, failed])
 
+    def test_a_start_refuses_an_item_a_prepared_lane_entry_delivers(self):
+        """A prepared entry waits for a hand merge: still a delivery in flight, item and closes (pack sd:7288)."""
+        item, close = self.item(status="ready"), self.item(status="ready")
+        self.lane("e7", {"id": "e7", "item": item, "status": "prepared", "claim": "deliver", "closes": [close]})
+        for number in (item, close):
+            with self.subTest(item=number), self.assertRaisesRegex(
+                    teammate.TeammateRefused, f"item {number} is delivered by prepared lane entry e7 of sd:{item}"):
+                self.start([number])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'teammate'").fetchone()[0], 0)
+
     def test_a_start_refuses_when_a_lane_entry_is_unreadable(self):
         """An entry that does not parse may deliver the item: unknown is not "no" (pack sd:7288)."""
         self.lane("bad", "{not json")

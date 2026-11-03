@@ -44,8 +44,9 @@ STATUS = IN_SESSION
 GRACE_MINUTES = 30
 #: The item statuses a run may not start on.
 CLOSED = ("done", "cancelled")
-#: The lane entry states whose items the lane still delivers: queued, or in its runner (`sd_lane`).
-LANE_LIVE = ("pending", "running")
+#: The lane entry states whose items a delivery still holds (`sd_lane`): queued, in its runner, or
+#: prepared and waiting for a hand merge (lead ruling on pack sd:7288).
+LANE_LIVE = ("pending", "running", "prepared")
 
 
 class TeammateRefused(SdDbError):
@@ -86,7 +87,7 @@ def holding(connection, item: int) -> dict | None:
 def lane_holding(connection, item: int) -> str | None:
     """Why a lane entry still delivers `item`, or None (pack sd:7288).
 
-    A pending or running entry delivers its item and its closes
+    A pending, running or prepared entry delivers its item and its closes
     (`reads.lane_delivered`). A merged entry that claimed delivery owes each
     of them a close until a status note on it records `delivered at` the
     merge commit, the sentence every delivering transition writes
@@ -104,7 +105,7 @@ def lane_holding(connection, item: int) -> str | None:
             continue
         status, where = entry.get("status"), f"lane entry {entry.get('id')} of sd:{entry.get('item')}"
         if status in LANE_LIVE:
-            return f"item {item} is delivered by {status} {where}; wait for the lane to end it"
+            return f"item {item} is delivered by {status} {where}; wait for it to merge or end"
         if status == "merged" and entry.get("claim") == "deliver":
             commit = entry.get("merge_commit")
             paid = isinstance(commit, str) and commit and connection.execute(
