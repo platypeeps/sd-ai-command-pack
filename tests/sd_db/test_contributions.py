@@ -1172,6 +1172,25 @@ class DismissTests(ContributionCase):
         self.assertIsNone(c.claim_notification(self.db, key, event, owner="worker"))
         self.assertEqual(self.lanes(), {key: "closed"})
 
+    def test_a_repeat_dismiss_acknowledges_attention_that_arrived_after_the_first(self):
+        # pack sd:7398: the repeat returned early, reported success and left the row in awaiting_you.
+        key = "github:" + URL
+        first = c.dismiss(self.db, key, who="operator", expected_revision=self.observe()["revision"])
+        noticed = self.observe(observed_at=T1, events=[self.event()])
+        event = noticed["attention"][0]["id"]
+        self.assertEqual(self.lanes(), {key: "awaiting_you"})
+        again = c.dismiss(self.db, key, who="someone-else", expected_revision=noticed["revision"])
+        self.assertEqual(self.lanes(), {key: "closed"})
+        self.assertEqual(again["attention"], [])
+        self.assertIn(event, again["acknowledged"])
+        self.assertEqual(again["notifications"][event]["acknowledged_by"], "someone-else")
+        self.assertIsNone(c.claim_notification(self.db, key, event, owner="worker"))
+        # The first dismissal's record stays: who closed the row and from which state.
+        self.assertEqual(again["dismissed"], first["dismissed"])
+        # The repeat ran under the revision the operator saw, so a stale one still refuses.
+        with self.assertRaises(StaleItem):
+            c.dismiss(self.db, key, who="operator", expected_revision=noticed["revision"])
+
     def test_dismiss_refuses_an_item_row_an_unobserved_key_and_another_rows_revision(self):
         other = URL.replace("12", "13")
         registered = c.capture(self.db, title="Filed", changes={"pull_url": other}, who="operator")["item"]["id"]

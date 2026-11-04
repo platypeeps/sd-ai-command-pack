@@ -421,6 +421,42 @@ class SlotCount(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(sd_gate_slots.thread_cap(value, share), value if value == str(share) else str(share))
 
+    def test_a_number_of_any_length_never_raises_out_of_the_gate_slot_reads(self):
+        """pack sd:7401: int() refuses an all-digit string past 4,300 digits with ValueError. A thread variable,
+        a slot count, a pid in a lock file and a time in the queue state or a slot info file each took one."""
+        share = 4
+        huge = "9" * 5000
+        for value in (huge, "9" * 4300, "9" * 19, "0" * 5000 + "3", "", "   ", " 3", "3 ", "0", "-3", "٣",
+                      "1e3", None, "3", "4", "5"):
+            with self.subTest(value=value if value is None or len(value) < 30 else f"{len(value)} chars"):
+                shown = sd_gate_slots.thread_cap(value, share)
+                kept = value in ("3", "4") or value == "0" * 5000 + "3"  # a lower value wins, zeros and all
+                self.assertEqual(shown, value if kept else str(share))
+        for value in (huge, "9" * 4300, "9" * 4301, "-1", "", " ", "٣"):
+            with self.subTest(count=value[:12]), self.assertRaises(ValueError) as caught:
+                sd_gate_slots.parse_count(value, "SD_GATE_SLOTS")
+            self.assertIn("SD_GATE_SLOTS", str(caught.exception))
+        self.assertEqual(sd_gate_slots.parse_count("0" * 5000 + "7", "x"), 7)
+        for stamp in (10 ** 400, -(10 ** 400), 10 ** 4000, float("inf"), "9" * 5000, True, None, 12.5):
+            seconds = sd_gate_slots.as_time(stamp)
+            self.assertTrue(seconds is None or isinstance(seconds, float))
+        self.assertEqual(sd_gate_slots.as_time(12), 12.0)
+        self.assertIsNone(sd_gate_slots.as_time(10 ** 400))
+
+    def test_a_lock_file_pid_or_time_past_the_float_or_digit_limit_leaves_the_holders_readable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            where = pathlib.Path(tmp)
+            lock = where / "slot.1.lock"
+            lock.write_text("9" * 5000 + "\n", encoding="utf-8")
+            lock.with_suffix(".info").write_text('{"pid": 1, "since": %s, "label": "x"}' % ("9" * 400), encoding="utf-8")
+            with open(lock, "r+") as held:
+                fcntl.flock(held, fcntl.LOCK_EX)
+                holders = sd_gate_slots.read_holders(where)
+        self.assertEqual([(entry["slot"], entry["pid"]) for entry in holders], [(1, None)])
+        state = {"low_since": 10 ** 400}
+        rule = sd_gate_slots.LoadRule(limit=10.0, settle=60.0, source="test")
+        self.assertIsInstance(sd_gate_slots.load_hold(state, rule, 1.0, 1.0, 1000.0), str)
+
     def test_the_machine_setting_is_a_declared_core_setting(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = pathlib.Path(tmp) / "sd-ai-command-pack" / "config.json"
