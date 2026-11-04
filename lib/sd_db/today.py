@@ -136,13 +136,22 @@ def _host_findings(basis: Any, host: str) -> list[str]:
     """The lines of a report's attention basis that name `host`, each cut to its finding.
 
     A cron report writes `<job> on <host>: <finding>` per line, and a failed
-    run `job exited N on <host>`; the second is its own finding. A line that
-    only heads the next ones (`App Store updates pending:` over
-    `App Store updates pending: <app>`) is dropped, as the lines under it say it.
+    run `job exited N on <host>`, with a grade in brackets and the job's
+    first line after a colon when it has them (`reporting.ingest_log`). That
+    line keeps all but ` on <host>`, so its finding names the exit code
+    (pack sd:7399). A line that only heads the next ones (`App Store updates
+    pending:` over `App Store updates pending: <app>`) is dropped, as the
+    lines under it say it.
     """
-    pattern = re.compile(rf"^(?P<head>.*?) on {re.escape(host)}(?::[ \t]*(?P<finding>.*)|[ \t]*)$")
-    found = [(match["finding"] or match["head"]).strip()
-             for match in map(pattern.match, str(basis or "").splitlines()) if match]
+    host = re.escape(host)
+    exited = re.compile(rf"^(?P<head>job exited -?[0-9]+) on {host}(?P<rest>(?:[ \t]+\(.*|:.*)?)$")
+    pattern = re.compile(rf"^(?P<head>.*?) on {host}(?::[ \t]*(?P<finding>.*)|[ \t]*)$")
+    found = []
+    for line in str(basis or "").splitlines():
+        if match := exited.match(line):
+            found.append((match["head"] + match["rest"]).strip())
+        elif match := pattern.match(line):
+            found.append((match["finding"] or match["head"]).strip())
     return [text for text in found
             if not (text.endswith(":") and any(other != text and other.startswith(text) for other in found))]
 

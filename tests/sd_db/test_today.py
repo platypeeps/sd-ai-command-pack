@@ -367,6 +367,17 @@ class TheOperations(TodayCase):
         self.assertEqual((mine["operations"]["gate"], mine["summary"]["operations"]), (found["gate"], 1))
         self.assertEqual(sorted(row["id"] for row in loose["operations"]["findings"]), sorted([exited, folded, unread]))
 
+    def test_a_failed_runs_finding_keeps_its_exit_code(self):
+        """pack sd:7399: `ingest_log` writes `job exited N on <host>`, graded or not, with the job's lines."""
+        bare = self.report("backup-nightly", "job exited 3 on alpha: backup on alpha: the NAS is gone")
+        graded = self.report("sync-nightly", "job exited 4 on alpha (data safe, one step failed: push): sync lagged")
+        self.report("other-nightly", "job exited 5 on alphabet: not this machine")
+        found = today.operations(self.connection, host="alpha", gate=None)["findings"]
+        self.assertEqual(sorted((row["id"], row["finding"]) for row in found), sorted([
+            (bare, "job exited 3: backup on alpha: the NAS is gone"),
+            (graded, "job exited 4 (data safe, one step failed: push): sync lagged"),
+        ]))
+
 
 class TheHubRequests(TodayCase):
     """pack sd:7358 (system sd:7324 S3): an open `hub:` item is Attention on the fence holder, not elsewhere."""
