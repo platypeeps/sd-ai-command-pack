@@ -106,20 +106,30 @@ the median wait stays above 30 min. Do not run parallel prepares.
 | 3 Gate admitted, load rises | gate running | gate times out (sd:3479 class) | `gate_failed`, not put back, as today; `flake_items` files a same-head pass | existing gate-timeout test |
 | 4 Speculative gate queued | scratch worktree, ticket | still waiting at the run's deadline | cancel through `CANCEL_SECONDS`; next prepare gates itself | stop the run while the speculative ticket waits |
 | 5 Older state | pending rows; older runner build | older runner meets `slot_waits`, or rollback | older code ignores the field; rollback only restores claim refusals | older-shape row with `slot_waits` claims and merges |
+| 6 B: gate two ahead | two scratch gates; each follower's `speculation` with `depth` | the chained prediction drifts from the real landings | the receipt names a tree no prepare makes; prepare gates itself | `test_each_entry_is_gated_once_two_ahead_on_the_chained_landings` holds both trees to the real catch-up |
+| 7 B: merge ahead | next entry's gate joined; the one two ahead runs on | the next claim gates that entry again | the run keeps each gate's entry and head; a gated one is skipped | the same test: each entry gated once |
+| 8 B: entry ahead fails | both predictions run through it | gates hold slots for a landing that never comes | cancel each gate whose chain names it; the next claim gates its entry again | `test_a_failure_ahead_cancels_both_gates_and_the_next_entry_gates_again` |
+| 9 B: deadline | two gates in flight | the run's budget ends | every live gate is cancelled | `test_the_runs_deadline_cancels_both_gates` |
+| 10 B: TERM mid-prepare | two gates in flight | the cron job TERMs the runner | each gate's group gets TERM before prepare's group ends | `test_a_sigterm_mid_prepare_ends_both_gates_first` |
 
 Evidence binding is unchanged: a gate receipt still names the head and tree it gated.
+A depth-2 receipt binds its tree and the predicted landing's tree, which equal the real ones only when both entries land as predicted.
+
+Older state for B: the one new key is `depth` in a follower's `speculation`. The queue page reads only its
+`status` and `summary`, and `lane_times` only its `status`, so a rollback runner and the dashboard read it as before.
 
 ## Slices
 
 Slice 1: option A with the table's tests, and the 30 min weekly check. It leaves every
 machine's lanes claiming under load and waiting in the gate queue in order.
 
-Slice 2: option B, speculation depth 2, in its own PR (ruling 1).
+Slice 2: option B, speculation depth 2, in its own PR (ruling 1), with rows 6 to 10.
 
 ## Acceptance criteria
 
 - [ ] `test_sd_lane` has a test that fails on `origin/main`: a claim at load5 above the limit runs the entry.
 - [ ] Rows 2, 4 and 5 each have a test that stops the run there and passes.
+- [ ] Rows 6 to 10 each have a test on real git trees, and each fails on the code before slice 2.
 - [ ] Seven days after the merge, `lane_times` for the pack shows a median wait under 30 min.
 - [ ] The same week's lane history shows under 5 h idle with a runnable entry pending (25.6 h now).
 
