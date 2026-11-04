@@ -139,6 +139,17 @@ class InventoryTests(unittest.TestCase):
                 self.assertNotIn(f'"{name}"', paths)
                 self.assertNotIn(f"`{name}`", readme)
 
+    def test_a_skill_retired_to_contrib_is_out_of_the_paths(self) -> None:
+        """pack sd:7368: `sd skill try` can still reach these; the installer
+        renders none of them, and the design template other repositories
+        cite keeps a path outside any skill."""
+        paths = (SKILLS / "paths.json").read_text(encoding="utf-8")
+        for name in ("sd-plan", "sd-receive-review", "sd-spec"):
+            with self.subTest(skill=name):
+                self.assertNotIn(f'"{name}"', paths)
+                self.assertEqual(skill_file(name), CONTRIB / name / "SKILL.md")
+        self.assertTrue((REPO_ROOT / "templates" / "design.md").is_file())
+
     def test_the_ten_named_surfaces_are_all_present(self) -> None:
         found = {p.parent.name for p in surfaces()}
         self.assertEqual(set(EXPECTED) - found, set(), "a named surface left the tree")

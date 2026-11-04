@@ -334,7 +334,7 @@ class ConditionalObligations(unittest.TestCase):
 
     SITES = (
         ".claude/sd-ai-command-pack/planning-adversarial-review.md",
-        "skills/sd-receive-review/SKILL.md",
+        "contrib/sd-receive-review/SKILL.md",
     )
 
     def test_every_site_naming_the_ledger_names_the_gate(self):
@@ -591,11 +591,11 @@ class SkillsThatRunAReview(unittest.TestCase):
     """
 
     def test_the_enumeration_finds_the_reviewer_and_the_skills_that_call_it(self):
-        """A floor, not the set: the four pages that run a review today must
+        """A floor, not the set: the three pages that run a review today must
         stay in, so an invocation edited into a mention shape is a failure
         here and not a page that quietly stops being checked."""
         skills = skills_that_run_a_review()
-        self.assertLessEqual({"skills/sd-plan/SKILL.md", "skills/sd-research-repo/SKILL.md",
+        self.assertLessEqual({"skills/sd-research-repo/SKILL.md",
                               "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md"},
                              set(skills), "a page that runs a review left the enumeration")
 

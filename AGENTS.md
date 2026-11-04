@@ -72,7 +72,7 @@ reading a list: its `commands:` line enumerates `bin/` and `PATH` at runtime,
 counts the commands that resolve from this checkout, names the missing ones,
 and says whether a command resolves elsewhere.
 
-Codex exposes these procedures as skills: invoke `$sd-review`, `$sd-ship`, or `$sd-plan`.
+Codex exposes these procedures as skills: invoke `$sd-review` or `$sd-ship`.
 Do not expect `/sd-*` entries in its slash-command menu.
 Shell commands remain separate; not every skill has an executable.
 

@@ -219,36 +219,11 @@ def command_usage(argv: list[str]) -> int:
 
 
 def command_telemetry(argv: list[str]) -> int:
-    """`telemetry export [--endpoint URL]`: every ended build run as OTLP traces (pack sd:6943).
-    `telemetry report [--month YYYY-MM] [--out FILE]`: the monthly lane report draft (pack sd:6947).
-
-    The endpoint is `--endpoint`, else `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`,
-    else `telemetry.ENDPOINT`. No collector there is a skip, exit 0.
-    """
-    rest = list(argv)
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or telemetry.ENDPOINT
-    if rest[:1] == ["report"]:
-        return _telemetry_report(rest[1:])
-    if rest[:1] != ["export"]:
-        print("sd-db telemetry: expected export [--endpoint URL] or report [--month YYYY-MM] [--out FILE]",
-              file=sys.stderr)
+    """`telemetry report [--month YYYY-MM] [--out FILE]`: the monthly lane report draft (pack sd:6947)."""
+    if argv[:1] != ["report"]:
+        print("sd-db telemetry: expected report [--month YYYY-MM] [--out FILE]", file=sys.stderr)
         return 1
-    rest.pop(0)
-    if rest[:1] == ["--endpoint"] and len(rest) == 2:
-        endpoint = rest[1]
-    elif rest:
-        print("sd-db telemetry export: takes --endpoint URL", file=sys.stderr)
-        return 1
-    connection = _open_for_read()
-    try:
-        result = telemetry.export(connection, endpoint)
-    finally:
-        connection.close()
-    if result["skipped"]:
-        print(f"sd-db telemetry: skip: {result['skipped']}")
-    else:
-        print(f"sd-db telemetry: sent {result['spans']} span(s) of {result['runs']} build run(s) to {endpoint}")
-    return 0
+    return _telemetry_report(argv[1:])
 
 
 def _telemetry_report(rest: list[str]) -> int:

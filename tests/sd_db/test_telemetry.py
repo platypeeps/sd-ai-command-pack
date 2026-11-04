@@ -1,11 +1,8 @@
-"""Build runs as OTLP traces (pack sd:6943)."""
-import http.server
+"""Build runs read from the store for the monthly lane report (pack sd:6947)."""
 import io
-import json
 import tempfile
-import threading
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -79,20 +76,6 @@ class Spans(Case):
         merge = {row["key"]: row["value"] for row in spans[-1]["attributes"]}
         self.assertEqual((merge["sd.pr"], merge["sd.commit"]), ({"intValue": "1722"}, {"stringValue": SHA}))
 
-    def test_ids_are_stable_so_a_second_export_repeats_the_spans(self):
-        self.merged()
-        first = telemetry.run_spans(self.db, telemetry.ended_runs(self.db)[0])
-        again = telemetry.run_spans(self.db, telemetry.ended_runs(self.db)[0])
-        self.assertEqual(first, again)
-        self.assertEqual(len({span["spanId"] for span in first}), len(first))
-
-    def test_no_detail_or_note_body_leaves_the_store(self):
-        self.merged()
-        text = json.dumps(telemetry.payload(telemetry.run_spans(self.db, telemetry.ended_runs(self.db)[0])))
-        for secret in ("/Users/x", "Fixed round 1", "Built."):
-            self.assertNotIn(secret, text)
-        self.assertIn('"openinference.project.name"', text)
-
     def test_a_failed_run_carries_its_class_and_an_error_status(self):
         self.run_row(["Fail me"], outcome="lane_failed",
                      detail="lane entry 1 failed: merging origin/main into build/sd-1 conflicts", notes=[
@@ -125,7 +108,7 @@ class Spans(Case):
         self.assertIsNone(telemetry.failure_class("done", "anything"))
         self.assertEqual(telemetry.failure_class("cancelled", "cancelled by operator"), "cancelled")
 
-    def test_an_open_run_is_not_exported(self):
+    def test_an_open_run_is_not_read(self):
         self.run_row(["Open"], outcome=None, detail=None, end=None, notes=[])
         self.assertEqual(telemetry.ended_runs(self.db), [])
 
@@ -137,7 +120,7 @@ class Report(Case):
         self.db.execute("UPDATE runner_lease SET released_at = ? WHERE released_at IS NULL", (end,))
         return self.run_row(["Fail me"], outcome="blocked", detail=detail, end=end, notes=[])[0]
 
-    def test_a_month_reports_prs_failures_reviews_and_trace_links(self):
+    def test_a_month_reports_prs_failures_reviews_and_notable_runs(self):
         ident, items = self.merged(review_round=2)
         record_cost(self.db, source="run", role="author", repo=REPO, pass_=ident, usd=1.25)
         denied = self.failed("ended at step building: permission denied: Bash")
@@ -153,8 +136,10 @@ class Report(Case):
         self.assertIn("Denied tool calls: 1 run", text)
         self.assertIn("Database-lock refusals: 1 run", text)
         self.assertIn("Repeat-blocker rate: 1 of 2 reviewed runs (50%)", text)
-        self.assertIn(f"{telemetry.PHOENIX_UI}/redirects/traces/{ident}", text)
-        self.assertIn(f"{telemetry.PHOENIX_UI}/redirects/traces/{denied}", text)
+        # No export sends a build run to Phoenix (pack sd:7365): the report names the run, no trace link.
+        self.assertIn(f"- denied_tool: build run {denied}", text)
+        self.assertIn(f"- repo PR #1722, 1.25 USD: build run {ident}", text)
+        self.assertNotIn("/redirects/traces/", text)
 
     def test_a_merge_noted_on_an_interrupted_run_counts_for_its_retry(self):
         """pack sd:7008: the merge was lost when only the bundle's cleanup retry ended done."""
@@ -191,40 +176,14 @@ class Report(Case):
 
 
 class Export(Case):
-    def test_a_missing_collector_is_a_skip(self):
-        self.merged()
-        with mock.patch.object(telemetry, "ENDPOINT", "http://127.0.0.1:9/v1/traces"), \
-                mock.patch.object(cli, "_open_for_read", return_value=connect(self.root / "sd.db", write=False)), \
-                mock.patch.dict("os.environ", {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": ""}), \
-                redirect_stdout(io.StringIO()) as out:
+    def test_the_otlp_export_is_gone(self):
+        """pack sd:7365: the genai-traces collector is the one sink; sd-db sends no traces."""
+        with mock.patch.object(cli, "_open_for_read", return_value=connect(self.root / "sd.db", write=False)), \
+                mock.patch.dict("os.environ", {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://127.0.0.1:9/v1/traces"}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as said:
             code = cli.main(["telemetry", "export"])
-        self.assertEqual(code, 0)
-        self.assertIn("sd-db telemetry: skip: no collector at http://127.0.0.1:9/v1/traces", out.getvalue())
-
-    def test_the_spans_reach_a_collector_as_otlp_json(self):
-        ident, _ = self.merged()
-        received = []
-
-        class Collector(http.server.BaseHTTPRequestHandler):
-            def do_POST(self):
-                received.append((self.path, self.headers["Content-Type"],
-                                 json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
-                self.send_response(200)
-                self.end_headers()
-
-            def log_message(self, *args):
-                pass
-
-        server = http.server.HTTPServer(("127.0.0.1", 0), Collector)
-        self.addCleanup(server.server_close)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(server.shutdown)
-        result = telemetry.export(self.db, f"http://127.0.0.1:{server.server_port}/v1/traces")
-        self.assertEqual(result, {"runs": 1, "spans": 7, "skipped": None})
-        path, kind, body = received[0]
-        self.assertEqual((path, kind), ("/v1/traces", "application/json"))
-        spans = body["resourceSpans"][0]["scopeSpans"][0]["spans"]
-        self.assertEqual(spans[0]["traceId"], ident)
+        self.assertEqual(code, 1)
+        self.assertIn("expected report", said.getvalue())
 
 
 if __name__ == "__main__":

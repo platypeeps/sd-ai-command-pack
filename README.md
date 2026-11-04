@@ -155,7 +155,8 @@ else is. Its executables write these paths, and no others:
   `## Local overrides of the shared template` section records the disagreements
   that are deliberate.
 
-Two skills add paths of their own, both tracked. Invoking either is the approval
+Two `contrib/` skills add paths of their own, both tracked, once `sd skill try`
+brings one back (pack sd:7368 retired both). Invoking either is the approval
 to write, and neither writes anywhere else:
 
 - `sd-plan` — a work item is a row (`sd task add`); it writes
@@ -509,7 +510,7 @@ knowledge and procedure with no standing side-effect authority, loaded when
 relevant rather than invoked. They are not listed here: `sd skill list`
 reads both roots, which are the only two inventories that cannot go stale.
 
-`sd-skill-adopt`, `sd-tips`, `sd-draft-review` and `sd-publish-drive` are the named surfaces in `contrib/`.
+`sd-plan`, `sd-spec`, `sd-skill-adopt`, `sd-tips`, `sd-draft-review` and `sd-publish-drive` are the named surfaces in `contrib/`.
 They install with `sd skill try` instead of the default installer.
 They remain commands because they authorize side effects.
 Each of the eleven commands sets `disable-model-invocation`.
