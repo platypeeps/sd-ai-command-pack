@@ -227,6 +227,17 @@ window.shell = { aside: (() => { const { html } = window.markup;
         self.assertIn("GitHub #3", drawn["issues"])
         self.assertIn("3 open", drawn["issues-tally"])
 
+    def test_each_row_says_when_it_was_last_updated(self):
+        # pack sd:7464: an Updated column, the stored updated_at as a relative time; none stored says so.
+        rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix", "reason": "filed",
+                 "url": None, "state": None, "updated_at": "2026-11-01T10:00:00Z"},
+                {"repo": "anvil", "tracker": "GitHub", "ref": "#3", "key": "github:anvil#3", "title": "Crash", "reason": "assigned",
+                 "url": None, "state": None}]
+        drawn = self.drawn({"issues": rows, "error": ""})["issues"]
+        self.assertIn('<td class="when"><time class="rel" datetime="2026-11-01T10:00:00Z"></time></td>', drawn)
+        self.assertIn('<td class="when"><span class="ph">not stored</span></td>', drawn)
+        self.assertIn("<th>Updated</th>", (V2 / "github.html").read_text(encoding="utf-8"))
+
     def test_a_closed_row_shows_with_closed_only_and_a_failed_github_read_is_said(self):
         # sd:5899: Your issues holds the operator's closed GitHub issues of the window; State open hides them.
         rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix", "reason": "filed",
