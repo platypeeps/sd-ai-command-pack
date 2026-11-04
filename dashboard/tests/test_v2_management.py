@@ -338,6 +338,29 @@ class TheDocument(ScreenCase):
         jobs = {job["name"]: job for job in doc["jobs"]}
         self.assertEqual((jobs["nightly-sync"]["state"], jobs["nightly-sync"]["capabilities"]["retry"]["allowed"]), ("failed", True))
 
+    def test_sessions_carry_each_worktree_abandoned_first(self):
+        """pack sd:7517: the rows Operations > Sessions listed, so Management can carry them alone."""
+        unread = dict(tree("odd", live=False), state="unknown", path="")
+        doc = self.document(read=lambda area: fleet(area) if area == "repos"
+                            else fleet_document(area, trees=[tree("here"), unread, tree("gone", live=False)]))
+        rows = doc["sessions"]["worktrees"]
+        self.assertEqual([(row["name"], row["state"]) for row in rows],
+                         [("gone", "abandoned"), ("odd", "unknown"), ("here", "live")])
+        self.assertEqual(rows[0], {"repo": "system", "name": "gone", "branch": "gone", "path": "/wt/gone",
+                                   "state": "abandoned"})
+
+    def test_a_service_carries_its_last_request(self):
+        """pack sd:7517: Operations > Services showed each service's last request; Management's Details now does."""
+        from sd_db import services
+
+        request = {"action": "restart", "status": "accepted", "at": NOW, "who": "dashboard", "message": "ok"}
+        row = {"name": "svc", "label": "local.example.svc", "scope": "user", "domain": "gui/501", "category": "tool",
+               "state": "running", "pid": 1, "last_exit": 0, "last_signal": None, "revision": "0" * 64,
+               "capabilities": {}, "last_request": request}
+        with patch.object(services, "inventory", lambda connection, backend=None: {"services": [row]}):
+            doc = self.document()
+        self.assertEqual(doc["services"][0]["last_request"], request)
+
     def test_a_source_that_fails_is_a_reason_and_the_others_still_answer(self):
         doc = self.document(read=dark_fleet)
         self.assertIsNone(doc["git"])
@@ -2311,6 +2334,42 @@ class TheJobLogAndCancel(PageScript):
         out = self.run_page("R.a = ELS['view-deploys'].html;", doc=self.services(30), search="?view=deploys&q=gui/501 svc-1")
         self.assertIn("10 of 30", out["R"]["a"])
         self.assertIn("svc-19", out["R"]["a"])
+
+
+class TheOperationsRows(PageScript):
+    """pack sd:7517: the rows Operations > Sessions and > Services showed, drawn on Management alone."""
+
+    def test_sessions_list_each_worktree_with_its_branch_and_path_abandoned_first(self):
+        out = self.run_page("R.sess = ELS['view-sessions'].html; selectRow('tree:0', false); R.det = ELS.details.html;",
+                            search="?view=sessions")
+        sess = out["R"]["sess"]
+        self.assertIn("<dt>Path</dt><dd class=\"mono\">/wt/gone</dd>", out["R"]["det"])
+        table = sess[sess.index('id="wts-h"'):]
+        self.assertIn("<th scope=\"col\">Branch</th>", table)
+        rows = re.findall(r'<tr data-id="tree:(\d+)">(.*?)</tr>', table)
+        self.assertEqual([index for index, _ in rows], ["0", "1"])
+        self.assertIn("/wt/gone", rows[0][1])
+        self.assertIn("/wt/here", rows[1][1])
+        self.assertIn("abandoned", rows[0][1])
+        self.assertIn("system", rows[0][1])
+        self.assertIn('<td class="d mono">gone</td>', rows[0][1])
+
+    def test_a_worktree_with_no_readable_path_says_so(self):
+        doc = json.loads(json.dumps(self.doc))
+        doc["sessions"]["worktrees"][0]["path"] = ""
+        out = self.run_page("R.sess = ELS['view-sessions'].html;", doc=doc, search="?view=sessions")
+        self.assertIn("(unreadable registration)", out["R"]["sess"])
+
+    def test_a_services_details_show_its_last_request(self):
+        doc = dict(self.doc, services=[{
+            "name": "svc", "label": "local.example.svc", "scope": "user", "domain": "gui/501", "category": "tool",
+            "state": "running", "pid": 1, "last_exit": 0, "last_signal": None, "revision": "0" * 64, "capabilities": {},
+            "last_request": {"action": "restart", "status": "accepted", "at": "2026-09-06T02:20:00Z", "who": "dashboard",
+                             "message": "launchctl accepted the request"}}])
+        out = self.run_page("selectRow('svc:local.example.svc', false); R.det = ELS.details.html;", doc=doc,
+                            search="?view=deploys")
+        self.assertIn("<dt>Last request</dt><dd>restart · accepted · dashboard · 2026-09-06T02:20:00Z"
+                      " · launchctl accepted the request</dd>", out["R"]["det"])
 
 
 

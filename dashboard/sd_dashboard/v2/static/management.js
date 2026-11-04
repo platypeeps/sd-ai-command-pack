@@ -617,7 +617,8 @@ function objects() {
   (CLAUDE?.sessions || []).forEach(r => out.push({ id: `cs:${r.id}`, type: 'claude session', label: r.name || r.id, sid: r.id, pid: r.pid, row: r }));
   if (SESS) out.push({ id: 'wt:abandoned', type: 'worktrees', label: `${SESS.abandoned} abandoned worktrees`, n: SESS.abandoned },
     { id: 'wt:live', type: 'live worktrees', label: `${SESS.registered - SESS.abandoned} live worktrees` },
-    ...SESS.processes.map((p, i) => ({ id: `proc:${i}`, type: 'process', label: p.command })));
+    ...SESS.processes.map((p, i) => ({ id: `proc:${i}`, type: 'process', label: p.command })),
+    ...(SESS.worktrees || []).map((t, i) => ({ id: `tree:${i}`, type: 'worktree', label: t.name })));
   SERVICES.forEach(s => out.push({ id: `svc:${s.label}`, type: 'service', label: s.name, name: s.label, running: s.state === 'running', revision: s.revision, caps: s.capabilities || {} }));
   out.push({ id: 'repos:git', type: 'git state', label: 'Git state' });
   if (SATS) out.push({ id: 'sats:request', type: 'satellite refresh', label: 'Refresh satellites', request: SATS.request },
@@ -905,7 +906,7 @@ function renderSessions() {
     <div class="sec-head"><h2 id="claude-h">Claude sessions <button class="help" type="button" aria-label="Help: Claude sessions" data-help="<b>This Mac's Claude sessions.</b> From claude agents --json, each session's transcripts, ps and git. Safe to exit means idle, no agent or lane watch under it, and no unpushed work in its checkouts. A stalled or unread agent counts as running until it gives a final answer.">${I('circle-help')}</button></h2><p class="tally">${CLAUDE ? html`<span>${plural(CLAUDE.sessions.length, 'session')}</span><span>${CLAUDE.builders.running == null ? html`<span class="g-unknown" aria-hidden="true">▨</span> builders not counted` : plural(CLAUDE.builders.running, 'builder') + ' running'}</span><span>claude agents · ${hhmm(CLAUDE.read)} UTC</span>` : ''}</p></div>
     ${renderClaude()}
 
-    <div class="sec-head"><h2 id="agents-h">sd-* processes <button class="help" type="button" aria-label="Help: processes" data-help="<b>The fleet's process read.</b> The sd-* commands running on this Mac, as Operations › Sessions lists them. Claude sessions are listed above; codex processes are not read.">${I('circle-help')}</button></h2><p class="tally">${SESS ? html`<span>${SESS.processes.length} running</span><span>fleet · ${seen(SESS)}</span>` : ''}</p></div>
+    <div class="sec-head"><h2 id="agents-h">sd-* processes <button class="help" type="button" aria-label="Help: processes" data-help="<b>The fleet's process read.</b> The sd-* commands running on this Mac, from the process table at this read. Claude sessions are listed above; codex processes are not read.">${I('circle-help')}</button></h2><p class="tally">${SESS ? html`<span>${SESS.processes.length} running</span><span>fleet · ${seen(SESS)}</span>` : ''}</p></div>
     ${!SESS ? unknown('Sessions were not read', why('sessions'), 'fleet sessions')
       : SESS.processes.length ? html`<table class="ledger" aria-labelledby="agents-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Command</th><th scope="col">Running for</th><th scope="col">PID</th></tr></thead>
       <tbody>${SESS.processes.map((p, i) => html`<tr data-id="proc:${i}"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${p.command}</button></td><td class="d mono" data-k="up">${p.elapsed}</td><td class="d num">${p.pid}</td></tr>`)}</tbody></table>`
@@ -915,8 +916,13 @@ function renderSessions() {
     ${SESS ? html`<table class="ledger" aria-labelledby="wt-h"><tbody>
       <tr data-id="wt:abandoned"><td class="g g-${SESS.abandoned ? 'caution' : 'ok'}">${SESS.abandoned ? '▲' : '●'}<span class="sr">${SESS.abandoned ? 'caution' : 'ok'}</span></td><td class="what"><button type="button">${SESS.abandoned} abandoned worktrees</button></td><td class="d mono">registered, directory gone</td>${ACT('wt:abandoned')}</tr>
       <tr data-id="wt:live"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${SESS.registered - SESS.abandoned} live worktrees</button></td><td class="d mono">of ${SESS.registered} registered</td><td class="act end"></td></tr>
-    </tbody></table>` : unknown('Worktrees were not read', why('sessions'))}`);
+    </tbody></table>${treeTable()}` : unknown('Worktrees were not read', why('sessions'))}`);
 }
+// pack sd:7517: each registered worktree, abandoned first, as Operations > Sessions listed them before it was retired.
+const TREESTATE = { abandoned: 'caution', unknown: 'unknown', live: 'ok' };
+const treeTable = () => !(SESS.worktrees || []).length ? '' : html`<div class="sec-head"><h2 id="wts-h">Each worktree</h2><p class="tally"><span>${plural(SESS.worktrees.length, 'worktree')}</span><span>abandoned first</span></p></div>
+    <table class="ledger" aria-labelledby="wts-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Worktree</th><th scope="col">Repository</th><th scope="col">Branch</th><th scope="col">Path</th></tr></thead>
+    <tbody>${SESS.worktrees.map((t, i) => { const st = TREESTATE[t.state] || 'unknown'; return html`<tr data-id="tree:${i}"><td class="g g-${st}">${GLYPH[st]}<span class="sr">${t.state}</span></td><td class="what"><button type="button">${t.name}</button></td><td class="d mono">${t.repo}</td><td class="d mono">${t.branch || '—'}</td><td class="d mono">${t.path || '(unreadable registration)'}</td></tr>`; })}</tbody></table>`;
 document.getElementById('view-sessions').addEventListener('click', e => {
   if (e.target.closest('.rowact')) return;
   const tr = e.target.closest('tr[data-id]'); if (tr) selectRow(tr.dataset.id, true);
@@ -1095,6 +1101,11 @@ function selectRow(id, open) {
     const p = SESS.processes[+key]; if (!p) return;
     h = html`<p class="kind"><span class="g-ok">●</span> sd-* process</p><h2>${p.command}</h2><dl><dt>PID</dt><dd>${p.pid}</dd><dt>Running for</dt><dd>${p.elapsed}</dd></dl>
       <p class="why">A process has no command here; stop it from its own terminal.</p>`;
+  } else if (kind === 'tree') {
+    const t = (SESS?.worktrees || [])[+key]; if (!t) return;
+    const st = TREESTATE[t.state] || 'unknown';
+    h = html`<p class="kind"><span class="g-${st}">${GLYPH[st]}</span> Worktree · ${t.state}</p><h2>${t.name}</h2><dl><dt>Repository</dt><dd>${t.repo}</dd><dt>Branch</dt><dd>${t.branch || '—'}</dd><dt>Path</dt><dd class="mono">${t.path || '(unreadable registration)'}</dd><dt>Source</dt><dd>fleet sessions</dd></dl>
+      ${t.state === 'abandoned' ? html`<p class="why">Its directory is gone and it still holds its branch; Prune on the abandoned row clears it.</p>` : ''}`;
   } else if (kind === 'wt') {
     h = key === 'abandoned'
       ? html`<p class="kind"><span class="g-caution">▲</span> Worktrees · abandoned</p><h2>${SESS.abandoned} abandoned worktrees</h2><dl><dt>What</dt><dd>registered, directory gone</dd><dt>Source</dt><dd>fleet sessions</dd></dl>${act}`
@@ -1121,7 +1132,7 @@ function selectRow(id, open) {
   } else if (kind === 'svc') {
     const s = SERVICES.find(x => x.label === key); if (!s) return;
     const st = SVCSTATE(s);
-    h = html`<p class="kind"><span class="g-${st}">${GLYPH[st]}</span> Service · ${s.state}</p><h2>${s.name}</h2><dl><dt>Label</dt><dd>${s.label}</dd><dt>What</dt><dd>${s.category} · ${s.scope} · ${s.domain}</dd><dt>PID</dt><dd>${s.pid ?? '—'}</dd><dt>Previous exit</dt><dd>${s.last_exit ?? '—'}</dd><dt>Deployed at</dt><dd>▨ not recorded</dd></dl>${act}`;
+    h = html`<p class="kind"><span class="g-${st}">${GLYPH[st]}</span> Service · ${s.state}</p><h2>${s.name}</h2><dl><dt>Label</dt><dd>${s.label}</dd><dt>What</dt><dd>${s.category} · ${s.scope} · ${s.domain}</dd><dt>PID</dt><dd>${s.pid ?? '—'}</dd><dt>Previous exit</dt><dd>${s.last_exit ?? '—'}</dd><dt>Last request</dt><dd>${requestDetail(s.last_request)}</dd><dt>Deployed at</dt><dd>▨ not recorded</dd></dl>${act}`;
   }
   put(details, h); swap();
   if (shell.commands.get(id)) shell.commands.select(id); else shell.setContext(details.querySelector('h2')?.textContent || '');

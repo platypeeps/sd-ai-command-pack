@@ -18,13 +18,15 @@ source guarded on its own so one that fails is a reason and not an empty list
 - `git`: `fleet.collect("repos")`, v1 Operations > Repos, each row with
   `repos_screen.primary`'s state, headline, detail and remedy. Nothing fetches
   or pulls.
-- `sessions`: `fleet.collect("sessions")`, v1 Operations > Sessions:
-  worktree counts and the sd-* processes it lists.
+- `sessions`: `fleet.collect("sessions")`: worktree counts, each worktree's
+  repo, name, branch, path and state, abandoned first, and the sd-* processes
+  it lists (pack sd:7517 retired Operations > Sessions, which listed them).
 - `claude`: `claude_sessions.document`, each Claude session on this Mac: its
   current task, the age of its last action, whether it waits on the operator
   and whether it is safe to exit (sd:5106).
 - `services` and `jobs`: `services.inventory` and `operations.inventory`,
-  v1 Operations > Services and > Jobs, with the revision each write sends.
+  with the revision each write sends and each service's `last_request`, as
+  the retired Operations > Services showed it (pack sd:7517).
   Each job carries `last_run`, read from `<cron_root>/logs/.<job>.stamp`, the
   start, end and exit the cron-jobs wrapper writes for every run (sd:2210):
   launchd keeps no run time, and a log's write time is not one. Each job
@@ -385,7 +387,11 @@ def _sessions(read) -> dict:
             not isinstance(tree, dict) or not isinstance(tree.get("live"), bool) for tree in trees):
         raise ValueError("fleet collector returned an incomplete sessions document")
     abandoned = sum(1 for tree in trees if not tree["live"])
-    return {"registered": len(trees), "abandoned": abandoned,
+    # Each worktree's row, abandoned first, as Operations > Sessions listed them (pack sd:7517).
+    rank = {state: number for number, state in enumerate(fleet_module.STATES)}
+    rows = sorted(({key: tree.get(key) or "" for key in ("repo", "name", "branch", "path", "state")} for tree in trees),
+                  key=lambda row: (rank.get(row["state"], len(fleet_module.STATES)), row["repo"], row["name"]))
+    return {"registered": len(trees), "abandoned": abandoned, "worktrees": rows,
             "processes": [{key: proc.get(key) for key in ("pid", "elapsed", "command")} for proc in procs if isinstance(proc, dict)],
             "processes_error": document.get("processes_error") or ""} | _seen(document)
 
@@ -393,7 +399,8 @@ def _sessions(read) -> dict:
 def _services(connection, backend) -> list[dict]:
     from sd_db import services
 
-    keep = ("name", "label", "scope", "domain", "category", "state", "pid", "last_exit", "last_signal", "revision")
+    keep = ("name", "label", "scope", "domain", "category", "state", "pid", "last_exit", "last_signal", "revision",
+            "last_request")
     return [{key: entry.get(key) for key in keep} | {"capabilities": entry.get("capabilities") or {}}
             for entry in services.inventory(connection, backend=backend)["services"]]
 
