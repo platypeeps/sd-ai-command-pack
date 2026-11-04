@@ -7,12 +7,15 @@
 # they live here, never in the checkout or in a setting the page writes.
 #
 #   tile|<realm>|<tile>|<label>|<folder>|<url or ->[|<host>]
-#   act|<tile>|<label>|<command>
+#   act|<tile>|<label>|<command>[|<help>]
 #
 # <realm> is an id in dashboard.realms; <tile> is a lower-case id of your
 # own. Visit opens <url>; each Overview read asks it once and says whether
-# it answers. Each act line is a button. Its command is split as a shell
-# would split it, with no shell: no pipe, no $VAR, no ~. It runs in
+# it answers. Each act line is a button. <help> says in plain words what
+# the button does; its hover shows it, with the command on a second line.
+# With no <help>, the hover names the action and the command. The line
+# splits on every |, so a command holds none. The command is split as a
+# shell would split it, with no shell: no pipe, no $VAR, no ~. It runs in
 # <folder>, in its own session, with its output in
 # ~/.local/state/system/place-tiles/<realm>/<tile>/<action>/start.log.
 # Wrap a command that needs a shell or a login PATH: /bin/zsh -lc "...".
@@ -28,11 +31,11 @@
 # this machine can reach: 127.0.0.1 is this machine's, not the host's.
 
 tile|work|simulator|World simulator|~/repos/example-org/example-simulator|http://work-mac.example.test:8740/studio|work-mac
-act|simulator|Start|./example-simulator.sh studio
-act|simulator|Stop|./example-simulator.sh studio-stop
-act|simulator|Update|git pull --ff-only
+act|simulator|Start|./example-simulator.sh studio|Starts the simulator's studio server.
+act|simulator|Stop|./example-simulator.sh studio-stop|Stops the studio server.
+act|simulator|Update|git pull --ff-only|Pulls the newest code; refuses local changes.
 
 tile|acme|staging|Staging site|~/deploy/acme-website|https://staging.example.test
-act|staging|Deploy|/bin/zsh -lc "npm run staging:deploy"
-act|staging|Tear down|/bin/zsh -lc "npm run staging:down"
-act|staging|Refresh|/bin/zsh -lc "npm run staging:up"
+act|staging|Deploy|/bin/zsh -lc "npm run staging:deploy"|Builds the site and puts it on staging.
+act|staging|Tear down|/bin/zsh -lc "npm run staging:down"|Takes the staging site down.
+act|staging|Refresh|/bin/zsh -lc "npm run staging:up"|Starts staging again with the current build.

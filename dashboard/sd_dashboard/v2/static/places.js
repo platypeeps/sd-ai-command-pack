@@ -56,7 +56,9 @@
   function tileHTML(r) {
     const [st, words] = r.probe ? ANSWER[String(r.probe.answers)] : ['', () => 'no link'];
     const off = r.here || r.host ? '' : r.why;
-    const tip = a => r.host ? `Asks ${r.host} to run ${a.command} in the tile's folder there.` : `Runs ${a.command} in the tile's folder.`;
+    // Pack sd:7536: the act line's help says what the button does; with none, the hover names the action. The command
+    // is the hover's second line.
+    const tip = a => `${a.help || (r.host ? `Asks ${r.host} to run the ${a.label} action in this tile's folder there.` : `Runs the ${a.label} action in this tile's folder.`)}\n${a.command}`;
     return html`<li class="place-tile" data-tile="${r.id}" data-label="${r.label}">
       <div class="pt-head"><h3>${r.label}</h3><span class="pt-st g ${st}">${st ? html`<span aria-hidden="true">${GLYPH[st]}</span> ` : ''}${words(r.probe)}</span></div>
       ${r.url ? html`<p><a class="btn quiet sm" href="${r.url}" target="_blank" rel="noopener">${window.shell.ICON('arrow-up-right')} Visit</a></p>` : ''}

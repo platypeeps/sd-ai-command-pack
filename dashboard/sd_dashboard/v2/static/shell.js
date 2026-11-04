@@ -635,12 +635,15 @@
     out.push(s.slice(at));
     while (open.length) out.push(HELP_TAGS[open.pop()][1]);
     return html`${out}`; };
+  // A command button's tip is plain text: a CLI line's <path> is not a tag. Pack sd:7536: each line break in it shows as
+  // one, so a tile's hover puts its command on a line of its own.
+  const tipLines = s => html`${String(s).split('\n').map((line, i) => i ? html`<br>${line}` : line)}`;
   // help:end
   // A tip's control names the popover only while it shows; a help icon keeps its own aria-expanded.
   const untip = () => document.querySelectorAll('[data-tip][aria-describedby="help-pop"]').forEach(b => b.removeAttribute('aria-describedby'));
   function showHelp(btn) {
     untip();
-    put(pop, btn.dataset.help != null ? helpText(btn.dataset.help) : html`${btn.dataset.tip}`); pop.hidden = false; place(btn);
+    put(pop, btn.dataset.help != null ? helpText(btn.dataset.help) : tipLines(btn.dataset.tip)); pop.hidden = false; place(btn);
     btn.setAttribute('aria-describedby', 'help-pop');
   }
   function hideHelp() {

@@ -635,7 +635,7 @@ OUT.toasts[0].undo(); await flush();""")
         self.assertGreaterEqual(SHELL_JS.count("data-cmd=\"${c.id}\" data-obj=\"${id}\" data-tip=\"${tipOf(c, o)}\""), 2)
         self.assertNotIn("title=\"${tipOf(", SHELL_JS)
         self.assertIn("const b = e.target.closest?.('.help, [data-tip]');", SHELL_JS, "the hover delay skips the command buttons")
-        self.assertIn("btn.dataset.help != null ? helpText(btn.dataset.help) : html`${btn.dataset.tip}`", SHELL_JS,
+        self.assertIn("btn.dataset.help != null ? helpText(btn.dataset.help) : tipLines(btn.dataset.tip)", SHELL_JS,
                       "a tip is plain text: a CLI line's <path> is not a tag")
 
     def test_run_and_bulk_ask_through_the_one_test(self):
