@@ -51,7 +51,7 @@
     const [g, mark, word] = state(r), open = r.id === OPEN;
     return html`<tr data-id="${r.id}" aria-selected="${String(r.id === SELECTED)}">
       <td class="g g-${g}" title="${word}"><span aria-hidden="true">${mark}</span><span class="sr">${word}</span></td>
-      <td class="what"><button class="expand" type="button" data-expand="${r.id}" aria-expanded="${String(open)}" aria-label="${`Rendered files: ${r.title}`}"><svg class="i" aria-hidden="true"><use href="#i-chevron-right"/></svg></button><button type="button">${r.title}</button><span class="file">${r.folder}</span></td>
+      <td class="what"><div class="lead"><button class="expand" type="button" data-expand="${r.id}" aria-expanded="${String(open)}" aria-label="${`Rendered files: ${r.title}`}"><svg class="i" aria-hidden="true"><use href="#i-chevron-right"/></svg></button><button type="button">${r.title}</button><span class="file">${r.folder}</span></div></td>
       <td class="repo" data-meta="${` · ${r.repo} · ${files(count(r))}`}">${r.kind || '—'}</td>
       <td class="kind">${r.repo}</td>
       <td class="num">${count(r)}</td>

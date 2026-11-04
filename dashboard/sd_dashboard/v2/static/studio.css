@@ -35,9 +35,12 @@
 .details details.aside summary { cursor: pointer; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-muted); }
 .details details.aside summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 
-/* sd:7490 · The chevron before a project's title expands its row; one row at a time. It turns down when open. */
-.ledger .what button.expand { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem;
-  margin-right: var(--space-2xs); vertical-align: middle; border-radius: var(--radius-sm); color: var(--color-ink-2); cursor: pointer; }
+/* sd:7490 · The chevron before a project's title expands its row; one row at a time. It turns down when open. It keeps
+ * its own column, so a long title wraps beside it, not under it. */
+.ledger .what .lead { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-2xs); align-items: center; }
+.ledger .what .lead > :not(.expand) { grid-column: 2; }
+.ledger .what button.expand { grid-row: span 2; align-self: start; display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem; border-radius: var(--radius-sm); color: var(--color-ink-2); cursor: pointer; }
 .ledger .what button.expand .i { width: var(--icon-sm); height: var(--icon-sm); transition: transform var(--dur-fast) var(--ease-out); }
 .ledger .what button.expand[aria-expanded="true"] .i { transform: rotate(90deg); }
 .ledger .what button.expand:hover { background: var(--color-well); color: var(--color-ink); }
