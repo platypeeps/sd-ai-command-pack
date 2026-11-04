@@ -267,8 +267,10 @@ def _repos(connection) -> list[dict]:
     out = []
     for row in repos.registered(connection):
         out.append({
-            "path": row["path"], "remote": row["remote"] or "", "mode": row["mode"], "ci": row["ci"],
-            "runner_merge": row["runner_merge"], "managed": "yes" if row["managed"] else "no",
+            "path": row["path"], "remote": row["remote"] or "", "mode": row["mode"],
+            # pack sd:7366: both read the policy; the page keeps the field names it always had.
+            "ci": repos.policy_ci(row["declarations"]), "runner_merge": repos.policy_merge(row["declarations"]),
+            "managed": "yes" if row["managed"] else "no",
             # sd:3075: NULL is the hub; a database before migration 24 has no column and reads as the hub.
             "lane_host": (row["lane_host"] if "lane_host" in row.keys() else None) or repos.LANE_HUB,
             "pieces_source": row["pieces_source"],
@@ -607,6 +609,7 @@ def set_repo(connection: sqlite3.Connection, field: str, path: str, value, befor
             raise repos.RepoRefusal(f"{path} is not a registered repository")
         current = (("yes" if row[column] else "no") if column in ("managed", "dependabot")
                    else repos.issues_policy(connection, row["path"]) if column == "github_issues"
+                   else repos.policy_merge(row["declarations"]) if column == "runner_merge"
                    else (row[column] or "off") if column == "jira_project" else row[column])
         if current != before:
             raise StaleSetting(f"{column} for {path} is {current} now, not {before}; read the page again")

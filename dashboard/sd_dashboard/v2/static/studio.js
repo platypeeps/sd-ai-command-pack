@@ -108,10 +108,13 @@
       const FILES = ROWS.flatMap(r => r.roots.flatMap(root => root.files.map(f => ({ ...f, media: f.type, id: fileId(r, f), type: 'studio file',
         label: f.name, file: `${r.repo}/${f.path}`, pinned: !!f.pinned, hidden: !!f.hidden }))));
       // sd:7151: a scan that could not read a folder says so first; only a clean scan with no project says there is none.
-      const problems = doc.problems || [];
+      // sd:7392: with no project, the banner says how many repositories the scan read, so a problem beside them is not "nothing read".
+      const problems = doc.problems || [], read = doc.repositories || 0;
+      const none = read ? `The scan read ${plural(read, 'repository', 'repositories')} and found no project in ${read === 1 ? 'it' : 'them'}.`
+        : 'No repository was read, so this is not a sign that no project exists.';
       return { objects: [...ROWS, ...FILES],
         state: problems.length ? { kind: 'partial', text: `${problems.map(p => p.replace(/\.$/, '')).join(' · ')}. ${ROWS.length
-          ? 'The list holds the projects the scan read.' : 'No project was read, so this is not a sign that none exists.'}`, source: '/api/studio' }
+          ? 'The list holds the projects the scan read.' : none}`, source: '/api/studio' }
           : ROWS.length ? null : { kind: 'empty', text: 'No project.json is under the repositories yet.', source: '/api/studio' } };
     },
     clear: () => { DOC = null; ROWS = []; draw(); },

@@ -144,6 +144,7 @@ class TheProjects(ScreenCase):
         self.assertEqual(len(doc["problems"]), 1, doc["problems"])
         self.assertRegex(doc["problems"][0], r"^art: songs could not be read: .*Permission denied")
         self.assertEqual(doc["attention"]["state"], "caution")
+        self.assertEqual(doc["repositories"], 1)
 
     def test_a_repo_root_that_does_not_resolve_is_a_problem_not_an_empty_list(self):
         missing = Path(self.tmp.name) / "no-such-root"
@@ -152,16 +153,78 @@ class TheProjects(ScreenCase):
         self.assertEqual(len(doc["problems"]), 1, doc["problems"])
         self.assertTrue(doc["problems"][0].startswith(f"REPO_ROOT {missing} does not resolve: "), doc["problems"])
 
-    def test_two_registered_repositories_with_one_name_are_neither_served(self):
+    def test_two_registered_repositories_with_one_name_are_each_keyed_by_their_parent_and_read(self):
+        """sd:7392: two checkouts named art under different parents are both read, each keyed parent-name."""
         twin = self.root / "other" / "art"
+        (twin / "p" / "media").mkdir(parents=True)
+        (twin / "p" / "media" / "a.mp3").write_bytes(MEDIA)
+        (twin / "p" / "project.json").write_text('{"kind": "song", "roots": {"media": "media"}}', encoding="utf-8")
+        register(self.connection, twin)
+        doc = self.read()
+        self.assertEqual(doc["problems"], [])
+        self.assertEqual(doc["repositories"], 2)
+        self.assertEqual([p["id"] for p in doc["projects"]], ["example-art/shirts/cat", "example-art/songs/broken", "other-art/p"])
+        self.assertIsNotNone(studio.located(self.connection, "example-art/shirts/cat/candidates/one.png", self.root))
+        self.assertIsNotNone(studio.located(self.connection, "other-art/p/media/a.mp3", self.root))
+        self.assertIsNone(studio.located(self.connection, "art/shirts/cat/candidates/one.png", self.root))
+
+    def test_a_qualified_key_that_still_clashes_is_neither_served_and_named(self):
+        """sd:7392: example/art keys as example-art, which a checkout named example-art already holds: neither is served."""
+        for path in (self.root / "other" / "art", self.root / "x" / "example-art"):
+            (path / "p").mkdir(parents=True)
+            (path / "p" / "project.json").write_text('{"kind": "song"}', encoding="utf-8")
+            register(self.connection, path)
+        doc = self.read()
+        self.assertEqual(doc["problems"], ["Two registered repositories take the key example-art (example/art, x/example-art): "
+                                           "neither is served."])
+        self.assertEqual([p["id"] for p in doc["projects"]], ["other-art/p"])
+        self.assertEqual(doc["repositories"], 1)
+        self.assertIsNone(studio.located(self.connection, "example-art/shirts/cat/candidates/one.png", self.root))
+
+    def test_a_qualified_key_that_is_no_name_is_not_served_and_named(self):
+        """sd:7392: a twin under `_drafts` keys as `_drafts-art`, which no URL segment may be: it is named, not served."""
+        twin = self.root / "_drafts" / "art"
         (twin / "p").mkdir(parents=True)
         (twin / "p" / "project.json").write_text('{"kind": "song"}', encoding="utf-8")
         register(self.connection, twin)
         doc = self.read()
-        self.assertEqual(doc["projects"], [])
-        self.assertEqual(doc["problems"], ["Two registered repositories are named art: neither is served."])
-        self.assertIsNone(studio.located(self.connection, "art/shirts/cat/candidates/one.png", self.root))
+        self.assertEqual(doc["problems"], ["The registered repository _drafts/art shares its name, and _drafts-art is no key: "
+                                           "it is not served."])
+        self.assertEqual(([p["id"] for p in doc["projects"]], doc["repositories"]),
+                         (["example-art/shirts/cat", "example-art/songs/broken"], 1))
 
+    def test_a_repository_whose_own_folder_does_not_list_is_not_counted_as_read(self):
+        checkout = self.root / "example" / "art"
+        checkout.chmod(0)
+        self.addCleanup(checkout.chmod, 0o755)
+        doc = self.read()
+        self.assertEqual((doc["projects"], doc["repositories"]), ([], 0))
+        self.assertRegex(doc["problems"][0], r"^art could not be read: .*Permission denied")
+
+    def test_a_media_name_with_spaces_and_punctuation_lists_and_resolves(self):
+        """sd:7395: a final render is named like a title; the gallery lists it and the file route finds it."""
+        media = self.root / "example" / "art" / "shirts" / "cat" / "media"
+        (media / "Song Title!.mp4").write_bytes(MEDIA)
+        roots = {r["role"]: r for r in self.read()["projects"][0]["roots"]}
+        self.assertIn("shirts/cat/media/Song Title!.mp4", [f["path"] for f in roots["media"]["files"]])
+        found = studio.located(self.connection, "art/shirts/cat/media/Song%20Title%21.mp4", self.root)
+        self.assertEqual(found, ((media / "Song Title!.mp4").resolve(), "video/mp4"))
+
+    def test_a_dot_a_hidden_or_a_control_name_still_never_lists_or_resolves(self):
+        """sd:7395: the looser last-segment rule still refuses '..', a leading dot, a control or format character."""
+        media = self.root / "example" / "art" / "shirts" / "cat" / "media"
+        for name in (".hidden.mp4", "bell\x07.mp4", "rtl\u202egnp.mp4"):
+            (media / name).write_bytes(MEDIA)
+        listed = [f["name"] for r in self.read()["projects"][0]["roots"] for f in r["files"]]
+        self.assertEqual(sorted(listed), ["clip.mp4", "one.png", "take.wav"])
+        for tail in ("art/shirts/cat/media/.hidden.mp4", "art/shirts/cat/media/bell%07.mp4", "art/shirts/cat/media/rtl%E2%80%AEgnp.mp4",
+                     "art/shirts/cat/media/..", "art/shirts/cat/media/%2E%2E%2Fclip.mp4", "art/shirts/cat/media/..%2F..%2Fstray.png",
+                     "art/shirts/cat/media/a%00.mp4"):
+            with self.subTest(tail=tail):
+                self.assertIsNone(studio.located(self.connection, tail, self.root))
+        for name in ("..", ".", ".mp4", "a/b.mp4", "a\x00.mp4", "tab\t.mp4", "", "Song Title!.mp4"):
+            with self.subTest(name=name):
+                self.assertEqual(studio.file_name(name), name == "Song Title!.mp4")
 
 def name_item(root: Path, item: int, folder: str = "shirts/cat") -> None:
     """The project at `folder` names `item` as its sd item."""
@@ -511,18 +574,33 @@ class TheServer(BrowserSession):
     def test_scan_problems_show_before_the_page_says_no_project_json_exists(self):
         """sd:7151: a scan that could not read a folder found nothing it can vouch for, so the page names the problem."""
         doc = {"read": "2026-11-01T07:00:00Z", "root": "/repos", "projects": [], "attention": {"state": "caution", "n": 1, "what": "x"},
+               "repositories": 0,
                "problems": ["art: songs could not be read: [Errno 13] Permission denied",
-                            "Two registered repositories are named twin: neither is served."]}
+                            "Two registered repositories take the key twin (a/twin, b-twin): neither is served."]}
         out = self.run_page(doc, "R.details = ELS.details.html;")
         last = out["states"][-1]
         self.assertEqual(last["kind"], "partial", out["states"])
-        self.assertTrue(last["text"].startswith("art: songs could not be read: [Errno 13] Permission denied · Two registered "
-                                                "repositories are named twin: neither is served. No project was read"), last["text"])
+        self.assertEqual(last["text"], "art: songs could not be read: [Errno 13] Permission denied · Two registered repositories "
+                                       "take the key twin (a/twin, b-twin): neither is served. No repository was read, so this is "
+                                       "not a sign that no project exists.")
         self.assertIn("The scan named a problem, so nothing is selected.", out["R"]["details"])
         self.assertNotIn("No project.json is under the repositories", json.dumps(out["states"]) + out["R"]["details"])
         out = self.run_page({**doc, "problems": []}, "R.details = ELS.details.html;")
         self.assertEqual(out["states"][-1]["kind"], "empty")
         self.assertIn("No project.json is under the repositories yet.", out["R"]["details"])
+
+    def test_a_scan_that_read_repositories_and_found_no_project_says_how_many_it_read(self):
+        """sd:7392: a problem beside repositories that were read is not 'No project was read': the banner counts them."""
+        doc = {"read": "2026-11-01T07:00:00Z", "root": "/repos", "projects": [], "attention": {"state": "ok", "n": 0, "what": "x"},
+               "repositories": 3, "problems": ["Two registered repositories take the key twin (a/twin, b-twin): neither is served."]}
+        out = self.run_page(doc, "R.details = ELS.details.html;")
+        last = out["states"][-1]
+        self.assertEqual(last["kind"], "partial", out["states"])
+        self.assertEqual(last["text"], "Two registered repositories take the key twin (a/twin, b-twin): neither is served. "
+                                       "The scan read 3 repositories and found no project in them.")
+        self.assertNotIn("No project was read", last["text"])
+        one = self.run_page({**doc, "repositories": 1}, "")["states"][-1]["text"]
+        self.assertTrue(one.endswith("The scan read 1 repository and found no project in it."), one)
 
     def test_a_stage_move_posts_the_items_route_and_a_stale_or_skipped_one_writes_nothing(self):
         """The design's criterion: a stage move with a stale revision answers 409 and writes no note; a skip is a 400."""
@@ -576,6 +654,21 @@ class TheServer(BrowserSession):
         self.assertEqual((status, headers["Content-Range"], headers["Accept-Ranges"], body), (206, "bytes 0-99/1000", "bytes", MEDIA[:100]))
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/take.wav", Range="bytes=-10")
         self.assertEqual((status, headers["Content-Range"], body), (206, "bytes 990-999/1000", MEDIA[990:]))
+
+    def test_a_media_name_with_spaces_and_punctuation_is_linked_encoded_and_served_with_a_range(self):
+        """sd:7395: studio.js links 'Song Title!.mp4' encoded; the server decodes it and answers 200 and a 206 Range."""
+        (self.root / "example" / "art" / "shirts" / "cat" / "media" / "Song Title!.mp4").write_bytes(MEDIA)
+        doc = json.loads(self.fetch("/api/studio")[2])
+        details = self.run_page(doc, "window.PAGE_LIST.select('art/shirts/cat'); R.details = ELS.details.html;")["R"]["details"]
+        self.assertIn('src="/studio/files/art/shirts/cat/media/Song%20Title!.mp4"', details)
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/Song%20Title!.mp4")
+        self.assertEqual((status, headers["Content-Type"], body), (200, "video/mp4", MEDIA))
+        status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/Song%20Title%21.mp4", Range="bytes=10-19")
+        self.assertEqual((status, headers["Content-Range"], body), (206, "bytes 10-19/1000", MEDIA[10:20]))
+        self.post("/api/studio/view", {"file": "art/shirts/cat/media/Song Title!.mp4", "pinned": True})
+        doc = json.loads(self.fetch("/api/studio")[2])
+        media = {f["name"]: f for r in doc["projects"][0]["roots"] for f in r["files"]}
+        self.assertTrue(media["Song Title!.mp4"]["pinned"])
 
     def test_a_range_past_the_end_is_416_and_one_that_does_not_parse_gets_the_whole_file(self):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=1000-")

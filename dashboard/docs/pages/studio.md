@@ -12,11 +12,22 @@ A file that does not parse lists with its error; an unknown kind or role,
 or a root that leaves the project folder, lists as a problem and the root
 is left out. A machine with no `project.json` shows an empty list.
 
+A repository's key is its folder name. Two registered repositories of one
+name each take their path under `REPO_ROOT` with `-` for `/`
+(`alpha-tools`, `beta-tools`), so both are read (sd:7392); a key two still
+share is served for neither and listed as a problem. When the scan names
+a problem and finds no project, the banner says how many repositories it
+read.
+
 Details shows each root's images, audio and video, listed from disk: the
 media is untracked, so git is never asked. Each file is served at
 `/studio/files/<repo>/<path in the repository>` under `designs.resolve`'s
-rules (every segment a name, the file inside the repository) and only
+rules (every folder a name, the file inside the repository) and only
 inside a root a project names; each answer carries a sandbox policy.
+A file's own name may hold spaces and punctuation, such as
+`Song Title!.mp4` (sd:7395): the link encodes it and the server decodes
+it. A name that starts with a dot, or holds a `/` or a control
+character, is never listed or served.
 `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and
 `Content-Range`, so a player seeks; a range past the end is 416, and a
 header that does not parse gets the whole file.

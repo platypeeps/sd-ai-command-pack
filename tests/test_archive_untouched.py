@@ -464,12 +464,12 @@ class TheArchiveIsAScopeBoundary(unittest.TestCase):
         walking `docs/work` itself. This asserts both halves of that -- the
         delegation is present, and no walk sits beside it.
         """
-        page = (REPO_ROOT / "skills" / "sd-plan" / "SKILL.md").read_text(encoding="utf-8")
+        page = (REPO_ROOT / "contrib" / "sd-plan" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("sd-review --scope planning", page)
         for walk in ("glob(", "iterdir", "os.walk", "find docs/work", "ls docs/work"):
             self.assertNotIn(
                 walk, page,
-                f"skills/sd-plan/SKILL.md enumerates items itself via {walk!r}, "
+                f"contrib/sd-plan/SKILL.md enumerates items itself via {walk!r}, "
                 "so sd-review --scope planning no longer covers it",
             )
 

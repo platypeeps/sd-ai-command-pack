@@ -1,45 +1,29 @@
-"""Build runs as OTLP traces, read from the store (pack sd:6943).
+"""Build runs read from the store into the monthly lane report (pack sd:6947).
 
-`sd-db telemetry export` turns each ended build run into one trace for the
-Phoenix project `sd-workflow`: a root span for the run, then its claim,
-build, each review round, enqueue, lane and merge, as far as the run's row,
-its notes and its cost rows record them. The run id is the trace id and each
-span id hashes the run id and the span's name, so a second export sends the
-same spans again and the collector keeps one copy: the export backfills
-history and is safe to run every night.
+`run_spans` turns each ended build run into its steps: a root for the run,
+then its claim, build, each review round, enqueue, lane and merge, as far as
+the run's row, its notes and its cost rows record them. Nothing leaves the
+store: the genai-traces collector is the one trace sink, and sd-db sends no
+traces of its own (pack sd:7365).
 
-Metadata only: item ids and titles, the repository, the model, cost and
-tokens, the review round, the outcome and a failure class. No note body,
-prompt or `detail` text leaves the store: those hold local paths and review
-prose. A missing collector is a skip, never a failure.
+`month_report` reads those steps into a monthly Markdown draft for the
+writing pipeline: item ids, PR numbers, counts, cost and run ids, never a
+title, note body or detail.
 
 The lane's prepare and gate steps live in the lane's own files, not here:
-the `lane` span runs from the enqueue to the merge or the run's end.
-
-`month_report` reads the same spans into a monthly Markdown draft for the
-writing pipeline (pack sd:6947), under the same rule: item ids, PR numbers,
-counts, cost and trace links, never a title, note body or detail.
+the `lane` step runs from the enqueue to the merge or the run's end.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-import urllib.error
-import urllib.request
 from collections import Counter
 from datetime import date, datetime, timedelta
 
 from . import build
 
-PROJECT = "sd-workflow"
-#: `genai-traces.sh`'s OTLP/HTTP port; `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` overrides it.
-ENDPOINT = "http://127.0.0.1:4338/v1/traces"
-BATCH = 50
-#: `genai-traces.sh`'s Phoenix UI; a report links each notable run's trace there.
-PHOENIX_UI = "http://127.0.0.1:6016"
-#: A report links the first run of each failure class, then this many costliest merged runs.
+#: A report names the first run of each failure class, then this many costliest merged runs.
 COSTLIEST = 3
 
 #: The failure classes, first match wins, read from a run's outcome and detail.
@@ -124,8 +108,8 @@ def run_spans(connection, row: dict) -> list[dict]:
     merged = enqueued and next((note for note in notes if note["timestamp"] >= enqueued["timestamp"]
                                 and note["body"].startswith("Code delivery ")), None)
     spans = [_span(ident, "build_run", start, end, {
-        **common, "openinference.span.kind": "CHAIN", "sd.item_titles": " | ".join(titles),
-        "sd.branch": row["branch"], "sd.model": row["model"], "llm.model_name": row["model"],
+        **common, "sd.item_titles": " | ".join(titles),
+        "sd.branch": row["branch"], "sd.model": row["model"],
         "sd.cost_usd": float(cost[0]) if cost[0] is not None else None,
         "sd.tokens_in": cost[1], "sd.tokens_out": cost[2], "sd.review_round": row["review_round"],
         "sd.step": row["step"], "sd.outcome": row["outcome"], "sd.failure_class": failure}, root=True, error=failure),
@@ -149,41 +133,11 @@ def run_spans(connection, row: dict) -> list[dict]:
 
 
 def ended_runs(connection) -> list[dict]:
-    """Every ended build run, oldest first: the whole history, each export."""
+    """Every ended build run, oldest first."""
     return [dict(row) for row in connection.execute(
         "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
         "WHERE assignment.scope = ? AND runner_run.released_at IS NOT NULL AND runner_run.outcome IS NOT NULL "
         "ORDER BY runner_run.created_at, runner_run.id", (build.SCOPE,))]
-
-
-def payload(spans: list[dict]) -> dict:
-    """The OTLP/JSON request body for `spans`."""
-    resource = _attributes({"service.name": PROJECT, "openinference.project.name": PROJECT})
-    return {"resourceSpans": [{"resource": {"attributes": resource},
-                               "scopeSpans": [{"scope": {"name": "sd_db.telemetry"}, "spans": spans}]}]}
-
-
-def export(connection, endpoint: str = ENDPOINT, *, timeout: float = 10.0) -> dict:
-    """Send every ended run; `{"runs", "spans", "skipped"}`. `skipped` names why nothing was sent, else None.
-
-    A refused or unreachable collector is a skip; an HTTP error from a reached one raises, it is a fault.
-    """
-    runs = ended_runs(connection)
-    spans = [run_spans(connection, row) for row in runs]
-    sent = 0
-    for first in range(0, len(spans), BATCH):
-        batch = [span for group in spans[first:first + BATCH] for span in group]
-        request = urllib.request.Request(endpoint, data=json.dumps(payload(batch)).encode(), method="POST",
-                                         headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=timeout):
-                pass
-        except urllib.error.HTTPError:
-            raise
-        except (urllib.error.URLError, OSError) as failure:
-            return {"runs": len(runs), "spans": sent, "skipped": f"no collector at {endpoint}: {failure}"}
-        sent += len(batch)
-    return {"runs": len(runs), "spans": sent, "skipped": None}
 
 
 def last_month(today: date | None = None) -> str:
@@ -199,15 +153,14 @@ def _runs(count: int) -> str:
     return f"{count} run" if count == 1 else f"{count} runs"
 
 
-def month_report(connection, month: str, *, ui: str = PHOENIX_UI) -> str:
+def month_report(connection, month: str) -> str:
     """The Markdown draft for the build runs that ended in `month` (`YYYY-MM`, UTC), against the month before.
 
     Merged PRs with their cost and lead time (the bundle's first run to the
     merge), failure classes with their trend, review rounds and the
     repeat-blocker rate (reviewed runs whose blockers outlived every round),
-    denied tool calls, database-lock refusals, and a trace link for the
-    first run of each failure class and the costliest merges. Metadata
-    only, as the export.
+    denied tool calls, database-lock refusals, and the run id of the first
+    run of each failure class and of the costliest merges. Metadata only.
     """
     first = date.fromisoformat(month + "-01")
     before = last_month(first)
@@ -217,7 +170,7 @@ def month_report(connection, month: str, *, ui: str = PHOENIX_UI) -> str:
     prior = Counter(failure_class(row["outcome"], row["detail"]) for row in runs
                     if row["released_at"].startswith(before))
     lines = [f"# Lane report, {month}", "",
-             "Draft from sd-workflow telemetry (`sd-db telemetry report`): metadata only, times in UTC. "
+             "Draft from `sd-db telemetry report`: metadata only, times in UTC. "
              "Not for publication as is.", "",
              f"Build runs ended: {len(this)} ({sum(prior.values())} in {before}).", "",
              "## Merged pull requests", "", "| Repo | PR | Items | Cost (USD) | Lead time (h) | Review rounds |",
@@ -270,5 +223,5 @@ def month_report(connection, month: str, *, ui: str = PHOENIX_UI) -> str:
               f"- Database-lock refusals: {_runs(classes['db_locked'])} ended on one.",
               "", "## Notable runs", ""]
     notable += [(what, ident) for _, what, ident in sorted(merged, key=lambda run: -run[0])[:COSTLIEST]]
-    lines += [f"- {what}: {ui}/redirects/traces/{ident}" for what, ident in notable] or ["- None."]
+    lines += [f"- {what}: build run {ident}" for what, ident in notable] or ["- None."]
     return "\n".join(lines) + "\n"

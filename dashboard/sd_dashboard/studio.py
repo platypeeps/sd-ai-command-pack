@@ -6,16 +6,18 @@ sd item and pins or hides a file; slice 4 (sd:6922) runs a project's tools and s
 **Which projects.** Every `project.json` in a registered repository that sits under `REPO_ROOT`, found by a walk a few
 folders deep that skips dot folders and build output. The page names no repository: a machine with no `project.json`
 shows an empty list, but a folder the walk cannot list, or a `REPO_ROOT` that does not resolve, is a problem the page
-shows first (sd:7151), not an empty list. A repository's key is its folder name; two registered repositories with one name share no key,
-so neither is served and the document names the contest, as Documents does.
+shows first (sd:7151), not an empty list. A repository's key is its folder name; two registered repositories with one
+name each take their path under `REPO_ROOT` with `-` for `/` (`alpha-tools`, `beta-tools`), so both are read (sd:7392).
+A key that two still share is neither's, and the document names it. `repositories` counts the ones the scan read.
 
 **What a project says.** `kind` (`shirt`, `song`, `episode`; a file with no `kind` is another tool's), `title`, `brief`, `item` (`sd:<n>`) and `roots`, a map
 from a role (`reference`, `candidates`, ...) to a folder relative to the project's. A file that does not parse lists
 with its error; a root that leaves the project folder, or names an unknown role, is dropped with its reason.
 
 **The gallery.** Each root's files, listed from disk (the media is untracked: git is never asked), served at
-`/studio/files/<repo key>/<path in the repository>` by `designs.resolve`'s rules with `TYPES` here: every segment a
-name, the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
+`/studio/files/<repo key>/<path in the repository>`, each segment percent-encoded, by `designs.resolve`'s rules with
+`TYPES` here: every folder a name, the file's own name a `file_name` (a title with spaces and `!` is one, sd:7395),
+the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
 file answers under `POLICY`, a sandbox, so an opened SVG runs nothing.
 
 **Seeking.** `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and `Content-Range` (`byte_range`): past the end
@@ -44,8 +46,10 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from . import designs
 
@@ -101,20 +105,32 @@ STAGES = {
 VIEW_ROOT = "studio"
 
 
+def file_name(name: str) -> bool:
+    """Whether a gallery file may carry `name` (sd:7395): a render is named like its title (`Song Title!.mp4`), so any
+    name but one that starts with a dot (`.`, `..`, a hidden file), holds a `/`, or holds a control or format character
+    (NUL, a tab, a right-to-left override). Its folders stay `designs.SEGMENT`s."""
+    return (bool(name) and not name.startswith(".") and "/" not in name
+            and not any(unicodedata.category(c) in ("Cc", "Cf") for c in name))
+
+
 def _repo_root(repo_root: Path | None = None) -> Path:
     return Path(repo_root if repo_root is not None else os.environ.get("REPO_ROOT", REPO_ROOT_DEFAULT)).expanduser()
 
 
 def repositories(connection, repo_root: Path | None = None) -> tuple[dict[str, Path], list[str]]:
     """(key -> checkout) for each registered repository under `REPO_ROOT`, and the problems: a `REPO_ROOT` that does not
-    resolve, or a contested key."""
+    resolve, or a key two checkouts still share.
+
+    A key is the checkout's folder name; two checkouts of one name each take their path under `REPO_ROOT`, its folders
+    joined by `-` (`alpha/tools` is `alpha-tools`), so both are read (sd:7392). A key that is still not one checkout's
+    is neither's, and the problem names it."""
     from sd_db import repos
 
     try:
         base = _repo_root(repo_root).resolve(strict=True)
     except (OSError, RuntimeError) as problem:
         return {}, [f"REPO_ROOT {_repo_root(repo_root)} does not resolve: {problem}"]
-    found: dict[str, list[Path]] = {}
+    named: dict[str, set[Path]] = {}
     for row in repos.registered(connection):
         path = Path(str(row["path"])).expanduser()
         try:
@@ -124,11 +140,21 @@ def repositories(connection, repo_root: Path | None = None) -> tuple[dict[str, P
         if resolved == base or not resolved.is_relative_to(base) or not resolved.is_dir():
             continue
         if designs.SEGMENT.fullmatch(resolved.name):
-            found.setdefault(resolved.name, []).append(resolved)
-    keys = {key: paths[0] for key, paths in found.items() if len(set(paths)) == 1}
-    problems = [f"Two registered repositories are named {key}: neither is served." for key, paths in sorted(found.items())
-                if len(set(paths)) > 1]
-    return dict(sorted(keys.items())), problems
+            named.setdefault(resolved.name, set()).add(resolved)
+    claims: dict[str, set[Path]] = {}
+    for name, paths in named.items():
+        for path in paths:
+            claims.setdefault(name if len(paths) == 1 else "-".join(path.relative_to(base).parts), set()).add(path)
+    keys, problems = {}, []
+    for key, paths in sorted(claims.items()):
+        where = ", ".join(sorted(path.relative_to(base).as_posix() for path in paths))
+        if len(paths) > 1:
+            problems.append(f"Two registered repositories take the key {key} ({where}): neither is served.")
+        elif not designs.SEGMENT.fullmatch(key):
+            problems.append(f"The registered repository {where} shares its name, and {key} is no key: it is not served.")
+        else:
+            keys[key] = next(iter(paths))
+    return keys, problems
 
 
 def _project_files(checkout: Path) -> tuple[list[Path], list[OSError]]:
@@ -150,7 +176,7 @@ def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
         folders[:] = sorted(f for f in folders if designs.SEGMENT.fullmatch(f))
         for name in sorted(names):
             relative = (Path(current) / name).relative_to(checkout).as_posix()
-            found = designs.resolve(relative, checkout, TYPES)
+            found = designs.resolve(quote(relative), checkout, TYPES, file_name)
             if found is None or not found[0].is_relative_to(root):
                 continue
             if len(out) >= FILES:
@@ -229,19 +255,20 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
     return entry
 
 
-def projects(connection, repo_root: Path | None = None, *, listing: bool = True) -> tuple[list[dict], list[str]]:
-    """Every project under `REPO_ROOT`, by repository then folder, and the scan's own problems; `listing` false leaves
-    each root's files out."""
+def projects(connection, repo_root: Path | None = None, *, listing: bool = True) -> tuple[list[dict], list[str], int]:
+    """Every project under `REPO_ROOT`, by repository then folder, the scan's own problems, and how many repositories
+    it read (one whose own folder does not list is not read); `listing` false leaves each root's files out."""
     keys, problems = repositories(connection, repo_root)
-    found = []
+    found, read = [], 0
     for key, checkout in keys.items():
         manifests, unread = _project_files(checkout)
+        read += not any(Path(problem.filename or checkout) == checkout for problem in unread)
         for problem in unread:
             folder = Path(problem.filename or checkout).relative_to(checkout, walk_up=True).as_posix()
             problems.append(f"{key}{'' if folder == '.' else ': ' + folder} could not be read: {problem.strerror or problem}")
         found.extend(entry for entry in (_project(key, checkout, manifest, listing=listing) for manifest in manifests)
                      if entry is not None)
-    return found, problems
+    return found, problems, read
 
 
 def document(connection, *, now: str = "", repo_root: Path | None = None) -> dict:
@@ -249,7 +276,7 @@ def document(connection, *, now: str = "", repo_root: Path | None = None) -> dic
     from .documents_screen import views
     from .v2.pages import attention
 
-    found, problems = projects(connection, repo_root)
+    found, problems, read = projects(connection, repo_root)
     kept, unread = views(connection)
     for entry in found:
         _stage(connection, entry)
@@ -259,7 +286,7 @@ def document(connection, *, now: str = "", repo_root: Path | None = None) -> dic
                 file["pinned"], file["hidden"] = bool(state.get("pinned")), bool(state.get("hidden"))
     return {
         "read": now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "root": str(_repo_root(repo_root)), "projects": found, "problems": problems,
+        "root": str(_repo_root(repo_root)), "projects": found, "problems": problems, "repositories": read,
         "store": {"available": not unread, "reason": unread},
         "attention": attention(("caution" if p["error"] or p["problems"] else "ok" for p in found),
                                {"caution": "projects whose project.json lists a problem"}),
@@ -350,7 +377,7 @@ def view_request(payload: dict):
     file = payload["file"]
 
     def write(connection):
-        if located(connection, file) is None:
+        if located(connection, quote(file)) is None:
             raise ValueError(f"No studio file {file} is served: read the projects again.")
         return {"file": file, **writes.set_view(connection, view_key(file), **fields)}
     return write
@@ -358,12 +385,13 @@ def view_request(payload: dict):
 
 def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path, str] | None:
     """The file `/studio/files/<tail>` names and its type, or None: in a registered repository, inside a root a project
-    of that repository names now, and passing `designs.resolve` with `TYPES`."""
+    of that repository names now, and passing `designs.resolve` with `TYPES` and `file_name`. `tail` is percent-encoded,
+    as the URL carries it; a caller holding a file's plain path quotes it first."""
     key, _, rest = tail.partition("/")
     checkout = repositories(connection, repo_root)[0].get(key)
     if checkout is None or not rest:
         return None
-    found = designs.resolve(rest, checkout, TYPES)
+    found = designs.resolve(rest, checkout, TYPES, file_name)
     if found is None:
         return None
     target = found[0]

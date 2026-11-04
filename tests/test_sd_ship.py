@@ -530,7 +530,7 @@ roles:
     # through a helper, nor one reached by a tool the pack shells out to.
     #
     # `sd-plan` is the criterion's other named command and has no
-    # executable; it is `skills/sd-plan/SKILL.md`. Its own words are the
+    # executable; it is `contrib/sd-plan/SKILL.md` (retired, pack sd:7368). Its own words are the
     # assertion for that half, checked below.
 
     def archive_digest(self) -> dict[str, str]:
@@ -585,7 +585,7 @@ roles:
                  "--", "docs/work/archive").strip(), "")
 
     def test_the_plan_skill_still_disclaims_every_archive_step(self) -> None:
-        page = (ROOT / "skills" / "sd-plan" / "SKILL.md").read_text(encoding="utf-8")
+        page = (ROOT / "contrib" / "sd-plan" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("There is no automatic archive, parking or sweep step.", page)
 
     def test_custom_database_controls_ship_receipts_and_the_actual_reviewer(self):
