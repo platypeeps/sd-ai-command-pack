@@ -162,6 +162,15 @@ def _project_files(checkout: Path) -> tuple[list[Path], list[OSError]]:
     return sorted(out), unread
 
 
+def _address(file: str) -> str | None:
+    """`file` percent-encoded for the file route, or None for a name with undecodable bytes (sd:7406: a Linux name
+    holding a surrogate, as os.walk reads it, which `quote` cannot encode and which no URL could carry)."""
+    try:
+        return quote(file)
+    except UnicodeEncodeError:
+        return None
+
+
 def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
     """A root's servable files, as the gallery links them, and whether the list was cut at `FILES`."""
     out, cut = [], False
@@ -169,7 +178,8 @@ def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
         folders[:] = sorted(f for f in folders if designs.SEGMENT.fullmatch(f))
         for name in sorted(names):
             relative = (Path(current) / name).relative_to(checkout).as_posix()
-            found = designs.resolve(quote(relative), checkout, TYPES, file_name)
+            address = _address(relative)
+            found = None if address is None else designs.resolve(address, checkout, TYPES, file_name)
             if found is None or not found[0].is_relative_to(root):
                 continue
             if len(out) >= FILES:
@@ -370,7 +380,8 @@ def view_request(payload: dict):
     file = payload["file"]
 
     def write(connection):
-        if located(connection, quote(file)) is None:
+        address = _address(file)
+        if address is None or located(connection, address) is None:
             raise ValueError(f"No studio file {file} is served: read the projects again.")
         return {"file": file, **writes.set_view(connection, view_key(file), **fields)}
     return write
