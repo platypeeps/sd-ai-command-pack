@@ -8,6 +8,7 @@ inside the v2 shell (sd:3586), under Fleet's Operations rail section, as one of 
 `/ui/operations.js` declares them, and the server draws only the area `?area=` names.
 """
 
+import contextlib
 import re
 import signal
 
@@ -58,6 +59,23 @@ def _signal_name(number):
         return f"{signal.Signals(number).name} ({number})"
     except ValueError:
         return str(number)
+
+
+@contextlib.contextmanager
+def _one_snapshot(connection):
+    """One deferred read transaction around a page's reads, so they compare one snapshot of the store.
+
+    Tasks, Places, HOA and Reports read through it. Deferred: the connection is read-only and `isolation_level=None`,
+    and WAL keeps a reader's snapshot from its first read to its COMMIT. Inside a caller's transaction it adds none.
+    """
+    if connection.in_transaction:
+        yield
+        return
+    connection.execute("BEGIN")
+    try:
+        yield
+    finally:
+        connection.execute("COMMIT")
 
 
 def moved_to(parameters):
