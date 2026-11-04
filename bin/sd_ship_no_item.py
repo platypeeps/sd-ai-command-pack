@@ -297,7 +297,14 @@ def committed_facts(root: pathlib.Path, *, require_diff: bool = True) -> GitFact
     except Refusal:
         raise Refusal("this checkout has no origin remote; no-item records need one canonical repository") from None
     repository = slug(configured)
-    branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    try:
+        branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    except Refusal:
+        # Close and reopen act on the stored branch, so a detached HEAD (the
+        # hub's pinned checkout, sd:3097) may run them; allocating needs one.
+        if require_diff:
+            raise
+        branch = ""
     if git(root, "status", "--porcelain"):
         raise Refusal("this checkout has uncommitted changes; allocation requires a clean checkout")
     remote, default = sd_lib.upstream(root)
@@ -776,6 +783,8 @@ def write_identity(connection: sqlite3.Connection, store, key: str, revision: in
 
 def rebind_record(root: pathlib.Path, connection, database: pathlib.Path, args, store) -> dict:
     key, facts, revision, state = any_record(connection, store, root, args)
+    if not facts.branch:
+        raise Refusal("--rebind-branch needs a branch checked out; this checkout is on a detached HEAD")
     if state.get("branch") != args.rebind_branch:
         raise Refusal(f"--rebind-branch must name the stored branch {state.get('branch')}")
     walked = NoItemHistory().ancestry_heads(state)
