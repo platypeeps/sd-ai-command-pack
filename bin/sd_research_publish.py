@@ -47,7 +47,7 @@ import sys
 import tempfile
 import urllib.request
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import quote, unquote, urlsplit
@@ -781,7 +781,7 @@ def mirror_targets(
         # Notion returned above, so this is the destination whose default is
         # a path the drain resolves rather than a container it is handed.
         where = str(raw.get(dest.where, "")).strip() or folder or dest.default % repo.name
-        targets.append({
+        target = {
             "destination": dest.name,
             dest.where: where,
             dest.what: str(raw.get(dest.what, "")).strip(),
@@ -789,7 +789,15 @@ def mirror_targets(
             # prints this verbatim, so it never has to carry a second copy of
             # the destination table to say which place a row is waiting on.
             "target": "the %s %s" % (where, dest.noun),
-        })
+        }
+        # A writing piece names the Google account its realm picks (pack
+        # sd:7243); the drain writes with it. Part of the identity, so a copy
+        # in one account is never carried into the other. A document that
+        # names none keeps the request it had, byte for byte.
+        account = str(raw.get("account", "")).strip()
+        if account:
+            target["account"] = account
+        targets.append(target)
     return targets, problems
 
 
@@ -1201,6 +1209,14 @@ def recorded(path: Path, wanted: dict[str, Any], what: str) -> str:
     return str(pending.get(what, "")).strip()
 
 
+def carried_identity(identity: dict[str, Any], cfg: dict[str, Any], where: str) -> dict[str, Any]:
+    """The part of `identity` a recorded id must match to be carried: all of
+    it, but for an entry that `moves` (a writing piece's file, pack sd:7243),
+    whose copy the drain moves to the new container `where` names."""
+    return {field: value for field, value in identity.items()
+            if not (cfg.get("moves") is True and field == where)}
+
+
 def delivered_url(receipt: Path, wanted: dict[str, Any], cfg: dict[str, Any]) -> str:
     """The URL drain step 6 left on `receipt`, for a routine brief's entry
     `cfg` (one carrying its `content`), or "".
@@ -1216,7 +1232,12 @@ def delivered_url(receipt: Path, wanted: dict[str, Any], cfg: dict[str, Any]) ->
     if not isinstance(cfg.get("content"), str):
         return ""
     record = load_record(receipt)
-    if record.get("delivered_to") != wanted or record.get("item") != cfg.get("item"):
+    went = record.get("delivered_to")
+    if not isinstance(went, dict) or record.get("item") != cfg.get("item"):
+        return ""
+    # `wanted` lacks the folder for an entry that moves (`carried_identity`).
+    channel = BY_NAME.get(went.get("destination"))
+    if carried_identity(went, cfg, channel.where if channel else "") != wanted:
         return ""
     url = record.get("url")
     return url.strip() if isinstance(url, str) else ""
@@ -2218,8 +2239,11 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
                 continue
             # The designation is the answer where it gives one; the queue records
             # what a drain did, and never overrides what the document says.
-            carried = "" if request[what] else (recorded(path, identity, what)
-                                                or delivered_url(receipts() / name, identity, cfg))
+            # A writing piece's file keeps its copy across its two folders
+            # (pack sd:7243): the drain moves it from Drafts to Published.
+            carry = carried_identity(identity, cfg, BY_NAME[target["destination"]].where)
+            carried = "" if request[what] else (recorded(path, carry, what)
+                                                or delivered_url(receipts() / name, carry, cfg))
             request[what] = request[what] or carried
             reverted = not force and reverts_to_delivered(path, name, digest)
             if dry:
@@ -2343,6 +2367,8 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
     request["content"] = soft_wraps_joined(request["content"])
     request.update(target)
     request.update(designated_item(cfg)[0])
+    if cfg.get("moves") is True:  # the drain moves a carried copy into the folder (pack sd:7243)
+        request["moves"] = True
     return request
 
 
@@ -2640,38 +2666,82 @@ def enqueue_briefs(connection: Any, items: set[int] | None = None) -> list[str]:
     return enqueue_rows(connection, *brief_docs(connection, items), "brief")
 
 
+#: A writing piece's Drive folder by its stage, the same two in each account
+#: (pack sd:7243, note #40909). A stage not here mirrors nothing.
+PIECE_FOLDERS = {"review": "Writing/Drafts", "ready": "Writing/Drafts", "published": "Writing/Published"}
+#: The realm whose pieces go to the work account; every other realm's go to
+#: the personal one (note #40909).
+WORK_REALM = "work"
+
+
+def piece_accounts(connection: Any) -> Callable[[str], tuple[str, str]]:
+    """A function from a piece's repo to its Drive account, `(address, "")`,
+    or `("", why not)` (pack sd:7243).
+
+    The realm is the dashboard's `places.realm_of`, the rule the Writing page
+    and Tasks use; the address is `realm_sweep.account` of `work` for the work
+    realm and of `personal` for any other. Both are read once, here. A realm
+    list or a setting that did not read is unknown: the piece is held, never
+    sent to the personal Drive by default.
+    """
+    import importlib  # noqa: PLC0415
+    dashboard = str(Path(__file__).resolve().parent.parent / "dashboard")
+    if dashboard not in sys.path:
+        sys.path.insert(0, dashboard)
+    # By name, as `sd_controls` loads the dashboard: it is not on bin/'s lint path.
+    places = importlib.import_module("sd_dashboard.places")
+    sweep = importlib.import_module("sd_dashboard.realm_sweep")
+    import_sd_db()
+    from sd_db import writes  # noqa: PLC0415 - the checkout's `lib/`
+
+    found = places.realms(connection)
+    rules = found["list"] if found["state"] in ("read", "partial") else None
+    unread = "" if rules is not None else "the realm list did not read (%s)" % (
+        "; ".join(found["problems"]) or found["state"])
+    try:
+        rows = writes.read_settings(connection, [sweep.ACCOUNT.format(realm=realm)
+                                                 for realm in (WORK_REALM, "personal")])
+    except Exception as problem:  # unknown, never unset
+        rows, unread = {}, unread or "the account settings did not read: %s" % (problem or type(problem).__name__)
+
+    def account(repo: str) -> tuple[str, str]:
+        realm = places.realm_of(repo, "idea", rules)
+        if realm is None or unread:
+            return "", unread or "its realm is unknown"
+        return sweep.account(WORK_REALM if realm == WORK_REALM else "personal", rows)
+
+    return account
+
+
 def piece_docs(
     connection: Any, items: set[int] | None = None
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
-    """Each repository's DOCS entries for the files of the writing pieces
-    their items designate, and what was wrong (pack sd:7243).
+    """Each repository's DOCS entries for the files of its writing pieces at
+    review or later, and what was wrong (pack sd:7243).
 
-    A piece is designated on its item's `fields.publish`, as a brief is, and
-    one designation covers each file `writing.MIRRORED` names that is there.
-    An entry carries the file's text as `content`, so it takes the brief's
-    route through `mirror_request`, and `sd:<item>/<file>` as its `source`,
-    which tells drain step 5 that no research.conf.py records the copy.
+    No one designates a piece (note #40909): one that is not parked, at a
+    stage `PIECE_FOLDERS` names, mirrors each file `writing.MIRRORED` names
+    that is there, to that stage's Drive folder, in the account its realm
+    picks (`piece_accounts`). An entry carries the file's text as `content`,
+    so it takes the brief's route through `mirror_request`, and
+    `sd:<item>/<file>` as its `source`, which tells drain step 5 that no
+    research.conf.py records the copy. `moves` lets `enqueue` carry the
+    file id from Drafts to Published, so the drain moves the copy.
     """
     import_sd_db()  # the caller holds a connection, so this is the one it has
     from sd_db import writing  # noqa: PLC0415 - the checkout's `lib/`
 
     docs: dict[str, list[dict[str, Any]]] = {}
     problems: list[str] = []
-    rows = connection.execute(
-        "SELECT * FROM item WHERE kind = 'idea' AND piece IS NOT NULL ORDER BY id")
+    rows = [row for row in connection.execute(
+        "SELECT * FROM item WHERE kind = 'idea' AND piece IS NOT NULL AND parked_at IS NULL "
+        "AND repo IS NOT NULL ORDER BY id")
+            if (items is None or row["id"] in items) and row["stage"] in PIECE_FOLDERS]
+    account = piece_accounts(connection) if rows else None
     for row in rows:
-        if items is not None and row["id"] not in items:
-            continue
-        try:
-            fields = json.loads(row["fields"] or "{}")
-        except ValueError:
-            fields = None
-        designation = fields.get("publish") if isinstance(fields, dict) else None
-        if designation is None and isinstance(fields, dict):
-            continue
-        if not isinstance(designation, dict) or not row["repo"]:
-            problems.append("mirror: sd:%s: its fields.publish is not an object on "
-                            "a piece with a repository; not queued" % row["id"])
+        address, why = account(row["repo"])
+        if not address:
+            problems.append("mirror: sd:%s: no Drive account: %s; not queued" % (row["id"], why))
             continue
         try:
             texts, unread = writing.mirror_texts(row)
@@ -2681,17 +2751,15 @@ def piece_docs(
         problems += ["mirror: sd:%s: %s; not queued" % (row["id"], why) for why in unread]
         stem = row["piece"].replace("/", "-")
         for part, (name, text) in texts.items():
-            entry: dict[str, Any] = {"out": "%s-%s" % (stem, part), "title": "%s · %s" % (row["title"], part),
-                                     "item": row["id"], "content": text,
-                                     "source": "sd:%s/%s" % (row["id"], name)}
-            entry.update({destination: dict(designation[destination]) for destination in ("notion", "drive")
-                          if isinstance(designation.get(destination), dict)})
-            docs.setdefault(row["repo"], []).append(entry)
+            docs.setdefault(row["repo"], []).append({
+                "out": "%s-%s" % (stem, part), "title": "%s · %s" % (row["title"], part),
+                "item": row["id"], "content": text, "source": "sd:%s/%s" % (row["id"], name),
+                "moves": True, "drive": {"folder": PIECE_FOLDERS[row["stage"]], "account": address}})
     return docs, problems
 
 
 def enqueue_pieces(connection: Any, items: set[int] | None = None) -> list[str]:
-    """Queue the files of every designated writing piece (`piece_docs`), as
+    """Queue the files of every writing piece at review or later (`piece_docs`), as
     `enqueue_briefs` queues briefs: only a file whose text changed is queued
     again (pack sd:7243)."""
     return enqueue_rows(connection, *piece_docs(connection, items), "piece")

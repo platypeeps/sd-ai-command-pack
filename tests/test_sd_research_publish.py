@@ -3350,10 +3350,12 @@ class BriefTests(Fixture):
 
 
 class PieceTests(Fixture):
-    """pack sd:7243: a writing piece is designated on its item, `fields.publish`, and each of its files queues as a brief does.
+    """pack sd:7243: a writing piece at review or later mirrors each of its files to Drive, with no designation.
 
-    One designation covers the draft and the three reports. Each request carries the file's text from the registered
-    checkout, names the item and `sd:<item>/<file>` as its source, and is queued again only when that file changed.
+    The operator's ruling (note #40909): the stage decides, `review` and `ready` go to `Writing/Drafts` and `published`
+    to `Writing/Published`, the piece's realm picks the account, and a published piece's copy moves, not doubles. Each
+    request carries the file's text from the registered checkout, names the item and `sd:<item>/<file>`, and is queued
+    again only when that file changed.
     """
 
     PIECE = "2026/a-piece"
@@ -3362,6 +3364,7 @@ class PieceTests(Fixture):
     REPORTS = {"research.md": "Source.\n", "fact-check.md": "Claim ledger.\n", "adversarial.md": "Findings.\n"}
     STEMS = ("draft", "research", "fact-check", "adversarial")
     URL = "https://docs.google.com/document/d/example-file-id/edit"
+    WORK, PERSONAL = "work@example.test", "personal@example.test"
 
     def setUp(self) -> None:
         super().setUp()
@@ -3378,10 +3381,15 @@ class PieceTests(Fixture):
             (self.folder / name).write_text(text, encoding="utf-8")
         self.writing = writing
         self.item = writing.import_piece(self.connection, self.key, self.PIECE, who="test")["item"]["id"]
+        self.stage("review")
+        self.account = (self.WORK, "")
+        patcher = unittest.mock.patch.object(PUBLISH, "piece_accounts",
+                                             lambda connection: lambda repo: self.account)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def designate(self, publish: dict) -> None:
-        self.connection.execute("UPDATE item SET fields = json_set(coalesce(fields, '{}'), '$.publish', json(?)) "
-                                "WHERE id = ?", (json.dumps(publish), self.item))
+    def stage(self, stage: str) -> None:
+        self.connection.execute("UPDATE item SET stage = ? WHERE id = ?", (stage, self.item))
         self.connection.commit()
 
     def name(self, stem: str, destination: str = "drive") -> str:
@@ -3393,31 +3401,70 @@ class PieceTests(Fixture):
     def queued(self) -> list[str]:
         return sorted(path.name for path in PUBLISH.QUEUE.glob("*.json")) if PUBLISH.QUEUE.exists() else []
 
-    def test_an_undesignated_piece_queues_nothing(self) -> None:
+    def deliver(self, stem: str) -> None:
+        name = self.name(stem)
+        self.assertEqual(PUBLISH.delivered_main([name, self.request(stem)["fingerprint"], "--url", self.URL]), 0)
+
+    def test_a_piece_before_review_queues_nothing(self) -> None:
+        for stage in ("accepted", "researching", "drafting", "declined"):
+            with self.subTest(stage=stage):
+                self.stage(stage)
+                self.assertEqual(PUBLISH.enqueue_pieces(self.connection), [])
+                self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_a_parked_piece_queues_nothing(self) -> None:
+        self.connection.execute("UPDATE item SET parked_at = '2026-11-01T00:00:00Z' WHERE id = ?", (self.item,))
+        self.connection.commit()
         self.assertEqual(PUBLISH.enqueue_pieces(self.connection), [])
         self.assertFalse(PUBLISH.QUEUE.exists())
 
-    def test_a_designated_piece_queues_each_file_naming_its_item(self) -> None:
-        self.designate({"drive": {}})
+    def test_a_piece_at_review_queues_each_file_into_drafts_for_its_account(self) -> None:
         reports = PUBLISH.enqueue_pieces(self.connection)
         self.assertEqual(self.queued(), sorted(self.name(stem) for stem in self.STEMS), reports)
         draft = self.request("draft")
         self.assertEqual((draft["content"], draft["item"], draft["source"], draft["rendered"], draft["markdown"]),
                          (self.INDEX, self.item, "sd:%d/index.md" % self.item, "", ""))
-        self.assertEqual((draft["document"], draft["title"], draft["folder"]),
-                         ("2026-a-piece-draft", "A piece · draft", "Briefs/my-research"))
+        self.assertEqual((draft["document"], draft["title"], draft["folder"], draft["account"], draft["file"]),
+                         ("2026-a-piece-draft", "A piece · draft", "Writing/Drafts", self.WORK, ""))
         research = self.request("research")
         self.assertEqual((research["content"], research["source"], research["title"]),
                          ("Source.\n", "sd:%d/research.md" % self.item, "A piece · research"))
+        self.assertEqual([path.name for path in PUBLISH.QUEUE.glob("*.notion.json")], [])
+
+    def test_a_ready_piece_stays_in_drafts(self) -> None:
+        self.stage("ready")
+        PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(self.request("draft")["folder"], "Writing/Drafts")
+
+    def test_a_published_piece_moves_its_copy_to_published(self) -> None:
+        PUBLISH.enqueue_pieces(self.connection)
+        self.deliver("draft")
+        self.stage("published")
+        reports = PUBLISH.enqueue_pieces(self.connection)
+        draft = self.request("draft")
+        self.assertEqual((draft["folder"], draft["file"], draft["moves"]), ("Writing/Published", self.URL, True), reports)
+
+    def test_a_copy_in_another_account_is_not_carried(self) -> None:
+        PUBLISH.enqueue_pieces(self.connection)
+        self.deliver("draft")
+        self.account = (self.PERSONAL, "")
+        PUBLISH.enqueue_pieces(self.connection)
+        draft = self.request("draft")
+        self.assertEqual((draft["account"], draft["file"]), (self.PERSONAL, ""))
+
+    def test_an_unread_account_holds_the_piece_and_says_why(self) -> None:
+        self.account = ("", "no google.accounts.work.email setting")
+        reports = PUBLISH.enqueue_pieces(self.connection)
+        self.assertTrue(any("sd:%d" % self.item in line and "google.accounts.work.email" in line
+                            and "not queued" in line for line in reports), reports)
+        self.assertFalse(PUBLISH.QUEUE.exists())
 
     def test_a_missing_report_queues_the_files_that_are_there(self) -> None:
         (self.folder / "adversarial.md").unlink()
-        self.designate({"drive": {}})
         PUBLISH.enqueue_pieces(self.connection)
         self.assertEqual(self.queued(), sorted(self.name(stem) for stem in self.STEMS[:3]))
 
     def test_only_a_changed_file_is_queued_again(self) -> None:
-        self.designate({"drive": {}})
         PUBLISH.enqueue_pieces(self.connection)
         again = PUBLISH.enqueue_pieces(self.connection)
         self.assertFalse(any(line.startswith("mirror: queued") for line in again), again)
@@ -3428,7 +3475,6 @@ class PieceTests(Fixture):
 
     def test_a_stop_part_way_is_finished_by_the_next_run(self) -> None:
         # Failure table, "Enqueue: per file": two requests written, then the process stops.
-        self.designate({"drive": {}})
         real, written = PUBLISH.write_request, []
 
         def stop_after_two(path, request, digest):
@@ -3447,10 +3493,8 @@ class PieceTests(Fixture):
         self.assertEqual(self.queued(), sorted(self.name(stem) for stem in self.STEMS))
 
     def test_a_delivered_copy_is_recorded_on_the_piece_and_updated_next_time(self) -> None:
-        self.designate({"drive": {}})
         PUBLISH.enqueue_pieces(self.connection)
-        name = self.name("research")
-        self.assertEqual(PUBLISH.delivered_main([name, self.request("research")["fingerprint"], "--url", self.URL]), 0)
+        self.deliver("research")
         self.assertEqual(self.published(self.item)["%s::2026-a-piece-research" % self.key]["drive"], self.URL)
         (self.folder / "research.md").write_text("Source, revised.\n", encoding="utf-8")
         PUBLISH.enqueue_pieces(self.connection)
@@ -3460,7 +3504,6 @@ class PieceTests(Fixture):
         other = self.root / "worktree" / "content" / self.PIECE
         other.mkdir(parents=True)
         (other / "index.md").write_text(self.INDEX + "Unmerged.\n", encoding="utf-8")
-        self.designate({"drive": {}})
         token = self.writing._CHECKOUT.set((self.repo.resolve(), (self.root / "worktree").resolve()))
         try:
             PUBLISH.enqueue_pieces(self.connection)
@@ -3473,32 +3516,53 @@ class PieceTests(Fixture):
         outside.write_text("Not this repository's.\n", encoding="utf-8")
         (self.folder / "fact-check.md").unlink()
         (self.folder / "fact-check.md").symlink_to(outside)
-        self.designate({"drive": {}})
         reports = PUBLISH.enqueue_pieces(self.connection)
         self.assertTrue(any("fact-check.md" in line and "sd:%d" % self.item in line for line in reports), reports)
         self.assertNotIn(self.name("fact-check"), self.queued())
         self.assertEqual(len(self.queued()), 3)
 
-    def test_fields_that_are_not_an_object_are_reported_not_queued(self) -> None:
-        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?",
-                                (json.dumps({"publish": ["drive"]}), self.item))
-        self.connection.commit()
-        reports = PUBLISH.enqueue_pieces(self.connection)
-        self.assertTrue(any("sd:%d" % self.item in line and "not queued" in line for line in reports), reports)
-        self.assertFalse(PUBLISH.QUEUE.exists())
-
     def test_only_the_named_items_are_queued(self) -> None:
-        self.designate({"drive": {}})
         self.assertEqual(PUBLISH.enqueue_pieces(self.connection, items={self.item + 1}), [])
         self.assertFalse(PUBLISH.QUEUE.exists())
 
     def test_an_unread_channels_setting_holds_the_repo(self) -> None:
-        self.designate({"drive": {}})
         from sd_db import repos  # noqa: PLC0415
         with unittest.mock.patch.object(repos, "repo_channels", side_effect=RuntimeError("hub down")):
             reports = PUBLISH.enqueue_pieces(self.connection)
         self.assertTrue(any(line.startswith(PUBLISH.HELD) and "hub down" in line for line in reports), reports)
         self.assertFalse(PUBLISH.QUEUE.exists())
+
+
+class PieceAccountTests(Fixture):
+    """pack sd:7243: a piece's realm picks its Drive account. Realm `work` takes `google.accounts.work.email`; any
+    other realm takes `google.accounts.personal.email`. An unread realm list is unknown, never
+    Personal."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.database()
+        from sd_db import writes  # noqa: PLC0415 - after the path is set
+        work = str(self.root / "work-*")
+        writes.set_setting(self.connection, "dashboard.realms",
+                           "realm|work|Work|%s\nrealm|side|Side|%s" % (work, self.root / "side-*"))
+        writes.set_setting(self.connection, "google.accounts.work.email", "work@example.test")
+        writes.set_setting(self.connection, "google.accounts.personal.email", "personal@example.test")
+
+    def test_work_takes_the_work_account_and_every_other_realm_the_personal_one(self) -> None:
+        account = PUBLISH.piece_accounts(self.connection)
+        self.assertEqual(account(str(self.root / "work-blog")), ("work@example.test", ""))
+        self.assertEqual(account(str(self.root / "side-news")), ("personal@example.test", ""))
+        self.assertEqual(account(str(self.root / "elsewhere")), ("personal@example.test", ""))
+
+    def test_an_unread_realm_list_is_unknown_not_personal(self) -> None:
+        PUBLISH.piece_accounts(self.connection)  # puts the pack's dashboard on the path, as it loads it
+        places = importlib.import_module("sd_dashboard.places")
+        with unittest.mock.patch.object(places, "realms", return_value={
+                "state": "error", "source": "row", "problems": ["database is locked"], "list": []}):
+            account = PUBLISH.piece_accounts(self.connection)
+        address, why = account(str(self.root / "elsewhere"))
+        self.assertEqual(address, "")
+        self.assertIn("database is locked", why)
 
 
 #: An Archify diagram as the 05-architecture template holds it: the SVG in
