@@ -3249,6 +3249,22 @@ class ClaimAndLease(SharedQueue):
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((answer["reclaimed"][0]["status"], self.entries()[0]["status"]), ("pending", "merged"))
 
+    def test_a_slot_wait_put_back_that_fails_to_write_is_settled_by_the_next_run(self) -> None:
+        """pack sd:7412, failure table row 2b: the hub fails the write of `slot_waits`; the entry stays running,
+        the next run's reclaim puts it back, and the run after ships it."""
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = Runner.SLOT_WAIT
+        with self.failing_store(lambda entry: "slot_waits" in entry):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertIn("the hub went away", answer["stopped"])
+        self.assertEqual((self.entries()[0]["status"], "slot_waits" in self.entries()[0]), ("running", False))
+        self.make_dead()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(answer["reclaimed"][0]["status"], "pending")
+        del self.answers[(1, "prepare")]
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
+
     def test_a_retryable_put_back_that_fails_to_write_is_reclaimed_and_counts_nothing(self) -> None:
         """Failure table, sd:3478 put-back: the write of the count fails; the entry stays running, a reclaim
         puts it back with no count, and the next prepare still has its one retry."""
