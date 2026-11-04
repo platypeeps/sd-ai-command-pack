@@ -105,8 +105,14 @@ class TheFolders(unittest.TestCase):
         self.assertEqual(hoa_attach.place({"id": "WELL-A1", "type": "well"}), ("Well A1", None))
         self.assertEqual(hoa_attach.place({"id": "WELL-A2", "type": "well"}), ("Well A2", None))
         self.assertEqual(hoa_attach.place({"id": "TANK-01", "type": "tank"}), ("Cistern", None))
+        # sd:7516: the booster station, the "submarine", files under Submarine.
+        self.assertEqual(hoa_attach.place({"id": "BST-1", "type": "booster"}), ("Submarine", None))
         with self.assertRaisesRegex(ValueError, "has no Water System folder"):
             hoa_attach.place({"id": "X-1", "type": "meter"})
+        # sd:7516: a street light or irrigation line is no Water System asset: its listing is that 400, not a folder.
+        for asset in ({"id": "LGT-1", "type": "light"}, {"id": "IRL-1", "type": "irrline"}):
+            with self.assertRaisesRegex(ValueError, "has no Water System folder"):
+                hoa_attach.place(asset)
 
 
 class TheListing(Case):

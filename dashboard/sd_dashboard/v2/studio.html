@@ -4,7 +4,8 @@
   repository with a project.json, and each artifact root's files. Shape: docs/work/2026-10-31-studio/design.md.
   Data: /api/studio (studio.document: each project's kind, title, brief, item and roots, each root's files listed from
   disk; a project.json that does not parse, or a root that leaves its folder, lists with its reason), read when the page
-  opens. Each file opens at /studio/files/<repo>/<path>, served sandboxed; audio and video seek through a Range.
+  opens. Each file opens at /studio/files/<repo>/<path>, an image served sandboxed;
+  audio and video, unsandboxed so they play (sd:7513), seek through a Range.
   Details draws the kind's stage strip (sd:6921); Next stage posts /api/items/<n>/stage with the revision read, and Pin
   and Hide post /api/studio/view, Documents' view state. The actions are slice 4 (sd:6922). sd:7490: an Updated column,
   and a row that expands, one at a time, into a sub-row per rendered file with Open and Re-render. Nothing here is sample data.
@@ -29,7 +30,7 @@
     <header class="head">
       <div>
         <h1>Studio</h1>
-        <p><span id="sub">Reading the projects…</span> · read from disk, each file served sandboxed</p>
+        <p><span id="sub">Reading the projects…</span> · read from disk, each image served sandboxed</p>
       </div>
     </header>
 

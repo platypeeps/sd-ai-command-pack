@@ -414,12 +414,17 @@ def _geojson(path: Path | None, keys: tuple[str, ...], kind: str) -> dict:
                 row["lng"], row["lat"] = (round(float(v), 7) for v in geometry["coordinates"][:2])
             elif geometry["type"] == "Polygon":
                 row["rings"] = [[[round(float(x), 7), round(float(y), 7)] for x, y, *_ in ring] for ring in geometry["coordinates"]]
+            elif geometry["type"] == "LineString" and kind == "assets":
+                # sd:7516: an irrigation line. Its middle vertex is its lng, lat: where the page centres it and Details places
+                # it. The base's outlines stay polygons only: the page draws each from its rings.
+                row["path"] = [[round(float(x), 7), round(float(y), 7)] for x, y, *_ in geometry["coordinates"]]
+                row["lng"], row["lat"] = row["path"][len(row["path"]) // 2]
             else:
                 continue
             features.append(row)
     except FileNotFoundError:
         return {"error": f"{path.name} is not there", "features": []}
-    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError) as error:
+    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError, IndexError) as error:
         return {"error": f"{path.name} did not parse: {error.__class__.__name__}: {error}", "features": []}
     return {"error": "", "features": features}
 
