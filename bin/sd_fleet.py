@@ -789,7 +789,7 @@ def auto_rows() -> list[tuple[pathlib.Path, str | None]]:
     import sd_handoff_rows  # noqa: PLC0415 - the library is optional until this verb runs
 
     sd_db = sd_handoff_rows.library()
-    from sd_db.repos import registered  # noqa: PLC0415
+    from sd_db.repos import policy_merge, registered  # noqa: PLC0415
 
     connection = sd_handoff_rows.connect(sd_db, write=False)
     try:
@@ -797,7 +797,7 @@ def auto_rows() -> list[tuple[pathlib.Path, str | None]]:
     finally:
         connection.close()
     return [(sd_lib.repo_disk(row["path"]), row["remote"]) for row in sd_lib.managed_rows(rows)
-            if row["runner_merge"] == "auto"]
+            if policy_merge(row["declarations"]) == "auto"]
 
 
 def _installer() -> Any:

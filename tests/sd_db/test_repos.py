@@ -408,7 +408,8 @@ class TheRunnerMergeWriter(RepoCase):
         after = dict(self.connection.execute(
             "SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
         moved = {key for key in before if before[key] != after[key]}
-        self.assertEqual(moved - {"updated_at"}, {"runner_merge"})
+        # pack sd:7366: the policy key moves with the column.
+        self.assertEqual(moved - {"updated_at"}, {"runner_merge", "declarations"})
 
     def test_a_value_the_check_would_reject_is_refused_in_a_sentence(self):
         path = self._registered()
@@ -463,7 +464,8 @@ class TheCiWriter(RepoCase):
         after = dict(self.connection.execute(
             "SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
         moved = {key for key in before if before[key] != after[key]}
-        self.assertEqual(moved - {"updated_at"}, {"ci"})
+        # pack sd:7366: the policy key moves with the column.
+        self.assertEqual(moved - {"updated_at"}, {"ci", "declarations"})
 
     def test_a_value_the_check_would_reject_is_refused_in_a_sentence(self):
         path = self._registered()
@@ -1756,3 +1758,129 @@ class TheCloneVerbs(TheCloneSeed):
         self.assertEqual(rc, 0)
         for line in out.splitlines():
             self.assertTrue(line.endswith("  manual"), line)
+
+
+class TheMergeAndCiPolicy(RepoCase):
+    """pack sd:7366 slice 1. `runner_merge` and `ci` live in the policy as
+    `merge` and `ci.provider`; every writer sets column and key in one
+    statement, so the two agree until slice 2 drops the columns, and every
+    reader reads the key, failing closed (`manual`, `github`) on anything
+    else. Rulings: note #41768 (Q1 `merge: ask|auto`, Q2 declare carries
+    both over)."""
+
+    def _registered(self, name: str = "one") -> str:
+        return add(self.connection, support.repository(self.checkouts / name), home=self.home)
+
+    def _row(self, path: str) -> tuple:
+        row = self.connection.execute(
+            "SELECT runner_merge, ci, declarations FROM repo WHERE path = ?", (path,)).fetchone()
+        return row[0], row[1], json.loads(row[2]) if row[2] else None
+
+    def test_the_merge_writer_sets_column_and_key_together(self):
+        from sd_db.repos import runner_merge
+        path = self._registered()
+        self.assertEqual(runner_merge(self.connection, path), "manual")
+        self.assertEqual(set_runner_merge(self.connection, path, "auto"), (path, "manual"))
+        self.assertEqual(self._row(path), ("auto", "github", {"policy": {"merge": "auto"}}))
+        self.assertEqual(runner_merge(self.connection, path), "auto")
+        self.assertEqual(set_runner_merge(self.connection, path, "manual"), (path, "auto"))
+        self.assertEqual(self._row(path), ("manual", "github", None))
+        self.assertIsNone(runner_merge(self.connection, str(self.checkouts / "absent")))
+
+    def test_the_ci_writer_sets_column_and_provider_and_keeps_other_keys(self):
+        path = self._registered()
+        set_github_issues(self.connection, path, "read")
+        self.assertEqual(set_ci(self.connection, path, "local"), (path, "github"))
+        self.assertEqual(self._row(path), ("manual", "local", {"policy": {"issues": "read", "ci": {"provider": "local"}}}))
+        self.assertEqual(repo_ci(self.connection, path), "local")
+        self.assertEqual(set_ci(self.connection, path, "github"), (path, "local"))
+        self.assertEqual(self._row(path), ("manual", "github", {"policy": {"issues": "read"}}))
+
+    def test_the_ci_writer_refuses_a_row_whose_policy_declares_jenkins(self):
+        path = self._registered()
+        jenkins = {"provider": "jenkins", "url": "https://ci.example.test", "job": "x/PR-{pr}"}
+        set_declaration(self.connection, path, "policy", {"ci": jenkins})
+        self.assertEqual(repo_ci(self.connection, path), "jenkins")
+        with self.assertRaises(RepoRefusal) as caught:
+            set_ci(self.connection, path, "local")
+        self.assertIn("jenkins", str(caught.exception))
+        self.assertEqual(self._row(path), ("manual", "github", {"policy": {"ci": jenkins}}))
+
+    def test_upsert_repo_writes_both_and_a_failed_statement_writes_neither(self):
+        path = self._registered()
+        upsert_repo(self.connection, path, runner_merge="auto", ci="local")
+        self.assertEqual(self._row(path), ("auto", "local", {"policy": {"merge": "auto", "ci": {"provider": "local"}}}))
+        self.connection.execute("CREATE TEMP TRIGGER stuck BEFORE UPDATE ON repo "
+                                "BEGIN SELECT RAISE(ABORT, 'stuck'); END")
+        with self.assertRaises(sqlite3.IntegrityError):
+            upsert_repo(self.connection, path, runner_merge="manual", ci="github")
+        self.connection.execute("DROP TRIGGER stuck")
+        self.assertEqual(self._row(path), ("auto", "local", {"policy": {"merge": "auto", "ci": {"provider": "local"}}}))
+
+    def test_merge_auto_is_refused_on_an_org_or_external_row(self):
+        path = self._registered()
+        for mode in ("org", "external"):
+            set_declaration(self.connection, path, "policy", {"mode": mode})
+            with self.subTest(mode=mode), self.assertRaises(RepoRefusal) as caught:
+                set_runner_merge(self.connection, path, "auto")
+            self.assertIn("managed", str(caught.exception))
+            self.assertEqual(self._row(path)[0], "manual")
+
+    def test_a_policy_declare_without_merge_or_ci_keeps_the_rows_values(self):
+        """Failure table, row "S1 `repo declare policy`" (ruling Q2)."""
+        path = self._registered()
+        set_runner_merge(self.connection, path, "auto")
+        set_ci(self.connection, path, "local")
+        set_declaration(self.connection, path, "policy", {"issues": "read"})
+        self.assertEqual(self._row(path), ("auto", "local", {"policy": {
+            "issues": "read", "merge": "auto", "ci": {"provider": "local"}}}))
+        set_declaration(self.connection, path, "policy", None)
+        self.assertEqual(self._row(path), ("auto", "local", {"policy": {"merge": "auto", "ci": {"provider": "local"}}}))
+        set_declaration(self.connection, path, "policy", {"merge": "ask", "ci": {"provider": "github"}})
+        self.assertEqual(self._row(path), ("manual", "github", {"policy": {"merge": "ask", "ci": {"provider": "github"}}}))
+
+    def test_a_carried_auto_onto_an_org_policy_is_refused_unwritten(self):
+        path = self._registered()
+        set_runner_merge(self.connection, path, "auto")
+        with self.assertRaises(RepoRefusal) as caught:
+            set_declaration(self.connection, path, "policy", {"mode": "org"})
+        self.assertIn('"merge": "ask"', str(caught.exception))
+        self.assertEqual(self._row(path), ("auto", "github", {"policy": {"merge": "auto"}}))
+        set_declaration(self.connection, path, "policy", {"mode": "org", "merge": "ask"})
+        self.assertEqual(self._row(path), ("manual", "github", {"policy": {"mode": "org", "merge": "ask"}}))
+
+    def test_the_readers_fail_closed_on_every_odd_policy_and_sql_agrees(self):
+        """Property: over missing keys, unknown values, an empty policy and
+        nested junk, the Python and SQL readers give the same word, and
+        `auto` or `local` only for exactly that string where it belongs."""
+        from sd_db.writes import CI_SQL, MERGE_SQL, policy_ci, policy_merge
+        values: list[Any] = [None, "", "auto", "AUTO", "ask", "local", "jenkins", "github", 0, 1, True, False, [], ["auto"],
+                  {}, {"merge": "auto"}, {"provider": "local"}, 1e308, -0.0, "a" * 5000]
+        shapes: list[Any] = [None, "{}", "[]", '"auto"', "1", "null"]
+        for value in values:
+            for where in ("merge", "mode", "ci", "provider", "policy"):
+                held: Any
+                if where == "policy":
+                    held = {"policy": value}
+                elif where == "provider":
+                    held = {"policy": {"ci": {"provider": value}}}
+                elif where == "mode":
+                    held = {"policy": {"merge": "auto", "mode": value}}
+                else:
+                    held = {"policy": {where: value}}
+                shapes.append(json.dumps(held))
+        shapes.append(json.dumps({"policy": {"ci": {"provider": {"provider": "local"}}, "merge": {"merge": "auto"}}}))
+        shapes.append("[" * 50 + "]" * 50)
+        for text in shapes:
+            with self.subTest(text=str(text)[:80]):
+                merge, ci = policy_merge(text), policy_ci(text)
+                read: Any = json.loads(text) if text else None
+                found: Any = read.get("policy") if isinstance(read, dict) else None
+                policy: dict[str, Any] = found if isinstance(found, dict) else {}
+                block: dict[str, Any] = policy["ci"] if isinstance(policy.get("ci"), dict) else {}
+                self.assertEqual(merge, "auto" if policy.get("merge") == "auto" and policy.get("mode") in (None, "managed")
+                                 else "manual")
+                self.assertEqual(ci, block.get("provider") if block.get("provider") in ("local", "jenkins") else "github")
+                sql = self.connection.execute(f"SELECT {MERGE_SQL.format(t='x')}, {CI_SQL.format(t='x')} "
+                                              "FROM (SELECT ? AS declarations) AS x", (text,)).fetchone()
+                self.assertEqual(tuple(sql), (merge, "local" if ci == "local" else "github"))

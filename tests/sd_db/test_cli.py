@@ -518,6 +518,37 @@ class TheMigrationVerbs(MigrationVerbCase):
                 self.assertIn(rule, completed.stderr)
         self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "policy").stdout), value)
 
+    def test_repo_declare_policy_without_merge_or_ci_keeps_the_rows_values(self):
+        """pack sd:7366, failure table row "S1 `repo declare policy`" (ruling Q2): a preset that
+        leaves out `merge` and `ci` must not stop the lane merging or move its checks."""
+        self.sd_db("repo", "add", str(self.checkout))
+        self.sd_db("repo", "runner-merge", str(self.checkout), "auto")
+        self.sd_db("repo", "ci", str(self.checkout), "local")
+        self.sd_db("repo", "declare", str(self.checkout), "policy", '{"issues": "read"}')
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "policy").stdout),
+                         {"issues": "read", "merge": "auto", "ci": {"provider": "local"}})
+        line = self.sd_db("repo", "list").stdout.strip()
+        self.assertTrue(line.endswith("  yes  local  read  hub  auto") or line.endswith("  no  local  read  hub  auto"), line)
+        completed = self.sd_db("repo", "declare", str(self.checkout), "policy", "off")
+        self.assertIn("policy declared -> declared", completed.stdout)
+        self.assertTrue(self.sd_db("repo", "list").stdout.strip().endswith("  local  off  hub  auto"))
+
+    def test_repo_list_prints_the_policy_provider_and_merge(self):
+        """pack sd:7366: `list` keeps its fields; `ci` prints the policy's provider, jenkins too."""
+        self.sd_db("repo", "add", str(self.checkout))
+        jenkins = {"ci": {"provider": "jenkins", "url": "https://ci.example.test", "job": "j/PR-{pr}"}}
+        self.sd_db("repo", "declare", str(self.checkout), "policy", json.dumps(jenkins))
+        line = self.sd_db("repo", "list").stdout.strip()
+        self.assertEqual(line.split("  ")[-4:], ["jenkins", "off", "hub", "manual"], line)
+        completed = self.sd_db("repo", "ci", str(self.checkout), "local", expect=1)
+        self.assertIn("jenkins", completed.stdout + completed.stderr)
+        for word in ('{"merge": "AUTO"}', '{"mode": "org", "merge": "auto"}', '{"ci": {"provider": "travis"}}',
+                     '{"ci": {"provider": "jenkins"}}'):
+            with self.subTest(word=word):
+                self.sd_db("repo", "declare", str(self.checkout), "policy", word, expect=1)
+        self.sd_db("repo", "declare", str(self.checkout), "policy", '{"merge": "auto", "ci": {"provider": "local"}}')
+        self.assertEqual(self.sd_db("repo", "list").stdout.strip().split("  ")[-4:], ["local", "off", "hub", "auto"])
+
     def test_repo_list_managed_prints_only_the_managed_rows(self):
         other = self.home / "other"
         subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)

@@ -47,7 +47,8 @@ from typing import Any, Iterable
 from . import config, paths
 from .database import transaction
 from .errors import SdDbError
-from .writes import now, upsert_repo
+from .writes import declarations_text as _declarations_text
+from .writes import now, policy_ci, policy_merge, upsert_repo
 
 #: `<subdir> <owner/repo>`, with `#` comments and blank lines. The format is
 #: the first line of the file itself, and this is the whole grammar.
@@ -699,18 +700,35 @@ def set_runner_merge(
     if value not in RUNNER_MERGE_VALUES:
         accepted = " or ".join(RUNNER_MERGE_VALUES)
         raise RepoRefusal(f"{value!r} is not a merge setting; expected {accepted}")
+    return _set_row_setting(connection, path, runner_merge=value)
+
+
+def _set_row_setting(connection: sqlite3.Connection, path: Path | str, **setting: Any) -> tuple[str, str]:
+    """`set_runner_merge` or `set_ci`: one row's column and policy key, read and written in one transaction."""
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
-    row = connection.execute(
-        f"SELECT path, runner_merge FROM repo WHERE path IN ({paths.placeholders(probe)})",
-        probe).fetchone()
-    if row is None:
-        raise RepoRefusal(
-            f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
-    target = row["path"]
-    before = row["runner_merge"]
-    upsert_repo(connection, target, runner_merge=value)
-    return target, before
+    with transaction(connection):
+        row = connection.execute(
+            f"SELECT path, declarations FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            probe).fetchone()
+        if row is None:
+            raise RepoRefusal(
+                f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        before = (policy_merge if "runner_merge" in setting else policy_ci)(row["declarations"])
+        try:
+            upsert_repo(connection, row["path"], **setting)
+        except SdDbError as error:
+            raise RepoRefusal(f"{row['path']}: {error}") from None
+    return row["path"], before
+
+
+def runner_merge(connection: sqlite3.Connection, path: Path | str) -> str | None:
+    """One repository's merge setting, `auto` or `manual`, from its `policy.merge` (pack sd:7366); None for no row.
+
+    `manual` for every value but `auto` on a managed policy: a doubt merges nothing.
+    """
+    row = row_for(connection, str(Path(path).expanduser().resolve()))
+    return None if row is None else policy_merge(row["declarations"])
 
 
 def issue_sources(connection: sqlite3.Connection, path: Path | str) -> dict[str, str]:
@@ -1129,11 +1147,6 @@ def experiment_problems(value: Any) -> list[str]:
     return problems
 
 
-def _declarations_text(value: dict[str, Any]) -> str:
-    """`value` as the column stores it: compact JSON with sorted keys."""
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-
-
 def set_declaration(connection: sqlite3.Connection, path: Path | str, kind: str,
                     value: dict[str, Any] | None) -> tuple[str, dict[str, Any] | None]:
     """Set or remove (`None`) one registered repository's `kind` declaration. Returns `(path, before)`.
@@ -1161,6 +1174,8 @@ def set_declaration(connection: sqlite3.Connection, path: Path | str, kind: str,
             raise RepoRefusal(f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
         held = _declarations(row["declarations"], row["path"])
         before = held.get(kind)
+        if kind == "policy":
+            value = _carried(before, value, row["path"])
         if value is None:
             held.pop(kind, None)
         else:
@@ -1171,9 +1186,39 @@ def set_declaration(connection: sqlite3.Connection, path: Path | str, kind: str,
             raise RepoRefusal(f"the {kind} declaration is not JSON: {error}") from None
         if text is not None and len(text.encode("utf-8")) > DECLARATION_BYTES:
             raise RepoRefusal(f"the declarations would take more than {DECLARATION_BYTES} bytes")
-        connection.execute("UPDATE repo SET declarations = ?, updated_at = ? WHERE path = ?",
-                           (text, now(), row["path"]))
+        # pack sd:7366: the columns follow the policy in the same statement, so the two agree until slice 2.
+        connection.execute("UPDATE repo SET declarations = ?, runner_merge = ?, ci = ?, updated_at = ? WHERE path = ?",
+                           (text, policy_merge(text), "local" if policy_ci(text) == "local" else "github", now(),
+                            row["path"]))
     return row["path"], before
+
+
+#: The policy keys a row setting writes (pack sd:7366): `repo runner-merge` and `repo ci` set them.
+ROW_SETTINGS = ("merge", "ci")
+
+
+def _carried(before: Any, value: dict[str, Any] | None, where: str) -> dict[str, Any] | None:
+    """`value` with the row's `merge` and `ci` kept where it leaves them out (ruling Q2, note #41768).
+
+    A preset that names neither must not stop the lane merging or move its
+    checks; `off` keeps them too. A `ci` without a `provider` takes the old
+    one's keys under its own. A kept `auto` on an org or external policy is
+    refused, so the operator says `"merge": "ask"` rather than losing it unread.
+    """
+    old = before if isinstance(before, dict) else {}
+    out = dict(value or {})
+    for key in ROW_SETTINGS:
+        if key not in old:
+            continue
+        if key not in out:
+            out[key] = old[key]
+        elif key == "ci" and isinstance(out["ci"], dict) and isinstance(old["ci"], dict) and "provider" not in out["ci"]:
+            out["ci"] = {**old["ci"], **out["ci"]}
+    if (out.get("merge") == "auto" and "merge" not in (value or {})
+            and out.get("mode") is not None and out.get("mode") != "managed"):
+        raise RepoRefusal(f"{where} merges auto, which a {out['mode']} policy refuses (note #34749); "
+                          f'add "merge": "ask" to the policy, or run `sd-db repo runner-merge {where} manual` first')
+    return out if value is not None else (out or None)
 
 
 def _declarations(text: Any, where: str) -> dict[str, Any]:
@@ -1227,33 +1272,18 @@ def set_ci(
     if value not in CI_MODES:
         accepted = " or ".join(CI_MODES)
         raise RepoRefusal(f"{value!r} is not a ci setting; expected {accepted}")
-    given = str(Path(path).expanduser().resolve())
-    probe = paths.keys(given)
-    row = connection.execute(
-        f"SELECT path, ci FROM repo WHERE path IN ({paths.placeholders(probe)})",
-        probe).fetchone()
-    if row is None:
-        raise RepoRefusal(
-            f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
-    target = row["path"]
-    before = row["ci"]
-    upsert_repo(connection, target, ci=value)
-    return target, before
+    return _set_row_setting(connection, path, ci=value)
 
 
 def repo_ci(connection: sqlite3.Connection, path: Path | str) -> str:
-    """Where one repository's checks run: `github` or `local`.
+    """Where one repository's checks run: its `policy.ci.provider`, `github`, `local` or `jenkins` (pack sd:7366).
 
-    An unregistered path reads `github`, the column default: a repository
-    the table does not hold has not been switched to local checks, so a
-    caller that ships it keeps waiting for GitHub Actions.
+    An unregistered path reads `github`, the default: a repository the table
+    does not hold has not been switched to local checks, so a caller that
+    ships it keeps waiting for GitHub Actions. So does a provider that does not read.
     """
-    given = str(Path(path).expanduser().resolve())
-    probe = paths.keys(given)
-    row = connection.execute(
-        f"SELECT ci FROM repo WHERE path IN ({paths.placeholders(probe)})",
-        probe).fetchone()
-    return CI_MODES[0] if row is None else row["ci"]
+    row = row_for(connection, str(Path(path).expanduser().resolve()))
+    return CI_MODES[0] if row is None else policy_ci(row["declarations"])
 
 
 def set_channels(
