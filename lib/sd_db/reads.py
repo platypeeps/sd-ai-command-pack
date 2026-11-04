@@ -308,8 +308,17 @@ def open_followups(connection: sqlite3.Connection, *, limit: int = 200) -> list[
 REVIEW_BATCH = "(item.source IS 'task-ref' AND substr(item.external_id, 1, 7) IS 'review:')"
 
 
+def repo_in(column: str, keep: set[str | None] | None) -> tuple[str, list[Any]]:
+    """A SQL condition keeping `keep`'s repositories, None for a NULL `column`, and its parameters."""
+    if keep is None:
+        return "1", []
+    named = sorted(key for key in keep if key is not None)
+    found = f"{column} IN ({', '.join('?' for _ in named)})"
+    return (f"({found} OR {column} IS NULL)" if None in keep else found), named
+
+
 def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int | None = 200,
-               batches: bool = True) -> list[sqlite3.Row]:
+               batches: bool = True, repos: set[str | None] | None = None) -> list[sqlite3.Row]:
     """Unresolved `kind` notes on items that are not parked, oldest first (sd:3501).
 
     A followup on a done item is not owed, so only an open item's lists. A
@@ -321,8 +330,11 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int | None =
     a batch of hundreds does not fill `limit`: the dashboard's Review page
     labels those questions, one click each (sd:5130). `limit=None` lists
     them all: Decisions finds done items' questions here, and a cap filled by
-    older open-item questions hid them (pack sd:6338).
+    older open-item questions hid them (pack sd:6338). `repos` keeps those
+    items' notes, as `repo_in` reads it, before `limit`: a busy repository's
+    older notes filled the cap and hid another's (pack sd:7400).
     """
+    where, values = repo_in("item.repo", repos)
     return list(
         connection.execute(
             f"""
@@ -330,10 +342,11 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int | None =
               FROM note JOIN item ON item.id = note.item
              WHERE note.kind = ? AND note.resolved_at IS NULL AND (item.status != 'done' OR note.kind = 'question')
                AND {_unparked_clause(connection, documents=True)} AND {"1" if batches else "NOT " + REVIEW_BATCH}
+               AND {where}
              ORDER BY note.timestamp ASC, note.id ASC
              LIMIT ?
             """,
-            (kind, -1 if limit is None else limit),
+            (kind, *values, -1 if limit is None else limit),
         ).fetchall()
     )
 
