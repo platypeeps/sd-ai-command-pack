@@ -764,7 +764,7 @@ The half no script can do — work it before publishing, per document:
 
   The second reader
     9. Run the independent pass through `sd-review`, from the repo. It takes
-       the reviewer from the provider registry's reviewer order, with this
+       two readers at once from the provider registry's reviewer order, with this
        repo's consent (`reviewers:` in CLAUDE.local.md), vendor independence
        and fallback: a reviewer that fails or is disabled hands the pass to
        the next enabled one instead of blocking it. `--lens research-brief`
@@ -785,7 +785,7 @@ The half no script can do — work it before publishing, per document:
 
        `--scope worktree` reviews the uncommitted change; `--scope branch`
        reviews what is committed.
-       Add `--explain` to see which reviewer the chain would pick, and why,
+       Add `--explain` to see which readers the chain would pick, and why,
        without running one. It runs the repository's own check first, as for
        any change. Exit 0 is clean and 1 is findings; any other exit means no
        reviewer completed or the run was refused, and the output says which

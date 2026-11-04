@@ -3850,6 +3850,103 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
 
 
+class ThreadGroups:
+    """sd:7519. The process groups worker threads lead, so a SIGTERM the main thread hears ends them.
+
+    Only the main thread runs a signal handler, so `term_ends_group` in a
+    worker installs none: a group a thread started outlived a killed parent,
+    the orphan sd:3203 fixed for one thread. `end_groups` runs as `first` in
+    the main thread's handler. A group that registers after it began is ended then.
+    """
+
+    def __init__(self) -> None:
+        import threading  # noqa: PLC0415 - only the group helpers need it
+
+        self._lock = threading.Lock()
+        self._live: set[int] = set()
+        self._ending = False
+
+    def group_hook(self) -> Callable[[int | None], None]:
+        """`run_group`'s `started`: the group's id once it runs, then None as `run_group` ends it."""
+        import signal  # noqa: PLC0415 - only the group helpers need it
+
+        mine: list[int] = []
+
+        def heard_group(pid: int | None) -> None:
+            with self._lock:
+                if pid is None:
+                    self._live.difference_update(mine)
+                    return mine.clear()
+                mine.append(pid)
+                self._live.add(pid)
+                ending = self._ending
+            if ending:
+                _signal_group(pid, signal.SIGTERM)
+        return heard_group
+
+    def end_groups(self) -> None:
+        """SIGTERM each live group, then SIGKILL one still registered after `GROUP_CLEANUP_SECONDS`.
+
+        A group leaves the set when its own `run_group` starts ending it, so
+        what is left at the deadline is a group nothing else will end."""
+        import signal  # noqa: PLC0415 - only the group helpers need it
+
+        with self._lock:
+            self._ending, live = True, set(self._live)
+        for pid in live:
+            _signal_group(pid, signal.SIGTERM)
+        deadline, left = time.monotonic() + GROUP_CLEANUP_SECONDS, live
+        while left and time.monotonic() < deadline:
+            time.sleep(0.05)
+            with self._lock:
+                left = live & self._live
+        for pid in left:
+            _signal_group(pid, signal.SIGKILL)
+
+
+def _signal_group(pid: int, number: int) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError):  # already gone
+        os.killpg(pid, number)
+
+
+def fill_slots(items: Any, slots: int, run: Callable[[Any], Any], counted: Callable[[Any], bool],
+               groups: ThreadGroups) -> list[Any]:
+    """sd:7519. Run the first `slots` items at once; a slot whose answer did not count takes the next item.
+
+    The items started are the ones a serial loop that stops at `slots` counted
+    answers starts: the next starts only once a slot's answer is known not to
+    count, and only while counted and running answers are fewer than `slots`.
+    Answers return in item order, whatever order they finished in. `run`
+    starts its processes through `run_group(started=groups.group_hook())`, so a
+    SIGTERM ends each one's group, then unwinds here.
+    """
+    import concurrent.futures  # noqa: PLC0415 - only the slot runner needs it
+
+    answers: dict[int, Any] = {}
+    if slots <= 0:
+        return []
+    with term_ends_group(first=groups.end_groups):
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=slots, thread_name_prefix="sd-slot")
+        try:
+            running: dict[Any, int] = {}
+            following = done = 0
+            while following < len(items) and done + len(running) < slots or running:
+                while following < len(items) and done + len(running) < slots:
+                    running[pool.submit(run, items[following])] = following
+                    following += 1
+                # Bounded, so the main thread runs a SIGTERM's handler promptly.
+                finished, _ = concurrent.futures.wait(running, timeout=1, return_when=concurrent.futures.FIRST_COMPLETED)
+                for future in sorted(finished, key=running.__getitem__):
+                    index = running.pop(future)
+                    answers[index] = future.result()
+                    done += bool(counted(answers[index]))
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        pool.shutdown(wait=True)
+    return [answers[index] for index in sorted(answers)]
+
+
 # Review lenses (#1194)
 #
 # A lens re-aims the review lane's prompt at a subject that is not code. It
@@ -3889,6 +3986,26 @@ REVIEW_LENSES: dict[str, str] = {
         "respond only with JSON matching the output schema."
     ),
 }
+
+
+#: sd:7519. What one reader alone is asked on top of the shared review prompt:
+#: the "ranked" arm of code-review-research SPIKE-recall-fix §8, for Claude.
+#: The findings schema has no rank key (`additionalProperties` is false, and
+#: codex's strict schema is the same one), so the array's order is the rank.
+#: The codex prompt stays as it was: the same addition bought codex nothing.
+READER_PROMPTS: dict[str, str] = {
+    "claude-json": (
+        "\n\nBefore you report, trace each changed function to its callers, and each changed setting "
+        "or config value to the code and deploy files that read it. Rank findings by likely production "
+        "impact: rank 1 is the problem most likely to break production after merge. Return the findings "
+        "array in rank order, rank 1 first; add no rank key."
+    ),
+}
+
+
+def reader_prompt(prompt: str, reader: str | None) -> str:
+    """The shared review prompt plus what this reader alone is asked."""
+    return prompt + READER_PROMPTS.get(reader or "", "")
 
 
 def review_lens(name: str | None) -> str:

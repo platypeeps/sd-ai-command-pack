@@ -637,6 +637,9 @@ class Runner(Protocol):
                  timeout: int, input_text: str | None = None) -> Completed: ...
 
 
+READER_GROUPS = sd_lib.ThreadGroups()  # the groups the reader threads lead (sd:7519)
+
+
 def subprocess_runner(
     argv: Sequence[str],
     env: Mapping[str, str],
@@ -646,10 +649,10 @@ def subprocess_runner(
 ) -> Completed:
     """The only place this file starts a process. Tests inject their own.
 
-    It ends the process's whole group, so a check's own children go with it (sd:1482).
+    It ends the process's whole group, so a check's own children go with it (sd:1482), and a SIGTERM ends it from a reader's thread (sd:7519).
     """
     try:
-        finished = sd_lib.run_group(list(argv), cwd=cwd, env=dict(env), timeout=timeout, input_text=input_text)
+        finished = sd_lib.run_group(list(argv), cwd=cwd, env=dict(env), timeout=timeout, input_text=input_text, started=READER_GROUPS.group_hook())
     except FileNotFoundError:
         return Completed(127, "", f"{argv[0]}: not found on PATH", launched=False)
     except sd_lib.GroupTimeout as error:  # what it wrote names where it hung (sd:3418); the timeout line stays last
@@ -1419,6 +1422,7 @@ def run_provider(
             material = review_material(root, subject)
         except Refusal as error:
             return _outcome(provider.name, REFUSED, str(error))
+    prompt = sd_lib.reader_prompt(prompt, provider.reader)  # Claude's ranked addition (sd:7519)
     request_prompt = (f"{prompt}\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{material}{URL_OUTPUT_CONTRACT}" if provider.url else
                       f"{prompt}\n\nReview input:\n{material}" if provider.reader in MATERIAL_READERS else prompt)
     if len(request_prompt.encode()) > MAX_OUTPUT_BYTES:
@@ -1724,14 +1728,14 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
 #: because a work item is documentation by path, `docs_skip` routes it to tier
 #: `skip`, and `sd-plan` gates `planning -> ready` on this lane: without the
 #: floor the gate would pass by asking nobody. The tier decides how deep a
-#: change is read; a scope decides that it is read at all.
+#: change is read; a scope decides that it is read at all, by both readers (sd:7519).
 FLOOR_SCOPES = ("planning",)
 
 
 def review_depth(plan: sd_route.Plan, challenge: bool, scope: str) -> int:
     """How many reviewers this run takes off the chain."""
     if challenge or scope in FLOOR_SCOPES:
-        return max(plan.depth, 1)
+        return max(plan.depth, sd_route.DEFAULT_DEPTH)
     return plan.depth
 
 
@@ -1995,7 +1999,7 @@ def review(
         authored_subject = subject if target_base == subject.head else subject._replace(base=target_base)
     checklist = "" if preflight else blocker_checklist(root, subject, getattr(args, "database", None), env)
     prompt, prepended, context = ("", False, []) if preflight else prepared_prompt(root, subject, args, previous, env, checklist)
-    overheads = {"codex-json": None, "claude-json": "\n\nReview input:\n",
+    overheads = {"codex-json": None, "claude-json": sd_lib.READER_PROMPTS["claude-json"] + "\n\nReview input:\n",
                  "agy-json": "\n\nReview input:\n",
                  "opencode-json": "\n\nReview input:\n",
                  "url": f"\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{URL_OUTPUT_CONTRACT}"}
@@ -2111,7 +2115,7 @@ def review(
         # binding, sd-ship replays `--explain` and keeps the receipt only while this is unchanged.
         "request_sha256": hashlib.sha256(json.dumps(
             {"scope": args.scope, "prompt": prompt, "material": _material, "route": plan._asdict(),
-             "providers": providers, "requested_reviews": depth, "input_manifest": input_manifest}, sort_keys=True).encode()).hexdigest(),
+             "providers": providers, "requested_reviews": depth, "input_manifest": input_manifest, "readers": sd_lib.READER_PROMPTS}, sort_keys=True).encode()).hexdigest(),
         "local_block_prepended": prepended,
         "scrubbed_env_names": list(scrubbed_names(env)),
         "check": None,
@@ -2161,25 +2165,20 @@ def review(
         return result
 
     try:
-        outcomes: list[Outcome] = []
-        reviewed: list[str] = []
-        cited = reviewed_paths(root, subject, previous)
-        omitted = tuple(input_manifest.get("omitted_paths", ()))
-        for provider in chosen:
-            if len(reviewed) >= depth:
-                break
-            # Measured against the binary about to run, so each entry answers for
-            # itself. The result key carries the last; each outcome carries its own.
-            if provider.reader == "codex-json" and auth["ok"]:
-                skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
+        cited, omitted = reviewed_paths(root, subject, previous), tuple(input_manifest.get("omitted_paths", ()))
+
+        def read_one(provider: sd_registry.Provider) -> tuple[dict[str, Any] | None, list[Outcome]]:
+            """One reader's attempts, in its own thread (sd:7519); its skill state measured against its own binary."""
+            measured = codex_skill_state(provider, root, runner, env, auth_home) if provider.reader == "codex-json" and auth["ok"] else None
             unread = omitted if provider.url or provider.reader in MATERIAL_READERS else ()
-            for outcome in _attempts(provider, lambda: partial(unlocated(run_provider(
-                    provider, root, subject, prompt, runner, env, phase,  # noqa: B023 -- run in this iteration
-                    codex_auth_home, client, ledger, skills), cited, result["severity_floor"]), unread)):  # noqa: B023
-                outcomes.append(outcome)
-                if outcome.status in (CLEAN, FINDINGS):
-                    reviewed.append(outcome.backend)
-        finish_review(result, outcomes, reviewed)
+            return measured, _attempts(provider, lambda: partial(unlocated(run_provider(provider, root, subject, prompt, runner, env, phase,
+                codex_auth_home, client, ledger, measured or skills), cited, result["severity_floor"]), unread))
+        answers = sd_lib.fill_slots(chosen, depth, read_one, lambda answer: any(row.status in (CLEAN, FINDINGS) for row in answer[1]), READER_GROUPS)
+        # The result key carries the first binary that ignored the key, else the last measured; each outcome its own.
+        measures = [measured for measured, _attempts_made in answers if measured is not None]
+        result["codex_skill_suppression"] = next((row for row in measures if row["state"] != SKILLS_SUPPRESSED), measures[-1]) if measures else skills
+        outcomes = [outcome for _measured, attempts in answers for outcome in attempts]
+        finish_review(result, outcomes, [outcome.backend for outcome in outcomes if outcome.status in (CLEAN, FINDINGS)])
     finally:
         slot.give_back()  # sd:2523: on every exit; the gate below queues in its own pool
     # Shadow only (sd:2092): Jev's kind for each finding goes to its ledger and

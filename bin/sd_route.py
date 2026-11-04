@@ -12,7 +12,8 @@ combining them are not.
 
 **It does not say who reviews.** The registry names the ordered provider chain;
 the tier records the change's risk classification. Every reviewing tier requires
-one completed independent local review; skip requires none.
+two completed independent local reviews, the first two readers in the chain run
+at once (sd:7519); skip requires none.
 
 Policy shape (every key optional unless noted)::
 
@@ -38,10 +39,12 @@ from typing import Any, Mapping, NamedTuple, Sequence
 DEFAULT_TIER_ORDER: tuple[str, ...] = ("skip", "cheap", "standard", "deep")
 DEFAULT_LARGE_CHANGE_LINES = 800
 
-#: Risk classification does not create additional provider calls. Unknown tiers
-#: still require an independent local review rather than silently skipping it.
-TIER_DEPTH: dict[str, int] = {"skip": 0, "cheap": 1, "standard": 1, "deep": 1}
-DEFAULT_DEPTH = 1
+#: Risk classification does not create additional provider calls: every
+#: reviewing tier asks two readers, so codex and Claude both answer (sd:7519,
+#: operator ruling sd:7239). Unknown tiers still require an independent local
+#: review rather than silently skipping it.
+TIER_DEPTH: dict[str, int] = {"skip": 0, "cheap": 2, "standard": 2, "deep": 2}
+DEFAULT_DEPTH = 2
 
 
 class Plan(NamedTuple):

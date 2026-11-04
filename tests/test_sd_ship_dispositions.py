@@ -98,7 +98,8 @@ class DispositionTests(unittest.TestCase):
                                 timeout=fixture.CLI_TIMEOUT)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         rows = json.loads(result.stdout)["proposal"]["findings"]
-        self.assertEqual([row["raw_finding"]["summary"] for row in rows], ["fixture disputed finding"])
+        # Both readers of the two-reader tier report it, each a row of its own (sd:7519).
+        self.assertEqual([row["raw_finding"]["summary"] for row in rows], ["fixture disputed finding"] * 2)
 
     def test_a_blocking_refusal_bounds_its_message_and_names_a_no_item_record(self):
         """sd:2102. Five findings are named, a line-less one by path, and `findings` carries every one."""
