@@ -477,7 +477,7 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         statements: list[str] = []
         self.db.set_trace_callback(statements.append)
         try:
-            reporting._fold_target(self.db, "probe", "disk low", chain=1)
+            reporting._fold_target(self.db, "probe", "disk low", host="hosta", chain=1)
         finally:
             self.db.set_trace_callback(None)
         [sql] = [sql for sql in statements if "attention_basis" in sql]
@@ -648,7 +648,7 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assert_fresh(self.tick("c", 16, exit_code=0, text=self.DISK), acked)
 
     def test_another_hosts_fold_does_not_hide_this_hosts_recovery(self):
-        """Host B's repeat folds into host A's open report and moves its last run;
+        """Host B's repeat of the same findings, a later run than A's;
         host A's own clean run must still end A's chain."""
         first = self.tick("a", 1, exit_code=0, text=self.DISK)["item"]["id"]
         with mock.patch("sd_db.ship.this_host", return_value="hostb"):
@@ -863,11 +863,46 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.tick("b", 16, self.ONE)
         self.assertEqual(self.row(other)["status"], "planning")
 
+    def test_another_hosts_findings_file_their_own_report(self):
+        """pack sd:7481: host B's repeat folded into host A's report, so the
+        row named host A and A's log above a body from B's run."""
+        mine = self.tick("a", 1, "run on hosta\n" + self.TWO)["item"]["id"]
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            other = self.tick("b", 16, "run on hostb\n" + self.TWO)
+        self.assertEqual(other["recorded"], "report")
+        self.assertNotEqual(other["item"]["id"], mine)
+        provenance = json.loads(other["item"]["fields"])["report"]
+        self.assertEqual((provenance["host"], provenance["source_path"]),
+                         ("hostb", str(self.root / "probe-b.log")))
+        self.assertIn("run on hostb", json.loads(other["item"]["body"])["text"])
+        self.assertIn("run on hosta", json.loads(self.row(mine)["body"])["text"])
+        self.assertNotIn("repeats", json.loads(self.row(mine)["fields"]))
+
+    def test_a_report_filed_before_the_host_was_stored_takes_no_hosts_repeat(self):
+        """Older state: a row with no host cannot say whose runs it holds."""
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        self.db.execute("UPDATE item SET fields=json_remove(fields, '$.report.host') WHERE id=?", (older,))
+        self.db.commit()
+        again = self.tick("b", 16, self.TWO)
+        self.assertEqual(again["recorded"], "report")
+        self.assertNotEqual(again["item"]["id"], older)
+        with mock.patch("sd_db.ship.this_host", return_value=""):
+            self.assertEqual(self.tick("c", 31, self.TWO)["item"]["id"], older)
+
+    def folded_from_hostb(self, item, run, minute):
+        """Older state: host B's run folded into `item` before pack sd:7481 kept folds to one host."""
+        repeats = {"count": 2, "first_ended": json.loads(self.row(item)["fields"])["report"]["ended"],
+                   "run_ids": [run], "last_run_id": run, "last_ended": f"2026-09-08T00:{minute:02d}:00+00:00"}
+        self.db.execute("UPDATE item SET fields=json_set(fields, '$.repeats', json(?)) WHERE id=?",
+                        (json.dumps(repeats), item))
+        reporting._set_chain(self.db, reporting.CHAIN_KEY + "probe@hostb", None,
+                             {"run_id": run, "ended": repeats["last_ended"], "item": item})
+        self.db.commit()
+
     def test_a_report_another_host_folded_into_stays_open(self):
         """Host B's run folded into host A's report: A's shrinking set must not hide B's finding."""
         shared = self.tick("a", 1, self.TWO)["item"]["id"]
-        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
-            self.assertEqual(self.tick("b", 2, self.TWO)["item"]["id"], shared)
+        self.folded_from_hostb(shared, "b", 2)
         self.tick("c", 16, self.ONE)
         self.assertEqual(self.row(shared)["status"], "planning")
         # Once B's newest run went elsewhere, A's next new set closes it.
@@ -991,10 +1026,11 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.assertRegex(self.status_notes(older)[-1], rf"superseded by sd:{cut}")
 
     def test_a_run_folded_into_a_cut_body_supersedes_nothing(self):
-        """Codex: this host's whole run folded into another host's cut report, which kept its body."""
+        """Codex: this host's whole run folded into a cut report another host's
+        later run had folded into, which kept the cut body."""
         older = self.tick("a", 1, self.TWO)["item"]["id"]
-        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
-            cut = self.tick("b", 31, self.past_the_cut(self.ONE, ""))["item"]["id"]
+        cut = self.tick("a2", 2, self.past_the_cut(self.ONE, ""))["item"]["id"]
+        self.folded_from_hostb(cut, "b", 31)
         whole = self.tick("c", 16, self.ONE)
         self.assertEqual((whole["recorded"], whole["item"]["id"]), ("folded", cut))
         self.assertEqual(self.row(older)["status"], "planning")
