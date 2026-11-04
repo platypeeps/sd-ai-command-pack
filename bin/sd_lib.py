@@ -3884,6 +3884,14 @@ class ThreadGroups:
                 _signal_group(pid, signal.SIGTERM)
         return heard_group
 
+    def reopen_groups(self) -> None:
+        """After `end_groups` and every reader thread has stopped: a later dispatch's groups run.
+
+        Left set while a thread may still start a group (a retry), which is
+        then ended as it registers; a second Ctrl-C during the wait leaves it so."""
+        with self._lock:
+            self._ending = False
+
     def end_groups(self) -> None:
         """SIGTERM each live group, then SIGKILL one still registered after `GROUP_CLEANUP_SECONDS`.
 
@@ -3918,7 +3926,8 @@ def fill_slots(items: Any, slots: int, run: Callable[[Any], Any], counted: Calla
     count, and only while counted and running answers are fewer than `slots`.
     Answers return in item order, whatever order they finished in. `run`
     starts its processes through `run_group(started=groups.group_hook())`, so a
-    SIGTERM ends each one's group, then unwinds here.
+    SIGTERM ends each one's group, then unwinds here. Any other exception ends
+    them too, and returns only once every reader thread has stopped.
     """
     import concurrent.futures  # noqa: PLC0415 - only the slot runner needs it
 
@@ -3941,7 +3950,12 @@ def fill_slots(items: Any, slots: int, run: Callable[[Any], Any], counted: Calla
                     answers[index] = future.result()
                     done += bool(counted(answers[index]))
         except BaseException:
-            pool.shutdown(wait=False, cancel_futures=True)
+            # Ctrl-C, a reader or `counted` that raised: no signal handler ran,
+            # so end the groups here, then wait for their threads, so the
+            # caller's `finally` gives the gate slot back after the readers stop.
+            groups.end_groups()
+            pool.shutdown(wait=True, cancel_futures=True)
+            groups.reopen_groups()
             raise
         pool.shutdown(wait=True)
     return [answers[index] for index in sorted(answers)]

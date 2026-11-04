@@ -7,6 +7,7 @@ and the receipt keeps the registry's order whatever order the answers came in.
 
 from __future__ import annotations
 
+import _thread
 import io
 import json
 import os
@@ -17,6 +18,7 @@ import sys
 import textwrap
 import threading
 import time
+import unittest
 from typing import Any
 
 from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
@@ -251,6 +253,82 @@ class ATermEndsBothReaders(ParallelFixture):
         while time.monotonic() < deadline and any(_alive(pid) for pid in pids):
             time.sleep(0.05)
         self.assertEqual([pid for pid in pids if _alive(pid)], [])
+
+
+
+class AnyExitEndsTheReaders(unittest.TestCase):
+    """Round 1 class: a reader group outlives the review on a non-normal exit of `fill_slots`.
+
+    Each test starts a real `sleep` group in a reader thread, ends the dispatch
+    another way than SIGTERM, and asks that the group and its thread are gone
+    when `fill_slots` returns: `review()`'s `finally` gives the gate slot back then.
+    """
+
+    def setUp(self) -> None:
+        self.groups = sd_review.sd_lib.ThreadGroups()
+        self.pids: list[int] = []
+        self.started = threading.Event()
+
+    def sleeper(self, seconds: float = 60, timeout: float = 60) -> Any:
+        hook = self.groups.group_hook()
+
+        def heard(pid: int | None) -> None:
+            if pid is not None:
+                self.pids.append(pid)
+                self.addCleanup(_quietly_kill, pid)
+                self.started.set()
+            hook(pid)
+        return sd_review.sd_lib.run_group(["sleep", str(seconds)], cwd=pathlib.Path.cwd(), env=dict(os.environ),
+                                          timeout=timeout, started=heard)
+
+    def assert_nothing_left(self) -> None:
+        self.assertTrue(self.pids, "no reader group started")
+        self.assertEqual([pid for pid in self.pids if _alive(pid)], [], "a reader group outlived fill_slots")
+        self.assertEqual([t.name for t in threading.enumerate() if t.name.startswith("sd-slot")], [])
+
+    def test_a_ctrl_c_ends_every_reader_group_before_fill_slots_returns(self) -> None:
+        def interrupt_once_started() -> None:
+            if self.started.wait(10):
+                _thread.interrupt_main()
+        threading.Thread(target=interrupt_once_started, daemon=True).start()
+        with self.assertRaises(KeyboardInterrupt):
+            sd_review.sd_lib.fill_slots(["a", "b"], 2, lambda _item: self.sleeper(), lambda _answer: True, self.groups)
+        self.assert_nothing_left()
+
+    def test_a_reader_that_raises_ends_the_other_readers_group(self) -> None:
+        def run_one(item: str) -> Any:
+            if item == "b":
+                return self.sleeper()
+            self.started.wait(10)
+            raise RuntimeError("reader a failed outside its group")
+        with self.assertRaisesRegex(RuntimeError, "reader a failed"):
+            sd_review.sd_lib.fill_slots(["a", "b"], 2, run_one, lambda _answer: True, self.groups)
+        self.assert_nothing_left()
+
+    def test_a_counting_rule_that_raises_ends_the_other_readers_group(self) -> None:
+        def run_one(item: str) -> Any:
+            return self.sleeper() if item == "b" else self.started.wait(10)
+        def counted(answer: Any) -> bool:
+            raise ValueError("unreadable answer")
+        with self.assertRaisesRegex(ValueError, "unreadable answer"):
+            sd_review.sd_lib.fill_slots(["a", "b"], 2, run_one, counted, self.groups)
+        self.assert_nothing_left()
+
+    def test_after_an_interrupted_dispatch_the_next_one_runs_its_readers(self) -> None:
+        self.test_a_reader_that_raises_ends_the_other_readers_group()
+        answers = sd_review.sd_lib.fill_slots(
+            ["a"], 1, lambda _item: self.sleeper(seconds=0.2).returncode, lambda _answer: True, self.groups)
+        self.assertEqual(answers, [0], "a later dispatch's group was ended as it started")
+
+    def test_a_reader_past_its_phase_timeout_ends_its_own_group(self) -> None:
+        def run_one(_item: str) -> str:
+            try:
+                self.sleeper(timeout=0.5)
+            except sd_review.sd_lib.GroupTimeout:
+                return "timed out"
+            return "finished"
+        self.assertEqual(sd_review.sd_lib.fill_slots(["a"], 1, run_one, lambda _answer: False, self.groups), ["timed out"])
+        self.assert_nothing_left()
 
 
 def _alive(pid: int) -> bool:
