@@ -164,7 +164,7 @@ class TheDocument(ScreenCase):
         """pack sd:7215: a table that names no toolbar row gets its column filter as a second row (shell.js); each GitHub
         view's table names its view's one filter row, as Health's do."""
         views = self.views()
-        self.assertEqual(sorted(views), ["intake", "issues", "pulls"])
+        self.assertEqual(sorted(views), ["dependabot", "intake", "issues", "pulls"])
         drawn = {"pulls": re.findall(r'<table class="ledger st"[^>]*>', PAGE_JS)}
         for view, body in views.items():
             rows = re.findall(r'<div class="filters toolbar-2" id="([a-z-]+)"', body)
