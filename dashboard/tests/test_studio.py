@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from unittest import mock
+from urllib.parse import quote
 
 from sd_dashboard import studio, v2
 from sd_db.testing import patience
@@ -69,6 +70,26 @@ def fixture(base: Path) -> tuple[Path, Path]:
     (art / "node_modules" / "dep").mkdir(parents=True)
     (art / "node_modules" / "dep" / "project.json").write_text("{}", encoding="utf-8")
     return root, outside
+
+
+def song_with_renders(root: Path, outside: Path) -> Path:
+    """A song as fun-ai-stuff keeps one (pack sd:7514): its films in illustrated-film/renders/<Title>.mp4, beside a
+    deeper draft, a subtitles folder, a note, a hidden partial, a link out and a link to a sibling."""
+    song = root / "example" / "art" / "songs" / "tune"
+    renders = song / "illustrated-film" / "renders"
+    (renders / "drafts").mkdir(parents=True)
+    (song / "illustrated-film" / "subtitles").mkdir()
+    (song / "project.json").write_text(json.dumps({"kind": "song", "title": "Tune"}), encoding="utf-8")
+    for name in ("Who Pays?.mp4", "All Rise! (Subtitled).mp4", "Don't Stop.mp4"):
+        (renders / name).write_bytes(MEDIA)
+    (renders / "notes.md").write_text("not media", encoding="utf-8")
+    (renders / ".partial.mp4").write_bytes(MEDIA)
+    (renders / "drafts" / "deeper.mp4").write_bytes(MEDIA)
+    (song / "illustrated-film" / "subtitles" / "Who Pays.mp4").write_bytes(MEDIA)
+    (outside / "film.mp4").write_bytes(MEDIA)
+    (renders / "linked.mp4").symlink_to(outside / "film.mp4")
+    (renders / "inside.mp4").symlink_to(renders / "Who Pays?.mp4")
+    return song
 
 
 class TheProjects(ScreenCase):
@@ -165,6 +186,40 @@ class TheProjects(ScreenCase):
         (song / "final-video.mp4").symlink_to(self.outside / "film.mp4")
         self.assertEqual(self.read()["projects"][2]["roots"], [])
         self.assertIsNone(studio.located(self.connection, "art/songs/tune/final-video.mp4", self.root))
+
+    def test_a_songs_films_in_its_renders_folder_list_as_results_and_nothing_deeper(self):
+        # pack sd:7514: no song has final-video.mp4; its films land in illustrated-film/renders/<Title>.mp4.
+        song = song_with_renders(self.root, self.outside)
+        tune = self.read()["projects"][2]
+        films = ["songs/tune/illustrated-film/renders/" + name for name in ("All Rise! (Subtitled).mp4", "Don't Stop.mp4", "Who Pays?.mp4")]
+        self.assertEqual([(r["role"], r["result"], [f["path"] for f in r["files"]]) for r in tune["roots"]],
+                         [("final", True, films)])
+        for film in films:
+            located = studio.located(self.connection, quote(f"art/{film}"), self.root)
+            self.assertEqual(located[0] if located else None, (self.root / "example" / "art" / film).resolve(), film)
+        for tail in ("renders/drafts/deeper.mp4", "subtitles/Who%20Pays.mp4", "renders/notes.md", "renders/.partial.mp4",
+                     "renders/linked.mp4", "renders/inside.mp4", "renders"):
+            with self.subTest(tail=tail):
+                self.assertIsNone(studio.located(self.connection, f"art/songs/tune/illustrated-film/{tail}", self.root))
+        self.assertIsNone(studio.located(self.connection, "art/songs/tune/Who%20Pays%3F.mp4", self.root))
+        self.assertTrue((song / "illustrated-film" / "renders" / "Who Pays?.mp4").is_file())
+        with mock.patch.object(studio, "FILES", 1):
+            final = self.read()["projects"][2]["roots"][0]
+        self.assertEqual(([f["name"] for f in final["files"]], final["cut"]), (["All Rise! (Subtitled).mp4"], True))
+
+    def test_a_renders_folder_that_does_not_list_is_a_problem_not_an_empty_list(self):
+        # pack sd:7514: a failed read is unknown, not "no film"; a missing folder is no film.
+        song_with_renders(self.root, self.outside)
+        real = os.listdir
+
+        def refuse(path):
+            if Path(path).name == "renders":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real(path)
+        with mock.patch.object(studio.os, "listdir", refuse):
+            tune = self.read()["projects"][2]
+        self.assertEqual((tune["roots"], tune["problems"]),
+                         ([], ["final illustrated-film/renders/ could not be read: Permission denied"]))
 
     def test_a_root_with_more_than_files_lists_the_first_and_says_it_was_cut(self):
         with mock.patch.object(studio, "FILES", 1):
@@ -873,6 +928,20 @@ class TheServer(BrowserSession):
         status, headers, body = self.fetch("/studio/files/art/songs/tune/final-video.mp4", Range="bytes=0-9")
         self.assertEqual((status, body, headers["Content-Security-Policy"]), (206, MEDIA[:10], studio.MEDIA_POLICY))
         self.assertEqual(self.fetch("/studio/files/art/songs/tune/other.mp4")[0], 404)
+
+    def test_a_songs_render_with_a_question_mark_is_linked_encoded_and_served_with_a_range(self):
+        """pack sd:7514: studio.js links renders/'Who Pays?.mp4' with %3F, so the "?" is no query; the server finds it."""
+        song_with_renders(self.root, self.outside)
+        doc = json.loads(self.fetch("/api/studio")[2])
+        details = self.run_page(doc, "window.PAGE_LIST.select('art/songs/tune'); R.details = ELS.details.html;")["R"]["details"]
+        self.assertIn('src="/studio/files/art/songs/tune/illustrated-film/renders/Who%20Pays%3F.mp4"', details)
+        status, headers, body = self.fetch("/studio/files/art/songs/tune/illustrated-film/renders/Who%20Pays%3F.mp4", Range="bytes=0-9")
+        self.assertEqual((status, headers["Content-Range"], body, headers["Content-Security-Policy"]),
+                         (206, "bytes 0-9/1000", MEDIA[:10], studio.MEDIA_POLICY))
+        self.assertEqual(self.fetch("/studio/files/art/songs/tune/illustrated-film/renders/Who%20Pays?.mp4")[0], 404)
+        for tail in ("renders/drafts/deeper.mp4", "subtitles/Who%20Pays.mp4", "renders/linked.mp4"):
+            with self.subTest(tail=tail):
+                self.assertEqual(self.fetch(f"/studio/files/art/songs/tune/illustrated-film/{tail}")[0], 404)
 
     def test_a_path_outside_its_roots_answers_404(self):
         for tail in ("art/shirts/cat/stray.png", "art/shirts/cat/previews/secret.png", "art/shirts/cat/candidates/.hidden.png",

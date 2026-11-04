@@ -20,10 +20,11 @@ with its error; a root that leaves the project folder, or names an unknown role,
 the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
 image answers under `POLICY`, a sandbox, so an opened SVG runs nothing; audio and video under `MEDIA_POLICY`, the
 same without the sandbox, whose null origin Chrome refuses to play (sd:7513). Each file carries its mtime
-(`modified`), each root whether its role is in `RESULTS`, a rendered end result, and each project `updated`, the newest mtime of its
-`project.json` and the files it lists (sd:7490). A kind's `OUTPUTS`, the files its tool renders in the project folder
-itself (a song's `final-video.mp4`), list under the role `FINAL`, a result; each is served by its name alone, so no
-other file of that folder is.
+(`modified`), each root whether its role is in `RESULTS`, a rendered end result, and each project `updated`, the
+newest mtime of its `project.json` and the files it lists (sd:7490). A kind's `OUTPUTS`, the files its tool renders
+outside any root (a song's `final-video.mp4` in the project folder, and each film directly in
+`illustrated-film/renders/`, sd:7514), list under the role `FINAL`, a result; each is served by its name, resolving
+to itself, so no other file of those folders is, and no deeper one. A renders folder that does not list is a problem.
 
 **Seeking.** `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and `Content-Range` (`byte_range`): past the end
 is 416, and a header that does not parse, or asks for several ranges, gets the whole file (200).
@@ -57,7 +58,7 @@ import sys
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from . import designs
 
@@ -71,9 +72,11 @@ KINDS = ("shirt", "song", "episode")
 ROLES = ("reference", "candidates", "selected", "print", "stickers", "previews", "media")
 #: The roles that hold a rendered end result (sd:7490): `reference` and `candidates` are inputs and options.
 RESULTS = ("selected", "print", "stickers", "previews", "media")
-#: The files a kind's tool renders in the project folder itself, outside any root (decision #43036): song_pipeline.py
-#: assemble writes final-video.mp4 there. Each lists under the role `FINAL`, a result, and is served alone, by name.
-OUTPUTS = {"song": ("final-video.mp4",)}
+#: The files a kind's tool renders outside any root (decision #43036): song_pipeline.py assemble writes final-video.mp4
+#: in the project folder, and song_delivery.py and the hyperframes scripts write each film to
+#: illustrated-film/renders/<Title>.mp4 (sd:7514). An entry ending in `/` is a folder: its own files list, no deeper one.
+#: Each lists under the role `FINAL`, a result, and is served alone, by name.
+OUTPUTS = {"song": ("final-video.mp4", "illustrated-film/renders/")}
 FINAL = "final"
 
 #: The media the gallery serves, each with its type. Anything else is a 404: no page, script or Markdown.
@@ -230,19 +233,46 @@ def _listed(found: tuple[Path, str], relative: str, name: str) -> dict | None:
             "modified": _stamp(stat.st_mtime)}
 
 
-def _outputs(checkout: Path, base: Path, names: tuple[str, ...]) -> list[dict]:
-    """The `OUTPUTS` named in the project folder `base` that are there: each passing `designs.resolve` and resolving to
-    itself, so one that links elsewhere is not listed."""
-    out = []
+def _named(base: Path, names: tuple[str, ...], problems: list[str]):
+    """Each `OUTPUTS` name under the project folder `base`: a file's as it is, and a folder's (`name/`) each of its own
+    files, in name order. A folder that is not there names none; one that is there and does not list is a problem."""
     for name in names:
+        if not name.endswith("/"):
+            yield name
+            continue
+        try:
+            entries = sorted(os.listdir(base / name))
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as problem:
+            problems.append(f"{FINAL} {name} could not be read: {problem.strerror or problem}")
+            continue
+        yield from (name + entry for entry in entries)
+
+
+def _output(base: Path, names: list[str], target: Path) -> bool:
+    """Whether `target`, a file as requested and resolved, is one `names` names under `base`: a file by its name, or a
+    direct file of a folder (`name/`)."""
+    return any(target.parent == base / name if name.endswith("/") else target == base / name for name in names)
+
+
+def _outputs(checkout: Path, base: Path, names: tuple[str, ...], problems: list[str]) -> tuple[list[dict], bool]:
+    """The `OUTPUTS` named in the project folder `base` that are there, each passing `designs.resolve` and resolving to
+    itself, so one that links elsewhere, even to a sibling, is not listed; and whether the list was cut at `FILES`. A
+    folder that does not list adds to `problems`."""
+    out = []
+    for name in _named(base, names, problems):
         relative = (base / name).relative_to(checkout).as_posix()
         address = _address(relative)
         found = None if address is None else designs.resolve(address, checkout, TYPES, file_name)
-        if found is not None and found[0] == base / name:
-            listed = _listed(found, relative, name)
-            if listed is not None:
-                out.append(listed)
-    return out
+        if found is None or found[0] != base / name:
+            continue
+        if len(out) >= FILES:
+            return out, True
+        listed = _listed(found, relative, Path(name).name)
+        if listed is not None:
+            out.append(listed)
+    return out, False
 
 
 def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) -> dict | None:
@@ -313,9 +343,9 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
         entry["roots"].append({"role": role, "path": value, "files": files, "cut": cut, "result": role in RESULTS})
     entry["roots"].sort(key=lambda r: ROLES.index(r["role"]))
     if entry["kind"] in OUTPUTS:
-        files = _outputs(checkout, base, OUTPUTS[entry["kind"]]) if listing else []
+        files, cut = _outputs(checkout, base, OUTPUTS[entry["kind"]], entry["problems"]) if listing else ([], False)
         if files or not listing:
-            entry["roots"].append({"role": FINAL, "path": ".", "files": files, "cut": False, "result": True,
+            entry["roots"].append({"role": FINAL, "path": ".", "files": files, "cut": cut, "result": True,
                                    "only": list(OUTPUTS[entry["kind"]])})
     entry["updated"] = max([entry["updated"], *(f["modified"] for r in entry["roots"] for f in r["files"])])
     return entry
@@ -462,12 +492,14 @@ def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path,
     if found is None:
         return None
     target = found[0]
+    # An `OUTPUTS` file resolves to itself, as `_outputs` lists it: the path asked for is the file served.
+    asked = checkout.joinpath(*unquote(rest).split("/"))
     for manifest in _project_files(checkout)[0]:
         entry = _project(key, checkout, manifest, listing=False)
         for root in entry["roots"] if entry else ():
             base = (manifest.parent / root["path"]).resolve()
             if "only" in root:
-                if any(target == base / name for name in root["only"]):
+                if target == asked and _output(base, root["only"], target):
                     return found
             elif target.is_relative_to(base):
                 return found
