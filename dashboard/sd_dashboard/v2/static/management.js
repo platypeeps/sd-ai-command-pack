@@ -136,7 +136,7 @@ function setURL() {
   if (text.q) p.set('q', text.q);
   const L = LIST_STATE();
   if (L) { const [st, sort, dir] = L; shell.list.listQuery(p, st, { sort, dir, size: 25 }); }
-  if (view === 'repos') ['managed', 'merge'].forEach(k => RS[k] && p.set(k, RS[k]));
+  if (view === 'repos') ['managed', 'merge', 'research'].forEach(k => RS[k] && p.set(k, RS[k]));
   if (view === 'repos' && RS.cols === 'settings') p.set('cols', 'settings');
   shell.url(p);
 }
@@ -149,7 +149,7 @@ function readURL() {
   // An older link's ?p= and ?n= still open their page and size.
   if (!params.get('page') && /^[1-9]\d*$/.test(params.get('p') || '')) st.page = +params.get('p');
   if (!params.get('size') && [25, 50, 100].includes(+params.get('n'))) st.size = +params.get('n');
-  if (view === 'repos') ['managed', 'merge'].forEach(k => { if (params.get(k)) RS[k] = params.get(k); });
+  if (view === 'repos') ['managed', 'merge', 'research'].forEach(k => { if (params.get(k)) RS[k] = params.get(k); });
 }
 function swap() { details.setAttribute('data-swap', ''); requestAnimationFrame(() => details.removeAttribute('data-swap')); }
 const ACT = id => html`<td class="act end">${shell.commands.rowActions(id)}</td>`;
@@ -226,7 +226,7 @@ const filterSeg = (k, name, vals, on) => html`<div class="fgroup"><span class="l
 const filterBar = (parts, clear) => { const free = text.q.split(/\s+/).filter(w => w && !FIELD.test(w)).join(' ');
   return shell.list.fbar(html`${parts}${free ? shell.list.tok('q', '', `“${free}”`) : ''}`, { clear: !!clear }); };
 const hides = (n, all, noun) => n < all ? html`<span>${shell.list.count(n, all, noun)}</span>` : '';
-const repoChips = () => [RS.managed && { key: 'managed', label: `Managed: ${RS.managed}` }, RS.merge && { key: 'merge', label: `Lane merge: ${RS.merge}` }, ...textChip()].filter(Boolean);
+const repoChips = () => [RS.managed && { key: 'managed', label: `Managed: ${RS.managed}` }, RS.merge && { key: 'merge', label: `Lane merge: ${RS.merge}` }, RS.research && { key: 'research', label: `Research: ${RS.research}` }, ...textChip()].filter(Boolean);
 const text = { q: '' };
 function tokens() {
   const chips = {}, free = [];
@@ -235,11 +235,27 @@ function tokens() {
 }
 
 // ---------- Repos list ----------
-const RS = { sort: 'name', dir: 1, page: 1, size: 25, managed: null, merge: null, cols: 'git' };
+const RS = { sort: 'name', dir: 1, page: 1, size: 25, managed: null, merge: null, research: null, cols: 'git' };
+// Research (pack sd:7527): Operations > Resources > Research as a Repos filter. yes keeps the sd-research-kit checkouts
+// and draws their documents below the table, no keeps the rest; /api/management/research (sd_tile.py research) is read
+// the first time the filter is set. Until it answers, or when it fails, no row is said to be one or not.
+let RESEARCH = null;
+const researchPaths = () => RESEARCH?.paths ? new Set(RESEARCH.paths.map(tilde)) : null;
+const readResearch = () => { RESEARCH = { reading: true };
+  return shell.getJSON('/api/management/research').then(d => { RESEARCH = d; }, e => { RESEARCH = { error: e.message }; }).then(() => { if (view === 'repos') renderRepos(); }); };
+function researchPart() {
+  if (!RS.research) return '';
+  if (!RESEARCH || RESEARCH.reading) return html`<p class="why">Reading the research checkouts…</p>`;
+  if (!RESEARCH.paths) return unknown('The research checkouts were not read', RESEARCH.error, '/api/management/research');
+  return RS.research === 'yes' ? html`<h3>Research documents</h3>${tile(RESEARCH)}` : '';
+}
 function repoRows() {
   const { chips, free } = tokens();
-  const managed = chips.managed || RS.managed, merge = chips.merge || RS.merge;
-  return ALL.filter(r => (!managed || r.managed === managed) && (!merge || r.merge === merge) && free.every(f => (r.path + ' ' + r.remote).toLowerCase().includes(f)))
+  const managed = chips.managed || RS.managed, merge = chips.merge || RS.merge, research = RS.research && researchPaths();
+  if (RS.research && !RESEARCH) readResearch();
+  return ALL.filter(r => (!managed || r.managed === managed) && (!merge || r.merge === merge)
+      && (!RS.research || (!!research && research.has(r.path) === (RS.research === 'yes')))
+      && free.every(f => (r.path + ' ' + r.remote).toLowerCase().includes(f)))
     .sort((a, b) => String(a[RS.sort]).localeCompare(String(b[RS.sort]), 'en', { numeric: true }) * RS.dir);
 }
 function gitCells(r) {
@@ -288,7 +304,7 @@ function renderRepos() {
       <p class="tally">${hides(rows.length, ALL.length, 'repo')}<span>${REPOS.length} registered</span><span>${managed} managed</span><span>${auto} lane merge auto</span></p>
       <p class="tally" id="git-tally">${GIT ? html`${c.repos ?? 0} checkouts under ${tilde(GIT.root || '') || 'the fleet root'} · ${c.dirty ?? 0} dirty · ${c.ahead ?? 0} ahead · ${GIT.repos.filter(g => g.state === 'behind').length} behind default · git read ${seen(GIT)}` : html`<span class="g-unknown">▨</span> git state not read: ${why('git')}`}</p>
       <div class="tools"><button class="btn quiet sm" type="button" data-cmd="repos.refresh" data-obj="repos:git">${I('rotate-ccw')}<span>Refresh git state</span></button></div></div>
-    <div class="filters toolbar-2">${filterBar(html`${filterSeg('managed', 'Managed', ['yes', 'no'], RS.managed)}${filterSeg('merge', 'Lane merge', ['auto', 'manual'], RS.merge)}${filterSeg('cols', 'Columns', ['git', 'settings'], RS.cols)}`, repoChips().length)}</div>
+    <div class="filters toolbar-2">${filterBar(html`${filterSeg('managed', 'Managed', ['yes', 'no'], RS.managed)}${filterSeg('merge', 'Lane merge', ['auto', 'manual'], RS.merge)}${filterSeg('research', 'Research', ['yes', 'no'], RS.research)}${filterSeg('cols', 'Columns', ['git', 'settings'], RS.cols)}`, repoChips().length)}</div>
     ${rows.length ? html`<table class="ledger" aria-labelledby="repos-h" data-tfilter="page" data-toolbar="toolbar"><thead>${shell.list.sortHead(repoCols(), RS)}</thead>
       <tbody>${shown.map(r => html`<tr data-id="${'repo:' + r.path}" data-repo="${r.path}">
         <td class="g" aria-hidden="true">${I(r.registered ? 'settings' : 'folder-code')}</td>
@@ -299,6 +315,7 @@ function renderRepos() {
         ${RS.cols === 'settings' ? settingCells(r) : gitCells(r)}
         <td class="act end">${shell.commands.rowActions('repo:' + r.path)}</td></tr>`)}</tbody></table>${shell.list.pager(rows.length, RS, 'repos')}`
       : html`<p class="empty">No repo matches ${text.q ? `“${text.q}”` : 'these filters'}. <button class="linkbtn" type="button" data-clear>Clear filters</button></p>`}
+    ${researchPart()}
     ${RS.cols === 'settings' ? html`<p class="note">Managed and Merge switch from a row's actions, each one sd-db repo verb on the hub. Floor and Copilot are read-only here: they change through the row's review declaration, drafted from its ${I('settings')} settings page. Required checks are the nightly protection reading; Python and Node are the versions the checkout pins.</p>` : ''}`);
 }
 // Refresh git state (sd:5614, sd:6697): the post writes nothing, but an answered post makes the next read wait for a new git reading (sd:4955).
@@ -307,8 +324,8 @@ document.getElementById('view-repos').addEventListener('click', e => {
   if (e.target.closest('.rowact')) return;
   const cols = e.target.closest('[data-f="cols"]');
   if (cols) { RS.cols = cols.dataset.v === 'settings' ? 'settings' : 'git'; if (!repoCols().some(c => c[0] === RS.sort)) RS.sort = 'name'; renderRepos(); return setURL(); }
-  const f = e.target.closest('[data-f="managed"], [data-f="merge"]'), tr = e.target.closest('tr[data-repo]');
-  if (e.target.closest('[data-clear]')) { RS.managed = RS.merge = null; text.q = ''; shell.filter(''); RS.page = 1; renderRepos(); return setURL(); }
+  const f = e.target.closest('[data-f="managed"], [data-f="merge"], [data-f="research"]'), tr = e.target.closest('tr[data-repo]');
+  if (e.target.closest('[data-clear]')) { RS.managed = RS.merge = RS.research = null; text.q = ''; shell.filter(''); RS.page = 1; renderRepos(); return setURL(); }
   if (shell.list.sortBy(e, RS) || shell.list.paging(e, RS)) { shell.list.keepFocus(e, renderRepos); return setURL(); }
   if (f) { RS[f.dataset.f] = RS[f.dataset.f] === f.dataset.v ? null : f.dataset.v; RS.page = 1; renderRepos(); return setURL(); }
   if (tr) selectRow(tr.dataset.id, true);
@@ -1045,7 +1062,7 @@ document.querySelector('main').addEventListener('click', e => {
   // The filter bar (shell.list.fbar): the text token removes the text, Clear all every filter; applyText draws the view once
   // and writes the URL.
   const q = e.target.closest('[data-f="q"]'), all = e.target.closest('[data-fclear]'); if (!q && !all) return;
-  if (all) RS.managed = RS.merge = null;
+  if (all) RS.managed = RS.merge = RS.research = null;
   applyText(shell.filter(all ? '' : text.q.split(/\s+/).filter(w => FIELD.test(w)).join(' ')));
 });
 

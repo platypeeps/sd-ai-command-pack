@@ -43,7 +43,7 @@ from .markup import join, tag
 # rather than in a child that the budget can kill.
 VIEWS = (("toolbox", "Toolbox"), ("vault", "Vault"), ("research", "Research"), ("queues", "Queues"))
 #: The views Operations > Resources still shows; each moves to its page in pack sd:7527 (`view`).
-RESOURCES = (("vault", "Vault"), ("research", "Research"), ("queues", "Queues"))
+RESOURCES = (("vault", "Vault"), ("queues", "Queues"))
 # The child each view runs: one plugin tile, owned by this dashboard checkout
 # and never supplied by a page.
 TILE = Path(__file__).resolve().parents[1] / "sd_tile.py"
@@ -99,8 +99,11 @@ def collect(area):
     if not isinstance(rows, list) or any(not isinstance(row, dict)
             or not isinstance(row.get("what"), str) or not isinstance(row.get("detail"), str) for row in rows):
         raise ValueError("resource collector returned incomplete observations")  # noqa: TRY004 - external document validation
+    paths = result.get("paths", [])
+    if not isinstance(paths, list) or not all(map(_text, paths)):
+        raise ValueError("resource collector returned incomplete output")  # noqa: TRY004 - external document validation
     return {"title": str(result.get("title") or dict(VIEWS)[area]), "sections": result["sections"],
-            "rows": [{"what": row["what"], "detail": row["detail"]} for row in rows]}
+            "rows": [{"what": row["what"], "detail": row["detail"]} for row in rows]} | ({"paths": paths} if "paths" in result else {})
 
 
 def _text(value):

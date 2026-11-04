@@ -141,6 +141,11 @@ class Resources(unittest.TestCase):
                            "rows": [[{"text": "sync", "title": "t", "href": "https://example.test/"}, {"text": "7", "num": True}]]}}]
         with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"title": "Toolbox", "sections": good, "rows": []})}):
             self.assertEqual(reports_screen.collect("toolbox"), {"title": "Toolbox", "sections": good, "rows": []})
+        with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"sections": [], "rows": [], "paths": ["/r/a"]})}):
+            self.assertEqual(reports_screen.collect("research")["paths"], ["/r/a"])
+        with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"sections": [], "rows": [], "paths": [3]})}):
+            with self.assertRaisesRegex(ValueError, "incomplete output"):
+                reports_screen.collect("research")
         table = good[3]["table"]
         for sections in (None, "<p>x</p>", [{"html": "<p>x</p>"}], [{"heading": 3}], [{"heading": "a", "listing": []}],
                          [{"figures": [["jobs"]]}], [{"listing": [None]}],

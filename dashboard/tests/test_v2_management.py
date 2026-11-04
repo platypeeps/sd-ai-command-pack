@@ -2238,6 +2238,50 @@ window.shell.view.show('repos'); await flush(); window.shell.view.show('machine'
             self.assertEqual(route.read(None), (503, {"error": "Toolbox could not be observed: budget"}))
 
 
+class TheResearchFilter(PageScript):
+    """pack sd:7527: Operations > Resources > Research is the Repos filter ?research=yes|no."""
+
+    ANSWER = """(path) => path === '/api/management/research' ? (OUT.research = (OUT.research || 0) + 1, RESEARCH_ANSWER) : [200, {}]"""
+
+    def research(self, search, answer=None):
+        checkout = str(Path(self.tmp.name).resolve() / "checkout")
+        doc = answer or [200, {"title": "Research", "paths": [checkout], "rows": [],
+                               "sections": [{"heading": "Documents"}, {"table": {"columns": [["Document", "text"]], "search": "",
+                                                                                "rows": [[{"text": "<i>Reading</i>"}]]}}]}]
+        out = self.run_page("await flush(); R.html = ELS['view-repos'].html; R.reads = OUT.research || 0;",
+                            answer=self.ANSWER, search=search, extra=f"var RESEARCH_ANSWER = {json.dumps(doc)};\n")
+        return checkout, out["R"], re.findall(r'data-repo="([^"]+)"', out["R"]["html"])
+
+    def test_yes_keeps_the_research_checkouts_and_draws_their_documents(self):
+        checkout, got, rows = self.research("?research=yes")
+        self.assertEqual((rows, got["reads"]), ([checkout], 1))
+        self.assertIn("<h3>Research documents</h3>", got["html"])
+        self.assertIn("<td>&lt;i&gt;Reading&lt;/i&gt;</td>", got["html"])
+        self.assertIn('data-f="research" data-v="yes" aria-pressed="true"', got["html"])
+
+    def test_no_keeps_the_rest_and_a_failed_read_says_no_row_is_either(self):
+        checkout, got, rows = self.research("?research=no")
+        self.assertTrue(rows)
+        self.assertNotIn(checkout, rows)
+        self.assertNotIn("Research documents", got["html"])
+        _, got, rows = self.research("?research=yes", [503, {"error": "Research could not be observed: budget"}])
+        self.assertEqual(rows, [])
+        self.assertIn("The research checkouts were not read", got["html"])
+        self.assertIn("Research could not be observed: budget", got["html"])
+
+    def test_without_the_filter_nothing_is_read(self):
+        _, got, rows = self.research("")
+        self.assertEqual(got["reads"], 0)
+        self.assertGreater(len(rows), 1)
+
+    def test_the_route_answers_the_research_tile(self):
+        page = next(entry for entry in v2.registry.PAGES if entry.section == "Management")
+        route = next(api for api in page.api if api.path == "/api/management/research")
+        with patch("sd_dashboard.reports_screen.collect", return_value={"paths": []}) as collect:
+            self.assertEqual(route.read(None), {"paths": []})
+        collect.assert_called_once_with("research")
+
+
 class TheMinuteMarks(PageScript):
     """sd:2385 (Copilot 65f0869637eb on PR 50): 'every N min' only when the marks are evenly spaced around the hour."""
 
@@ -2582,5 +2626,5 @@ class TheSharedUpload(PageScript):
 
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route, api = ("management", "Management", "/management",
-                                 ("/api/management", "/api/management/machine", "/api/repos/land/preview", "/api/repos/land",
+                                 ("/api/management", "/api/management/machine", "/api/management/research", "/api/repos/land/preview", "/api/repos/land",
                                   "/api/repos/standard/preview", "/api/repos/standard", "/api/claude-sessions/end"))

@@ -593,7 +593,9 @@ def tab_research(collectors) -> dict:
         }
         for item in broken
     ]
-    return {"title": "Research", "sections": [part for part in parts if part], "rows": rows}
+    # The checkouts' paths, for the Repos filter that shows this tab (pack sd:7527).
+    return {"title": "Research", "sections": [part for part in parts if part], "rows": rows,
+            "paths": [item["path"] for item in items]}
 
 
 def conflict_ports(service) -> list[str]:

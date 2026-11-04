@@ -22,7 +22,7 @@ AREAS = (("resources", "Resources"), ("trackers", "Trackers"))
 #: `/ui/operations.js` sends an old `#view=` address there too.
 MOVED = {"services": "/management#view=deploys", "sessions": "/management#view=sessions", "usage": "/metrics#view=spend"}
 #: Resources' views that moved to a page of their own (pack sd:7527): `?area=resources&resource=<view>` answers 301 there.
-MOVED_RESOURCES = {"toolbox": "/management#view=machine"}
+MOVED_RESOURCES = {"toolbox": "/management#view=machine", "research": "/management?research=yes#view=repos"}
 #: Each area's Details note.
 NOTES = {
     "resources": "Resources shows what the local collectors read: Toolbox, Vault, Research and Queues.",
