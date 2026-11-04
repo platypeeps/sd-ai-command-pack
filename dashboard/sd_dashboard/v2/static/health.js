@@ -26,17 +26,17 @@
   const STATES = ['warning', 'caution', 'unknown', 'queued', 'ok'];
   // The design's icon and help per area; the help is page markup the shell renders with <b> and <code> only.
   const LOOK = {
-    disk: ['hard-drive', '<b>Where the space went.</b> Volume use from df, then the biggest items the fleet itself creates: the storage folders Settings names (<code>dashboard.disk_storage</code>) and build output left in worktrees. A merged worktree must not keep build output (rule of 2026-09-25). A volume lights caution at 80% and warning at 90%. A storage folder on a network mount shows its share\'s use from df instead; its folders are not measured. Build output is found, not sized.'],
+    disk: ['hard-drive', '<b>Where the space went.</b> Each volume\'s use, then the biggest things the tools create: the storage folders Settings names (Disk storage) and build output left in worktrees. A merged worktree should keep no build output. A volume shows caution at 80% and warning at 90%. A storage folder on a network drive shows the drive\'s use; its folders are not measured. Build output is found, not sized.'],
     cred: ['key-round', '<b>Presence and expiry only.</b> Token values are never read into this page. GitHub reports a classic PAT expiry in a response header; Home Assistant tokens carry none the dashboard can read.'],
-    wt: ['folder-x', '<b>Registered is not present.</b> A worktree whose directory is gone still holds its branch. Prune clears the registration only; it never touches a directory that exists.'],
-    br: ['git-branch', '<b>Merged but not deleted.</b> Local branches already contained in origin’s default branch. <code>git branch -d</code> refuses any branch that is not merged, so the fix cannot lose work. Merged worktrees are those at the head a lane entry merged: Remove takes the tree, its branch and origin’s, and keeps a tree with files, a process in it or a branch that moved.'],
+    wt: ['folder-x', '<b>Registered is not present.</b> A worktree whose folder is gone still holds its branch. Prune forgets it; it never deletes a folder.'],
+    br: ['git-branch', '<b>Merged but not deleted.</b> Local branches already in origin’s default branch. Delete removes only merged ones, so no work is lost. Merged worktrees are those the merge queue landed: Remove deletes the folder, its branch and origin’s, and keeps one with changed files, a running process or a branch that moved.'],
     dep: ['package', '<b>Dependabot, per repo.</b> Open alerts on the unarchived managed repos, as the nightly sync stored them. A repo whose alerts could not be read is unknown, never clean. A repo with alerts off is allowed and listed, not flagged.'],
     sec: ['shield-alert', '<b>Secret scanning, public repos only.</b> Private repos are not scanned, by policy. A public repo with scanning off is a finding.'],
     ports: ['link-2', '<b>Who holds which port.</b> Configured service ports, then every other TCP listener the Mac shows. <b>Unknown is not free</b>: an uninspected listener says nothing about the port.'],
-    doc: ['shield-check', '<b>What machine-setup doctor says.</b> Its WARN and FAIL lines, one row each, and the lines that pass. The doctor runs <code>brew doctor</code>, so an answer stands for ten minutes; a run still going, stopped at its deadline or failed is unknown, never clean.'],
-    ctr: ['box', '<b>Running containers.</b> Each container <code>docker ps</code> lists, read once with Ports: its image, status, compose project and working directory, and the bind mounts it holds under the checkout root. A Docker that was not read is unknown, never empty. Start and stop stay in the CLI.'],
-    svc: ['activity', '<b>Long-running user services.</b> Each LaunchAgent that keeps a process alive, as <code>sd services list</code> reads it. Restart and Start run <code>sd services restart</code> and <code>start</code> here, against the row as shown. The dashboard compares the commit it serves with the checkout; its own service is protected, so a stale one gives the kickstart line to copy. A run-once or scheduled agent shows only when its last run failed, as a warning with no controls.'],
-    mir: ['book-open', '<b>The vault mirror of base rows.</b> The <code>records-mirror</code> heartbeat a base row write leaves, read-only: this page writes no vault note.'],
+    doc: ['shield-check', '<b>The machine\'s own self-check.</b> Each warning and failure, one row each, and the checks that pass. A result stays good for ten minutes; a check still running, stopped at its deadline or failed is unknown, never clean.'],
+    ctr: ['box', '<b>Running containers.</b> Each running Docker container, read with Ports: its image, status, project and folder, and the repo folders it mounts. A Docker that was not read is unknown, never empty. Start and stop them from the terminal.'],
+    svc: ['activity', '<b>Background services that stay running.</b> Restart and Start act on the row as shown. The dashboard checks that it serves the newest code; it cannot restart itself, so a stale dashboard gives you the command to run. A one-off or scheduled job shows only when its last run failed, as a warning with no controls.'],
+    mir: ['book-open', '<b>The vault copy of your records.</b> When it last updated. Read-only: this page writes no vault note.'],
     prot: ['lock', '<b>What each default branch enforces.</b> One column per registered repo, one line per check: a filled cell is a gap, a short mark passes, an empty cell does not apply. <b>Unknown is not protected</b>: a hatched column was not read and shows no cells. Every column opens its repo; the table below carries the same cells.'],
   };
   // Protection has no lamp: the annunciator holds 2 to 8 (the design's rule), and its matrix is Health's evidence strip.
@@ -265,7 +265,7 @@
   const load = () => Promise.resolve(readers[VIEW] && readers[VIEW].load()).then(() => readSummary());
   // Read again (sd:5638): the shell's head button reads the shown view and the lamps again; sd:6697
   // dropped the Observed lamp. Re-run collector, on the protection collector, runs the sync first.
-  window.PAGE_AGAIN = { title: 'Read the shown view and the lamps again', run: load };
+  window.PAGE_AGAIN = { title: 'Refresh this view and the status lights', run: load };
   const spec = view => ({
     source: `/api/health/${view}`, what: `the ${PAGE_VIEWS.find(v => v.id === view).label} rows`,
     // Each view's reading state sits in its own panel, and a late read of a view not open leaves the selection alone.
@@ -380,10 +380,10 @@
         run: o => RECHECK.test(o.id) ? run(o, 'check.run', { row: o.id }) : (load(), 'Reading Health again') },
       // pack sd:6684: a doctor row runs the doctor again, and Fix files its finding in the system repo, or reuses the open item
       // with its ref, then starts a builder on it through the item's Fix (commands.js).
-      { id: 'doctor check.run', on: 'doctor check', label: 'Run doctor', does: 'Runs machine-setup.sh doctor and shows its output in Details.', key: 'e', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: () => true,
+      { id: 'doctor check.run', on: 'doctor check', label: 'Run doctor', does: 'Runs the machine self-check and shows the result in Details.', key: 'e', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: () => true,
         cli: o => o.cli, sends: o => `POST /api/actions/run {action: check.run, row: ${o.id}}`, run: o => run(o, 'check.run', { row: o.id }) },
       { ...DOCTOR_FIX, sends: o => `POST /api/items {title, body, ref: doctor:${pathOf(o)}}, then POST /api/items/<id>/fix {revision}`,
-        consequence: o => `Files "${o.what}" in the system repo, or reuses the open item that has it, then opens a herdr workspace and starts claude as a builder on it.`,
+        consequence: o => `Files "${o.what}" in the system repo, or reuses the open item that has it, then opens a Claude session that fixes it (herdr).`,
         run: o => shell.post('/api/items', { title: o.what, body: `Doctor: ${o.detail}`, ref: `doctor:${pathOf(o)}` }).then(filed => DOCTOR_FIX.run({ ...o, filed })) },
       { id: 'storage folder.du', on: 'storage folder', label: 'Show biggest', does: 'Lists this folder\'s biggest entries in Details.', key: 'b', icon: 'chart-no-axes-column', risk: 'safe', executes: true, primary: () => true,
         cli: o => o.cli, sends: o => `POST /api/actions/run {action: storage.du, path: ${pathOf(o)}}`, run: o => run(o, 'storage.du', { path: pathOf(o) }) },
@@ -399,7 +399,7 @@
         consequence: o => `Removes ${o.facts.Registered} worktree registrations whose directories are gone: ${names(o.list)}. No directory is touched.`, run: cleanup },
       { id: 'merged branches.delete', on: 'merged branches', label: 'Delete merged', does: 'Deletes local branches already merged; this cannot be undone.', key: 'd', risk: 'confirm', executes: true,
         primary: () => true, when: CLEAN['merged branches'].ready, cli: o => o.cli,
-        consequence: o => `Deletes ${o.facts.Merged} local branches already in origin's default branch: ${names(o.branches)}. git branch -d refuses any unmerged one.`, run: cleanup },
+        consequence: o => `Deletes ${o.facts.Merged} local branches already in origin's default branch: ${names(o.branches)}. An unmerged branch is never deleted.`, run: cleanup },
       { id: 'merged worktrees.remove', on: 'merged worktrees', label: 'Remove merged', does: 'Removes worktrees the lane merged, with their branches; cannot be undone.', key: 'r', icon: 'folder-x', risk: 'confirm',
         executes: true, primary: () => true, when: CLEAN['merged worktrees'].ready, cli: o => o.cli,
         consequence: o => `Removes ${o.removable.length} worktrees the lane merged, with their build output, their local branch and origin's: ${names(o.removable)}.`
@@ -413,22 +413,22 @@
     // Services (sd:3707): Restart and Start run sd services' code through Operations' route. sd_db.services protects the
     // dashboard's own service, and a restart from its page would end the request that asks, so that row is copy only.
     C.register(
-      { id: 'service.restart', on: 'service', label: 'Restart', does: 'Stops and starts the service through launchctl; connections drop.', key: 'r', icon: 'rotate-ccw', risk: 'confirm', executes: true,
+      { id: 'service.restart', on: 'service', label: 'Restart', does: 'Restarts the service; open connections drop.', key: 'r', icon: 'rotate-ccw', risk: 'confirm', executes: true,
         primary: o => o.facts.State === 'running', when: can('restart'),
         cli: o => `sd services restart ${o.facts.Label}`,
-        consequence: o => `Stops ${o.facts.Label} and starts it again through launchctl (bootout, bootstrap, kickstart). Its open connections drop.`,
+        consequence: o => `Stops ${o.facts.Label} and starts it again. Its open connections drop.`,
         run: service('restart') },
-      { id: 'service.start', on: 'service', label: 'Start', does: 'Loads and starts the service through launchctl.', key: 's', icon: 'play', risk: 'confirm', executes: true,
+      { id: 'service.start', on: 'service', label: 'Start', does: 'Starts the service.', key: 's', icon: 'play', risk: 'confirm', executes: true,
         primary: o => o.facts.State !== 'running', when: can('start'),
         cli: o => `sd services start ${o.facts.Label}`,
-        consequence: o => `Loads ${o.facts.Label} if it is unloaded and kickstarts it through launchctl.`,
+        consequence: o => `Starts ${o.facts.Label}.`,
         run: service('start') },
-      { id: 'dashboard service.kickstart', on: 'dashboard service', label: 'Kickstart', does: 'Gives the restart line; copy only, since a restart ends its own request.', key: 'l', icon: 'rocket', risk: 'safe', executes: false,
+      { id: 'dashboard service.kickstart', on: 'dashboard service', label: 'Kickstart', does: 'The dashboard cannot restart itself; gives you the command to run.', key: 'l', icon: 'rocket', risk: 'safe', executes: false,
         primary: () => true, cli: o => o.kickstart, run: copyOnly },
     );
     // Ports and Protection are read-only: each line is copy only.
     C.register(
-      { id: 'port.inspect', on: 'port', label: 'Inspect listener', does: 'Shows what listens on this port in Details, from lsof.', key: 'i', icon: 'search', risk: 'safe', primary: () => true, executes: true,
+      { id: 'port.inspect', on: 'port', label: 'Inspect listener', does: 'Shows which program uses this port, in Details.', key: 'i', icon: 'search', risk: 'safe', primary: () => true, executes: true,
         when: o => !!o.port || 'no port configured: there is nothing to inspect', cli: o => `lsof -nP -iTCP:${o.port || '<port>'} -sTCP:LISTEN`,
         sends: o => `POST /api/actions/run {action: port.lsof, port: ${o.port}}`, run: o => run(o, 'port.lsof', { port: Number(o.port) }) },
       { id: 'protection.settings', on: 'branch protection', label: 'Open branch settings', does: 'Opens the repo\'s branch protection settings on GitHub.', key: 'o', icon: 'settings', risk: 'safe', primary: () => true, executes: false,
@@ -444,10 +444,10 @@
       // through commands.js fix(). The brief: land an open Dependabot PR through sd-ship, else bump the dependency in
       // a worktree; never re-enable Actions. The clean and alerts-off rows are checks, so they have no Fix.
       { ...depFix, when: o => !!o.slug || 'no github.com remote: there is no alerts page to fix from',
-        does: 'Asks first, files an sd item in this repo, then starts claude in herdr as a builder on it.',
+        does: 'Asks first, files a task in this repo, then opens a Claude session to fix it.',
         sends: o => `POST /api/items {ref: dependabot:${o.slug}}, then POST /api/items/<id>/fix {revision}`,
-        consequence: o => `Files an sd item in ${o.facts.Repository} for ${o.slug}'s ${o.facts.Shown} open Dependabot alerts (reused while one is open), `
-          + 'then opens a herdr workspace there and starts claude as a builder on it: it lands an open Dependabot PR through sd-ship, or bumps the dependency in a worktree.',
+        consequence: o => `Files a task in ${o.facts.Repository} for ${o.slug}'s ${o.facts.Shown} open Dependabot alerts (reused while one is open), `
+          + 'then opens a Claude session there (herdr): it merges an open Dependabot pull request, or updates the dependency itself.',
         run: o => shell.post('/api/items', { title: `Dependabot: ${o.facts.Shown} open alerts in ${o.slug}`, repo: o.repo_path, ref: `dependabot:${o.slug}`,
           body: `${o.facts.Shown} open Dependabot alerts in ${o.slug}, ${o.grave} critical or high. Land an open Dependabot PR through sd-ship if one exists; `
             + 'else bump the dependency in a worktree. Never re-enable Actions.' })

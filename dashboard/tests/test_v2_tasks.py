@@ -1238,8 +1238,8 @@ change('det-body', 'New words'); await flush(); lastUndo().undo(); await flush()
         self.details[str(plan)]["item"]["body"] = "{not json"
         out = self.run_page(f"open({plan}); await flush(); R.bad = ELS.details.html;")
         self.assertNotIn('id="det-body"', out["R"]["bad"])
-        self.assertIn(f"The stored description is not valid JSON, so the field is withheld and no save here can overwrite it. "
-                      f"Repair it with <code>sd task edit {plan} --body</code>.", out["R"]["bad"])
+        self.assertIn(f"The saved description is not valid JSON, so it is hidden and nothing here can overwrite it. "
+                      f"Fix it from the terminal: <code>sd task edit {plan} --body</code>.", out["R"]["bad"])
         self.details[str(port)]["item"]["body"] = json.dumps({"text": "Report words"})
         out = self.run_page(f"open({port}); await flush(); R.port = ELS.details.html;")
         self.assertNotIn('id="det-body"', out["R"]["port"])
@@ -1390,14 +1390,18 @@ tile('due', {plan}, ''); await flush();""", self.ECHO)
 
     def test_each_sections_read_is_a_help_icon_that_copies_it_and_act_has_no_explanations(self):
         # sd:3444: the read under each Details heading moved into a popover beside the heading; pressing the icon copies it.
+        # Pack sd:7536: the help says what the section shows first; the command it copies comes after.
         plan = self.ids["plan"]
         out = self.run_page(f"open({plan}); await flush(); R.html = ELS.details.html;")
         html = out["R"]["html"]
         self.assertNotIn('<p class="src">', html)
         self.assertIn(f'<h3>Status history <button class="help src" type="button" aria-label="Help: Status history" '
-                      f'data-help="&lt;code&gt;sd task show {plan} --json&lt;/code&gt; · notes of kind status_change. Press to copy." '
-                      f'data-copy="sd task show {plan} --json">', html)
-        self.assertIn('data-copy="sd shadow"', html)
+                      f'data-help="Every status change, from the task&#39;s history. Press to copy the command: '
+                      f'&lt;code&gt;sd task show {plan} --json&lt;/code&gt;" data-copy="sd task show {plan} --json">', html)
+        # A section with no command to copy is plain help, with no copy.
+        self.assertIn('<h3>External context <button class="help" type="button" aria-label="Help: External context" '
+                      'data-help="What the tracker says about this task, and how fresh the last sync is.">', html)
+        self.assertNotIn("/api/tasks/", html)
         self.assertNotIn("Delete asks first", html)
 
     def test_a_status_move_toasts_after_the_write_and_undo_posts_the_old_status_with_the_new_revision(self):
@@ -1421,7 +1425,7 @@ lastToast().undo(); await flush();""", answer)
         port = self.ids["port"]
         out = self.run_page(f"shellRun(cmd('item.status.ready'), C.get('{port}')); await flush();")
         self.assertEqual(out["posts"], [])
-        self.assertEqual(out["toasts"], [["off: A runner assignment is running. Status is locked until it ends.", False]])
+        self.assertEqual(out["toasts"], [["off: An agent is working on this task. Status is locked until it ends.", False]])
 
     def test_a_stale_revision_toasts_and_reads_the_rows_again(self):
         ask = self.ids["ask"]
@@ -1572,7 +1576,7 @@ R.port = [cmd('work.relink').when(C.get('{port}')), cmd('work.cancel').when(C.ge
 R.plan = [cmd('work.relink').when(C.get('{plan}')), cmd('work.cancel').when(C.get('{plan}'))];""")
         self.assertTrue(why)
         self.assertEqual(out["R"]["port"], [why, why])
-        self.assertEqual(out["R"]["plan"], ["sd work relink acts on a work item; this is a task", "sd work cancel acts on a work item; this is a task"])
+        self.assertEqual(out["R"]["plan"], ["Relink works on a work item; this is a task", "Cancel works on a work item; this is a task"])
 
     def test_a_due_weekday_is_a_calendar_date_across_the_dst_change(self):
         # Friday 2026-10-30 in Denver; the clocks go back on Sunday 2026-11-01, so "due mon" is 2026-11-02.
@@ -1648,7 +1652,7 @@ C.runBulk(cmd('item.close'), [C.get('{plan}'), C.get('{ask}')]); await flush();"
         out = self.run_page(f"""R.off = [{plan}, {ask}, {port}, {old}].map(i => C.get(String(i)) ? cmd('item.close').when(C.get(String(i))) : 'not listed');""")
         self.assertEqual(out["R"]["off"], [
             "a recurring task cannot be cancelled; clear its recurrence first, or complete it", True,
-            "sd task cancel closes a task or followup; this is a work item", "not listed"])
+            "Close works on a task or followup; this is a work item", "not listed"])
 
     def test_a_priority_runs_on_every_picked_row_with_its_own_revision(self):
         plan, ask = self.ids["plan"], self.ids["ask"]
@@ -1791,7 +1795,7 @@ shellRun(cmd('item.status.done'), C.get('{ask}')); await flush();""", self.ECHO)
         self.assertEqual(buttons[str(ask)], f'<button class="icon-btn tile-done" type="button" data-cmd="item.status.done" data-obj="{ask}" '
                                             'aria-label="Mark Answer the question done">')
         self.assertIn('data-cmd="item.status.done"', buttons[str(plan)])
-        self.assertRegex(buttons[str(port)], r' disabled title="A runner assignment is running\. Status is locked until it ends\.">$')
+        self.assertRegex(buttons[str(port)], r' disabled title="An agent is working on this task\. Status is locked until it ends\.">$')
         self.assertNotIn(f"/api/tasks/{ask}", out["R"]["gets"], "a click on the done icon opened the Details")
         self.assertEqual([(p[0], p[1]["status"]) for p in out["posts"]], [(f"/api/items/{ask}/status", "done")])
         self.assertTrue(out["toasts"][-1][1], "Done keeps its Undo")
@@ -1954,7 +1958,7 @@ R.chips = ELS.filters.html;""")
         out = self.run_page(f"""R.what = cmd('item.fix').consequence(C.get('{plan}')); R.cli = cmd('item.fix').cli(C.get('{plan}'));
 shellRun(cmd('item.fix'), C.get('{plan}')); await flush();""", answer)
         self.assertEqual(out["confirms"], ["item.fix"])
-        self.assertIn(f"starts claude as a builder on #{plan}", out["R"]["what"])
+        self.assertIn(f"Opens a Claude session on #{plan} in herdr", out["R"]["what"])
         self.assertTrue(out["R"]["cli"].startswith("no sd verb:"))
         self.assertEqual(out["posts"], [[f"/api/items/{plan}/fix", {"revision": self.row("plan")["revision"]}, 64]])
         self.assertEqual(out["toasts"], [[f"Fix started · #{plan} · builder session in herdr pane w9:p1", False]])

@@ -46,7 +46,7 @@
     const out = l.output ? html` <details class="pt-out"><summary>Output${l.cut ? ', the end' : ''}</summary><pre>${l.output}</pre></details>` : '';
     const on = l.host ? ` on ${l.host}` : '';
     if (l.state === 'none') return html`<span class="pt-last">Not run${on} from here yet.</span>`;
-    if (l.state === 'pending') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Asked ${l.host} ${t(l.requested)}; waiting for its follow job, every five minutes.</span>`;
+    if (l.state === 'pending') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Asked ${l.host} ${t(l.requested)}; it starts within five minutes.</span>`;
     if (l.state === 'starting') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Starting${on} since ${t(l.started)}.</span>`;
     if (l.state === 'running') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Running${on} since ${t(l.started)}.</span>${out}`;
     if (l.state === 'done') return html`<span class="pt-last g ${l.exit ? 'warning' : 'ok'}"><span aria-hidden="true">${GLYPH[l.exit ? 'warning' : 'ok']}</span> ${l.exit ? 'Failed' : 'Done'}${on}, exit ${String(l.exit)}, ${t(l.ended)}.</span>${out}`;
@@ -63,7 +63,7 @@
       <div class="pt-head"><h3>${r.label}</h3><span class="pt-st g ${st}">${st ? html`<span aria-hidden="true">${GLYPH[st]}</span> ` : ''}${words(r.probe)}</span></div>
       ${r.url ? html`<p><a class="btn quiet sm" href="${r.url}" target="_blank" rel="noopener">${window.shell.ICON('arrow-up-right')} Visit</a></p>` : ''}
       ${off ? html`<p class="why">${off}.</p>` : ''}
-      ${r.host ? html`<p class="why">Runs on ${r.host}: its follow job answers a button within about five minutes.</p>` : ''}
+      ${r.host ? html`<p class="why">Runs on ${r.host}; a press takes up to five minutes to start.</p>` : ''}
       <ul class="pt-acts">${r.actions.map(a => html`<li>${off
         ? html`<button class="btn sm" type="button" data-tile-act="${a.label}" aria-disabled="true" data-tip="${off}">${a.label}</button>`
         : html`<button class="btn sm" type="button" data-tile-act="${a.label}" data-tip="${tip(a)}">${a.label}</button>`} ${lastHTML(a.last)}</li>`)}</ul>
@@ -78,7 +78,7 @@
     b.setAttribute('aria-busy', 'true');
     try {
       const out = await window.shell.post('/api/place/tiles', { realm: document.body.dataset.place, tile, action });
-      window.shell.toast(out.requested ? `${label} · ${action} asked of ${out.host}; its follow job runs it within about five minutes.`
+      window.shell.toast(out.requested ? `${label} · ${action} asked of ${out.host}; it starts within about five minutes.`
         : `${label} · ${action} started. Read again shows how it ended.`);
     } catch (err) {
       window.shell.toast(err.status ? `${label} · ${action} not run: ${err.message}` : `${label} · ${action}: no answer, so whether it started is not known: ${err.message}`);

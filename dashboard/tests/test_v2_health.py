@@ -2121,8 +2121,7 @@ R.cli = c.cli(o); R.why = c.consequence(o); R.on = c.when(o); R.primary = c.prim
 R.start = cmd('service.start').when(o);
 shellRun(c, o); await flush();""")
         self.assertEqual(out["R"]["cli"], "sd services restart com.example.alpha")
-        self.assertEqual(out["R"]["why"], "Stops com.example.alpha and starts it again through launchctl (bootout, bootstrap, "
-                                          "kickstart). Its open connections drop.")
+        self.assertEqual(out["R"]["why"], "Stops com.example.alpha and starts it again. Its open connections drop.")
         self.assertEqual((out["R"]["on"], out["R"]["primary"]), (True, True))
         self.assertEqual(out["R"]["start"], "service is already running")
         self.assertEqual(out["confirms"], ["service.restart"])
@@ -2314,7 +2313,7 @@ R.on = cmd('merged branches.delete').when(o); R.held = cmd('merged branches.dele
 shellRun(cmd('merged branches.delete'), o); await flush();""")
         self.assertEqual(out["R"]["cli"], "git -C /checkouts/alpha branch -d feat/one feat/two fix/three")
         self.assertEqual(out["R"]["why"], "Deletes 3 local branches already in origin's default branch: feat/one, feat/two, "
-                                          "fix/three. git branch -d refuses any unmerged one.")
+                                          "fix/three. An unmerged branch is never deleted.")
         self.assertIs(out["R"]["on"], True)
         self.assertEqual(out["R"]["held"], "checked out in a worktree: git branch -d refuses it until the worktree is removed")
         self.assertEqual(out["confirms"], ["merged branches.delete"])

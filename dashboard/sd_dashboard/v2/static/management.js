@@ -257,7 +257,7 @@ function pinCell(rt, key) {
   return pin.error ? unk(pin.error) : html`<span title="${pin.source}">${pin.value}</span>`;
 }
 function settingCells(r) {
-  if (!r.registered) return html`<td class="d mono" data-k="settings" colspan="7"><span class="no">not registered in sd-db</span></td>`;
+  if (!r.registered) return html`<td class="d mono" data-k="settings" colspan="7"><span class="no">not registered</span></td>`;
   return html`<td class="d mono" data-k="floor">${reviewCell(r.review, 'floor')}</td><td class="d mono" data-k="copilot">${reviewCell(r.review, 'copilot')}</td>
     <td class="d mono" data-k="checks">${checksCell(r.protection)}</td><td class="d mono" data-k="python">${pinCell(r.runtimes, 'python')}</td><td class="d mono" data-k="node">${pinCell(r.runtimes, 'node')}</td>`;
 }
@@ -269,7 +269,7 @@ function renderRepos() {
   const auto = REPOS.filter(r => r.merge === 'auto').length, managed = REPOS.filter(r => r.managed === 'yes').length;
   const c = GIT?.counts || {};
   shell.view.count('repos', rows.length);
-  put(el, html`<div class="sec-head"><h2 id="repos-h">Repos <button class="help" type="button" aria-label="Help: Repos" data-help="<b>The sd-db repo table is the enumeration.</b> One row per registered checkout. Open a repo for its settings page: the sd-db row, its review declaration and GitHub protection, each with the route an edit takes.">${I('circle-help')}</button></h2>
+  put(el, html`<div class="sec-head"><h2 id="repos-h">Repos <button class="help" type="button" aria-label="Help: Repos" data-help="<b>Every registered repo.</b> Open one for its settings, review rules and GitHub protection.">${I('circle-help')}</button></h2>
       <p class="tally">${hides(rows.length, ALL.length, 'repo')}<span>${REPOS.length} registered</span><span>${managed} managed</span><span>${auto} lane merge auto</span></p>
       <p class="tally" id="git-tally">${GIT ? html`${c.repos ?? 0} checkouts under ${tilde(GIT.root || '') || 'the fleet root'} · ${c.dirty ?? 0} dirty · ${c.ahead ?? 0} ahead · ${GIT.repos.filter(g => g.state === 'behind').length} behind default · git read ${seen(GIT)}` : html`<span class="g-unknown">▨</span> git state not read: ${why('git')}`}</p>
       <div class="tools"><button class="btn quiet sm" type="button" data-cmd="repos.refresh" data-obj="repos:git">${I('rotate-ccw')}<span>Refresh git state</span></button></div></div>
@@ -354,11 +354,11 @@ function proposeChannels(r, value) {
   if (!r.chProblem && chSetting(r) && chCanon(value) === chCanon(chSetting(r))) return withdraw('channels');
   const was = r.chProblem ? r.channels : chWords(chSetting(r));
   addProposal({ key: 'channels', value, shown: chWords(value), before: r.channels, verb: 'channels', route: 'sd-db', icon: 'terminal',
-    title: `channels ${was} → ${chWords(value)}`, cmd: `${SDDB} repo channels ${shq(r.path)} ${value === null ? 'none' : CH.filter(c => value[c]).map(c => shq(`${c}=${value[c].folder || ''}`)).join(' ')}`,
+    title: `Publishing: ${was} → ${chWords(value)}`, cmd: `${SDDB} repo channels ${shq(r.path)} ${value === null ? 'none' : CH.filter(c => value[c]).map(c => shq(`${c}=${value[c].folder || ''}`)).join(' ')}`,
     // Undo writes the whole setting the page read back. A value the library refuses cannot be written back, and a row that
     // held only inbound keys cannot be: a set that names no channel keeps the new ones, and none would drop the feed.
     back: r.chProblem || (r.channels !== 'none' && !chSetting(r)) ? undefined : chStored(r),
-    note: `Takes effect at the next render: run sd-research-kit render in ${r.path}, or wait for the next commit.` });
+    note: `Takes effect at the next render: your next commit, or sd-research-kit render in ${r.path} now.` });
 }
 // sd:4191: the repo's mail aliases, labels of local-mail-intake's conf whose threads Today shows under this repo. The write
 // names only `email`, so the library keeps the channels and the other inbound keys. Undo writes the old setting back, which
@@ -370,7 +370,7 @@ function proposeAliases(r, text) {
   if (labels.join(',') === chAliases(r).join(',')) return withdraw('mail_aliases');
   if (!labels.length) { withdraw('mail_aliases', true); shell.toast('Not proposed: an alias field cannot be emptied alone. Clear setting removes the whole setting.'); return; }
   addProposal({ key: 'mail_aliases', value: { email: { aliases: labels } }, shown: labels.join(','), before: r.channels, verb: 'channels', route: 'sd-db',
-    icon: 'terminal', title: `email aliases ${was} → ${labels.join(',')}`, cmd: `${SDDB} repo channels ${shq(r.path)} ${shq(`email=${labels.join(',')}`)}`,
+    icon: 'terminal', title: `Email aliases: ${was} → ${labels.join(',')}`, cmd: `${SDDB} repo channels ${shq(r.path)} ${shq(`email=${labels.join(',')}`)}`,
     back: r.channels === 'none' ? null : !r.chProblem && chAliases(r).length ? chStored(r) : undefined,
     note: "Today shows these aliases' threads under this repo from its next read." });
 }
@@ -383,42 +383,42 @@ function renderRepoPage(el) {
   put(el, html`
     <div class="crumb"><a class="btn quiet sm" href="?#view=repos">${I('chevron-left')}All repos</a><h2>${r.name}</h2>${url ? html`<a class="ext" href="${url}" target="_blank" rel="noopener">${r.slug}${I('arrow-up-right')}</a>` : ''}</div>
     <ul class="routes" aria-label="How edits land">
-      <li><span class="route">${I('terminal')}sd-db · local</span> runs one sd-db verb here</li>
-      <li><span class="route">${I('terminal')}sd-db declare · copy</span> gives the sd-db line that writes the row's declaration</li>
-      <li><span class="route">${I('shield-check')}GitHub · API</span> read here; edits stay on the classic Protection screen</li>
+      <li><span class="route">${I('terminal')}sd-db · local</span> saves the change on this machine</li>
+      <li><span class="route">${I('terminal')}sd-db declare · copy</span> rewrites the review rules when you press Write</li>
+      <li><span class="route">${I('shield-check')}GitHub · API</span> shown here; change it on the classic Protection screen</li>
     </ul>
 
-    <section class="set" aria-labelledby="set-db"><header><h3 id="set-db">sd-db row <button class="help" type="button" aria-label="Help: sd-db row" data-help="<b>The row the runner and dashboard read.</b> Seven fields have sd-db verbs: <code>repo runner-merge</code>, <code>repo managed</code>, <code>repo dependabot</code>, <code>repo lane-host</code>, <code>repo github-issues</code>, <code>repo jira-project</code> and <code>repo channels</code>. The rest change only through registration or a migration.">${I('circle-help')}</button></h3><span class="route">${I('terminal')}sd-db · local</span>
-      <p class="src">repo table · read ${hhmm(READ)} UTC</p></header>
+    <section class="set" aria-labelledby="set-db"><header><h3 id="set-db">Repo settings <button class="help" type="button" aria-label="Help: Repo settings" data-help="<b>What the merge runner and the dashboard read for this repo.</b> A field with a control changes here. One without changes only when you register the repo again.">${I('circle-help')}</button></h3><span class="route">${I('terminal')}sd-db · local</span>
+      <p class="src">read ${hhmm(READ)} UTC</p></header>
       ${setRow('path', r.path, lock('primary key'))}
       ${setRow('remote', r.remote || html`<span class="no">none</span>`, lock('from the checkout'))}
-      ${setRow(html`<code>runner_merge</code> <button class="help" type="button" aria-label="Help: runner_merge" data-help="<b>auto</b> lets the runner queue a merge after a done author run with a reviewed head, through the exclusive merge lane. <b>manual</b> ends the item at ready_to_send for you. Every row starts at manual.">${I('circle-help')}</button>`, r.merge, seg('runner_merge', ['manual', 'auto'], r.merge), html` data-key="runner_merge"`)}
-      ${setRow(html`<code>managed</code>`, r.managed, r.managed === 'no' ? manageSeg(r) : seg('managed', ['yes', 'no'], r.managed), html` data-key="managed"`)}
-      ${r.managed === 'yes' ? setRow(html`Standard setup <button class="help" type="button" aria-label="Help: standard setup" data-help="<b>The managed-repo standard</b> (sd:5610): this row, the GitHub settings and the fleet files, as <code>sd fleet standard</code> plans them. Check previews; nothing changes until you apply. Dependabot alerts you turned off stay off.">${I('circle-help')}</button>`, html`<span class="no">not checked</span>`,
+      ${setRow(html`Merge automatically <button class="help" type="button" aria-label="Help: Merge automatically" data-help="<b>auto</b>: a finished, reviewed change goes into the merge queue and merges on its own. <b>manual</b>: it waits for you. New repos start manual.">${I('circle-help')}</button>`, r.merge, seg('runner_merge', ['manual', 'auto'], r.merge), html` data-key="runner_merge"`)}
+      ${setRow(html`Managed <button class="help" type="button" aria-label="Help: Managed" data-help="<b>yes</b>: the workflow keeps this repo to the standard setup and lists it everywhere. <b>no</b>: it is registered but left alone.">${I('circle-help')}</button>`, r.managed, r.managed === 'no' ? manageSeg(r) : seg('managed', ['yes', 'no'], r.managed), html` data-key="managed"`)}
+      ${r.managed === 'yes' ? setRow(html`Standard setup <button class="help" type="button" aria-label="Help: standard setup" data-help="<b>The standard setup:</b> these settings, the GitHub settings and the shared files every managed repo carries. Check shows a preview; nothing changes until you apply. Dependabot alerts you turned off stay off.">${I('circle-help')}</button>`, html`<span class="no">not checked</span>`,
         html`<button class="btn quiet sm" type="button" data-cmd="repo.standard" data-obj="repo:${r.path}">Check</button>`, html` data-key="standard"`) : ''}
-      ${setRow(html`<code>dependabot</code> <button class="help" type="button" aria-label="Help: dependabot" data-help="<b>Whether the daily Dependabot sweep may merge this repo's patch and minor bumps.</b> Every platypeeps repo is swept, except the ones ROUTINE.md denies by name; for any other owner this is the consent. The sweep reads it at its next run.">${I('circle-help')}</button>`, depShown(r), depCtl(r), html` data-key="dependabot"`)}
-      ${setRow(html`<code>lane_host</code> <button class="help" type="button" aria-label="Help: lane_host" data-help="<b>The machine that runs this repo's merge lane.</b> <b>hub</b>, where every row starts, or a machine's short host name, lower-cased. Only that machine takes this repo's ship lock; every other refuses.">${I('circle-help')}</button>`, r.lane,
+      ${setRow(html`Auto-merge dependency updates <button class="help" type="button" aria-label="Help: Auto-merge dependency updates" data-help="<b>Whether the daily dependency sweep may merge small version bumps here.</b> Repos of your own organisation are swept unless the sweep's rules name them; for any other owner, this is your consent. It takes effect at the sweep's next run.">${I('circle-help')}</button>`, depShown(r), depCtl(r), html` data-key="dependabot"`)}
+      ${setRow(html`Merge machine <button class="help" type="button" aria-label="Help: Merge machine" data-help="<b>The machine that merges this repo's changes:</b> <b>hub</b>, where every repo starts, or a machine's short name in lower case. Every other machine refuses to merge here.">${I('circle-help')}</button>`, r.lane,
         html`<input class="fld" type="text" data-set="lane_host" list="lane-hosts" value="${r.lane}" aria-label="Move lane to" autocomplete="off" spellcheck="false"><datalist id="lane-hosts">${laneHosts().map(h => html`<option value="${h}"></option>`)}</datalist>`, html` data-key="lane_host"`)}
-      ${setRow(html`<code>github_issues</code> <button class="help" type="button" aria-label="Help: github_issues" data-help="<b>The repo policy's issues key: whether this repo takes third-party GitHub issues.</b> <b>read</b> lists its issues for mapping to sd items; <b>ask</b> also lets agents close and update issues on its own remote once you approve each write, and offers File GitHub issue on its tasks; <b>off</b>, where every row starts, keeps work in sd items only.">${I('circle-help')}</button>`, r.github_issues ?? html`<span class="no">not read</span>`,
+      ${setRow(html`GitHub issues <button class="help" type="button" aria-label="Help: GitHub issues" data-help="<b>Whether this repo takes GitHub issues from other people.</b> <b>off</b>, where every repo starts: work stays in tasks. <b>read</b>: lists outside issues to turn into tasks. <b>ask</b>: agents may also close and update issues after you approve each one, and tasks offer File GitHub issue.">${I('circle-help')}</button>`, r.github_issues ?? html`<span class="no">not read</span>`,
         r.github_issues == null ? lock(why('repos') || 'the policy declaration did not read') : seg('github_issues', ['off', 'read', 'ask'], r.github_issues), html` data-key="github_issues"`)}
-      ${setRow(html`<code>jira_project</code> <button class="help" type="button" aria-label="Help: jira_project" data-help="<b>The Jira project File Jira issue files in,</b> by its key, such as EXAMPLE. <b>off</b>, where every row starts, offers no File Jira issue on this repo's tasks. The credential is <code>JIRA_BASE_URL</code>, <code>JIRA_EMAIL</code> and <code>JIRA_API_TOKEN</code> in the dashboard's <code>.env</code>.">${I('circle-help')}</button>`, r.jira_project ?? html`<span class="no">not read</span>`,
+      ${setRow(html`Jira project <button class="help" type="button" aria-label="Help: Jira project" data-help="<b>The Jira project that File Jira issue files in,</b> by its key, such as EXAMPLE. <b>off</b>, where every repo starts, hides that action. The Jira sign-in lives in the dashboard's settings file.">${I('circle-help')}</button>`, r.jira_project ?? html`<span class="no">not read</span>`,
         r.jira_project == null ? lock(why('repos') || 'the row has no jira_project column') : html`<input class="fld" type="text" data-set="jira_project" value="${r.jira_project}" placeholder="KEY or off" aria-label="Jira project" autocomplete="off" spellcheck="false">`, html` data-key="jira_project"`)}
-      ${setRow(html`Publishing <code>channels</code> <button class="help" type="button" aria-label="Help: publishing channels" data-help="<b>Where this repo's briefs and documents publish</b> (sd:5102): the Obsidian folder under the vault, the Notion page under the scope folder, the Drive path under My Drive. A checked channel is on; an empty folder is its default, shown greyed. A document still opts in to Notion or Drive under Publish to on the Documents page. <b>none</b> is no setting: each document's research.conf.py designation and the default folders, as before the setting existed. A change takes effect at the next render.">${I('circle-help')}</button>`, chShown(r), chForm(r), html` data-key="channels"`)}
-      ${setRow(html`<code>email</code> <button class="help" type="button" aria-label="Help: email aliases" data-help="<b>The mail aliases this repo owns.</b> Each is an alias label in local-mail-intake's conf; Today shows the threads that came to them and wait on you. Labels only: the addresses stay in the conf.">${I('circle-help')}</button>`, chAliases(r).join(', ') || html`<span class="no">none</span>`,
+      ${setRow(html`Publishing <button class="help" type="button" aria-label="Help: Publishing" data-help="<b>Where this repo's briefs and documents publish:</b> a folder in Obsidian, a page in Notion, a path in Drive. A checked place is on; an empty folder uses the default, shown greyed. A document still opts in to Notion or Drive under Publish to on Documents. <b>none</b>: each document's own settings and the default folders. A change takes effect at the next render.">${I('circle-help')}</button>`, chShown(r), chForm(r), html` data-key="channels"`)}
+      ${setRow(html`Email aliases <button class="help" type="button" aria-label="Help: Email aliases" data-help="<b>The mail aliases this repo owns.</b> Today lists mail sent to them that waits on you. Names only: the addresses stay in the mail settings file.">${I('circle-help')}</button>`, chAliases(r).join(', ') || html`<span class="no">none</span>`,
         html`<input class="fld" type="text" data-set="mail_aliases" value="${chAliases(r).join(', ')}" placeholder="label, label" aria-label="Email aliases" autocomplete="off" spellcheck="false">`, html` data-key="mail_aliases"`)}
-      ${setRow(html`<code>mode</code>`, r.mode || html`<span class="no">unset</span>`, lock('no sd-db verb writes it'))}
-      ${setRow(html`<code>ci</code>`, r.ci, lock('sd-db repo ci'))}
-      ${setRow(html`<code>pieces_source</code>`, r.pieces, lock('moves only by migration'))}
+      ${setRow('Mode', r.mode || html`<span class="no">unset</span>`, lock('set when the repo is registered'))}
+      ${setRow('Checks', r.ci, lock('sd-db repo ci'))}
+      ${setRow('Writing pieces from', r.pieces, lock('changes only with a database update'))}
       ${setRow('registered', html`<time class="rel" datetime="${r.created}"></time> <span class="no">· updated</span> <time class="rel" datetime="${r.updated}"></time>`)}
     </section>
 
-    <section class="set" aria-labelledby="set-review"><header><h3 id="set-review">Review declaration <button class="help" type="button" aria-label="Help: review declaration" data-help="<b>The review lane's policy for this repo,</b> held on its sd-db row (sd:5159): tiers, categories, severity floor and the Copilot override. sd-db repo declare writes it, and refuses a value sd-review would refuse.">${I('circle-help')}</button></h3><span class="route">${I('terminal')}sd-db declare · copy</span>
-      <p class="src">${rv.error && rv.declaration == null ? 'not read' : `the sd-db row · ${hhmm(READ)} UTC`}</p></header>
+    <section class="set" aria-labelledby="set-review"><header><h3 id="set-review">Review declaration <button class="help" type="button" aria-label="Help: review declaration" data-help="<b>How code review treats this repo:</b> which tiers and categories it runs, the severity that blocks a merge, and the Copilot choice. A value review would refuse is refused here too.">${I('circle-help')}</button></h3><span class="route">${I('terminal')}sd-db declare · copy</span>
+      <p class="src">${rv.error && rv.declaration == null ? 'not read' : `read ${hhmm(READ)} UTC`}</p></header>
       ${rv.declaration == null && rv.error ? unknown('Not read', rv.error)
         : rv.declaration == null ? setRow('declaration', html`<span class="no">none</span><p class="why">The repo inherits the machine's review settings.</p>`, html`<button class="btn quiet sm" type="button" data-create-review>${I('plus')}Add declaration</button>`)
         : rv.error ? html`${setRow('declaration', html`<span class="no">${rv.error}</span>`)}<details class="srcfile"><summary>Show the declaration</summary><pre class="code">${rv.declaration}</pre></details>`
-        : html`${setRow(html`<code>severity_floor</code> <button class="help" type="button" aria-label="Help: severity_floor" data-help="The severity at which a finding is blocking and sd-review exits 1. Schema values: high, medium, low, unspecified.">${I('circle-help')}</button>`, rv.severity_floor || html`<span class="no">unset</span>`, html`<select class="fld" data-set="severity_floor" aria-label="severity_floor">${['', 'high', 'medium', 'low', 'unspecified'].map(v => html`<option value="${v}"${(rv.severity_floor || '') === v ? html` selected` : ''}>${v || 'unset'}</option>`)}</select>`, html` data-key="severity_floor"`)}
-           ${rv.automatic_deep == null ? setRow(html`<code>copilot_review.automatic_deep</code>`, html`<span class="no">unset</span>`) : setRow(html`<code>copilot_review.automatic_deep</code>`, String(rv.automatic_deep), seg('automatic_deep', ['true', 'false'], String(rv.automatic_deep)), html` data-key="automatic_deep"`)}
+        : html`${setRow(html`Blocking severity <button class="help" type="button" aria-label="Help: Blocking severity" data-help="A finding at this level or above blocks the merge: high, medium, low or unspecified.">${I('circle-help')}</button>`, rv.severity_floor || html`<span class="no">unset</span>`, html`<select class="fld" data-set="severity_floor" aria-label="Blocking severity">${['', 'high', 'medium', 'low', 'unspecified'].map(v => html`<option value="${v}"${(rv.severity_floor || '') === v ? html` selected` : ''}>${v || 'unset'}</option>`)}</select>`, html` data-key="severity_floor"`)}
+           ${rv.automatic_deep == null ? setRow('Automatic deep Copilot review', html`<span class="no">unset</span>`) : setRow('Automatic deep Copilot review', String(rv.automatic_deep), seg('automatic_deep', ['true', 'false'], String(rv.automatic_deep)), html` data-key="automatic_deep"`)}
            <details class="srcfile"><summary>Show the declaration</summary><pre class="code">${rv.declaration}</pre></details>`}
     </section>
 
@@ -427,8 +427,8 @@ function renderRepoPage(el) {
       ${unknown('Not read by the dashboard', 'The file is gitignored and can hold personal notes, so the build does not read it. Open it in the checkout to see its sd block.')}
     </section>
 
-    <section class="set" aria-labelledby="set-gh"><header><h3 id="set-gh">GitHub · <code>${pr?.default_branch || 'default branch'}</code> <button class="help" type="button" aria-label="Help: GitHub protection" data-help="<b>Protection on the default branch,</b> as the nightly collector last read it into repo_protection. Nothing here calls GitHub. The gap sentences are the ones sd-status prints.">${I('circle-help')}</button></h3><span class="route">${I('shield-check')}GitHub · API</span>
-      <p class="src">${pr?.observed_at ? html`repo_protection · observed <time class="rel" datetime="${pr.observed_at}"></time>${pr.borrowed_from ? html` · borrowed from <code>${pr.borrowed_from}</code>` : ''}` : 'not observed'}</p></header>
+    <section class="set" aria-labelledby="set-gh"><header><h3 id="set-gh">GitHub · <code>${pr?.default_branch || 'default branch'}</code> <button class="help" type="button" aria-label="Help: GitHub protection" data-help="<b>What GitHub enforces on the default branch,</b> as of last night's check. Nothing here calls GitHub.">${I('circle-help')}</button></h3><span class="route">${I('shield-check')}GitHub · API</span>
+      <p class="src">${pr?.observed_at ? html`checked <time class="rel" datetime="${pr.observed_at}"></time>${pr.borrowed_from ? html` · borrowed from <code>${pr.borrowed_from}</code>` : ''}` : 'not observed'}</p></header>
       ${!pr || pr.status === 'unknown' ? unknown(pr ? 'Protection unknown' : 'Not read', pr?.reason || why('repos') || 'no protection reading for this repo', r.slug ? `gh api repos/${r.slug}/rulesets` : '')
         : html`${setRow('status', pr.status)}
            ${pr.gaps.length ? pr.gaps.map(g => setRow(html`<code>${g.id}</code>`, html`<span class="g-caution" aria-hidden="true">▲</span> gap<p class="why">${g.gap || ''}</p>`)) : setRow('gaps', 'none found')}
@@ -450,6 +450,9 @@ function withdraw(key, quiet) {
   dropProposal(p);
   if (!quiet) shell.toast(`Proposal withdrawn · ${p.title}`);
 }
+// Pack sd:7536: the plain names the settings page and its proposals show; the column each sets stays in the line.
+const LABEL = { runner_merge: 'Merge automatically', managed: 'Managed', dependabot: 'Auto-merge dependency updates', github_issues: 'GitHub issues',
+  severity_floor: 'Blocking severity', automatic_deep: 'Automatic deep Copilot review' };
 function propose(key, value) {
   const r = REPOS.find(x => x.path === repoParam), rv = r.review || {};
   let p;
@@ -459,20 +462,20 @@ function propose(key, value) {
     const before = key === 'runner_merge' ? r.merge : r[key];
     if (value === before) return withdraw(key);
     const verb = key.replace('_', '-');
-    p = { key, value, before, verb, route: 'sd-db', icon: 'terminal', title: `${key} ${before} → ${value}`, cmd: `${SDDB} repo ${verb} ${shq(r.path)} ${value}`,
-      note: key === 'runner_merge' && value === 'manual' ? 'Items for this repo will stop at ready_to_send for you.' : key === 'runner_merge' ? 'The runner may queue merges for this repo through the exclusive lane.'
+    p = { key, value, before, verb, route: 'sd-db', icon: 'terminal', title: `${LABEL[key]}: ${before} → ${value}`, cmd: `${SDDB} repo ${verb} ${shq(r.path)} ${value}`,
+      note: key === 'runner_merge' && value === 'manual' ? 'Changes to this repo will wait for you before they merge.' : key === 'runner_merge' ? 'A finished, reviewed change to this repo goes into the merge queue on its own.'
         : key === 'dependabot' ? `The daily Dependabot sweep ${value === 'yes' ? 'may merge' : 'skips'} this repo's bumps from its next run.`
         : key === 'github_issues' ? (value === 'ask' ? "Agents may close and update issues on this repo's own remote, each write approved by you; its tasks offer File GitHub issue." : value === 'read' ? "Agents read this repo's issues and map each to an sd item; they write none." : 'Agents write no GitHub issues here; work stays in sd items.') : 'Writes one column; no new row.' };
   } else if (key === 'lane_host') {
     if (!value || value === r.lane) return withdraw(key);
-    p = { key, value, before: r.lane, verb: 'lane-host', route: 'sd-db', icon: 'terminal', title: `Move lane ${r.lane} → ${value}`,
+    p = { key, value, before: r.lane, verb: 'lane-host', route: 'sd-db', icon: 'terminal', title: `Merge machine: ${r.lane} → ${value}`,
       cmd: `${SDDB} repo lane-host ${shq(r.path)} ${shq(value)}`,
-      note: `Only ${value === 'hub' ? 'the hub' : value} may take this repo's ship lock; every other machine refuses with the way back. Pending entries follow: the queue lives in the hub database.` };
+      note: `Only ${value === 'hub' ? 'the hub' : value} merges this repo's changes; every other machine refuses and says how to move it back. Queued changes follow, since the queue lives on the hub.` };
   } else if (key === 'jira_project') {
     // sd:5103: a key or off; an empty field is off. repos.set_jira_project refuses a bad key when the change runs.
     const want = !value || value.toLowerCase() === 'off' ? 'off' : value.toUpperCase();
     if (want === r.jira_project) return withdraw(key);
-    p = { key, value: want, before: r.jira_project, verb: 'jira-project', route: 'sd-db', icon: 'terminal', title: `jira_project ${r.jira_project} → ${want}`,
+    p = { key, value: want, before: r.jira_project, verb: 'jira-project', route: 'sd-db', icon: 'terminal', title: `Jira project: ${r.jira_project} → ${want}`,
       cmd: `${SDDB} repo jira-project ${shq(r.path)} ${shq(want)}`,
       note: want === 'off' ? "This repo's tasks offer no File Jira issue." : `File Jira issue files this repo's tasks in Jira project ${want}, after a preview you confirm.` };
   } else if (key === 'severity_floor' || key === 'automatic_deep') {
@@ -484,7 +487,7 @@ function propose(key, value) {
     };
     if (!reviewDiff(rv.declaration || '', edit)) { shell.toast('Not proposed: the review declaration is not a JSON object'); return; }
     // The diff and the line are set by restateDeclaration, with every other pending edit for this repo.
-    p = { key, value, route: 'declare', icon: 'terminal', title: `review declaration · ${key} → ${value || 'unset'}`, edit,
+    p = { key, value, route: 'declare', icon: 'terminal', title: `Review rules · ${LABEL[key]}: ${value || 'unset'}`, edit,
       note: 'Replaces the review declaration on the row with every pending review edit; the next review reads it. Nothing changes until Write runs.' };
   }
   if (p) addProposal(p);
@@ -626,7 +629,7 @@ function objects() {
   CRON.forEach(c => out.push({ id: `cron:${c.name}`, type: 'job', label: c.name, job: c.name, name: c.name, service: c.service, failed: c.rank === 'warning', running: c.state === 'running', pid: c.pid, exit: c.last_exit, revision: c.revision, caps: c.capabilities || {} }));
   return [...out, ...pending];
 }
-const registeredWhy = o => o.row.registered || 'not registered in sd-db: sd-db repo add registers it first';
+const registeredWhy = o => o.row.registered || 'register this repo first (sd-db repo add)';
 // sd:5100: the repo's open pull requests as `sd shadow sync` last saw them, keyed by its lower-cased GitHub slug.
 const pullsOf = o => (o.row.slug && DOC?.pulls?.[o.row.slug.toLowerCase()]) || [];
 // sd:5109: the Deep review's settings as the document read them (management_screen's `deep` source).
@@ -640,27 +643,27 @@ function registerCommands() {
   const C = shell.commands;
   C.register(
     // Repo rows: the two sd-db verbs, each an Undo-able flip of one column. build: they post /api/repos/<verb>.
-    { id: 'repo.runner-merge', on: 'repo', label: 'Switch runner-merge', does: 'Switches runner merge between auto and manual; Undo switches it back.', key: 'm', icon: 'git-merge', risk: 'undo', bulk: true, primary: o => o.row.managed === 'yes', when: o => o.row.registered || 'not registered in sd-db: sd-db repo add registers it first',
+    { id: 'repo.runner-merge', on: 'repo', label: 'Switch runner-merge', does: 'Switches automatic merging on or off; Undo switches it back.', key: 'm', icon: 'git-merge', risk: 'undo', bulk: true, primary: o => o.row.managed === 'yes', when: o => o.row.registered || 'register this repo first (sd-db repo add)',
       cli: o => `${SDDB} repo runner-merge ${shq(o.path)} ${o.row.merge === 'auto' ? 'manual' : 'auto'}`, executes: true,
       run: o => flipRepo('runner-merge', o), undo: undoOf },
-    { id: 'repo.managed', on: 'repo', label: 'Switch managed', does: 'Switches whether sd manages this repo; Undo switches it back.', key: 'g', risk: 'undo', bulk: true, primary: o => o.row.managed !== 'yes', when: o => o.row.registered || 'not registered in sd-db: sd-db repo add registers it first',
+    { id: 'repo.managed', on: 'repo', label: 'Switch managed', does: 'Switches whether the workflow manages this repo; Undo switches it back.', key: 'g', risk: 'undo', bulk: true, primary: o => o.row.managed !== 'yes', when: o => o.row.registered || 'register this repo first (sd-db repo add)',
       cli: o => `${SDDB} repo managed ${shq(o.path)} ${o.row.managed === 'yes' ? 'no' : 'yes'}`, executes: true,
       run: o => o.row.managed === 'yes' ? flipRepo('managed', o) : sheet(() => standardRepo(o, true)), undo: undoOf },
     // sd:5610: the managed-repo standard, previewed by `sd fleet standard` and applied with the digest the sheet showed.
-    { id: 'repo.standard', on: 'repo', label: 'Standard setup', does: 'Previews the managed-repo standard for this repo; applies it when you confirm.', icon: 'shield-check', risk: 'confirm', executes: true,
+    { id: 'repo.standard', on: 'repo', label: 'Standard setup', does: 'Previews the standard setup for this repo; applies it when you confirm.', icon: 'shield-check', risk: 'confirm', executes: true,
       when: registeredWhy, cli: o => `cd ${shq(o.path)} && sd fleet standard --json`,
       // previews: run() reads the plan and asks with it, so the shell's own confirm does not ask first.
       previews: true, run: o => sheet(() => standardRepo(o, o.row.managed !== 'yes')) },
     // sd:3075: Move lane needs a host, so it opens the repo's settings page, where the lane_host field proposes the move.
-    { id: 'repo.lane-host', on: 'repo', label: 'Move lane', does: 'Opens the repo\'s settings page, where you move its lane.', key: 'h', risk: 'safe', executes: false, when: o => o.row.registered || 'not registered in sd-db: sd-db repo add registers it first',
+    { id: 'repo.lane-host', on: 'repo', label: 'Move lane', does: 'Opens the repo\'s settings, where you pick its merge machine.', key: 'h', risk: 'safe', executes: false, when: o => o.row.registered || 'register this repo first (sd-db repo add)',
       cli: o => `${SDDB} repo lane-host ${shq(o.path)} hub`,
       run: o => { location.href = `?repo=${encodeURIComponent(o.path)}#view=repos`; return `Move lane: ${o.label}'s settings page opens`; } },
     // sd:5888: Pull runs `git pull --ff-only` through /api/actions/run (run_actions.repo_pull). when() carries v1's refusals; the
     // server checks again under the lane's runner lock, just before the pull, and refuses a pinned checkout, a linked
     // worktree, another branch, a dirty tree or a lane that runs. Details shows git's output; no verb undoes a pull.
-    { id: 'repo.pull', on: 'repo', label: 'Pull', does: 'Fast-forwards the default branch from origin, after the server\'s checks.', key: 'l', icon: 'download', risk: 'confirm', executes: true, primary: o => o.row.git?.state === 'behind',
-      when: o => o.row.registered ? pullWhy(o) : 'not registered in sd-db: Pull runs only in a registered checkout',
-      consequence: o => `This runs git pull --ff-only in ${o.path}. It moves the default branch only, and refuses a dirty tree, another branch or a lane that runs there.`,
+    { id: 'repo.pull', on: 'repo', label: 'Pull', does: 'Pulls the newest code into this checkout\'s main branch.', key: 'l', icon: 'download', risk: 'confirm', executes: true, primary: o => o.row.git?.state === 'behind',
+      when: o => o.row.registered ? pullWhy(o) : 'this checkout is not registered; Pull works only in a registered one',
+      consequence: o => `Pulls the newest code into ${o.path}. It moves the main branch only, and refuses when there are local changes, another branch is out, or a merge runs there.`,
       cli: o => `git -C ${shq(o.row.git ? o.row.git.path : o.path)} pull --ff-only`, sends: o => `POST /api/actions/run {action: repo.pull, path: ${o.path}}`,
       run: o => window.commands.runAction(o, 'repo.pull', { path: o.path }).then(t => { reread(); return t; }) },
     // sd:5064: a codex review of the repository, in the background; the backend reviews only a registered checkout.
@@ -668,7 +671,7 @@ function registerCommands() {
     // sd:5100: one open pull request, picked from the shadow rows the document carries (`pulls`), reviewed by codex
     // as a change at its head. The server checks the number against the same rows and fetches nothing.
     window.commands.adversarialReview('repo', { id: 'repo.adversarial-pr', label: 'Adversarial review: PR',
-      does: 'Starts a codex review of one open pull request in the background; its brief lists tasks to pick.',
+      does: 'Starts a background review of one open pull request; you pick fixes from its report.',
       payload: (o, v) => ({ kind: 'change', target: o.path, pr: Number(v.pr || pullsOf(o)[0]?.number) }),
       fields: o => [{ name: 'pr', label: 'Pull request', options: pullsOf(o).map(p => ({ value: String(p.number), label: `#${p.number} ${p.title}` })) }],
       when: o => { const r = registeredWhy(o); if (r !== true) return r;
@@ -677,9 +680,9 @@ function registerCommands() {
         return pullsOf(o).length > 0 || 'no open pull request as sd shadow sync last saw it'; } }),
     // sd:5100: headless claude reads the whole checkout with read-only sub-agents; one runs per repository.
     window.commands.adversarialReview('repo', { id: 'repo.deep-review', label: 'Deep review',
-      does: 'Runs a read-only claude review with up to 8 sub-agents in the background; its brief lists fixes to pick.',
+      does: 'Starts a deep read-only review of the repo; you pick fixes from its report.',
       payload: o => ({ kind: 'deep', target: o.path }), when: registeredWhy,
-      consequence: o => `Runs claude at ${deepOf('model')} and ${deepOf('effort')} effort on ${o.label}, with up to ${deepOf('agents')} read-only sub-agents, for up to ${deepOf('bound_minutes')} minutes. It changes nothing in the checkout. Its brief lists each fix as a question to approve or reject.` }),
+      consequence: o => `Has Claude (${deepOf('model')}, ${deepOf('effort')} effort) read ${o.label} with up to ${deepOf('agents')} read-only helpers, for up to ${deepOf('bound_minutes')} minutes. It changes nothing in the checkout. Its report lists each fix as a question to approve or reject.` }),
     // Land (sd:5104): the preview first, in the confirm, then the write with the preview's revision (land.py). A changed
     // Items field previews again, so the confirm always shows what lands. build: it posts /api/repos/land.
     { id: 'repo.land', on: 'repo', label: 'Land', does: 'Commits the work once per item and queues it; asks first with a preview.', key: 'n', icon: 'rocket', risk: 'confirm', executes: true,
@@ -687,7 +690,7 @@ function registerCommands() {
       cli: o => `sd-ship -C ${shq(o.path)} lane enqueue --item <n> --title <title> --body-file <body> --expected-head <head> --deliver`,
       // previews: run() reads the preview and asks with it, so the shell's own confirm does not ask first.
       previews: true, run: o => landRepo(o) },
-    { id: 'sddb.run', on: 'sd-db change', label: 'Run', does: 'Runs this sd-db change on this machine; Undo restores the old value.', key: 'u', icon: 'play', risk: 'undo', primary: () => true, cli: o => o.cmd, executes: true,
+    { id: 'sddb.run', on: 'sd-db change', label: 'Run', does: 'Saves this setting change; Undo puts the old value back.', key: 'u', icon: 'play', risk: 'undo', primary: () => true, cli: o => o.cmd, executes: true,
       run: o => { dropProposal(o);
         // sd:3465: a channels write answers the render remedy, and its Undo writes the setting back (`back`) over the row the
         // write answered (sd:4632): the library keeps an inbound key the form never posts, so that row is not the posted value.
@@ -713,17 +716,17 @@ function registerCommands() {
     // Services on this Mac. build: each posts /api/services/<label>/<action> with the service's revision; when() is its capability.
     { id: 'svc.restart', on: 'service', label: 'Restart', does: 'Stops and starts the service; what it serves drops for seconds.', key: 't', icon: 'rotate-ccw', risk: 'confirm', primary: () => true, when: o => capWhy(o, 'restart', 'not read'), cli: o => `sd services restart ${o.name}`,
       consequence: o => `Stops and starts ${o.name}. Anything it serves drops for a few seconds.`, run: o => landing(service(o, 'restart'), () => `Restart requested · ${o.label}`) },
-    { id: 'svc.stop', on: 'service', label: 'Stop', does: 'Stops the service through launchd; Start brings it back.', key: 's', risk: 'confirm', when: o => capWhy(o, 'stop', o.running || 'not running'), cli: o => `sd services stop ${o.name}`,
+    { id: 'svc.stop', on: 'service', label: 'Stop', does: 'Stops the service; Start brings it back.', key: 's', risk: 'confirm', when: o => capWhy(o, 'stop', o.running || 'not running'), cli: o => `sd services stop ${o.name}`,
       consequence: o => `Stops ${o.name} through launchd. Start brings it back.`, run: o => landing(service(o, 'stop'), () => `Stop requested · ${o.label}`) },
-    { id: 'svc.start', on: 'service', label: 'Start', does: 'Starts the service through launchd.', key: 'a', risk: 'safe', when: o => capWhy(o, 'start', !o.running || 'already running'), cli: o => `sd services start ${o.name}`,
+    { id: 'svc.start', on: 'service', label: 'Start', does: 'Starts the service.', key: 'a', risk: 'safe', when: o => capWhy(o, 'start', !o.running || 'already running'), cli: o => `sd services start ${o.name}`,
       run: o => landing(service(o, 'start'), () => `Start requested · ${o.label}`) },
     // sd:6697: Refresh <what>, a registered command whose tip names the source and what it writes.
-    { id: 'repos.refresh', on: 'git state', label: 'Refresh git state', does: 'Reads every checkout\'s git state under the fleet root again; writes nothing.', icon: 'rotate-ccw', risk: 'safe', primary: () => true,
+    { id: 'repos.refresh', on: 'git state', label: 'Refresh git state', does: 'Checks every repo\'s branch and changes again; writes nothing.', icon: 'rotate-ccw', risk: 'safe', primary: () => true,
       cli: () => 'no CLI: the next fleet reading reads git', sends: () => 'POST /api/repos/refresh {}', executes: true, run: () => refreshRepos() },
     // sd:5108: one request row in the hub database; each satellite's next repo-sync follow run (every 5 min) answers it.
-    { id: 'sats.refresh', on: 'satellite refresh', label: 'Refresh satellites', does: 'Asks each satellite to follow the hub\'s pins and run machine-setup update --apply.', icon: 'rotate-ccw', risk: 'confirm', primary: () => true,
+    { id: 'sats.refresh', on: 'satellite refresh', label: 'Refresh satellites', does: 'Asks each other machine to update to the hub\'s versions.', icon: 'rotate-ccw', risk: 'confirm', primary: () => true,
       cli: () => 'no CLI: the dashboard writes the refresh.request row', executes: true,
-      consequence: () => 'Each satellite, on its next repo-sync follow run (every five minutes), drains its lanes, follows the hub\'s pins and runs machine-setup update --apply, then writes its result here.',
+      consequence: () => 'Each other machine checks for this request every five minutes. It waits for its merges to finish, updates to the hub\'s versions, and reports here.',
       run: () => landing(refreshSatellites(), v => `Refresh requested · ${v.id}`) },
     // sd:5405: local-shared-upload's signer, run by the server; the link is one setting row and the toast never holds it.
     { id: 'upload.regenerate', on: 'upload link', label: 'Regenerate', does: 'Signs a new 7-day upload link under inbox/ and shows it here.', icon: 'link-2', risk: 'confirm',
@@ -737,15 +740,15 @@ function registerCommands() {
       run: o => landing(job(o, 'retry'), out => window.commands.answered(out, o.job, 'retried', `Run started · ${o.job}`)) }),
     // build (sd:3388): Cancel is `sd jobs cancel`, which sends SIGTERM to the running job through launchd. It posts
     // /api/jobs/<name>/cancel with the row's revision; the confirm names the job, since the run stops part way.
-    { id: 'jobs.cancel', on: 'job', label: 'Cancel', does: 'Stops the running job with SIGTERM; the stopped run cannot resume.', key: 'x', icon: 'ban', risk: 'confirm', primary: o => o.running,
+    { id: 'jobs.cancel', on: 'job', label: 'Cancel', does: 'Stops the running job now; the stopped run cannot resume.', key: 'x', icon: 'ban', risk: 'confirm', primary: o => o.running,
       when: o => capWhy(o, 'cancel', o.running || 'not running'), cli: o => `sd jobs cancel ${o.job}`, sends: o => `launchctl kill SIGTERM ${o.service}`,
-      consequence: o => `Sends SIGTERM to ${o.job}${o.pid ? ` (PID ${o.pid})` : ''} through launchd. The run stops part way through; its next scheduled run still starts.`,
+      consequence: o => `Stops ${o.job}${o.pid ? ` (PID ${o.pid})` : ''} now. The run stops part way through; its next scheduled run still starts.`,
       run: cancelJob },
     window.commands.showLog({ job: o => ({ name: o.job }), run: o => { selectRow(o.id, true); return `${o.job}'s log is in Details`; } }),
     window.commands.printJob({ job: o => ({ name: o.job, service: o.service, exit: o.exit }) }),
     // sd:5126: End session sends SIGTERM to a Claude session on this Mac, so a full builder cap can be cleared. A subagent
     // runs inside its session's process, so a stalled agent ends with its session; the confirm names each agent that does.
-    { id: 'cs.end', on: 'claude session', label: 'End session', does: 'Sends SIGTERM to the Claude session; its turn and every agent under it stop.', key: 'e', icon: 'square', risk: 'confirm',
+    { id: 'cs.end', on: 'claude session', label: 'End session', does: 'Ends the Claude session; its current turn and all its helpers stop.', key: 'e', icon: 'square', risk: 'confirm',
       primary: o => o.row.agents.some(a => a.state === 'stalled'), when: o => o.pid != null || 'claude agents gave no pid, so there is nothing to signal',
       cli: o => `kill -TERM ${o.pid}`, executes: true, sends: o => `POST /api/claude-sessions/end {"id":"${o.sid}","pid":${o.pid}}`,
       consequence: endWhat, run: o => landing(endSession(o), v => `${v.ended === 'already gone' ? 'Already gone' : 'End requested'} · ${o.label}`) },
@@ -763,7 +766,7 @@ async function refreshSatellites() { const got = await window.shell.post('/api/s
 async function regenerateUpload() { const got = await window.shell.post('/api/shared-upload/regenerate', {}); await reread(); return got; }
 // Land (sd:5104): no git state, an unread tree or nothing new is the off reason; the server reads the tree again anyway.
 const landWhy = o => { const g = o.row.git;
-  if (!o.row.registered) return 'not registered in sd-db: sd-db repo add registers it first';
+  if (!o.row.registered) return 'register this repo first (sd-db repo add)';
   if (!g) return 'git state was not read, so nothing says what would land';
   if (g.error || g.dirty == null) return "the tree's state was not fully read";
   return g.dirty || g.ahead ? true : 'nothing to land: no uncommitted change and no unpushed commit'; };
@@ -773,7 +776,7 @@ const landText = p => [
     : `Commits on ${p.branch}.`,
   ...(p.groups || []).filter(g => g.paths.length).map(g => `sd:${g.item} ${g.title}: ${plural(g.paths.length, 'file')} (${g.paths.slice(0, 4).join(', ')}${g.paths.length > 4 ? ', …' : ''}).`),
   p.commits.length ? `Carries ${plural(p.commits.length, 'unpushed commit')}: ${p.commits.map(c => c.subject).slice(0, 3).join('; ')}.` : '',
-  p.why || 'Each commit ends with Authored-with: claude/anthropic; then sd-ship lane enqueue publishes the branch and queues it.',
+  p.why || 'Then the branch goes into the merge queue.',
 ].filter(Boolean).join(' ');
 // Ask with the preview until the Items field matches what was previewed, then post. A 4xx landed nothing; a 502 may follow
 // a step that landed, so it says what did and reads the page again.
@@ -804,7 +807,7 @@ async function landRepo(o, items) {
 // A 4xx ran nothing; any other failure may follow a write, so the page reads again and says Check again.
 let sheets = Promise.resolve();
 const sheet = f => (sheets = sheets.then(f, f));
-const STD_GROUPS = [['row', 'sd-db row'], ['github', 'GitHub'], ['checkout', 'checkout']];
+const STD_GROUPS = [['row', 'Repo settings'], ['github', 'GitHub'], ['checkout', 'checkout']];
 const stdValue = v => v == null ? 'none' : typeof v === 'object' ? JSON.stringify(v) : String(v);
 const stdState = s => s.result || (s.state === 'change' ? `${stdValue(s.before)} → ${stdValue(s.after)}` : s.state);
 const stdBody = (p, head) => html`${head ? html`${head}<br>` : ''}${STD_GROUPS.map(([g, label]) => {
@@ -874,7 +877,7 @@ function claudeRows() {
   return (CLAUDE?.sessions || []).filter(r => free.every(f => [r.name, r.cwd, r.id, ...r.tasks.map(t => `#${t.item} ${t.title}`)].join(' ').toLowerCase().includes(f)));
 }
 function renderClaude() {
-  if (!CLAUDE) return unknown('Claude sessions were not read', why('claude'), 'claude agents --json');
+  if (!CLAUDE) return unknown('Claude sessions were not read', why('claude'));
   const rows = claudeRows();
   if (!rows.length) return html`<p class="empty">${CLAUDE.sessions.length ? `No Claude session matches “${text.q}”.` : 'No Claude session runs on this Mac.'}</p>`;
   return html`<table class="ledger" aria-labelledby="claude-h" data-tfilter="page" data-toolbar="toolbar"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Session</th><th scope="col">Task</th><th scope="col">Last action</th><th scope="col">Waits on you</th><th scope="col">Safe to exit</th>${ACTH}</tr></thead>
@@ -897,15 +900,15 @@ function claudeDetails(r, act) {
     <h3>Tasks</h3>${list(r.tasks, t => html`<span class="mono">#${t.item}</span> ${t.title || '(not read)'} · via ${t.via}`, 'No item is tied to this session.')}
     <h3>Agents</h3>${list(r.agents, a => html`${a.name} · ${a.state}${a.items.length ? html` · <span class="mono">${a.items.map(n => `#${n}`).join(' ')}</span>` : ''}`, 'No agent runs or stalled under it.')}
     <h3>Checkouts</h3>${list(r.checkouts, c => html`<span class="mono">${c.path}</span> · ${c.error ? html`<span class="g-unknown" aria-hidden="true">▨</span> ${c.error}` : `${c.branch} · ${plural(c.dirty, 'uncommitted file')} · ${plural(c.unpushed, 'unpushed commit')}`}`, 'No git checkout.')}
-    <p class="why">Read from claude agents --json, the session's transcripts, ps and git. Sessions on other machines are not listed.</p>${act}`;
+    <p class="why">From Claude's own session list, the session's transcripts, its processes and git. Sessions on other machines are not listed.</p>${act}`;
 }
 function renderSessions() {
   const el = document.getElementById('view-sessions');
   put(el, html`
-    <div class="sec-head"><h2 id="claude-h">Claude sessions <button class="help" type="button" aria-label="Help: Claude sessions" data-help="<b>This Mac's Claude sessions.</b> From claude agents --json, each session's transcripts, ps and git. Safe to exit means idle, no agent or lane watch under it, and no unpushed work in its checkouts. A stalled or unread agent counts as running until it gives a final answer.">${I('circle-help')}</button></h2><p class="tally">${CLAUDE ? html`<span>${plural(CLAUDE.sessions.length, 'session')}</span><span>${CLAUDE.builders.running == null ? html`<span class="g-unknown" aria-hidden="true">▨</span> builders not counted` : plural(CLAUDE.builders.running, 'builder') + ' running'}</span><span>claude agents · ${hhmm(CLAUDE.read)} UTC</span>` : ''}</p></div>
+    <div class="sec-head"><h2 id="claude-h">Claude sessions <button class="help" type="button" aria-label="Help: Claude sessions" data-help="<b>This Mac's Claude sessions.</b> Safe to exit means idle, no helper or merge watch running under it, and no unpushed work in its checkouts. A stalled or unread agent counts as running until it gives a final answer.">${I('circle-help')}</button></h2><p class="tally">${CLAUDE ? html`<span>${plural(CLAUDE.sessions.length, 'session')}</span><span>${CLAUDE.builders.running == null ? html`<span class="g-unknown" aria-hidden="true">▨</span> builders not counted` : plural(CLAUDE.builders.running, 'builder') + ' running'}</span><span>claude agents · ${hhmm(CLAUDE.read)} UTC</span>` : ''}</p></div>
     ${renderClaude()}
 
-    <div class="sec-head"><h2 id="agents-h">sd-* processes <button class="help" type="button" aria-label="Help: processes" data-help="<b>The fleet's process read.</b> The sd-* commands running on this Mac, as Operations › Sessions lists them. Claude sessions are listed above; codex processes are not read.">${I('circle-help')}</button></h2><p class="tally">${SESS ? html`<span>${SESS.processes.length} running</span><span>fleet · ${seen(SESS)}</span>` : ''}</p></div>
+    <div class="sec-head"><h2 id="agents-h">Workflow commands running <button class="help" type="button" aria-label="Help: Workflow commands running" data-help="<b>Workflow commands running on this Mac now,</b> as Operations › Sessions lists them. Claude sessions are listed above; Codex processes are not read.">${I('circle-help')}</button></h2><p class="tally">${SESS ? html`<span>${SESS.processes.length} running</span><span>fleet · ${seen(SESS)}</span>` : ''}</p></div>
     ${!SESS ? unknown('Sessions were not read', why('sessions'), 'fleet sessions')
       : SESS.processes.length ? html`<table class="ledger" aria-labelledby="agents-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Command</th><th scope="col">Running for</th><th scope="col">PID</th></tr></thead>
       <tbody>${SESS.processes.map((p, i) => html`<tr data-id="proc:${i}"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${p.command}</button></td><td class="d mono" data-k="up">${p.elapsed}</td><td class="d num">${p.pid}</td></tr>`)}</tbody></table>`
@@ -957,9 +960,9 @@ function renderDeploys() {
   const rows = DOC.services ? serviceRows() : [], shown = pageOf(rows, DS);
   const states = [...new Set(SERVICES.map(s => String(s.state).toLowerCase()))].sort();
   put(el, html`
-    <div class="sec-head"><h2 id="dep-h">Deploys <button class="help" type="button" aria-label="Help: Deploys" data-help="<b>Unknown, not empty.</b> Nothing in the fleet records a deploy yet, and the dashboard has no deploy collector. The services below are what is installed on this Mac now.">${I('circle-help')}</button></h2></div>
-    ${unknown('No deploy source', 'The dashboard has no deploy collector, so this list cannot fill. The services below are what runs on this Mac now.')}
-    <div class="sec-head"><h2 id="sat-h">Satellites <button class="help" type="button" aria-label="Help: Satellites" data-help="<b>Refresh satellites.</b> The request is one row in the hub database. Each satellite answers it on its next repo-sync follow run: it follows the hub's pins, runs machine-setup update --apply and writes its result. A satellite is listed once its repo-sync-follow job has reported a run.">${I('circle-help')}</button></h2><p class="tally">${SATS ? html`<span>${plural(SATS.satellites.length, 'satellite')}</span><span>hub database · ${hhmm(READ)} UTC</span>` : ''}</p></div>
+    <div class="sec-head"><h2 id="dep-h">Deploys <button class="help" type="button" aria-label="Help: Deploys" data-help="<b>No deploy history is recorded yet,</b> so this list stays empty; that is unknown, not none. The services below are what is installed on this Mac now.">${I('circle-help')}</button></h2></div>
+    ${unknown('No deploy history', 'Nothing records a deploy yet, so this list cannot fill. The services below are what runs on this Mac now.')}
+    <div class="sec-head"><h2 id="sat-h">Satellites <button class="help" type="button" aria-label="Help: Satellites" data-help="<b>Refresh satellites</b> asks each other machine to update to the hub's versions. Each checks for the request every five minutes, updates and reports here. A machine is listed once it has reported once.">${I('circle-help')}</button></h2><p class="tally">${SATS ? html`<span>${plural(SATS.satellites.length, 'satellite')}</span><span>hub database · ${hhmm(READ)} UTC</span>` : ''}</p></div>
     ${!SATS ? unknown('Satellites were not read', why('satellites'), 'local-repo-sync/satellite_refresh.py') : html`<table class="ledger" aria-labelledby="sat-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Satellite</th><th scope="col">State</th><th scope="col">When</th><th scope="col" class="num">Exit</th><th scope="col">Last line</th>${ACTH}</tr></thead>
       <tbody><tr data-id="sats:request"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">Refresh request</button></td><td class="d mono">${SATS.request ? SATS.request.id : 'none sent'}</td><td class="d mono"><time class="rel" datetime="${SATS.request?.at || ''}" data-empty="never"></time></td><td class="d num"></td><td class="d"></td>${ACT('sats:request')}</tr>
       ${SATS.satellites.map(x => { const st = SATSTATE(x), r = x.result || {}; return html`<tr data-id="sat:${x.host}"><td class="g g-${st}">${GLYPH[st]}<span class="sr">${x.state}</span></td><td class="what"><button type="button">${x.host}</button></td><td class="d mono">${x.state}${r.attempt > 1 ? ` · attempt ${r.attempt}` : ''}</td><td class="d mono"><time class="rel" datetime="${r.finished || r.started || ''}" data-empty="never"></time></td><td class="d num" data-k="exit">${r.exit ?? '—'}</td><td class="d mono">${x.state === 'unread' ? x.reason : r.step ? `${r.step}: ${r.line}` : '—'}</td><td class="act end"></td></tr>`; })}</tbody></table>
@@ -999,7 +1002,7 @@ function renderSchedules() {
   const failed = CRON.filter(c => c.rank === 'warning').length;
   const shown = pageOf(rows, SS);
   put(el, html`
-    <div class="sec-head"><h2 id="sch-h">Schedules <button class="help" type="button" aria-label="Help: Schedules" data-help="<b>launchd calendar jobs, ranked.</b> Failed first, then by next run. Last run is the cron-jobs wrapper's stamp of each run's start, end and exit. Times are this browser's clock; launchd reads the Mac's.">${I('circle-help')}</button></h2>
+    <div class="sec-head"><h2 id="sch-h">Schedules <button class="help" type="button" aria-label="Help: Schedules" data-help="<b>Scheduled jobs,</b> failed first, then by next run. Last run is when each run started and ended, and how it exited. Times use this browser's clock; the jobs use the Mac's.">${I('circle-help')}</button></h2>
       <p class="tally">${hides(rows.length, CRON.length, 'job')}<span class="g-warning">■ ${failed} failed</span><span class="g-ok">● ${CRON.length - failed} not failed</span><span>launchd · ${hhmm(READ)} UTC</span><span class="g-unknown">▨ cloud routines not read</span></p></div>
     <div class="filters toolbar-2">${filterBar(filterSeg('state', 'State', ['failed'], chips.state), text.q)}</div>
     ${rows.length ? html`<table class="ledger" aria-labelledby="sch-h" data-tfilter="page" data-toolbar="toolbar"><thead>${shell.list.sortHead(SCHED_COLS, SS)}</thead>
@@ -1085,8 +1088,8 @@ function selectRow(id, open) {
     h = html`<p class="kind">${I(r.registered ? 'settings' : 'folder-code')} Repo${r.registered ? '' : ' · not registered'}</p><h2>${r.name}</h2>
       <dl><dt>Path</dt><dd>${r.path}</dd><dt>Owner</dt><dd>${r.owner}</dd><dt>Managed</dt><dd>${r.managed}</dd><dt>Lane merge</dt><dd>${r.merge}</dd></dl>
       ${r.registered ? html`<p><a class="btn quiet" href="?repo=${encodeURIComponent(r.path)}#view=repos">${I('settings')} Open settings</a></p>
-      <p class="why">The settings page shows the sd-db row, its review declaration and GitHub protection, each with the route an edit takes.</p>`
-        : html`<p class="why">sd-db has no row for this checkout, so it has no settings page. <code>sd-db repo add ${r.path}</code> registers it.</p>`}${git}${act}
+      <p class="why">The settings page shows the repo's settings, review rules and GitHub protection.</p>`
+        : html`<p class="why">This checkout is not registered, so it has no settings page. Register it from the terminal: <code>sd-db repo add ${r.path}</code>.</p>`}${git}${act}
       ${window.commands.reviewPane('repo', r.path)}${window.commands.reviewPane('change', r.path, 'Adversarial review: PR')}${window.commands.reviewPane('deep', r.path, 'Deep review')}${r.registered ? deepLine() : ''}`;
   } else if (kind === 'cs') {
     const r = (CLAUDE?.sessions || []).find(x => x.id === key); if (!r) return;
@@ -1102,7 +1105,7 @@ function selectRow(id, open) {
   } else if (kind === 'sats') {
     const q = SATS?.request;
     h = html`<p class="kind">${I('rotate-ccw')} Refresh satellites</p><h2>Refresh satellites</h2><dl><dt>Last request</dt><dd>${q ? q.id : 'none sent'}</dd><dt>Sent</dt><dd><time class="rel" datetime="${q?.at || ''}" data-long data-empty="never"></time></dd></dl>
-      <p class="why">Each satellite answers on its next repo-sync follow run, every five minutes, once its lanes drain. A run stopped part way runs once more; a second stop is written as failed.</p>${act}`;
+      <p class="why">Each other machine answers within five minutes, once its merges finish. A run stopped part way runs once more; a second stop is written as failed.</p>${act}`;
   } else if (kind === 'upload') {
     const u = UPLOAD; if (!u?.set_up) return;
     const st = UPSTATE[u.link_state] || 'unknown', l = u.link;
@@ -1163,7 +1166,7 @@ window.PAGE_COMMANDS = [
 let reading = null, FAILED = '';
 const load = () => reading.load();
 // Read again (sd:5638): the shell's head button reads the management document again.
-window.PAGE_AGAIN = { title: 'Read the management document again', run: load };
+window.PAGE_AGAIN = { title: 'Refresh Management', run: load };
 const reread = () => reading.reread();
 function adopt(doc) {
   absorb(doc);

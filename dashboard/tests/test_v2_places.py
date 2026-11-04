@@ -1004,13 +1004,13 @@ class TheOverviewScript(Fixture):
 DOCS['/api/place/acme/overview'] = [200, {json.dumps(pending)}];
 clickAct('sim', 'Start'); await flush(); R.after = ELS['overview-rows'].html;""", docs, place="acme")
         before, after = out["R"]["before"], out["R"]["after"]
-        self.assertIn("Runs on far-host: its follow job answers a button within about five minutes.", before)
+        self.assertIn("Runs on far-host; a press takes up to five minutes to start.", before)
         self.assertNotIn("aria-disabled", before, "a hosted tile's button is off")
         self.assertIn("Not run on far-host from here yet.", before)
         self.assertEqual(out["posts"], [["/api/place/tiles", {"realm": "acme", "tile": "sim", "action": "Start"}, 64]])
-        self.assertEqual(out["toasts"][-1]["msg"], "Simulator · Start asked of far-host; its follow job runs it within about five minutes.")
+        self.assertEqual(out["toasts"][-1]["msg"], "Simulator · Start asked of far-host; it starts within about five minutes.")
         self.assertIn("Asked far-host <time", after)
-        self.assertIn("waiting for its follow job, every five minutes.", after)
+        self.assertIn("; it starts within five minutes.", after)
 
     def test_a_hosted_actions_answer_reads_with_its_host(self):
         doc = self.hosted({"state": "starting", "started": NOW}, {"state": "running", "started": NOW, "output": "", "cut": False},

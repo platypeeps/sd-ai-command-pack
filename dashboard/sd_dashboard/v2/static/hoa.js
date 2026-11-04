@@ -88,12 +88,12 @@ let polling = 0;
   // Each lamp's hover and focus text (sd:5287): what it measures, its source, and the line that reads it where one exists.
   const TIPS = {
     water: 'What the water system is doing now. No live reader yet: the Mission export holds daily rows only.',
-    tank: 'Mean tank level on the newest daily row, with that day\'s low and high. Source: analog-daily.csv in the Mission export.',
-    pumps: 'A2 pump runtime, starts and gallons on the newest daily row. Source: pump-daily.csv in the Mission export.',
-    aquifer: 'Mean aquifer level on the newest daily row, with that day\'s low and high. Source: analog-daily.csv in the Mission export.',
-    alarms: 'Alarm events today; returns to normal and generator tests do not count. Source: alarm-events.csv in the Mission export.',
-    tasks: 'Open items of the hoa checkout: overdue, then due within a week. Source: the workflow database.',
-    mission: 'Age of the newest row in the Mission export. Source: the hoa checkout\'s tools/source-ages.py. CLI: python3 tools/source-ages.py',
+    tank: 'Mean tank level on the newest daily row, with that day\'s low and high, from Mission\'s daily export.',
+    pumps: 'A2 pump runtime, starts and gallons on the newest daily row, from Mission\'s daily export.',
+    aquifer: 'Mean aquifer level on the newest daily row, with that day\'s low and high, from Mission\'s daily export.',
+    alarms: 'Alarm events today; returns to normal and generator tests do not count. From Mission\'s alarm export.',
+    tasks: 'Open HOA tasks: overdue first, then due within a week.',
+    mission: 'How old the newest Mission data is.',
   };
   function lamps() {
     // sd:6697: no Observed clock; the shell's Read again (or r) is the page's one re-read.
@@ -428,7 +428,7 @@ let polling = 0;
     put($('src-tools'), html`${SRC.map(r => r.source).filter(k => DOWNLOADS[k] && C.get(`download:${k}`)).map(k => {
       const c = DOWNLOADS[k], o = C.get(`download:${k}`), w = c.when(o);
       const icon = html`<svg class="i" aria-hidden="true"><use href="#i-download"/></svg>${c.label}`;
-      return w === true ? html`<button class="btn quiet sm" type="button" data-download="${k}" data-tip="${c.does} Runs ${c.cli(o)}.">${icon}</button>`
+      return w === true ? html`<button class="btn quiet sm" type="button" data-download="${k}" data-tip="${c.does}">${icon}</button>`
         : html`<button class="btn quiet sm" type="button" data-download="${k}" aria-disabled="true" aria-describedby="dl-${k}-off" data-tip="${w}">${icon}</button><span class="sr" id="dl-${k}-off">${w}</span>`; })}`);
   }
   // The head button and the palette entry: an off Download toasts its reason, as the shell's run does not check it.
@@ -550,7 +550,7 @@ let polling = 0;
       SWEEP = doc.sweep || null;
       if (SWEEP) objects.push({ id: 'sweep', type: 'sweep', label: 'HOA sweep' });
       if (SRC.some(r => r.job?.state === 'running') || SWEEP?.running || Object.values(DL).some(d => d.running)) poll();
-      const st = c.state === 'missing' ? { kind: 'empty', title: 'No HOA checkout', text: `Register the HOA checkout: add a repo whose folder is named hoa (sd-db repo add).`, source: c.source }
+      const st = c.state === 'missing' ? { kind: 'empty', title: 'No HOA checkout', text: `No HOA folder is registered. Add the repo whose folder is named hoa (sd-db repo add).`, source: c.source }
         : c.problems.length ? { kind: 'partial', text: `${c.source}: ${c.problems.join(' · ')}.`, source: c.source }
         : failed.length ? { kind: 'partial', text: `${failed.join(' · ')}. The other parts are current.`, source: '/api/hoa' } : null;
       return { objects, state: st };
@@ -595,6 +595,7 @@ let polling = 0;
     // ---------- Commands (products/system/commands.md) ----------
     C.register(
       { id: 'asset.ask', on: 'asset', label: 'Ask', key: 'a', icon: 'message-square', risk: 'safe', primary: () => true,
+        does: o => `Asks Claude in chat what is known about ${o.asset}.`,
         run: o => { S.openChat(); S.send(`What do we know about ${o.asset} (${o.name})?`); return ''; } },
     );
 
@@ -744,7 +745,7 @@ let polling = 0;
     // ---------- Run sweep (sd:5095) ----------
     // POST /api/hoa/sweep starts the checkout's tools/sweep.py in the background (sd_dashboard/sweep.py); a 409 names the run going.
     // HOA reads again until the run ends; the row's lamp and text follow it. It asks first: the run lands a commit.
-    C.register({ id: 'sweep.run', on: 'sweep', label: 'Run sweep', does: 'Runs the HOA sweep headless: drafts followups, never sends; lands through the lane.',
+    C.register({ id: 'sweep.run', on: 'sweep', label: 'Run sweep', does: 'Checks HOA mail and files, then drafts follow-ups. Sends nothing.',
       key: 'w', icon: 'play', risk: 'safe', askFirst: true, executes: true, primary: () => true,
       when: () => SWEEP?.error || (SWEEP?.running ? 'a sweep is running now' : true),
       consequence: () => 'Reviews the week, both Drives and the alias mail, updates the status and the VP brief, saves followups as Gmail drafts, and hands the commit to the lane. Up to 90 min.',

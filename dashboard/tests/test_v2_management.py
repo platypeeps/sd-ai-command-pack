@@ -1116,7 +1116,7 @@ R.got = await cmd('repo.standard').run(C.get('repo:{path}'));""", search=f"?repo
         sheet, result = out["asks"]
         self.assertEqual(sheet["options"], [["apply", "only"]])
         self.assertEqual(sheet["title"], f"Manage {path}?")
-        for line in ("sd-db row", "D1 managed: no → yes", "GitHub", "G4 Delete head branches: false → true",
+        for line in ("Repo settings", "D1 managed: no → yes", "GitHub", "G4 Delete head branches: false → true",
                      "G7 Dependabot alerts: ok", "checkout", "F1 tracked fleet files: pending"):
             self.assertIn(line, sheet["body"])
         self.assertEqual([(p, b) for p, b, _ in out["posts"]], [("/api/repos/standard", {"path": path, "digest": "d" * 64})])
@@ -1383,7 +1383,7 @@ R.lamp = /data-view="sessions" data-state="(\\w+)"/.exec(ELS.annunciator.html)[1
         out = self.run_page(f"""const was = ANSWER; ANSWER = (p, b) => p === '/api/actions/run' ? [200, {{ action: b.action, label: 'Pull', line: 'l', exit: 0, output: 'Fast-forward', cut: false }}] : was(p, b);
 R.off = cmd('repo.pull').when(C.get('repo:/elsewhere/loose')); R.on = cmd('repo.pull').when(C.get('repo:{path}'));
 shellRun(cmd('repo.pull'), C.get('repo:{path}')); await flush(); R.toast = lastToast().msg;""", doc=doc)
-        self.assertEqual(out["R"]["off"], "not registered in sd-db: Pull runs only in a registered checkout")
+        self.assertEqual(out["R"]["off"], "this checkout is not registered; Pull works only in a registered one")
         self.assertIs(out["R"]["on"], True)
         self.assertEqual(([b for p, b, _ in out["posts"] if p == "/api/actions/run"], out["confirms"]), ([{"action": "repo.pull", "path": path}], ["repo.pull"]))
         self.assertEqual(out["R"]["toast"], "Pull · exit 0 · the output is in Details")
@@ -1408,7 +1408,7 @@ R.toast = lastToast().msg; const undo = lastToast().undo; await undo(); await fl
 R.off = cmd('repo.adversarial-review').when(busy); selectRow('repo:{path}');
 C.run(cmd('repo.adversarial-review'), C.get('repo:{path}')); await flush(); await flush(); R.det = ELS.details.html;""", answer=answer)
         self.assertEqual(out["posts"], [["/api/adversarial", {"kind": "repo", "target": path}, 64]])
-        self.assertEqual(out["R"]["off"], "not registered in sd-db: sd-db repo add registers it first")
+        self.assertEqual(out["R"]["off"], "register this repo first (sd-db repo add)")
         self.assertIn('<a href="/item/77">brief sd:77</a>', out["R"]["det"])
 
     def github_doc(self, pulls):
@@ -1460,8 +1460,8 @@ document.addEventListener('adversarial:run', e => {{ if (e.detail.run.state === 
 selectRow('repo:{path}'); C.run(c, o); await flush(); await flush(); R.end = ELS.details.html;""", answer=answer)
         self.assertTrue(out["R"]["asks"])
         self.assertEqual(out["confirms"], ["repo.deep-review"])
-        self.assertIn("up to 8 read-only sub-agents, for up to 90 minutes", out["R"]["says"])
-        self.assertEqual(out["R"]["off"], "not registered in sd-db: sd-db repo add registers it first")
+        self.assertIn("up to 8 read-only helpers, for up to 90 minutes", out["R"]["says"])
+        self.assertEqual(out["R"]["off"], "register this repo first (sd-db repo add)")
         self.assertEqual(out["posts"], [["/api/adversarial", {"kind": "deep", "target": path}, 64]])
         self.assertIn("<h3>Deep review</h3>", out["R"]["det"])
         self.assertIn("Run d1 is running, 10 of at most 90 min.", out["R"]["det"])
@@ -1500,11 +1500,11 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         self.assertEqual(re.findall(r'<option value="([^"]+)"></option>', page.split('id="lane-hosts"')[1]), ["hub", "build-3"])
         self.assertEqual(out["R"]["cmd"], f"sd-db repo lane-host '{path}' 'build-2'")
         # sd:3284: the queue lives in the hub database, so the move takes the pending entries with it.
-        self.assertIn("Pending entries follow", out["R"]["note"])
+        self.assertIn("Queued changes follow", out["R"]["note"])
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/lane-host", {"path": path, "value": "build-2", "before": "hub"}),
                           ("/api/repos/lane-host", {"path": path, "value": "hub", "before": "build-2"})])
-        self.assertEqual(out["R"]["toast"], "Ran locally · Move lane hub → build-2")
+        self.assertEqual(out["R"]["toast"], "Ran locally · Merge machine: hub → build-2")
         out = self.run_page("R.repos = ELS['view-repos'].html;", doc=doc)
         cells = re.findall(r'data-k="lane">([^<]*)</td>', out["R"]["repos"])
         self.assertIn("hub", cells)
@@ -1536,12 +1536,12 @@ fill('obsidian', false, ''); fill('drive', false, ''); propose('channels', 'on')
         self.assertIn(f'data-chf="drive" value="" placeholder="Briefs/{name}"', page)
         self.assertNotIn("data-ch-clear", page, "no setting, nothing to clear")
         self.assertEqual(out["R"]["cmd"], f"sd-db repo channels '{path}' 'obsidian=Briefs/x' 'drive='")
-        self.assertEqual(out["R"]["title"], "channels none → obsidian=Briefs/x drive=")
+        self.assertEqual(out["R"]["title"], "Publishing: none → obsidian=Briefs/x drive=")
         self.assertIn("sd-research-kit render", out["R"]["note"])
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/channels", {"path": path, "value": {"obsidian": {"folder": "Briefs/x"}, "drive": {}}, "before": "none"}),
                           ("/api/repos/channels", {"path": path, "value": None, "before": '{"drive":{},"obsidian":{"folder":"Briefs/x"}}'})])
-        self.assertEqual(out["R"]["toast"], f"Ran locally · channels none → obsidian=Briefs/x drive= · {remedy}")
+        self.assertEqual(out["R"]["toast"], f"Ran locally · Publishing: none → obsidian=Briefs/x drive= · {remedy}")
         self.assertEqual(out["R"]["left"], 0)
         self.assertEqual(out["toasts"][-1], ["Not proposed: no channel is checked. Clear setting removes the setting.", False])
 
@@ -1617,7 +1617,7 @@ propose('mail_aliases', 'acme'); R.same = pending.length; propose('mail_aliases'
         self.assertIn('data-set="mail_aliases" value="acme"', page)
         self.assertNotIn("Inbound email", page)
         self.assertEqual(out["R"]["cmd"], f"sd-db repo channels '{path}' 'email=acme,kiln'")
-        self.assertEqual(out["R"]["title"], "email aliases acme → acme,kiln")
+        self.assertEqual(out["R"]["title"], "Email aliases: acme → acme,kiln")
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/channels", {"path": path, "value": {"email": {"aliases": ["acme", "kiln"]}}, "before": old}),
                           ("/api/repos/channels", {"path": path, "value": json.loads(old), "before": new})])
@@ -1650,10 +1650,10 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         self.assertIn("Cannot be used: &#39;site&#39; is not a channel", page)
         self.assertIn("data-ch-clear", page)
         self.assertNotIn(" checked>", page.split('id="ch-form"')[1].split("</fieldset>")[0])
-        self.assertEqual(out["R"]["title"], 'channels {"site":{}} → none')
+        self.assertEqual(out["R"]["title"], 'Publishing: {"site":{}} → none')
         self.assertEqual([(p, b) for p, b, _ in out["posts"]], [("/api/repos/channels", {"path": path, "value": None, "before": '{"site":{}}'})])
-        self.assertEqual(out["R"]["toast"], 'Ran locally · channels {"site":{}} → none')
-        self.assertEqual(out["toasts"][-1], ['Run not undone · channels {"site":{}} → none: nothing to reverse', False])
+        self.assertEqual(out["R"]["toast"], 'Ran locally · Publishing: {"site":{}} → none')
+        self.assertEqual(out["toasts"][-1], ['Run not undone · Publishing: {"site":{}} → none: nothing to reverse', False])
 
     def test_the_repo_page_shows_github_issues_and_the_toggle_runs_the_verb_and_undoes(self):
         """sd:4840: off, read or ask, written through `sd-db repo github-issues`; an unread setting shows no toggle."""
@@ -1666,7 +1666,7 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/github-issues", {"path": path, "value": "ask", "before": "off"}),
                           ("/api/repos/github-issues", {"path": path, "value": "off", "before": "ask"})])
-        self.assertEqual(out["R"]["toast"], "Ran locally · github_issues off → ask")
+        self.assertEqual(out["R"]["toast"], "Ran locally · GitHub issues: off → ask")
         doc = json.loads(json.dumps(self.doc))
         next(r for r in doc["repos"] if r["path"] == path)["github_issues"] = None
         page = self.run_page("R.page = ELS['view-repos'].html;", doc=doc, search=f"?repo={path}")["R"]["page"]
@@ -1695,7 +1695,7 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/jira-project", {"path": path, "value": "EXAMPLE", "before": "off"}),
                           ("/api/repos/jira-project", {"path": path, "value": "off", "before": "EXAMPLE"})])
-        self.assertEqual(out["R"]["toast"], "Ran locally · jira_project off → EXAMPLE")
+        self.assertEqual(out["R"]["toast"], "Ran locally · Jira project: off → EXAMPLE")
         next(r for r in doc["repos"] if r["path"] == path)["jira_project"] = None
         page = self.run_page("R.page = ELS['view-repos'].html;", doc=doc, search=f"?repo={path}")["R"]["page"]
         cell = page.split('data-key="jira_project"')[1].split('<div class="row"')[0]
@@ -1713,7 +1713,7 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/dependabot", {"path": path, "value": "yes", "before": "no"}),
                           ("/api/repos/dependabot", {"path": path, "value": "no", "before": "yes"})])
-        self.assertEqual(out["R"]["toast"], "Ran locally · dependabot no → yes")
+        self.assertEqual(out["R"]["toast"], "Ran locally · Auto-merge dependency updates: no → yes")
         doc = json.loads(json.dumps(self.doc))
         for gate, shown in (("owner", "always (owner)"), ("denied", "denied by name"), (None, "not read")):
             row = next(r for r in doc["repos"] if r["path"] == path)
@@ -1899,7 +1899,7 @@ R.toast = lastToast().msg; R.left = pending.length; await lastToast().undo(); aw
                          [{"action": "declaration.write", "path": path, "kind": "review", "value": after, "before": self.LAST},
                           {"action": "declaration.write", "path": path, "kind": "review", "value": json.loads(self.LAST),
                            "before": json.dumps(after, separators=(",", ":"))}])
-        self.assertEqual((out["R"]["toast"], out["R"]["left"]), ("Written · review declaration · severity_floor → low", 0))
+        self.assertEqual((out["R"]["toast"], out["R"]["left"]), ("Written · Review rules · Blocking severity: low", 0))
 
     def test_write_sends_the_latest_reading_and_keeps_a_refused_one(self):
         """sd:5958: Write sent the declaration the proposal was made on as `before`, so after a reread the server refused it
@@ -2359,7 +2359,7 @@ class TheSatellites(PageScript):
                             doc=self.doc_with(), search="?view=deploys",
                             answer="(p, b) => [200, {id: 'ab12cd34ef56ab78', at: '2026-09-06T02:00:00Z'}]")
         self.assertEqual(out["confirms"], ["sats.refresh"])
-        self.assertIn("machine-setup update --apply", out["R"]["why"])
+        self.assertIn("updates to the hub's versions", out["R"]["why"])
         self.assertEqual([(p, b) for p, b, _ in out["posts"]], [("/api/satellites/refresh", {})])
         self.assertEqual(out["R"]["early"], 0, "the toast came before the write landed")
         self.assertEqual(out["toasts"][0], ["Refresh requested · ab12cd34ef56ab78", False])

@@ -30,7 +30,7 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'issues', la
   const facts = () => ({ name: SYNC?.name || 'shadow-sync-nightly', service: SYNC?.service, failed: SYNC?.state === 'failed', exit: SYNC?.last_exit,
     capability: !SYNC ? { allowed: false, reason: 'the sync job was not read' } : SYNC.error ? { allowed: false, reason: SYNC.error } : SYNC.capabilities?.retry });
   const LINES = ['pulls-sync', 'issues-sync', 'intake-sync'];
-  const TIP = 'Runs sd shadow sync: reads pull request and issue state from GitHub, and writes only the local store.';
+  const TIP = 'Gets the latest pull requests and issues from GitHub. Changes nothing on GitHub.';
   function drawSync() {
     const { html, put } = window.markup;
     if (!SYNC) return LINES.forEach(id => { put(document.getElementById(id), html``); put(document.getElementById(id.replace('-sync', '-said')), html``); });
