@@ -148,11 +148,26 @@ def default_slots(cores: int | None = None) -> int:
     return max(1, count // CORES_PER_SLOT)
 
 
+#: A count or pid of more digits is no real one; int() refuses a string past 4,300 digits with ValueError (sd:7401).
+MAX_DIGITS = 18
+
+
 def parse_count(text: str, source: str) -> int:
     """A non-negative slot count, or a `ValueError` naming where it came from."""
-    if not text.isascii() or not text.isdigit():
-        raise ValueError(f"{source} must be a non-negative integer (got '{text}')")
-    return int(text)
+    if not text.isascii() or not text.isdigit() or len(text.lstrip("0")) > MAX_DIGITS:
+        shown = text if len(text) <= 40 else f"{text[:40]}... ({len(text)} characters)"
+        raise ValueError(f"{source} must be a non-negative integer of at most {MAX_DIGITS} digits (got '{shown}')")
+    return int(text.lstrip("0") or "0")
+
+
+def as_time(value: object) -> float | None:
+    """`value` as a time when it is a number a float holds, else None: float() of an int past 308 digits raises."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return float(value)
+    except OverflowError:
+        return None
 
 
 def configured(environ: Mapping[str, str], setting: str | None) -> tuple[int, str]:
@@ -518,7 +533,7 @@ def load_hold(state: dict, rule: LoadRule, load1: float, load5: float, now: floa
     if rule.limit > 0:
         if load1 >= rule.limit:
             return f"load {load1:.1f} is at or above {rule.limit:g}"
-        low = now - float(state.get("low_since") or now)
+        low = now - (as_time(state.get("low_since")) or now)
         if load5 >= rule.limit and low < rule.settle:
             return (f"load {load1:.1f} has been below {rule.limit:g} for {low:.0f}s of {rule.settle:g}s "
                     f"(load5 {load5:.1f})")
@@ -755,7 +770,10 @@ def cpu_share(slots: int, cores: int | None = None) -> int:
 
 def thread_cap(value: str | None, share: int) -> str:
     """`value` when it is a positive integer no higher than `share`, else `share`: a lower value wins (sd:2726)."""
-    return value if value and value.isascii() and value.isdigit() and 0 < int(value) <= share else str(share)
+    if not value or not value.isascii() or not value.isdigit():
+        return str(share)
+    digits = value.lstrip("0")
+    return value if 0 < len(digits) <= MAX_DIGITS and int(digits) <= share else str(share)
 
 
 def holder_environment(environ: Mapping[str, str], slots: int) -> dict[str, str]:
@@ -863,15 +881,17 @@ def read_holders(where: pathlib.Path) -> list[dict]:
                 fcntl.flock(fd, fcntl.LOCK_UN)
                 continue
             text = lock.read_text(encoding="utf-8", errors="replace").split()
-            pid = int(text[0]) if text and text[0].isdigit() else None
+            pid = (int(text[0].lstrip("0") or "0") if text and text[0].isascii() and text[0].isdigit()
+                   and len(text[0].lstrip("0")) <= MAX_DIGITS else None)
             try:
                 info = json.loads(lock.with_suffix(".info").read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 info = {}
             if not isinstance(info, dict) or info.get("pid") != pid:
                 info = {}
-            recorded = info.get("since")
-            since = float(recorded) if isinstance(recorded, (int, float)) else lock.stat().st_mtime
+            since = as_time(info.get("since"))
+            if since is None:
+                since = lock.stat().st_mtime
             holders.append({"slot": number, "pid": pid, "label": info.get("label", ""),
                             "cwd": info.get("cwd", ""), "since": utc_stamp(since)})
         finally:
@@ -904,10 +924,10 @@ def snapshot(where: pathlib.Path, slots: int, rule: LoadRule, *,
             live = queue.waiters(prune=False)
             lanes = lane_gates(where, live)
             for place, entry in enumerate(admission_order(live), start=1):
-                queued = entry.get("since")
+                queued = as_time(entry.get("since"))
                 waiters.append({"place": place, "pid": entry.get("pid"), "label": entry.get("label", ""),
                                 "cwd": entry.get("cwd", ""),
-                                "since": utc_stamp(float(queued)) if isinstance(queued, (int, float)) else ""})
+                                "since": utc_stamp(queued) if queued is not None else ""})
     try:
         load = [round(float(value), 2) for value in tuple(loadavg())[:3]]
     except OSError:
