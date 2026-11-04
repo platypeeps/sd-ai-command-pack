@@ -3563,6 +3563,10 @@ class PieceAccountTests(Fixture):
         address, why = account(str(self.root / "elsewhere"))
         self.assertEqual(address, "")
         self.assertIn("database is locked", why)
+        with unittest.mock.patch.object(places, "realms", return_value={
+                "state": "missing", "source": "row", "problems": [], "list": []}):
+            account = PUBLISH.piece_accounts(self.connection)
+        self.assertEqual(account(str(self.root / "elsewhere")), ("", "no realm list is set (dashboard.realms)"))
 
 
 #: An Archify diagram as the 05-architecture template holds it: the SVG in

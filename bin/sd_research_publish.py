@@ -2696,8 +2696,10 @@ def piece_accounts(connection: Any) -> Callable[[str], tuple[str, str]]:
 
     found = places.realms(connection)
     rules = found["list"] if found["state"] in ("read", "partial") else None
-    unread = "" if rules is not None else "the realm list did not read (%s)" % (
-        "; ".join(found["problems"]) or found["state"])
+    # No list set is unknown too: which realm is work is the operator's to say.
+    unread = "" if rules is not None else "no realm list is set (dashboard.realms)" \
+        if found["state"] == "missing" else "the realm list did not read (%s)" % (
+            "; ".join(found["problems"]) or found["state"])
     try:
         rows = writes.read_settings(connection, [sweep.ACCOUNT.format(realm=realm)
                                                  for realm in (WORK_REALM, "personal")])
