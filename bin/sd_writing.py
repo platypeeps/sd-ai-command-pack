@@ -30,15 +30,17 @@ CONTENT_ONLY = frozenset({"list", "import", "verify"})
 #: Review verbs that write only the piece's own report files, and the library function each needs (sd:3301).
 REVIEWS = {"adversarial": "adversarial_brief", "reconcile": "reconcile_companion"}
 
-#: Verbs that write one piece, so its designated mirror is queued again after them (pack sd:7243).
-MIRRORED = frozenset({"promote", "register", "stage", "metadata", "gate", "park", "adversarial", "reconcile"})
+#: Verbs that write one piece, so its Drive mirror is queued again after them (pack sd:7243); `publication-reconcile`
+#: moves a piece to `published`, and with it the copy to Writing/Published.
+MIRRORED = frozenset({"promote", "register", "stage", "metadata", "gate", "park", "adversarial", "reconcile",
+                      "publication-reconcile"})
 
 
 def _mirror(connection: Any, item: int) -> None:
-    """Queue the piece's designated files whose text changed, as a brief add queues its brief (pack sd:7243).
+    """Queue the piece's files whose text changed, from review on, as a brief add queues its brief (pack sd:7243).
 
     Best effort: the verb's write is committed, so a failure here changes neither its exit nor its JSON. It is named
-    on stderr, and the next verb, or the Writing page's Mirror again, queues the piece.
+    on stderr, and the next verb, or the Writing page's Stage or Park, queues the piece.
     """
     try:
         import sd_research_publish  # noqa: PLC0415 - the pack's `bin/`, beside this file

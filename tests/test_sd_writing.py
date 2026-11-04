@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import sd_db
+import sd_db.publication
 import sd_db.writing as writing
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -499,10 +500,10 @@ class WritingFromWorktree(unittest.TestCase):
 
 
 class WritingMirror(unittest.TestCase):
-    """pack sd:7243: a verb that writes a piece queues its designated mirror again, best effort.
+    """pack sd:7243: a verb that writes a piece queues its Drive mirror again, best effort.
 
     `enqueue_pieces` queues only the files whose text changed, so every write verb may call it. It never changes the
-    verb's exit status or its JSON: the verb's write is committed, and the next verb or Mirror again queues.
+    verb's exit status or its JSON: the verb's write is committed, and the next verb or page write queues.
     """
 
     GATE = {"artifact": "fact-check", "verdict": "pass"}
@@ -547,6 +548,19 @@ class WritingMirror(unittest.TestCase):
         self.assertEqual((code, json.loads(output)), (0, self.GATE))
         self.enqueue.assert_called_once_with(self.connection, {7})
         self.assertIn("mirror: queued 2026-a-draft", errors)
+
+    def test_a_publication_reconcile_queues_the_piece_it_published(self):
+        # pack sd:7243: reconcile moves a piece to `published`, so its Drive copy moves to Writing/Published.
+        folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        for name in ("context.json", "evidence.json"):
+            (folder / name).write_text("{}", encoding="utf-8")
+        reconciled = {"phase": "published"}
+        self.enterContext(patch.object(sd_db.publication, "reconcile", autospec=True, return_value=reconciled))
+        code, output, _ = self.call("publication-reconcile", "--piece", "2026/a", "--claim", "c1",
+                                    "--context-file", str(folder / "context.json"),
+                                    "--evidence-file", str(folder / "evidence.json"))
+        self.assertEqual((code, json.loads(output)), (0, reconciled))
+        self.enqueue.assert_called_once_with(self.connection, {7})
 
     def test_promote_queues_the_item_it_names(self):
         self.assertEqual(self.call("promote", "12")[0], 0)
