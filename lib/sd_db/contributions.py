@@ -1057,7 +1057,8 @@ def dismiss(connection, key, *, who, expected_revision) -> dict:
     A pull request whose repository was re-created 404s, so every observation
     holds and the row read open forever. Dismissing acknowledges what is
     active and moves the row to `closed`; `_undismiss` ends it on a lifecycle
-    change. A row with an item closes through the item instead.
+    change. A repeat acknowledges attention that arrived since, under the
+    first dismissal's record. A row with an item closes through the item.
     """
     who = _text(who, "who")
     key = _key(key)
@@ -1070,8 +1071,10 @@ def dismiss(connection, key, *, who, expected_revision) -> dict:
             raise WorkflowError("no observed contribution has this key")
         if any(url in (metadata.get("pull_url"), metadata.get("issue_url")) for _, metadata in _registered(connection)):
             raise WorkflowError("this contribution belongs to an item; close the item instead")
-        if state.get("dismissed"):
+        # A repeat acknowledges attention that arrived after the first and
+        # keeps its record; with nothing new it changes nothing (sd:7398).
+        if state.get("dismissed") and not state["attention"]:
             return state
         _acknowledge(connection, state, [event["id"] for event in state["attention"]], who)
-        state["dismissed"] = {"by": who, "at": now(), "state": (state["observation"] or {}).get("state")}
+        state.setdefault("dismissed", {"by": who, "at": now(), "state": (state["observation"] or {}).get("state")})
         return _save(connection, state)

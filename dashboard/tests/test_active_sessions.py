@@ -463,6 +463,23 @@ class TodayDraws(ScreenCase):
         self.assertIn("#21 Ready 21", r["alpha"])
         self.assertNotIn("#51 Ready 51", r["alpha"], "a build-queue row is no suggested item")
 
+    def test_auto_pickup_shows_its_state_and_on_posts_the_end_read(self):
+        """pack sd:6097: the Queue view draws auto-pickup off with On, and On posts the value the panel read."""
+        self.grouped()
+        builds = {"runs": [], "recent": [], "error": "", "read": NOW, "show": "all",
+                  "pickup": {"on": False, "until": None, "next": "2026-09-07T13:00:00Z", "error": ""}}
+        answer = (f"ANSWER = (p, b) => p === '/api/now' ? [200, DOC0] : p.startsWith('/api/queue/builds/pickup')"
+                  f" ? [200, {{ on: true, until: '2026-09-07T13:00:00Z' }}] : p.startsWith('/api/queue/builds')"
+                  f" ? [200, {json.dumps(builds)}] : [404, {{ error: 'not served here' }}];\n")
+        out = self.run_page(answer + self.SHOW + "R.line = ELS['queue-pickup'].html;"
+                            " ELS['queue-pickup'].listeners.click[0]({ target: { closest: s => s === 'button[data-pickup]'"
+                            " ? { dataset: { pickup: 'on' }, disabled: false } : null } }); await flush(); await flush();",
+                            search="?show=", after="")
+        self.assertIn("Auto-pickup is off", out["R"]["line"])
+        self.assertIn('data-pickup="on"', out["R"]["line"])
+        self.assertEqual([(path, body) for path, body, _ in out["posts"] if "pickup" in path],
+                         [("/api/queue/builds/pickup", {"on": True, "until": None})])
+
     def test_ready_items_that_could_not_be_read_say_so(self):
         self.grouped()
         self.doc["queues"] = {"rows": [], "suggested": [], "error": "database is locked"}

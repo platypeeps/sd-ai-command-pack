@@ -29,9 +29,9 @@ from sd_db import repos as sd_repos
 from sd_db.config import label_prefix
 from sd_db.database import transaction
 from sd_db.errors import SdDbError
-from sd_db.writes import add_note, transition
+from sd_db.writes import SettingStale, add_note, set_setting, transition
 
-__all__ = ["ENDED_MAX", "JOB", "QUIET_SECONDS", "kickstart", "panel", "plan", "press", "retry"]
+__all__ = ["ENDED_MAX", "JOB", "QUIET_SECONDS", "kickstart", "panel", "pickup", "plan", "press", "retry"]
 
 #: The local-cron-jobs job that runs `sd assignments dispatch` (system, build-dispatch.job).
 JOB = "build-dispatch"
@@ -302,7 +302,36 @@ def panel(connection, *, now: str, show: str = "active") -> dict:
         return {"runs": [], "recent": [], "error": str(failure) or "the build runs could not be read", "read": now,
                 "show": show}
     return {"runs": rows, "recent": recent, "error": "", "read": now, "quiet_seconds": QUIET_SECONDS,
-            "stale_seconds": build.STALE_SECONDS, "show": show}
+            "stale_seconds": build.STALE_SECONDS, "show": show, "pickup": _pickup(connection, now)}
+
+
+def _pickup(connection, now: str) -> dict:
+    """Auto-pickup's state for the panel's control (pack sd:6097): `on`, `until`, or `error` when unread."""
+    try:
+        state = build.pickup_state(connection, now=now)
+    except (SdDbError, sqlite3.Error) as failure:
+        return {"on": None, "until": None, "error": str(failure)}
+    return {"on": state["on"], "until": state["until"], "next": build.morning(now), "error": ""}
+
+
+def pickup(payload: dict):
+    """POST /api/queue/builds/pickup: `{on, until}`, `until` the end the panel read (null when off); the write
+    `action_route` runs, or ValueError. On ends at the next 07:00 America/Denver; Off clears it. A value
+    that moved since the read is a 409 and writes nothing."""
+    if (set(payload) != {"on", "until"} or type(payload["on"]) is not bool
+            or not (payload["until"] is None or isinstance(payload["until"], str))):
+        raise ValueError("Auto-pickup takes on (true or false) and the end the panel read.")
+
+    def write(connection):
+        try:
+            set_setting(connection, build.AUTO_PICKUP, build.morning() if payload["on"] else None,
+                        before=payload["until"])
+        except SettingStale:
+            return 409, {"error": "Auto-pickup changed since the panel read it. Read it again.", "reload": True}
+        state = build.pickup_state(connection)
+        return {"on": state["on"], "until": state["until"], "kickstart": kickstart() if state["on"] else None}
+
+    return write
 
 
 def retry(connection, assignment: int, *, expected_revision: str, who: str, finding: str = "") -> dict:

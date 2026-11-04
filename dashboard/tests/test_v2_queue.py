@@ -1654,7 +1654,7 @@ class TheRegistration(unittest.TestCase):
         pages = {page.name: page for page in registry().PAGES}
         self.assertNotIn("queue", pages)
         self.assertEqual(tuple(api_paths(pages["today"])), ("/api/queue", "/api/queue/move", "/api/queue/builds",
-                                                            "/api/queue/builds/retry", "/api/queue/runner"))
+                                                            "/api/queue/builds/retry", "/api/queue/builds/pickup", "/api/queue/runner"))
         self.assertNotIn("Queue", v2.SECTIONS)
         self.assertNotIn("'Queue'", GROUP_BLOCK)
         for gone in ("queue.html", "static/queue.js", "static/queue.css", "pages/queue.py"):
