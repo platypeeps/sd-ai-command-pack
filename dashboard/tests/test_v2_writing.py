@@ -100,8 +100,8 @@ class TheDocument(Pieces):
         # A parked piece is listed, and it has no moves until it is revived.
         self.assertEqual((by[self.ids["parked"]]["parked"], by[self.ids["parked"]]["next"]), (True, []))
 
-    def test_each_piece_carries_its_drive_choice_and_each_files_copies(self):
-        # pack sd:7243: fields.publish.drive is the choice; fields.published and the queue give each file's copy.
+    def test_each_piece_carries_its_drive_folder_and_each_files_copies(self):
+        # pack sd:7243: the stage gives the folder, with no designation; fields.published and the queue give each copy.
         import tempfile
 
         from sd_dashboard import publishing
@@ -110,17 +110,17 @@ class TheDocument(Pieces):
         queue = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pending-mirror-syncs"
         self.enterContext(mock.patch.object(publishing.kit(), "QUEUE", queue))
         url = "https://docs.google.com/document/d/example-doc/edit"
-        fields = {"publish": {"drive": {}},
-                  "published": {f"{paths.key(str(self.root))}::2026-fixture-research": {"drive": url}}}
-        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(fields), self.ids["fixture"]))
+        fields = {"published": {f"{paths.key(str(self.root))}::2026-fixture-research": {"drive": url}}}
+        self.connection.execute("UPDATE item SET fields = ?, stage = 'review' WHERE id = ?",
+                                (json.dumps(fields), self.ids["fixture"]))
         self.connection.commit()
         by = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}
         mirror = by[self.ids["fixture"]]["mirror"]
-        self.assertEqual((mirror["choice"], mirror["unread"]), ({"drive": True, "notion": False}, ""))
+        self.assertEqual((mirror["folder"], mirror["unread"]), ("Writing/Drafts", ""))
         self.assertEqual([(c["channel"], c["state"], c["url"]) for c in mirror["copies"]["research.md"]],
                          [("drive", "published", url)])
-        self.assertEqual((mirror["copies"]["index.md"], by[self.ids["parked"]]["mirror"]["choice"]),
-                         ([], {"drive": False, "notion": False}))
+        # A parked piece mirrors nothing, whatever its stage.
+        self.assertEqual((mirror["copies"]["index.md"], by[self.ids["parked"]]["mirror"]["folder"]), ([], None))
 
     def test_a_mirror_not_read_is_unknown_with_its_reason(self):
         # A pack without the queue says why; it is never "no copy".
@@ -128,7 +128,7 @@ class TheDocument(Pieces):
 
         with mock.patch.object(publishing, "kit", side_effect=ImportError("no sd_research_publish")):
             pieces = writing_screen.document(self.connection, now=NOW)["pieces"]
-        self.assertEqual([p["mirror"]["choice"] for p in pieces], [None, None])
+        self.assertEqual([p["mirror"]["folder"] for p in pieces], [None, None])
         self.assertIn("no sd_research_publish", pieces[0]["mirror"]["unread"])
 
     def test_each_piece_carries_its_whole_draft_up_to_a_bound(self):
@@ -347,20 +347,25 @@ class ThePage(Pieces):
         self.assertEqual((piece["stage"], piece["ready_recorded"]), ("ready", True))
         self.assertEqual(self.post(f"/api/items/{piece['id']}/park", {"revision": piece["revision"]})[0], 200)
 
-    def test_mirror_to_drive_posts_the_designation_and_the_pack_queues_the_piece(self):
-        # pack sd:7243: POST /api/writing/publish writes fields.publish.drive and calls the pack's enqueue_pieces.
+    def test_the_stage_and_park_writes_queue_the_piece_and_a_failed_queue_changes_neither(self):
+        # pack sd:7243: no one designates a piece; the dashboard's Stage and Park ask the pack to queue it after their
+        # write, as the sd writing verbs do. Failure table, "Verb or page write, then enqueue": the write stands.
         from sd_dashboard import publishing
 
         ids = self.seed()
+        cookie = {"Cookie": self.cookie}
         queued = []
-        self.enterContext(mock.patch.object(publishing.kit(), "enqueue_pieces",
-                                            lambda connection, items: queued.append(items) or ["mirror: queued 2026-fixture-draft -> Briefs/writing"]))
-        status, _, answer = self.post("/api/writing/publish", {"item": ids["fixture"], "channel": "drive"})
-        self.assertEqual((status, answer["designated"], answer["queued"]), (200, "drive", True))
+        enqueue = self.enterContext(mock.patch.object(publishing.kit(), "enqueue_pieces",
+                                                      side_effect=lambda connection, items: queued.append(items) or []))
+        piece = next(p for p in json.loads(self.request("/api/writing", headers=cookie)[2])["pieces"] if p["id"] == ids["fixture"])
+        self.assertEqual(self.post(f"/api/items/{piece['id']}/stage", {"revision": piece["revision"], "stage": "review"})[0], 200)
         self.assertEqual(queued, [{ids["fixture"]}])
-        fields = json.loads(self.connection.execute("SELECT fields FROM item WHERE id = ?", (ids["fixture"],)).fetchone()[0])
-        self.assertEqual(fields["publish"], {"drive": {}})
-        self.assertEqual(self.post("/api/writing/publish", {"item": ids["fixture"], "channel": "obsidian"})[0], 400)
+        enqueue.side_effect = OSError("queue unwritable")
+        piece = next(p for p in json.loads(self.request("/api/writing", headers=cookie)[2])["pieces"] if p["id"] == ids["fixture"])
+        self.assertEqual(self.post(f"/api/items/{piece['id']}/park", {"revision": piece["revision"]})[0], 200)
+        self.assertEqual(enqueue.call_count, 2)
+        piece = next(p for p in json.loads(self.request("/api/writing", headers=cookie)[2])["pieces"] if p["id"] == ids["fixture"])
+        self.assertTrue(piece["parked"])
 
 
 def piece(id, title, stage, **fields):
@@ -835,8 +840,7 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
 
 
 class TheRegistration(Registers, unittest.TestCase):
-    page, section, route, api = "writing", "Writing", "/writing", ("/api/writing", "/api/writing/1/research",
-                                                                  "/api/writing/publish")
+    page, section, route, api = "writing", "Writing", "/writing", ("/api/writing", "/api/writing/1/research")
 
 
 if __name__ == "__main__":

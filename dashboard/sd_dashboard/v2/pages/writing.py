@@ -1,7 +1,6 @@
 """Writing (sd:2125): every writing piece by stage, with its four gate lamps and its moves. The old filtered list, kept
 under /classic/, was retired in sd:3402; Stage, Correct, Park and Revive post the item routes the item page posts
-too. A gate's view icon reads its report at /api/writing/<item>/<gate> (pack sd:7242). Mirror to Drive posts
-/api/writing/publish (pack sd:7243)."""
+too. A gate's view icon reads its report at /api/writing/<item>/<gate> (pack sd:7242)."""
 
 from __future__ import annotations
 
@@ -23,20 +22,13 @@ def _report(read):
     return writing_screen.report(read.connection, read.path)
 
 
-def _publish(payload, principal):
-    from ... import publishing
-
-    return publishing.piece_request(payload)
-
-
 PAGE = Page(
     section="Writing",
     routes=("/writing",),
     html="writing.html",
     item="sd:2125",
     api=(Api("/api/writing", _read),
-         Api(pattern=REPORT, example="/api/writing/1/research", read=_report),
-         Api("/api/writing/publish", write=_publish)),
+         Api(pattern=REPORT, example="/api/writing/1/research", read=_report)),
     count="/api/writing",
     live=True,
 )

@@ -53,9 +53,9 @@ and it names each entry it seeds. `python3 -m sd_dashboard.publishing seed-obsid
 it in one transaction and calls the pack's `enqueue_briefs`, which builds the request from the row and queues it as for a
 research document; every brief render queues it again when its text changes. `undesignate_brief` unticks it as above.
 
-**A writing piece's Mirror to Drive** (pack sd:7243) is `fields.publish.drive` on its item, one designation for each of its
-files: `designate_piece` writes it as `designate_brief` does and calls the pack's `enqueue_pieces`; the `sd writing`
-verbs queue it again after each write. `piece_mirror` reads each file's copy for the Writing page's gate rows.
+**A writing piece** (pack sd:7243) is designated by no one: at review or later the pack's `enqueue_pieces` queues each
+of its files, after each `sd writing` write and after the dashboard's Stage and Park (`queue_piece`, best effort).
+`piece_mirror` reads each file's copy for the Writing page's gate rows.
 """
 
 from __future__ import annotations
@@ -70,8 +70,8 @@ import urllib.parse
 from pathlib import Path
 
 __all__ = ["CHANNELS", "DESIGNATED", "OUTWARD", "PUBLISH_SECONDS", "brief_choice", "brief_copies", "brief_request", "choices", "choices_of",
-           "designate", "designate_brief", "designate_piece", "document_copies", "item_fields", "piece_mirror", "piece_request",
-           "published_fields", "remove_key", "request",
+           "designate", "designate_brief", "document_copies", "item_fields", "piece_mirror", "published_fields",
+           "queue_piece", "remove_key", "request",
            "seed_obsidian", "undesignate", "undesignate_brief", "unrequest", "brief_unrequest", "vault_repository"]
 
 #: The destinations, in the order a row shows their icons.
@@ -830,19 +830,12 @@ def designate_brief(connection, item: int, channel: str, *, enqueue=None) -> dic
     2. `fields.publish.<channel>` becomes `{}` in one transaction, unless it is there already.
     3. The pack's `enqueue_briefs` queues the brief's designated channels from its row; a pack without it says so.
     """
-    if channel not in OUTWARD:
-        raise Refused(f"{channel!r} is not a destination a brief designates; expected notion or drive")
-    row, checkout, fields = _brief(connection, item)
-    return _designate(connection, item, channel, checkout, fields, enqueue, "enqueue_briefs", "sd:5102", (row["title"],))
-
-
-def _designate(connection, item: int, channel: str, checkout: Path, fields: dict, enqueue, named: str, since: str,
-               stems: tuple[str, ...]) -> dict:
-    """`designate_brief`'s three steps for any row its item designates: `enqueue`, else the pack's function `named`
-    (added in `since`), queues it; `stems` are the documents whose request says it was queued."""
     from sd_db import reads, writes
     from sd_db.database import transaction
 
+    if channel not in OUTWARD:
+        raise Refused(f"{channel!r} is not a destination a brief designates; expected notion or drive")
+    row, checkout, fields = _brief(connection, item)
     setting, unread = read_channels(connection, checkout)
     if unread:
         raise Refused(f"{unread}; nothing was designated")
@@ -863,16 +856,16 @@ def _designate(connection, item: int, channel: str, checkout: Path, fields: dict
             fields = {**current, "publish": {**held, channel: {}}}
             writes.set_item_fields(connection, item, fields=fields)
     try:
-        queue = enqueue or getattr(kit(), named, None)
+        queue = enqueue or getattr(kit(), "enqueue_briefs", None)
         if queue is None:
             return {"designated": channel, "already": already, "queued": False, "exit": 1,
-                    "lines": [f"the installed command pack has no {named} ({since}), so nothing was queued; update it"]}
+                    "lines": ["the installed command pack has no enqueue_briefs (sd:5102), so nothing was queued; update it"]}
         lines = queue(connection, {item})
     except Exception as error:  # noqa: BLE001 - the designation stands; the next tick or brief render queues again
         return {"designated": channel, "already": already, "queued": False, "exit": 1,
                 "lines": [f"the pack's enqueue failed, so nothing was queued: {error}"]}
-    queued = any(line.startswith((f"mirror: queued {stem} ", f"mirror: {stem}: already queued"))
-                 for line in lines for stem in stems)
+    stem = row["title"]
+    queued = any(line.startswith((f"mirror: queued {stem} ", f"mirror: {stem}: already queued")) for line in lines)
     return {"designated": channel, "already": already, "queued": queued, "exit": 0, "lines": lines[-12:]}
 
 
@@ -886,57 +879,27 @@ def _piece_outs(piece: str) -> dict[str, str]:
     return {name: f"{piece.replace('/', '-')}-{stem}" for stem, name in writing.MIRRORED.items()}
 
 
-def _piece(connection, item: int):
-    """`(row, checkout, fields)` for a writing piece, or `Refused`."""
-    from sd_db import paths, reads
-
-    row = reads.item_by_id(connection, item)
-    if row is None or row["kind"] != "idea" or not row["piece"]:
-        raise Refused(f"sd:{item} is not a writing piece")
-    checkout = paths.expand(row["repo"]) if row["repo"] else None
-    if checkout is None or not checkout.is_dir():
-        raise Refused(f"sd:{item} names no checkout on this machine, so its mirror has no repository to queue under")
-    return row, checkout, item_fields(connection, [item]).get(item, {})
-
-
-def designate_piece(connection, item: int, channel: str, *, enqueue=None) -> dict:
-    """Mirror to Drive on a writing piece: `designate_brief`'s three steps, with the pack's `enqueue_pieces`.
-
-    One designation covers each of the piece's files. Idempotent: on a designated piece it queues each file whose text
-    changed since, which is the page's answer to a hand edit no `sd writing` verb followed.
-    """
-    if channel not in OUTWARD:
-        raise Refused(f"{channel!r} is not a destination a piece designates; expected notion or drive")
-    row, checkout, fields = _piece(connection, item)
-    return _designate(connection, item, channel, checkout, fields, enqueue, "enqueue_pieces", "pack sd:7243",
-                      tuple(_piece_outs(row["piece"]).values()))
-
-
-def piece_request(values: dict):
-    """The POST `/api/writing/publish` checks: `{item, channel}`; the designation as a write."""
-    if set(values) != {"item", "channel"} or type(values["item"]) is not int or not isinstance(values["channel"], str):
-        raise ValueError("Send the piece's item and the channel: drive or notion.")
-    if values["channel"] not in OUTWARD:
-        raise ValueError("A piece designates drive or notion.")
-
-    def write(connection):
-        try:
-            return designate_piece(connection, values["item"], values["channel"])
-        except Refused as refused:
-            raise ValueError(str(refused)) from None
-
-    return write
-
-
-def piece_mirror(checkout: Path, piece: str, fields: dict, *, queue: Path | None, receipts: Path | None) -> dict:
-    """A piece's Drive and Notion choice, and each mirrored file's copies by file name, from the queue, the receipt
-    and the item's `fields.published`, as `document_copies` reads a document's."""
-    publish = fields.get("publish") if isinstance(fields.get("publish"), dict) else {}
+def piece_mirror(checkout: Path, piece: str, folder: str | None, fields: dict, *, queue: Path | None,
+                 receipts: Path | None) -> dict:
+    """A piece's Drive `folder` (None: its stage mirrors nothing) and each mirrored file's Drive copies by file name,
+    from the queue, the receipt and the item's `fields.published`, as `document_copies` reads a document's."""
     published = fields.get("published") if isinstance(fields.get("published"), dict) else {}
     copies = {name: [copy for copy in document_copies(checkout, out, setting=None, unread="", fields=published,
-                                                      queue=queue, receipts=receipts)["copies"] if copy["channel"] in OUTWARD]
+                                                      queue=queue, receipts=receipts)["copies"] if copy["channel"] == "drive"]
               for name, out in _piece_outs(piece).items()}
-    return {"choice": {channel: isinstance(publish.get(channel), dict) for channel in ("drive", "notion")}, "copies": copies}
+    return {"folder": folder, "copies": copies}
+
+
+def queue_piece(connection, item: int) -> list[str]:
+    """The pack's `enqueue_pieces` for one piece after a dashboard write, best effort: the write is committed, so a
+    failure is named in the lines, never raised; the next write or `sd writing` verb queues it."""
+    try:
+        queue = getattr(kit(), "enqueue_pieces", None)
+        if queue is None:
+            return ["mirror: the installed command pack has no enqueue_pieces (pack sd:7243); the piece was not queued"]
+        return queue(connection, {item})
+    except Exception as error:  # noqa: BLE001 - reported; the write stands
+        return [f"mirror: piece not queued: {error or type(error).__name__}"]
 
 
 def brief_request(values: dict):

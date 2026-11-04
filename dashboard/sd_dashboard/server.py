@@ -326,6 +326,18 @@ def _reopen_report(connection, item, *, expected_revision):
         return workflow.item_state(connection, item)
 
 
+def _queued_piece(connection, number: int, answer):
+    """`answer`, after the pack queues the piece's Drive copies (pack sd:7243), as an `sd writing` verb queues them.
+
+    Best effort: the write is done, so `publishing.queue_piece` never raises and its lines go to the log only.
+    """
+    from . import publishing
+
+    for line in publishing.queue_piece(connection, number):
+        print(f"sd-dashboard: sd:{number}: {line}", file=sys.stderr, flush=True)
+    return answer
+
+
 def _base_kind(connection, item):
     """The base kind of a vault base row (sd:3977), or None: the item routes send such a row to `records.edit_row`."""
     from sd_db.sources.vault import SOURCE
@@ -624,8 +636,10 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
 
         if values:
             raise ValueError("Parking accepts only the current item revision.")
-        return lambda connection: writing.park_piece(connection, number,
-            parked=suffix == "/park", actor="human", require_row=True, **options)
+        def park(connection):
+            return _queued_piece(connection, number, writing.park_piece(connection, number,
+                parked=suffix == "/park", actor="human", require_row=True, **options))
+        return park
     if entity == "items" and suffix == "/stage":
         from sd_db import writing
 
@@ -653,9 +667,9 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
                                              expected_revision=revision)
             if values["stage"] == "published":
                 raise ValueError("Publication uses the reviewed publishing workflow.")
-            return writing.change_stage(connection, number, values["stage"],
+            return _queued_piece(connection, number, writing.change_stage(connection, number, values["stage"],
                 actor="human", require_row=True, reason=values.get("reason") or None,
-                correct=values.get("correct", False), **options)
+                correct=values.get("correct", False), **options))
         return stage
     if entity == "items" and suffix in ("/relink", "/cancel"):
         from sd_db import progress
