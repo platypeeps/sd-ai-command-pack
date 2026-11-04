@@ -1113,7 +1113,7 @@ R.start = ELS['shift-hint'].html;""")
         self.assertEqual(out["states"][0]["kind"], "loading")
         last = out["states"][-1]
         # system sd:5659: the banner said rounds are not read on every load; the rows and the Details' Rounds line say it.
-        self.assertEqual(last, {"kind": "partial", "text": "1 project with a config or render the collector could not read.",
+        self.assertEqual(last, {"kind": "partial", "text": "1 project with a config or page that could not be read.",
                                 "source": "/api/research"})
 
     def test_a_board_read_whole_shows_no_banner(self):

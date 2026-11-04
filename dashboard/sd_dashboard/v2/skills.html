@@ -63,7 +63,7 @@
 
     <section id="view-catalog" aria-labelledby="cat-h">
       <div class="sec-head">
-        <h2 id="cat-h">Catalog <button class="help" type="button" aria-label="Help: Catalog" data-help="<b>One row per skill in the pack.</b> Path skills install on every surface; trials last 30 days; contrib skills are available to try. Use per week comes from <code>skill_use</code>, every surface it records. Sort any column; tap a row for usage, run, schedule and review.">
+        <h2 id="cat-h">Catalog <button class="help" type="button" aria-label="Help: Catalog" data-help="<b>One row per skill in the pack.</b> Path skills install on every surface; trials last 30 days; contrib skills are available to try. Use per week counts every tool that records skill use. Sort any column; tap a row for usage, run, schedule and review.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <div class="tools">
           <p class="tally" id="tally"></p>
@@ -82,7 +82,7 @@
 
     <section id="view-intake" aria-labelledby="repos-h">
       <div class="sec-head">
-        <h2 id="repos-h">Tracked repositories <button class="help" type="button" aria-label="Help: Tracked repositories" data-help="<b>One row per source repository.</b> Until the list is first changed, it is the repositories the installed skills came from: their Provenance, the skills CLI's lock file and linked GitHub checkouts. Refresh reads the repository's default branch and lists its new and changed skills, each with its intake report; nothing installs until you approve a report. Remove stops tracking; the installed skills stay.">
+        <h2 id="repos-h">Tracked repositories <button class="help" type="button" aria-label="Help: Tracked repositories" data-help="<b>One row per source repository.</b> Until the list is first changed, it is the repositories the installed skills came from: their Provenance, the record of where installed skills came from, and linked GitHub checkouts. Refresh reads the repository's default branch and lists its new and changed skills, each with its intake report; nothing installs until you approve a report. Remove stops tracking; the installed skills stay.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <div class="tools">
           <p class="tally" id="intake-tally"></p>
@@ -100,7 +100,7 @@
 
     <section id="view-usage" class="usage" aria-labelledby="usage-h">
       <div class="sec-head">
-        <h2 id="usage-h">Skill use <button class="help" type="button" aria-label="Help: Skill use" data-help="<b>Every skill use <code>skill_use</code> records, over four Monday-start weeks.</b> All skills per week, this week first, and this week's ten most used; a skill opens its catalog row. Metrics' Skills view until sd:5881.">
+        <h2 id="usage-h">Skill use <button class="help" type="button" aria-label="Help: Skill use" data-help="<b>Skill use over four Monday-start weeks.</b> All skills per week, this week first, and this week's ten most used; a skill opens its catalog row.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="usage-tally"></p>
       </div>

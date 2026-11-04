@@ -266,7 +266,7 @@ addEventListener('DOMContentLoaded', () => {
     document.getElementById('edit-tiles').disabled = !CONFIG?.editor;
     const problems = CONFIG?.problems || [];
     const unread = Object.values(E).filter(e => !e.state);
-    const state = CONFIG?.state === 'missing' ? { kind: 'empty', title: 'No tile list', text: 'Edit tiles opens on project-dashboard/home-tiles.conf.example; Save keeps the list in the workflow database.', source: CONFIG.source }
+    const state = CONFIG?.state === 'missing' ? { kind: 'empty', title: 'No tile list', text: 'No tiles yet. Edit tiles starts from an example list; Save keeps it.', source: CONFIG.source }
       : CONFIG?.state === 'error' ? { kind: 'error', text: `The tile list was not read: ${problems.map(p => p.replace(/^tile list not read: /, '')).join('; ')}. Home Assistant was not called.`, source: CONFIG.source }
       : problems.length ? { kind: 'partial', text: `${plural(problems.length, 'line')} skipped: ${problems.join('; ')}. ${REASON ? `No tile has a state: ${REASON}.` : ''}`, source: CONFIG.source }
       : REASON ? { kind: 'partial', title: 'No state read', text: `The tiles are the configured entities; none has a state: ${REASON}.`, source: '/api/home' }

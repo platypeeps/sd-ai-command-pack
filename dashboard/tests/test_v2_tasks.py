@@ -2059,7 +2059,7 @@ R.shown = D.html; R.before = OUT.posts.length; D.returnValue = 'start'; D.onclos
         out = self.start_next(self.START_PLAN, run)
         self.assertIn('<button class="btn" value="start" type="submit">Build</button>', out["R"]["shown"])
         self.assertIn("Tasks to build (1–2)", out["R"]["shown"])
-        self.assertIn("Each queues a headless build; the dispatcher bundles them by repository.", out["R"]["shown"])
+        self.assertIn("Each queues an unattended build, grouped by repo.", out["R"]["shown"])
         self.assertNotIn("herdr", out["R"]["shown"])
         self.assertEqual(out["toasts"][-1], ["Queued #11 for build · the dispatcher was started", False])
         late = ("[200, { queued: [{ id: 7, item: 11, status: 'queued' }, { id: 8, item: 12, status: 'queued' }],"

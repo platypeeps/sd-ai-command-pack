@@ -1440,7 +1440,7 @@ FIELD_VALUES = {{ pr: '9' }}; C.run(c, o); await flush(); await flush(); R.det =
     def test_adversarial_review_pr_is_off_with_its_reason(self):
         path = self.ids["checkout"]
         script = f"R.why = cmd('repo.adversarial-pr').when(C.get('repo:{path}'));"
-        for doc, said in ((self.github_doc({}), "no open pull request as sd shadow sync last saw it"),
+        for doc, said in ((self.github_doc({}), "no open pull request as of the last GitHub sync"),
                           (self.github_doc(None), "pull requests not read: the reading carries none"),
                           (dict(self.doc, pulls={"example/checkout": [{"number": 1, "title": "t"}]}),
                            "not a GitHub repository, so it has no pull requests")):

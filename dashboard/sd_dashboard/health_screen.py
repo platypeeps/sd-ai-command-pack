@@ -164,7 +164,7 @@ def _worktree_rows(document) -> list[dict]:
             rows.append({
                 "id": f"unread:{repo}", "state": "unknown", "type": "unread registrations", "repo_path": path,
                 "what": f"{repo}: {count} {_plural(count, 'registration', 'registrations')} could not be read",
-                "detail": "gitdir or HEAD under .git/worktrees was unreadable, so nobody can say whether the directory is there",
+                "detail": "the worktree records could not be read, so whether the folder exists is unknown",
                 "kind": "Worktrees · unreadable", "facts": {"Repo": path, "Unreadable": str(count)},
                 "list": listed,
             })
@@ -261,7 +261,7 @@ def _container_rows(snapshot) -> tuple[list[dict], dict]:
         })
     if not rows:
         rows.append({"id": "ctr:none", "state": "ok", "type": "check", "what": "No container running",
-                     "detail": "docker ps listed no running container", "kind": "Containers", "facts": {},
+                     "detail": "no container is running", "kind": "Containers", "facts": {},
                      "cli": "docker ps"})
     return rows, {"running": len(found["rows"]), "holding": holding, "root": root}
 
@@ -469,9 +469,9 @@ def _disk_rows(scan: dict) -> tuple[list[dict], dict]:
                 "facts": {"Path": root, "Mount": share["mount"], "File system": share.get("type", "local"), "Used": f"{capacity}%",
                           "Free": _size(free), "Size": _size(size)},
                 "cli": f"df -h {shlex.quote(root)}",
-                "note": "Health runs no du on a network mount: over the SMB share it ran past 120 s against the 8 s Disk budget."
+                "note": "Health does not measure folders on a network drive: that took over 120 s, and Disk has 8 s."
                         if "type" in share else
-                        "du did not finish inside the 8 s Disk budget on this drive, so Health shows the drive's total, not its folders.",
+                        "Measuring the folders took longer than Disk's 8 s, so Health shows the drive's total, not its folders.",
                 "problem": [root],
             })
             continue

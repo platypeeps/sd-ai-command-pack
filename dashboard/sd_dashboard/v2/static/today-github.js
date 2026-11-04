@@ -78,7 +78,7 @@
   };
   // With closed, the window and the settled rows it could not place.
   const unknown = () => DOC.pulls.filter(r => r.ready == null && (all() || mine(r)) && inRepo(r)).length;
-  const note = () => ready() ? (unknown() ? html`<p class="st-line"><span class="g-unknown">▨</span> ${plural(unknown(), 'open pull request')} whose review, checks or merge state was not read, so not listed: the next sd shadow sync reads them</p>` : '')
+  const note = () => ready() ? (unknown() ? html`<p class="st-line"><span class="g-unknown">▨</span> ${plural(unknown(), 'open pull request')} whose review, checks or merge state was not read, so not listed: the next GitHub sync reads them</p>` : '')
     : closed() ? html`<p class="st-line">Merged or closed: the last ${DOC.days} days${DOC.undated ? html` · <span class="g-unknown">▨</span> ${plural(DOC.undated, 'merged or closed row')} with no date recorded, not placed` : ''}</p>` : '';
   function table() {
     const L = window.shell.list, rows = shown();
@@ -175,7 +175,7 @@
         when: o => !!o.item || 'no work item names this pull request', cli: o => `sd task show ${o.item}`, run: o => window.shell.openItem(o.item) },
       // sd:5100's pull request review (adversarial.py `_resolve_pull`): a change review at the head origin names, in the
       // registered checkout of the pull request's repository. The server checks the number against sd shadow sync's open rows.
-      K.adversarialReview(TYPE, { does: 'Starts a codex review of this pull request at its head in the background; its brief lists tasks to pick.',
+      K.adversarialReview(TYPE, { does: 'Starts a background review of this pull request; you pick fixes from its report.',
         payload: o => ({ kind: 'change', target: o.checkout, pr: o.number, ...(o.item ? { item: o.item } : {}) }),
         when: o => o.state !== 'open' ? `${closed(o)}; a review reads an open one`
           : o.checkout ? true : `${o.repo} is not a registered repository, so no checkout holds it to review` }),
@@ -190,18 +190,18 @@
           () => `Copilot review requested · ${o.repo}#${o.number}`,
           err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether Copilot was asked is not known`); }) },
       // sd:5668: previews: run() reads the preview and asks with it, so the shell's own confirm does not ask first.
-      { id: `${TYPE}.merge`, on: TYPE, label: 'Merge', does: 'Copies this pull request into a worktree and queues it in the lane.',
+      { id: `${TYPE}.merge`, on: TYPE, label: 'Merge', does: 'Copies this pull request and sends it to the merge queue.',
         icon: 'git-merge', risk: 'confirm', executes: true, previews: true,
         when: o => o.state !== 'open' ? `${closed(o)}; Merge copies an open one`
-          : o.checkout ? true : `${o.repo} is not a registered repository, so the lane cannot take it`,
+          : o.checkout ? true : `${o.repo} is not a registered repository, so the merge queue cannot take it`,
         cli: o => `git -C ${window.shell.shq(o.checkout)} fetch origin pull/${o.number}/head && sd-ship -C <worktree> lane enqueue --item <n> --title <title> --body-file <body> --expected-head <head> --deliver`,
         sends: o => `POST /api/today/github/merge ${JSON.stringify({ repo: o.repo, number: o.number, revision: '<preview>' })}`,
         run: mergePull },
       // sd:5669: previews, as Merge does; nothing closes without this press and its confirm.
-      { id: `${TYPE}.close-original`, on: TYPE, label: 'Close original', does: 'Comments with a link to the lane\'s merged copy, then closes this pull request.',
+      { id: `${TYPE}.close-original`, on: TYPE, label: 'Close original', does: 'Comments with a link to the merged copy, then closes this pull request.',
         icon: 'git-pull-request', risk: 'confirm', executes: true, previews: true,
         when: o => o.state !== 'open' ? `${closed(o)}; nothing to close`
-          : o.landed ? true : 'the lane has not merged a copy of it yet: Merge copies it, and the lane merges the copy',
+          : o.landed ? true : 'the merge queue has not merged a copy of it yet: Merge copies it, and the queue merges the copy',
         cli: o => `gh api repos/${o.repo}/issues/${o.number}/comments --method POST -f body=<comment> && gh api repos/${o.repo}/pulls/${o.number} --method PATCH -f state=closed`,
         sends: o => `POST /api/today/github/close ${JSON.stringify({ repo: o.repo, number: o.number, revision: '<preview>' })}`,
         run: closePull },
@@ -211,10 +211,10 @@
   // What Merge will do, from its preview: the confirm names every fact the copy moves on.
   const mergeText = p => [
     `${p.repo}#${p.number} "${p.title}" by ${p.author || 'an author not recorded'}, head ${p.head.slice(0, 12)}.`,
-    p.mode === 'resume' ? `Resumes: ${p.branch} already holds this head${p.worktree_listed ? ` in ${p.worktree}` : `; Merge adds its worktree ${p.worktree}`}.`
-      : `Fetches pull/${p.number}/head into ${p.branch} and a worktree at ${p.worktree}; the commits keep their authors.`,
+    p.mode === 'resume' ? `Resumes: ${p.branch} already holds this head${p.worktree_listed ? ` in ${p.worktree}` : `; Merge adds its work folder ${p.worktree}`}.`
+      : `Copies #${p.number} into ${p.branch} in a work folder at ${p.worktree}; the commits keep their authors.`,
     p.item ? `Item: sd:${p.item} ${p.item_title} (${p.ref}).` : `Item: files a new task, ${p.item_title}, under ${p.ref}.`,
-    'Then sd-ship lane enqueue --deliver: the lane publishes its own pull request, gates, reviews and merges it. The original stays open; close it once the lane merges.',
+    'Then the merge queue opens its own pull request, checks it, reviews it and merges it. The original stays open; close it once the queue merges.',
   ].join(' ');
   async function mergePull(o) {
     const ref = `${o.repo}#${o.number}`;
@@ -231,7 +231,7 @@
     // The next read lists the row's item: the one filed under its ref.
     load();
     const lane = out.lane || {};
-    const queued = lane.status === 'not queued' ? `not queued: ${lane.error}. Merge again to retry the enqueue` : `lane ${lane.status}; Queue shows it`;
+    const queued = lane.status === 'not queued' ? `not queued: ${lane.error}. Merge again to queue it` : `lane ${lane.status}; Queue shows it`;
     return { text: `Copied · ${ref} at ${out.head.slice(0, 12)} into ${out.branch} · sd:${out.item}${out.filed ? ' filed' : ''} · ${queued}` };
   }
 
@@ -247,7 +247,7 @@
       if (err.status >= 400 && err.status < 500) throw err;
       return { text: `Not known how far Close original got · ${ref}: ${err.message}. Close original again posts no second comment.` };
     }
-    return { text: `Closed · ${ref}${out.commented ? ' with a comment' : '; its comment was already posted'} linking ${p.merged} · the row moves once sd shadow sync reads it` };
+    return { text: `Closed · ${ref}${out.commented ? ' with a comment' : '; its comment was already posted'} linking ${p.merged} · the row updates after the next GitHub sync` };
   }
 
   // Of overlapping reads only the newest draws.

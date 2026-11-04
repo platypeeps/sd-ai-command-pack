@@ -66,7 +66,7 @@ def sessions_panel(parameters, *, backend=None):
     except (OSError, ValueError, TypeError) as failure:
         return tag("section", tag("h2", "Sessions"),
             tag("p", "Sessions could not be observed: " + str(failure), class_="notice"),
-            tag("p", "No worktree or process state is inferred from a failed read; refresh to run the collector again.", class_="hint"))
+            tag("p", "No worktree or process state is inferred from a failed read; refresh to read it again.", class_="hint"))
     # One state per list, not one for the page. The two are independent row
     # sets, so a term that narrows the processes has nothing to say about the
     # worktrees, and page two of one is not page two of the other. Each list
@@ -110,7 +110,7 @@ def sessions_panel(parameters, *, backend=None):
     if document.get("rootExists"):
         registry = join((tag("p", summary, class_="hint"),
                          tag("h3", "Worktrees"),
-                         tag("p", "Every registration under a checkout's .git/worktrees, read from git's own files. An abandoned one names a directory that is gone and still holds its branch; git worktree prune clears it.", class_="hint"),
+                         tag("p", "Every worktree each repo knows about, read from git's own files. An abandoned one's folder is gone, but it still holds its branch; git worktree prune clears it.", class_="hint"),
                          worktrees.render()))
     else:
         registry = tag("p", f"The checkout root {root} does not exist. REPO_ROOT names it; ~/repos is the default.", class_="notice")

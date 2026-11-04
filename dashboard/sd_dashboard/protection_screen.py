@@ -145,15 +145,15 @@ def render(connection, *, parameters):
     columns.append(Column("reason", "Reason", _reason, text=lambda row: row.get("reason") or "" if row["status"] == "unknown" else ""))
     listing = Listing("protection", columns, rows, path="/protection", query=query, page_number=number,
                       selected=selected,
-                      empty="No repositories registered. Register one with sd-db repo add PATH, then run sd shadow sync.")
+                      empty="No repositories registered yet. Register one with sd-db repo add PATH, then run sd shadow sync.")
     # sd:3586: inside the v2 shell, under Management, which links this page as its gap matrix.
     return shell_page("Protection", "Management",
         tag("p", "Unknown is not protected: a repository whose protection could not be read shows no gap cells. "
                  "Protection that exempts admins is prose, not authority.", class_="hint"),
         _summary(rows), listing.render(),
-        subtitle="What each registered repository's default branch enforces, as the nightly collector last read it. "
+        subtitle="What each registered repository's default branch enforces, as of last night's check. "
                  "Unprotected first, then unknown, then protected.",
-        note="Protection reads repo_protection as the nightly collector left it; nothing here calls GitHub. "
+        note="Read from last night's check; nothing here calls GitHub. "
              "Open a GAP cell for its sentence.",
         # A Management page like Services: its picker offers the Operations commands (sd:4002).
         screen="operations")

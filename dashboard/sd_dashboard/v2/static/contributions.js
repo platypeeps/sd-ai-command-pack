@@ -23,7 +23,7 @@ if (location.hash === '#view=hidden') {
 const BY_TEXT = 'repo, title and reason';
 window.PAGE_FILTER = { open: BY_TEXT, settled: BY_TEXT, filed: 'tickets and issues' };
 window.PAGE_COMMANDS = [
-  { label: 'Show the collector', icon: 'activity', run: () => document.dispatchEvent(new CustomEvent('shell:open', { detail: 'collector' })) },
+  { label: 'Show the GitHub sync', icon: 'activity', run: () => document.dispatchEvent(new CustomEvent('shell:open', { detail: 'collector' })) },
   ...['all', 'internal', 'external'].map(v => ({ label: `Show ${v} repositories`, icon: 'filter', run: () => document.dispatchEvent(new CustomEvent('contributions:scope', { detail: v })) })),
 ];
 // build: nothing is read yet, so the page claims nothing for the rail until /api/contributions/page answers.
@@ -98,7 +98,7 @@ addEventListener('DOMContentLoaded', () => {
     // Rail badge (shell.js): the read's own, the rule every page's rail shows (sd:3446, contribution_screen._attention).
     window.PAGE_ATTENTION = doc.attention || { state: 'unknown', n: 0, what: 'contributions not read' };
     window.shell.attention?.();
-    return { objects: [...ROWS, ...FILED, { id: 'collector', type: 'collector', label: 'contributions collector' }], state: stateOf(doc) };
+    return { objects: [...ROWS, ...FILED, { id: 'collector', type: 'collector', label: 'GitHub sync' }], state: stateOf(doc) };
   }
   // A failed read clears the page: no rows, lamps or counts, and the rail claims nothing.
   function clear(err) {
@@ -332,7 +332,7 @@ addEventListener('DOMContentLoaded', () => {
     if (!DOC.github_dates) {
       tp.setAttribute('aria-label', 'Settle dates not recorded');
       put(tp, html``);
-      note.textContent = 'This sd records no merge or close dates: update the command pack and run sd shadow sync.';
+      note.textContent = 'This version records no merge or close dates: update the command pack, then press Re-run collector.';
       return;
     }
     const end = new Date(Date.parse(DOC.read)); end.setHours(12, 0, 0, 0);
@@ -436,7 +436,7 @@ addEventListener('DOMContentLoaded', () => {
         <dt>Updated</dt><dd>${r.updated_at ? html`<time class="rel" datetime="${r.updated_at}" data-long=""></time>` : 'not synced yet'}</dd>
         <dt>Last synced</dt><dd><time class="rel" datetime="${r.seen || ''}" data-empty="never"></time></dd></dl>
       <h3>Act</h3>${C.bar(r.key)}
-      <p class="why">Edit opens it in ${where}; the dashboard changes nothing there, and the next sd shadow sync reads your edit back.</p>`);
+      <p class="why">Edit opens it in ${where}; the dashboard changes nothing there, and the next GitHub sync reads your edit back.</p>`);
     C.select(r.key); swap();
     return true;
   }
@@ -515,7 +515,7 @@ addEventListener('DOMContentLoaded', () => {
   // selection whose row is gone, and queues a reread behind a read that started before its write landed.
   function stateOf(doc) {
     const c = doc.collector || {};
-    if (!doc.total) return { kind: 'empty', title: 'No contributions', text: 'The projection has no rows. Register local work or run sd shadow sync to collect authored pull requests.', source: '/api/contributions/page' };
+    if (!doc.total) return { kind: 'empty', title: 'No contributions', text: 'No contributions yet. Register local work, or press Re-run collector to get your pull requests from GitHub.', source: '/api/contributions/page' };
     if (c.state && c.state !== 'fresh') return { kind: 'partial', title: 'GitHub sync not fresh', text: `The GitHub sync is ${c.state}${c.reason ? ': ' + c.reason : ''}. Rows show what the last sync saw.`, source: 'progress.tracker_freshness' };
     return null;
   }
@@ -552,7 +552,7 @@ addEventListener('DOMContentLoaded', () => {
   const load = () => reading.load(), reread = () => reading.reread();
   // Read again (sd:5638): the shell's head button reads the table again. The sync is the collector's Re-run collector
   // (sd:5750 took out the toolbar's Refresh, a second way to it).
-  window.PAGE_AGAIN = { title: 'Read the contributions again; Re-run collector runs the sync', run: load };
+  window.PAGE_AGAIN = { title: 'Refresh contributions', run: load };
   registerCommands();
   load();
 });

@@ -162,7 +162,7 @@
     { id: `${t.type}.add`, on: `${t.type} list`, label: `Add ${t.type}`, does: `Files a ${t.added} learning row for a URL.`, key: 'a', icon: 'plus', risk: 'safe', executes: true, primary: () => true,
       fields: () => [{ name: 'url', label: 'URL', required: true, placeholder: 'https://', help: 'An http or https link.' },
         { name: 'title', label: 'Title', placeholder: 'optional', help: 'Empty: the page\'s own title.' }],
-      consequence: () => `This files a ${t.added} row in the vault's Learning base with sd store add. It shows here and in Tasks.`,
+      consequence: () => `This adds the link to your ${t.added} list in the vault. It shows here and in Tasks.`,
       cli: (o, v) => `sd store add sdw.learning ${shq(v?.title || 'TITLE')} --field content-type=${t.type === 'book' ? 'book' : 'video'} --field url=${shq(v?.url || 'URL')}`,
       sends: () => `POST /api/actions/run {action: learning.add, view: ${id}, url, title}`,
       run: (o, v) => window.commands.runAction(o, 'learning.add', { view: id, url: v?.url || '', title: v?.title || '' })

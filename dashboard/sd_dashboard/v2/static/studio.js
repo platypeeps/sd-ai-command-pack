@@ -127,7 +127,7 @@
     SELECTED = null;
     put($('details'), html`<p class="why">${!DOC ? 'The projects were not read, so nothing is selected.'
       : !ROWS.length ? (DOC.problems || []).length ? 'The scan named a problem, so nothing is selected. The note above names each one.'
-        : 'No project.json is under the repositories yet.' : 'No project matches these filters. Clear them to see the list.'}</p>`);
+        : 'No studio project found yet: a project is a repo folder with a project.json file.' : 'No project matches these filters. Clear them to see the list.'}</p>`);
   }
   let reader = null;
   const start = () => window.shell.read({ source: '/api/studio', what: 'the projects',
@@ -146,7 +146,7 @@
       return { objects: [...ROWS, ...FILES],
         state: problems.length ? { kind: 'partial', text: `${problems.map(p => p.replace(/\.$/, '')).join(' · ')}. ${ROWS.length
           ? 'The list holds the projects the scan read.' : none}`, source: '/api/studio' }
-          : ROWS.length ? null : { kind: 'empty', text: 'No project.json is under the repositories yet.', source: '/api/studio' } };
+          : ROWS.length ? null : { kind: 'empty', text: 'No studio project found yet: a project is a repo folder with a project.json file.', source: '/api/studio' } };
     },
     clear: () => { DOC = null; ROWS = []; draw(); },
     draw, current: () => SELECTED, first: () => shown().slice((L.page - 1) * L.size)[0]?.id,
@@ -177,9 +177,13 @@
   const TOOLS = { song: 'tools/song_pipeline.py', episode: 'tools/episode.py' };
   // The fixed flags a verb runs with, as studio.SONG_FLAGS: assemble replaces the last render, which the tool backs up.
   const verbLine = verb => verb === 'assemble' ? 'assemble --replace' : verb;
+  // What each tool verb does, in plain words (studio.EPISODE_VERBS, SONG_VERBS); a verb not here says its name.
+  const DOES = { 'episode check': 'Checks this episode\'s files', 'episode pack': 'Builds this episode\'s pack, a Markdown file',
+    'song validate': 'Checks this song\'s files', 'song suno-export': 'Exports this song for Suno', 'song assemble': 'Builds this song\'s final video' };
+  const doesOf = (kind, verb) => DOES[`${kind} ${verb}`] || `Runs the ${kind} tool's ${verb}`;
   const ran = (o, action, ids) => window.commands.runAction(o, action, { project: o.id, ...ids });
   const tool = (kind, verb, risk) => ({ id: `studio.${kind}-${verb}`, on: 'project', label: `${kind === 'song' ? 'Song' : 'Episode'} ${verb}`,
-    icon: 'play', risk, executes: true, does: `Runs the ${kind} tool's ${verb} on this project and shows its output in Details.`,
+    icon: 'play', risk, executes: true, does: `${doesOf(kind, verb)} and shows the result in Details.`,
     when: o => o.kind === kind || `it is ${o.kind ? 'a ' + o.kind : 'a project of no kind'}, not ${kind === 'episode' ? 'an' : 'a'} ${kind}`,
     cli: o => `${TOOLS[kind]} ${verbLine(verb)} ${o.folder}`,
     sends: o => `POST /api/actions/run {action: studio.${kind}, project: ${o.id}, verb: ${verb}}`,
@@ -187,13 +191,13 @@
     run: o => ran(o, `studio.${kind}`, { verb }) });
   const register = () => window.shell.commands.register(
     { id: 'studio.check', on: 'project', label: 'Check', key: 'c', icon: 'check', risk: 'safe', executes: true,
-      does: 'Runs make check in the project\'s repository and shows its output in Details.', when: () => true,
+      does: 'Runs the repo\'s tests and checks and shows the result in Details.', when: () => true,
       cli: () => 'make check', sends: o => `POST /api/actions/run {action: studio.check, project: ${o.id}}`, run: o => ran(o, 'studio.check') },
     tool('episode', 'check', 'safe'), tool('episode', 'pack', 'confirm'),
     tool('song', 'validate', 'safe'), tool('song', 'suno-export', 'confirm'), tool('song', 'assemble', 'confirm'),
     { id: 'studio.session', on: 'project', label: 'Brief session', key: 'n', icon: 'terminal', risk: 'confirm', executes: true,
-      does: 'Starts claude in herdr on this project\'s brief; notes the pane on its item.',
-      when: () => true, consequence: o => `This starts a claude session for ${o.title}. It orders, uploads and buys nothing.`,
+      does: 'Opens a Claude session on this project\'s brief.',
+      when: () => true, consequence: o => `This opens a Claude session (herdr) for ${o.title} and notes it on its task. It orders, uploads and buys nothing.`,
       cli: () => 'no sd verb: the dashboard starts claude in herdr, as Run starts a skill',
       sends: o => `POST /api/actions/run {action: studio.session, project: ${o.id}}`, run: o => ran(o, 'studio.session') },
     { id: 'studio.stage', on: 'project', label: 'Next stage', key: 's', icon: 'chevron-right', risk: 'confirm', executes: true, primary: () => true,
@@ -208,7 +212,7 @@
           e => { if (e.stale) reader.reread(); throw e; }) },
     // sd:7490: a result file's Re-render runs its kind's render verb on the project; its output shows in that project's Details.
     { id: 'studio.rerender', on: 'studio file', label: 'Re-render', risk: 'confirm', executes: true,
-      does: o => `Runs the ${o.kind} tool's ${o.render || 'render verb'} on ${o.title} again and shows its output in Details.`,
+      does: o => o.render ? `${doesOf(o.kind, o.render)} again for ${o.title} and shows the result in Details.` : `Renders ${o.title} again and shows the result in Details.`,
       when: o => !o.result ? `a ${o.role} file is no rendered result` : o.render ? true : `a ${o.kind || 'project of no kind'} has no render verb`,
       cli: o => `${TOOLS[o.kind]} ${verbLine(o.render)} ${o.folder}`,
       sends: o => `POST /api/actions/run {action: studio.${o.kind}, project: ${o.project}, verb: ${o.render}}`,

@@ -39,8 +39,8 @@ NOTES = {
     "usage": "Usage keeps the past months Metrics does not read: each bill's four numbers, its rows and charts.",
     "services": "Services lists this Mac's launchd services with each one's last request and its controls.",
     "resources": "Resources shows what the local collectors read: Toolbox, Vault, Research and Queues.",
-    "trackers": "Trackers lists the open pull requests and issues that sd shadow sync last saw.",
-    "sessions": "Sessions lists the worktrees each checkout registered and the sd commands running at this read.",
+    "trackers": "Trackers lists the open pull requests and issues as of the last GitHub sync.",
+    "sessions": "Sessions lists the worktrees each repo knows about and the workflow commands running now.",
 }
 
 
@@ -276,7 +276,7 @@ def _services(connection, parameters, backend):
     shown, paged = listing.page()
     return tag("section", tag("h2", "Launchd services"),
         tag("p", "User LaunchAgents and third-party system daemons installed on this Mac. System daemons and protected services are read-only.", class_="hint"),
-        tag("p", "Stop unloads a user service for this login. Its plist stays installed and may load again at the next login. An accepted request is not proof of application health.", class_="hint"),
+        tag("p", "Stop stops a user service until it loads again, at the latest at the next login. A service that took the request may still be unhealthy.", class_="hint"),
         tag("p", tag("a", "Refresh observations", href=listing.link())),
         listing.controls(paged),
         tag("div", join(_service(entry) for entry in shown), class_="operations-grid") if shown else

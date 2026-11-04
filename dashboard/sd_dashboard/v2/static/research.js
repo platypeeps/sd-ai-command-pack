@@ -199,7 +199,7 @@ function followBuild(run, told) {
 const NO_BRIEF = 'this project keeps no status brief (30-brief/BRIEF-status.md)';
 function deckCommand() {
   return { id: 'research.deck', on: 'research project', label: 'Build deck', icon: 'file-text', risk: 'safe', executes: true,
-    does: 'Builds this experiment\'s status deck from its deck.json; nothing uploads.',
+    does: 'Builds this experiment\'s status slides. Uploads nothing.',
     when: o => (!o.experiment ? NO_BRIEF : !o.experiment.deck ? 'this checkout keeps no 30-brief/deck.json' : !settled(BUILD) ? `run ${BUILD.id} is building ${BUILD.repo}'s deck` : true),
     cli: o => `cd ${shPath(o.path)} && sd-research-kit deck`,
     sends: o => `POST /api/research/deck {"repo": "${o.key}"}`,
@@ -487,7 +487,7 @@ function showProject(key, read = true) {
       <dt>Documents</dt><dd>${plural(p.docs_total ?? p.docs.length, 'document')} in research.conf.py${p.docs.length < (p.docs_total ?? 0) ? ` · ${p.docs.length} listed: the board passed its print bound` : ''} · <a href="/documents">Documents</a></dd>
       <dt>Architecture</dt><dd>${architecture(p)}</dd>
       <dt>Rounds</dt><dd>${ROUNDS}</dd></dl>
-    ${p.conf ? html`<p class="unknown"><span class="g-unknown">▨</span>The dashboard collector could not read research.conf.py: “${p.conf}”. Per-document freshness stays unknown until it is read.</p>` : ''}
+    ${p.conf ? html`<p class="unknown"><span class="g-unknown">▨</span>The dashboard could not read research.conf.py: “${p.conf}”. Per-document freshness stays unknown until it is read.</p>` : ''}
     ${notFresh.length ? html`<h3>Not fresh</h3><ul class="claims">${notFresh.map(d => html`<li class="claim"><span class="g g-caution" aria-hidden="true">▲</span><span>${d.title} · ${d.state} · ${d.src}</span></li>`)}</ul>` : ''}
     <h3>Act</h3>${shell.commands.bar(p.key)}
     ${p.experiment ? html`<h3>Deck</h3><p class="links">${deckLine(p)}${slidesLine(p)}</p>` : ''}
@@ -731,7 +731,7 @@ function registerCommands() {
     { id: 'research.render', on: 'research project', label: 'Render', does: 'Renders in its checkout and queues the Notion mirror; a session writes it later.', key: 'r', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: o => o.s === 'caution',
       cli: o => `cd ${shPath(o.path)} && sd-research-kit render`, sends: o => `POST /api/research/render {"repo": "${o.key}"}`,
       run: o => window.shell.post('/api/research/render', { repo: o.key }).then(run => { followRun(run, o.key, 'render'); return `Rendering ${o.label} · run ${run.id}`; }, refused) },
-    { id: 'research.review', on: 'research project', label: 'Review', does: 'Runs the research kit\'s mechanical pre-publication checks here; Details show the report.', key: 'v', icon: 'shield-check', risk: 'safe', executes: true,
+    { id: 'research.review', on: 'research project', label: 'Review', does: 'Checks the project before publishing; the report shows in Details.', key: 'v', icon: 'shield-check', risk: 'safe', executes: true,
       cli: o => `cd ${shPath(o.path)} && sd-research-kit review`, sends: o => `POST /api/research/review {"repo": "${o.key}"}`,
       run: o => window.shell.post('/api/research/review', { repo: o.key }).then(run => { followRun(run, o.key, 'review'); return `Reviewing ${o.label} · run ${run.id}`; }, refused) },
     START,
@@ -742,7 +742,7 @@ function registerCommands() {
     slidesCommand(),
     // sd:5101: codex checks the source's grade and the claims citing it against the source as the runner fetches it.
     window.commands.adversarialReview('research source', { id: 'source.adversarial-review',
-      does: 'Starts a codex review of this source against the claims citing it; its brief lists fixes to pick.',
+      does: 'Starts a background check of the claims that cite this source; you pick fixes.',
       payload: o => ({ kind: 'source', target: o.project, source: o.key }),
       when: o => { const s = SOURCES.get(o.project);
         return !o.key ? 'no link or ID in this ledger row, so no claim can cite it' : s?.reviews ? true : `briefs not read: ${s?.reviews_error || 'the ledger was not read'}`; } }),
@@ -870,8 +870,8 @@ function adopt(doc) {
   // build: past its print bound the board lists fewer projects (research_screen.board); say how many are missing.
   const cut = CUT ? ` ${plural(CUT, 'project')} not listed: the board passed its print bound.` : '';
   const state = doc.error ? { kind: 'error', text: `The checkouts were not read: ${doc.error}. Reload retries it.`, source: 'collectors.collect_research' }
-    : !PROJECTS.length ? { kind: 'empty', title: 'No research checkouts', text: `No checkout under ${doc.root || 'REPO_ROOT'} carries a research.conf.py.`, source: 'collectors.collect_research' }
-    : unknown ? { kind: 'partial', text: `${plural(unknown, 'project')} with a config or render the collector could not read.${cut}`, source: '/api/research' }
+    : !PROJECTS.length ? { kind: 'empty', title: 'No research checkouts', text: `No research project found under ${doc.root || 'REPO_ROOT'}.`, source: 'collectors.collect_research' }
+    : unknown ? { kind: 'partial', text: `${plural(unknown, 'project')} with a config or page that could not be read.${cut}`, source: '/api/research' }
     : cut ? { kind: 'partial', text: cut.trim(), source: '/api/research' } : null; // rounds stay unread: the Details' Rounds line says why
   return { objects: [...PROJECTS, DRAFT], state };
 }

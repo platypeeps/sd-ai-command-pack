@@ -677,7 +677,7 @@ function registerCommands() {
       when: o => { const r = registeredWhy(o); if (r !== true) return r;
         if (!DOC?.pulls) return `pull requests not read: ${why('pulls') || 'the reading carries none'}`;
         if (!o.row.slug) return 'not a GitHub repository, so it has no pull requests';
-        return pullsOf(o).length > 0 || 'no open pull request as sd shadow sync last saw it'; } }),
+        return pullsOf(o).length > 0 || 'no open pull request as of the last GitHub sync'; } }),
     // sd:5100: headless claude reads the whole checkout with read-only sub-agents; one runs per repository.
     window.commands.adversarialReview('repo', { id: 'repo.deep-review', label: 'Deep review',
       does: 'Starts a deep read-only review of the repo; you pick fixes from its report.',

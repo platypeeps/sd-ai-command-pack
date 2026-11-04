@@ -99,5 +99,5 @@ def trackers_panel(connection, parameters, *, now):
         aria_current="page" if key == view else None) for key, label in VIEWS),
         class_="view-toggle", aria_label="Trackers")
     return tag("section", tag("h2", "Trackers"), navigation,
-        tag("p", "Open pull requests and issues as `sd shadow sync` last saw them. External state is context and does not hold a local item open.", class_="hint"),
+        tag("p", "Open pull requests and issues as of the last GitHub sync. External state is context and does not hold a local item open.", class_="hint"),
         _health(connection, view, now), listing.render())

@@ -573,7 +573,7 @@ R.cli = cmd('report.resolve').cli(C.get('r{n}')); shellRun(cmd('report.resolve')
         out = self.run_page(f"""R.what = cmd('report.fix').consequence(C.get('r{n}')); R.off = cmd('report.fix').when(C.get('r{done}'));
 shellRun(cmd('report.fix'), C.get('r{n}')); await flush();""", answer=answer)
         self.assertEqual(out["confirms"], ["report.fix"])
-        self.assertIn(f"starts claude on report #{n}: the sd-debug skill", out["R"]["what"])
+        self.assertIn(f"Opens a Claude session on report #{n} in herdr.", out["R"]["what"])
         self.assertEqual(out["R"]["off"], "already acknowledged")
         self.assertEqual(out["posts"], [[f"/api/items/{n}/fix", {"revision": revision}, 64]])
         self.assertEqual(out["toasts"][-1], [f"Fix started · #{n} · debug session in herdr pane w9:p1", False])

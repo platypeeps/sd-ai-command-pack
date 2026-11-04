@@ -337,7 +337,7 @@ class TheScript(unittest.TestCase):
         cells = [open_cell(R[k]) for k in ("l1", "l2", "l3")]
         self.assertEqual([re.search(r"<b>(\d+)</b>", c).group(1) for c in cells], ["4", "4", "4"], "the lamp counts the rows Open lists, in either view")
         self.assertEqual([re.search(r'aria-pressed="(\w+)"', c).group(1) for c in cells], ["true", "false", "true"], "pressed follows the bar's Open")
-        self.assertIn("Rows not hidden", cells[0])
+        self.assertIn("Rows you have not hidden", cells[0])
         self.assertEqual((R["u2"], R["u3"], R["u4"]), ({"hidden": "1"}, {}, {}), "the URL keeps ?hidden=1 for Hidden and nothing for Open")
         self.assertIn('data-v="open" aria-pressed="true"', R["bar3"])
         self.assertNotIn(f"{PAGES}/tasks.html", R["rows3"])

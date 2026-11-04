@@ -624,7 +624,7 @@ class ThePullRequestDetails(unittest.TestCase):
         self.assertEqual(kept["toasts"][-1]["msg"], "off: the pull request is merged; Merge copies an open one")
         unregistered = self.page(f"C.run(cmd('github pull request.merge'), C.get('gh:{PR}'));", found=doc(pulls=[entry(1, checkout=None)]))
         self.assertEqual((unregistered["gets"][1:], unregistered["posts"]), ([], []))
-        self.assertIn("example/anvil is not a registered repository, so the lane cannot take it", unregistered["toasts"][-1]["msg"])
+        self.assertIn("example/anvil is not a registered repository, so the merge queue cannot take it", unregistered["toasts"][-1]["msg"])
 
     def test_a_merge_the_server_could_not_finish_says_merge_again_resumes(self):
         lost = self.MERGE.replace("path === '/api/today/github/merge' ? [200,", "path === '/api/today/github/merge' ? [502, { error: 'Merge stopped part way: stopped' }] : false ? [200,")
@@ -646,7 +646,7 @@ class ThePullRequestDetails(unittest.TestCase):
                         posts=self.CLOSE)
         self.assertEqual((out["gets"][1:], out["posts"]), ([], []))
         said = [t["msg"] for t in out["toasts"]]
-        self.assertIn("off: the lane has not merged a copy of it yet: Merge copies it, and the lane merges the copy", said)
+        self.assertIn("off: the merge queue has not merged a copy of it yet: Merge copies it, and the queue merges the copy", said)
         self.assertIn("off: the pull request is merged; nothing to close", said)
 
     def test_close_original_asks_with_the_exact_comment_then_posts_its_revision_once(self):
@@ -662,7 +662,7 @@ class ThePullRequestDetails(unittest.TestCase):
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/today/github/close", {"repo": "example/anvil", "number": 1, "revision": "r" * 64})])
         self.assertEqual(out["R"]["got"]["text"], "Closed · example/anvil#1 with a comment linking https://github.com/example/anvil/pull/12"
-                                                  " · the row moves once sd shadow sync reads it")
+                                                  " · the row updates after the next GitHub sync")
         kept = self.page(self.ASKS + f"YES = false; R.got = await cmd('github pull request.close-original').run(C.get('gh:{PR}'));",
                          posts=self.CLOSE, found=found)
         self.assertEqual((kept["posts"], kept["R"]["got"]["text"]), ([], "Close original not run · example/anvil#1"))

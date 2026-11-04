@@ -930,7 +930,7 @@ open('binary_sensor.wan_degraded'); R.det = ELS.details.html; R.groups = ELS.gro
         out = self.run_page("R.groups = ELS.groups.html;", answer=f"() => [200, {json.dumps(missing)}]")
         last = out["states"][-1]
         self.assertEqual((last["kind"], last["title"], last["source"]), ("empty", "No tile list", "<config>/project-dashboard/home-tiles.conf"))
-        self.assertIn("project-dashboard/home-tiles.conf.example", last["text"])
+        self.assertIn("Edit tiles starts from an example list", last["text"])
         self.assertNotIn("data-id=", out["R"]["groups"], "a missing tile list drew a grid")
         out = self.run_page("", answer="() => [500, { error: 'boom' }]")
         self.assertEqual(out["states"][-1]["kind"], "error")

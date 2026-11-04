@@ -91,7 +91,7 @@ function renderFacets() {
   const hid = DOCS.filter(d => d.hidden).length;
   put(facets, html`
     <div class="facet">${window.shell.list.pick('repo', 'Repo', shownRoots().map(r => [r.key, LABEL[r.key] || r.key, facetCount('repo', r.key), r.n === 0 ? `Nothing generated yet in ${r.path}` : '']), F.repo, { multi: true, help: hiddenRoots() })}</div>
-    <div class="facet"><span class="label">Kind <button class="help" type="button" aria-label="Help: Kind" data-help="<b>Derived until the index exists.</b> A checkout with research.conf.py makes research; the rest are reports. The document index (backend work) stores kind per file.">${I('circle-help')}</button></span><div class="chips">${KINDS.map(k => chip('kind', k, k))}</div></div>
+    <div class="facet"><span class="label">Kind <button class="help" type="button" aria-label="Help: Kind" data-help="<b>Research</b>: a document from a research project (a repo with research.conf.py). <b>Report</b>: every other document. Design and dashboard need a per-file record that is not built yet.">${I('circle-help')}</button></span><div class="chips">${KINDS.map(k => chip('kind', k, k))}</div></div>
     <div class="facet"><span class="label">Freshness</span><div class="chips">${Object.entries(FRESH).map(([k, l]) => chip('fresh', k, l, k === 'stale' ? html`<span class="g-caution" aria-hidden="true">▲</span>` : ''))}</div></div>
     <div class="facet"><span class="label">Destination</span><div class="chips">${Object.entries(DEST).map(([k, [l, i]]) => chip('dest', k, l, i ? I(i) : ''))}</div></div>
     <div class="facet"><span class="label">Show</span><div class="chips">${window.shell.aside.seg('hidden', 'Hidden', F.hidden, { open: DOCS.length - hid, aside: hid })}
@@ -288,10 +288,10 @@ function registerCommands() {
     { id: 'document.untag', on: 'document tag', label: 'Untag', does: 'Removes this tag from the document; Undo puts it back.', key: 'u', icon: 'x', risk: 'undo', when: storeOff, cli: () => NO_CLI,
       run: o => view(o.doc, { tags: o.doc.tags.filter(x => x !== o.tag) }).then(() => `Removed tag ${o.tag}`),
       undo: o => view(o.doc, { tags: o.doc.tags }) },
-    { id: 'document.skip', on: 'document', label: 'Disable render', does: 'Proposes a documents.conf line that hides this document from the list.', key: 's', icon: 'ban', risk: 'safe',
+    { id: 'document.skip', on: 'document', label: 'Disable render', does: 'Gives you the documents.conf line that hides this document from the list.', key: 's', icon: 'ban', risk: 'safe',
       when: () => `${NO_SWITCH}, and skip|<key>|<file> in documents.conf hides a document from this list without stopping its render`,
       cli: o => `no CLI: proposes skip|${o.key}|${o.file} in documents.conf` },
-    { id: 'document.skip-repo', on: 'document', label: 'Disable render for repo', does: 'Proposes a documents.conf line that hides this root from the list.', key: 'e', icon: 'ban', risk: 'safe',
+    { id: 'document.skip-repo', on: 'document', label: 'Disable render for repo', does: 'Gives you the documents.conf line that hides this repo\'s documents from the list.', key: 'e', icon: 'ban', risk: 'safe',
       when: () => `${NO_SWITCH}, and skip|<key> in documents.conf hides a root from this list without stopping its render`,
       cli: o => `no CLI: proposes skip|${o.key} in documents.conf` },
     REQUEST,
@@ -525,8 +525,8 @@ function adopt(doc) {
   }
   const contested = DOC.contested || [], unread = shownRoots().filter(confNote);
   // build: a key two checkouts claim is served by neither (documents.py, contested); the state slot names each one.
-  const state = !ROOTS.length && !contested.length ? { kind: 'empty', title: 'No document roots', text: `Publish into ${DOC.published} in a checkout under ${DOC.base}, or add a root| line to ${DOC.config}.`, source: DOC.config }
-    : contested.length ? { kind: 'partial', text: `${contested.map(c => `${plural(c.paths.length, 'checkout')} claim the key ${c.key} (${c.paths.join(', ')}), so none is served`).join('; ')}. Name the one you mean with a root| line in ${DOC.config}.`, source: DOC.config }
+  const state = !ROOTS.length && !contested.length ? { kind: 'empty', title: 'No document roots', text: `No documents found. Publish into ${DOC.published} in a repo under ${DOC.base}, or add a root| line to ${DOC.config}.`, source: DOC.config }
+    : contested.length ? { kind: 'partial', text: `${contested.map(c => `${plural(c.paths.length, 'repo')} use the name ${c.key} (${c.paths.join(', ')}), so none shows`).join('; ')}. Name the one you mean with a root| line in ${DOC.config}.`, source: DOC.config }
     // build: an unread view store pins and hides nothing, so every document shows; the slot says so (sd:3428).
     : STORE ? { kind: 'partial', text: `Pins, hidden documents and tags were not read: ${STORE}. Every document shows.`, source: '/api/documents' }
     : unread.length ? { kind: 'partial', text: `${unread.map(r => `${r.label}: ${confNote(r)}`).join('; ')}.`, source: '/api/documents' }

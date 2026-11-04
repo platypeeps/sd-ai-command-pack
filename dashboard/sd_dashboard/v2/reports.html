@@ -43,7 +43,7 @@
 
     <section id="view-reports" aria-labelledby="led-h">
       <div class="sec-head">
-        <h2 id="led-h">Reports <button class="help" type="button" aria-label="Help: Reports" data-help="<b>Newest first.</b> Database reports come from sd-db, one per failed or reporting run; a repeated failure folds into one row with a count. Acknowledge closes a database report, and its Undo reopens it. Neither touches the job.">
+        <h2 id="led-h">Reports <button class="help" type="button" aria-label="Help: Reports" data-help="<b>Newest first.</b> One database report per failed or reporting run; a repeated failure folds into one row with a count. Acknowledge closes a database report, and its Undo reopens it. Neither touches the job.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
       </div>
       <div class="filters toolbar-2" id="filters"></div>
@@ -56,7 +56,7 @@
 
     <section id="view-cadence" aria-labelledby="cad-h">
       <div class="sec-head">
-        <h2 id="cad-h">Run cadence <button class="help" type="button" aria-label="Help: Run cadence" data-help="<b>One mark per local day.</b> Read from each job's log. A quiet day, when a job ran but mailed nothing, is a gap, not a fault. The watchdog decides whether silence is a fault. A day the job's calendar leaves out is not scheduled. Tap a job to see its reports in the Reports view.">
+        <h2 id="cad-h">Run cadence <button class="help" type="button" aria-label="Help: Run cadence" data-help="<b>One mark per local day.</b> Read from each job's log. A quiet day, when a job ran but mailed nothing, is a gap, not a fault. A day the job's calendar leaves out is not scheduled. Tap a job to see its reports in the Reports view.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="cad-tally"></p>
       </div>

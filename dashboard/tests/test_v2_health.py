@@ -1020,7 +1020,7 @@ class TheDocument(Collectors, ScreenCase):
         self.assertEqual(row["what"], "store: drive 1.50 TiB used of 2.00 TiB, 512.0 GiB free")
         self.assertEqual(row["detail"], f"{store} · local drive at /Volumes/store · du did not finish inside the Disk budget; "
                                         "folders not measured")
-        self.assertIn("du did not finish", row["note"])
+        self.assertIn("took longer than Disk's 8 s", row["note"])
         self.assertEqual(row["cli"], f"df -h {store}")
 
     def test_a_du_that_does_not_finish_and_no_df_is_a_row_not_a_refusal_of_the_area(self):

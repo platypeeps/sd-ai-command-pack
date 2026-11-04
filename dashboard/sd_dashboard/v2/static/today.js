@@ -481,7 +481,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     // pack sd:7470: merging is the leftmost box.
     const [w, m, n, b, s] = ['working', 'merging', 'next', 'blocked', 'suggested'].map(t => g.rows.filter(c => c.type === t).length);
     // Each box says its count and what it counts, in its title (pack sd:7383); the label above says all five at once.
-    return html`<td class="detail pipe" aria-label="${m} merging, ${w} working, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane until someone acts')}${pip(s, ' on', 'suggested: ready or planned items sd-next offers, up to 3')}</td>`;
+    return html`<td class="detail pipe" aria-label="${m} merging, ${w} working, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane until someone acts')}${pip(s, ' on', 'suggested: up to 3 ready or planned tasks to do next')}</td>`;
   }
   function queueView() {
     const unread = [];
@@ -805,9 +805,9 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     const sync = K.syncCollector({ reread: () => reading.reread(), page: 'Today' });
     const prs = o => o.id === 'dark:prs';
     const session = (on, when) => ({ ...K.fix(on, { item: o => o.id, report: () => false, when, post: null }), primary: () => true,
-      does: 'Asks first, then starts claude in herdr to fix this row.',
+      does: 'Asks first, then opens a Claude session (herdr) to fix this row.',
       cli: () => 'no sd verb: the dashboard runs local-herdr/herdr.sh launch', sends: o => `POST /api/now/fix ${JSON.stringify({ row: o.id })}`,
-      consequence: o => `Opens a herdr workspace and starts claude on "${o.label}", in ${o.type === 'repo' ? 'its checkout' : 'the system checkout'}. A second Fix starts a second session: look in herdr first.`,
+      consequence: o => `Opens a Claude session on "${o.label}", in ${o.type === 'repo' ? 'its repo' : 'the system repo'}. Pressing Fix again opens a second session: look in herdr first.`,
       run: o => window.shell.post('/api/now/fix', { row: o.id }).then(
         out => reading.reread().then(() => `Fix started · ${o.label} · claude in herdr workspace ${out.fix.workspace}, pane ${out.fix.pane}`),
         err => { load(); throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) });
@@ -884,10 +884,10 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
         cli: o => `sd-ship -C ${o.repoPath} lane retry ${o.item} --expected-head ${o.head}`, sends: () => 'POST /api/queue/move {action: retry}',
         when: o => !!o.head || 'the entry recorded no head; retry it from Queue', run: o => lane('retry')(o).then(() => `Queued again · sd:${o.item}`) },
       // Approve grants the merge, which nothing takes back, so it asks first as Queue's does; Retry runs at once there too.
-      { id: 'today.lane.approve', on: 'lane entry', label: 'Approve', does: 'Asks first, then queues the entry again with the merge grant.', key: 'p', risk: 'safe', askFirst: true,
+      { id: 'today.lane.approve', on: 'lane entry', label: 'Approve', does: 'Asks first, then queues the entry again and lets the runner merge it.', key: 'p', risk: 'safe', askFirst: true,
         consequence: o => `The entry is queued again at head ${String(o.head).slice(0, 12)}, and the runner may merge it to the default branch. A merge is not taken back.`,
         cli: o => `sd-ship -C ${o.repoPath} lane retry ${o.item} --expected-head ${o.head} --manual`, sends: () => 'POST /api/queue/move {action: approve}',
-        when: o => o.runnerMerge === 'manual' || 'this repo merges without a grant (runner_merge auto)', run: o => lane('approve')(o).then(() => `Approved · sd:${o.item}`) },
+        when: o => o.runnerMerge === 'manual' || 'this repo merges automatically, so it needs no approval', run: o => lane('approve')(o).then(() => `Approved · sd:${o.item}`) },
       { id: 'today.lane.queue', on: 'lane entry', label: 'Open in Queue', does: 'Opens its repo in the Queue view, where Cancel is.', key: 'q', risk: 'safe', executes: false,
         cli: o => `sd-ship -C ${o.repoPath} lane list`, run: o => { qOpen = repoKey(o.repoPath); shell.view.show('queue'); queueView(); return 'Queue opens'; } },
       // A new brief: Seen is the Today snooze held until the brief changes (sd:5752), the mark the place pages read too.

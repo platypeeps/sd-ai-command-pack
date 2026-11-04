@@ -76,7 +76,7 @@
 
     <section id="view-needs" aria-labelledby="needs-h">
       <div class="sec-head">
-        <h2 id="needs-h">Needs you <button class="help" type="button" aria-label="Help: Needs you" data-help="&lt;b&gt;Everything that asks you to act, in one list.&lt;/b&gt; Broken first, then what to look at, then what is queued. Rows of one kind fold into one group row: open it for its first rows. A lamp above, or an intent, shows only its rows. Each row has one main action and the rest under ⋯. &lt;code&gt;sd today&lt;/code&gt; prints the full status.">
+        <h2 id="needs-h">Needs you <button class="help" type="button" aria-label="Help: Needs you" data-help="&lt;b&gt;Everything that asks you to act, in one list.&lt;/b&gt; Broken first, then what to look at, then what is queued. Rows of one kind fold into one group row: open it for its first rows. A lamp above, or an intent, shows only its rows. Each row has one main action and the rest under ⋯. The full status: &lt;code&gt;sd today&lt;/code&gt;.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="tally"></p>
       </div>
@@ -95,7 +95,7 @@
 
     <section id="view-queue" aria-labelledby="queue-h" hidden>
       <div class="sec-head">
-        <h2 id="queue-h">Queue <button class="help" type="button" aria-label="Help: Queue" data-help="&lt;b&gt;What runs and what waits, one row per repo.&lt;/b&gt; A click opens a repo and closes the one that was open. Its rows, in order: working (live sessions, build runs, runner assignments), merging, next and blocked (the lane entries, with the lane's own actions), suggested (up to three items sd-next offers next: ready, then planned, then unscheduled) and ended (ended build runs, cancelled and landed entries). The marker on the left names each row's type; its glyph is the row's state, and a repo's glyph is its worst row's. Suggested shows until you press it off; Ended builds show only once you press them. Each repo row counts its merging, working, next, blocked and suggested rows in five boxes, merging first.">
+        <h2 id="queue-h">Queue <button class="help" type="button" aria-label="Help: Queue" data-help="&lt;b&gt;What runs and what waits, one row per repo.&lt;/b&gt; A click opens a repo and closes the one that was open. Its rows, in order: working (live sessions, build runs, runner assignments), merging, next and blocked (the lane entries, with the lane's own actions), suggested (up to three tasks to do next: ready, then planned, then unscheduled) and ended (ended build runs, cancelled and landed entries). The marker on the left names each row's type; its glyph is the row's state, and a repo's glyph is its worst row's. Suggested shows until you press it off; Ended builds show only once you press them. Each repo row counts its merging, working, next, blocked and suggested rows in five boxes, merging first.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="queue-tally"></p>
       </div>

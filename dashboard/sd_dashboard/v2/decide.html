@@ -47,7 +47,7 @@
   <div id="view-decisions" aria-label="Decisions">
     <section aria-labelledby="drafts-h" id="drafts-sec" hidden>
       <div class="sec-head">
-        <h2 id="drafts-h">Drafts <button class="help" type="button" aria-label="Help: Drafts" data-help="&lt;b&gt;Specs a headless lead drafted for new captures.&lt;/b&gt; Read the spec, answer its questions under Decisions, then Mark ready. Mark ready stays off while a draft question is open.">
+        <h2 id="drafts-h">Drafts <button class="help" type="button" aria-label="Help: Drafts" data-help="&lt;b&gt;Specs an agent drafted for new tasks.&lt;/b&gt; Read the spec, answer its questions under Decisions, then Mark ready. Mark ready stays off while a draft question is open.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="drafts-tally"></p>
       </div>
@@ -57,7 +57,7 @@
     </section>
     <section aria-labelledby="decisions-h">
       <div class="sec-head">
-        <h2 id="decisions-h">Decisions <button class="help" type="button" aria-label="Help: Decisions" data-help="&lt;b&gt;Questions that wait on you.&lt;/b&gt; Each is a &lt;code&gt;question&lt;/code&gt; note with one &lt;code&gt;Option:&lt;/code&gt; line per choice. A button records that choice as a &lt;code&gt;decision&lt;/code&gt; note and resolves the question; &lt;code&gt;sd task show&lt;/code&gt; prints both. Prose &quot;Decision needed&quot; notes stay on their item. A review batch&#39;s questions are on Scoring.">
+        <h2 id="decisions-h">Decisions <button class="help" type="button" aria-label="Help: Decisions" data-help="&lt;b&gt;Questions that wait on you.&lt;/b&gt; Press a choice to answer; the answer is saved on the task and the question closes. Prose &quot;Decision needed&quot; notes stay on their item. A review batch&#39;s questions are on Scoring.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="decisions-tally"></p>
       </div>
@@ -70,7 +70,7 @@
     </section>
     <section aria-labelledby="rulings-h">
       <div class="sec-head">
-        <h2 id="rulings-h">Rulings by session <button class="help" type="button" aria-label="Help: Rulings by session" data-help="&lt;b&gt;What each session ruled in the last 7 days.&lt;/b&gt; Each &lt;code&gt;decision&lt;/code&gt; note, grouped by the session that wrote it, with its item&#39;s state. Reverse notes the reversal and reopens the question the ruling answered; it then waits under Decisions again.">
+        <h2 id="rulings-h">Rulings by session <button class="help" type="button" aria-label="Help: Rulings by session" data-help="&lt;b&gt;What each session ruled in the last 7 days.&lt;/b&gt; Grouped by the session that decided, with each task&#39;s state. Reverse notes the reversal and reopens the question the ruling answered; it then waits under Decisions again.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="rulings-tally"></p>
       </div>
@@ -83,7 +83,7 @@
     <annunciator-strip><ul class="annunciator" id="annunciator" hidden></ul></annunciator-strip>
     <section aria-labelledby="led-h">
       <div class="sec-head">
-        <h2 id="led-h">Scoring <button class="help" type="button" aria-label="Help: Scoring" data-help="&lt;b&gt;Review batches to label.&lt;/b&gt; A batch is a task filed by &lt;code&gt;sd-db review file&lt;/code&gt;; its questions are question notes, and a label is the ruling. A digit labels the selected question with that option; the bar labels every selected row. Undo withdraws a label while its toast shows.">
+        <h2 id="led-h">Scoring <button class="help" type="button" aria-label="Help: Scoring" data-help="&lt;b&gt;Review batches to label.&lt;/b&gt; Each question takes one label, and the label is the answer. A digit labels the selected question with that option; the bar labels every selected row. Undo withdraws a label while its toast shows.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="tally"></p>
       </div>

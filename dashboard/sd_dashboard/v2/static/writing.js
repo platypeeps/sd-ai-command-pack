@@ -107,7 +107,7 @@ addEventListener('DOMContentLoaded', () => {
        <span class="fact"><span class="g-caution" aria-hidden="true">▲</span><b>${bad}</b> gates want you</span>
        <span class="fact"><b>${act.filter(p => p.stage === 'ready').length}</b> at Ready, <b>${pub}</b> publishable</span>
        ${D.ideas?.state === 'read' ? html`<span class="fact"><b>${D.ideas.count}</b> ideas in the vault inbox</span>` : html`<span class="fact" title="${D.ideas?.reason || 'the read gave no ideas'}"><span class="g-unknown" aria-hidden="true">▨</span>vault ideas not read</span>`}
-       <button class="help" type="button" aria-label="Help: lamps" data-help="<b>D R F A</b>: draft, research, fact-check, adversarial, in that order on every card. <b>●</b> passes against this draft, <b>▲</b> stale or findings open, <b>■</b> verdict not pass, <b>◌</b> not written yet, <b>▨</b> file exists but no gate verdict is recorded. Source: <code>sd_db.writing._problems</code>.">${ICON('circle-help')}</button>
+       <button class="help" type="button" aria-label="Help: lamps" data-help="<b>D R F A</b>: draft, research, fact-check, adversarial, in that order on every card. <b>●</b> passes against this draft, <b>▲</b> stale or findings open, <b>■</b> verdict not pass, <b>◌</b> not written yet, <b>▨</b> file exists but no gate verdict is recorded.">${ICON('circle-help')}</button>
        <span class="src">read ${String(D.read).slice(11, 16)} UTC</span>`);
     const parkedN = pieces.filter(p => p.parked).length;
     put(document.getElementById('parked-seg'), window.shell.aside.buttons('parked', 'Parked', parked, { open: pieces.length - parkedN, aside: parkedN }));
@@ -320,7 +320,7 @@ addEventListener('DOMContentLoaded', () => {
       cli: o => `sd writing publication-claim --piece ${P_(o).piece} --context-file context.json --payload-file payload.json\nsd writing publication-dispatch --piece ${P_(o).piece} --claim <claim> --context-file context.json --confirmed`,
       primary: o => !!P_(o) && publishState(P_(o)).ok,
       when: o => { const P = publishState(P_(o)); return P.ok || P.why.join(' '); },
-      consequence: () => 'Publishes to the destinations in sd-plugin.json; the canonical destination comes first. The publication claim records the URL. It posts outside, so the dashboard sends nothing: copy the two lines.',
+      consequence: () => 'Gives you two commands that publish the piece, main site first, and record its URL. The dashboard sends nothing outside: copy the two lines.',
       run: o => `Copy the two lines to publish #${P_(o).id}; publishing posts outside, so the dashboard does not run them` },
     // pack sd:7242: the row menu's and the palette's way to the draft; Details show it in their bar. The editor is the answer.
     { id: 'piece.draft', on: 'piece', label: 'Show draft', does: 'Selects the piece and opens its whole draft in the read-only editor.', key: 'd', icon: 'file-text', risk: 'safe',
@@ -334,7 +334,7 @@ addEventListener('DOMContentLoaded', () => {
       ready: o => { const p = P_(o); return !p ? 'not listed' : asked(p) || (p.grill?.answered ? true : 'no grill question answered yet; press Grill first'); } }),
     // pack sd:6699: Refresh review is the shared adversarial review with kind piece; it rewrites the piece's adversarial.md.
     window.commands.adversarialReview('piece', { id: 'piece.review', label: 'Refresh review',
-      does: 'Starts a codex review of the draft in the background; it rewrites adversarial.md.',
+      does: 'Starts a background review of the draft; it replaces the last review.',
       payload: o => ({ kind: 'piece', target: String(o.id) }),
       when: o => { const p = P_(o); return !p ? 'not listed' : p.words ? true : 'no draft to review yet'; } }),
     // Apply review is the shared Fix with apply: adversarial; the page reads again once the session starts.

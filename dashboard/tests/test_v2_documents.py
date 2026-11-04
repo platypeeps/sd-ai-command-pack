@@ -834,7 +834,7 @@ R.cli = cmd('document.request').cli(C.get('draft:request'));""")
         self.assertEqual(out["states"][0]["kind"], "loading")
         # The fixture's twin key is contested: the slot names it, and the source is the config.
         self.assertEqual(out["states"][-1]["kind"], "partial")
-        self.assertIn("claim the key twin", out["states"][-1]["text"])
+        self.assertIn("use the name twin", out["states"][-1]["text"])
         empty = {**self.doc, "roots": [], "documents": [], "contested": []}
         last = self.run_page("", answer=f"() => [200, {json.dumps(empty)}]")["states"][-1]
         self.assertEqual((last["kind"], last["title"]), ("empty", "No document roots"))
