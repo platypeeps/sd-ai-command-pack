@@ -795,6 +795,30 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         self.assertIn('aria-pressed="true">Adversarial</button>', out["R"]["editor"])
         self.assertIn("/api/writing/11/adversarial", out["gets"])
 
+    def test_each_gate_row_links_its_drive_copy_or_says_why_not(self):
+        """pack sd:7243: each gate row has a Drive icon. A delivered copy is a link that opens in a new tab; a queued
+        one, a missing file, a stage that mirrors nothing and an unread queue are off and say why."""
+        url = "https://docs.google.com/document/d/example-doc/edit"
+        mirror = ("DOC.pieces[0].mirror = { folder: 'Writing/Drafts', unread: '', copies: {"
+                  " 'index.md': [{ channel: 'drive', state: 'published', url: '%s' }],"
+                  " 'research.md': [{ channel: 'drive', state: 'queued', url: null }],"
+                  " 'fact-check.md': [], 'adversarial.md': [] } };\n" % url)
+        def rows(out):
+            return re.findall(r"<li>.*?</li>", re.search(r'<ul class="gates">.*?</ul>', out["R"]["details"], re.S).group(0), re.S)
+
+        draft, research, fact, adversarial = rows(self.run_page("open('11'); await flush(); R.details = ELS.details.html;",
+                                                                prelude=mirror))
+        self.assertIn(f'href="{url}" target="_blank" rel="noopener" data-drive="index.md" aria-label="Draft: open the Drive copy"', draft)
+        self.assertIn('data-drive="research.md" aria-label="Research: Drive copy queued, not yet drained"', research)
+        self.assertIn('aria-label="Fact-check: Drive copy missing"', fact)
+        self.assertIn('aria-label="Adversarial: Drive copy not drained yet; it goes to Writing/Drafts"', adversarial)
+        early = mirror.replace("folder: 'Writing/Drafts'", "folder: null")
+        self.assertIn("a piece mirrors from Review on", rows(self.run_page("open('11'); await flush(); R.details = ELS.details.html;",
+                                                                          prelude=early))[3])
+        unread = "DOC.pieces[0].mirror = { folder: null, unread: 'the queue was not read', copies: {} };\n"
+        self.assertIn("Drive copy unknown: the queue was not read", rows(self.run_page(
+            "open('11'); await flush(); R.details = ELS.details.html;", prelude=unread))[0])
+
     def test_a_reread_drops_the_cached_reports_so_two_versions_in_one_second_differ(self):
         """pack sd:7328: a report is cached per piece, file and whole-second change time. Two versions written in one
         second share a key, so Draft's refresh kept the old text beside the new gate state. Every read of the pieces
