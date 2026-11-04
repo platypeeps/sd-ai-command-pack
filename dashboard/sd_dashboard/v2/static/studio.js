@@ -1,13 +1,14 @@
 // Studio (sd:6920, sd:6921; slices 2 and 3 of sd:6919): the creative projects, each a folder with a project.json
 // (studio.py). The page reads /api/studio through the shell's reader and draws the Documents list grammar: a filter bar, a
 // sorted and paged ledger and the one Details pane, where each root's files show as a gallery. Each file is
-// /studio/files/<repo>/<path>, served sandboxed; audio and video seek through a Range. Details draws the kind's stage strip;
+// /studio/files/<repo>/<path>, an image served sandboxed; audio and video, unsandboxed so they play (sd:7513), seek
+// through a Range. Details draws the kind's stage strip;
 // Next stage posts /api/items/<n>/stage with the revision the page read, as Watches' moves do. Each file's Pin and Hide post
 // /api/studio/view, Documents' view state: a pinned file leads its root, a hidden one folds under Hidden.
 // sd:7490: Updated is each project's newest mtime, as time.rel. A row's chevron expands it, one row at a time, into one
 // sub-row per unhidden file of a result root (studio.RESULTS), newest first: its time, Open (the file, in a new tab) and,
 // for a kind with a render verb (studio.RENDER), Re-render, the kind's tool row with that verb. A song's final-video.mp4
-// lists under the role final (studio.OUTPUTS).
+// and its films in illustrated-film/renders/ list under the role final (studio.OUTPUTS, sd:7514).
 (() => {
   const { html, put, plural } = window.markup;
   const projects = n => plural(n, 'project', 'projects');
@@ -46,7 +47,7 @@
   function subs(r) {
     const list = results(r);
     if (list.length) return list.map(f => sub(r, f));
-    return html`<tr class="sub empty"><td class="g"></td><td colspan="5">No rendered file yet. Results list from a selected, print, stickers, previews or media root, and a song's final-video.mp4; a hidden one stays in Details.</td></tr>`;
+    return html`<tr class="sub empty"><td class="g"></td><td colspan="5">No rendered file yet. Results list from a selected, print, stickers, previews or media root, and a song's final-video.mp4 or illustrated-film/renders films; a hidden one stays in Details.</td></tr>`;
   }
   function row(r) {
     const [g, mark, word] = state(r), open = r.id === OPEN;

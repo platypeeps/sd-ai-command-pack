@@ -1351,7 +1351,8 @@ class Dashboard(BaseHTTPRequestHandler):
         self._send(200, body, kind, overrides=FONT_HEADERS if kind.startswith("font/") else ASSET_HEADERS)
 
     def _studio_file(self, context, connection, tail: str) -> None:
-        """sd:6920: one gallery file from a Studio project's root, under a sandbox; a seekable type answers a Range."""
+        """sd:6920: one gallery file from a Studio project's root, an image under a sandbox (`studio.policy`, sd:7513); a
+        seekable type answers a Range."""
         from . import studio
 
         if not self._session(context):
@@ -1372,11 +1373,11 @@ class Dashboard(BaseHTTPRequestHandler):
             overrides = {"Accept-Ranges": "bytes"} if ranged else {}
             if status == 416:
                 overrides["Content-Range"] = f"bytes */{size}"
-                return self._send(416, b"", kind, policy=studio.POLICY, overrides=overrides)
+                return self._send(416, b"", kind, policy=studio.policy(target), overrides=overrides)
             if status == 206:
                 overrides["Content-Range"] = f"bytes {start}-{start + length - 1}/{size}"
             self._started = True
-            self._policy, self._overrides = studio.POLICY, overrides
+            self._policy, self._overrides = studio.policy(target), overrides
             self.send_response(status)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(length))
