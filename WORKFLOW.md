@@ -515,7 +515,8 @@ sentence.
 The provider registry maps roles to providers.
 Reusable skill procedures name roles; operator policy owns preferred entries.
 
-Cheap, standard, and deep changes require two completed independent local reviews (sd:7519).
+Cheap, standard, and deep changes ask two independent local reviews (sd:7519).
+With one eligible reader, the review asks one and its result names the shortfall (`review_shortfall`).
 The first two readers on the reviewer order run at once: with the shipped order, codex and Claude.
 A reader that fails gives its slot to the next entry; the receipt keeps the registry order.
 Claude's reader also gets the ranked addition: trace callers and config readers, rank by production impact.
@@ -564,9 +565,10 @@ a priced entry falls through to the next reviewer.
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
-mid-item. `reviewer` is the first entry that is enabled, is of no vendor that
-authored the change, is on no bill at its cap this month, and answers
-its preflight (the cap check is below). A rate limit,
+mid-item. `reviewer` is the first entry that is enabled, is on no bill at its
+cap this month, and answers its preflight (the cap check is below).
+The registry refuses a file whose first `author` and first `reviewer`
+are the same entry; no check reads which vendor authored a change. A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
 the review refuses by name rather than reading its own work.

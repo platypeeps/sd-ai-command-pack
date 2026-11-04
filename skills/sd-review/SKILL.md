@@ -77,8 +77,9 @@ Do not substitute another diff or copy a cap into this procedure.
    A failing gate fails the review.
    Under `repo.ci = local`, follow the round order below instead.
 
-Reviewing tiers require two completed independent local reviews; with the shipped order, codex and Claude.
-The Claude reader's prompt adds the ranked instruction: trace callers and config readers, findings in production-impact order.
+Reviewing tiers ask two independent local reviews: the first two entries on the reviewer order, run at once.
+With one eligible reader, the review asks one, and `review_shortfall` and a `shortfall` line say so.
+The `claude-json` reader's prompt adds the ranked instruction: trace callers and config readers, findings in production-impact order.
 Skip requires none, subject to the planning, lens and challenge floor of two.
 Enabled reviewers outside the order `sd providers list` shows require explicit `--provider NAME` selection and the same eligibility checks.
 Copilot never fills the local slot.

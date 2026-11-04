@@ -55,7 +55,7 @@ An active-session agent remains the coordinator.
   The pack declares no `sd-check` reuse; its merge gate reuses gate receipts instead (`sd gate check`, the repo row's `gate_reuse` declaration).
 - The pack's `main` is protected; its `status` declaration accepts only its zero-approval `reviews` gap.
   `sd-ship merge` is the merge path; it refuses absent or weaker protection.
-- Each reviewing tier requires two independent local reviews, run at once (sd:7519).
+- Each reviewing tier asks two independent local reviews, run at once (sd:7519); one eligible reader gives one, and the result names the shortfall.
   Existing installations need the updated code and an explicit reviewer-order migration.
   Local review precedes any explicitly requested Copilot escalation.
 - Copilot is a separate advisory PR reviewer, not a substitute automatically credited by the local review gate.

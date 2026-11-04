@@ -9,7 +9,7 @@ Explicit task instructions and stricter execution permissions take precedence.
 - Run `sd-review` and let it pick; do not pick a reviewer by hand or call a provider CLI directly.
 - `sd-review` follows the reviewer order `sd providers list` shows; `sd providers configure` sets it.
 - This file names no provider preference: the registry order is the only one, and `--explain` names its source.
-- `sd-review` passes over any provider whose vendor authored the reviewed change.
+- The registry refuses a file whose first `author` and first `reviewer` are one entry; reorder one list.
 - Use a provider outside that order only after an explicit user request naming it for the task (`--provider NAME`).
 - Do not select such a provider for fallback, retries, or an additional review slot.
 - Availability, configured credentials, and standing transmission consent do not constitute that explicit request.
