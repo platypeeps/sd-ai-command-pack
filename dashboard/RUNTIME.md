@@ -90,7 +90,7 @@ and Metrics' month and week numbers (`server._metrics_kept`) in memory: a reques
 reading past 45 seconds starts one background refresh, any write the server answers
 makes the next read wait for a fresh one, and a failed refresh keeps the last
 reading marked `stale` with its reason. `/api/usage` without `?month=` is kept the same way (`server._usage_kept`);
-there a stale reading answers 503, not old bytes. A restart reads again, and starts these reads, Health's walkers and its
+there a stale reading answers 503, not old bytes. `/api/metrics?month=` reads that month per request, unkept (pack sd:7524). A restart reads again, and starts these reads, Health's walkers and its
 doctor in the background as serving begins (`server._warm`, sd:5064).
 
 Every page links the dashboard's icons from `sd_dashboard/static/`
@@ -209,11 +209,11 @@ bound to the assignment's revision; Queue's Builds panel posts it.
 Operations renders one area per entry of `operations_screen.AREAS`, the area `?area=` names,
 into its view's panel; `/ui/operations.js` declares the views and loads the address of one not drawn.
 [README.md](README.md) names them, and no list here repeats that inventory.
-Usage's month section and `/api/usage` (`usage_screen.py`) read
+`/api/usage` (`usage_screen.py`) and Metrics' month (`/api/metrics?month=`, pack sd:7524) read
 `sd_db.usage.read` -- `reads.usage_month` under the registry's merged caps, so
-a legacy row cap on a `start` bill is no cap there, as on the cost tile
-(sd:234 slice 12h) -- on the request's read-only connection and write
-nothing; the orphan sweep that `sd-db usage` runs is the verb's alone. Provider enabled flags and both role orders save together, after the
+a legacy row cap on a `start` bill is no cap there (sd:234 slice 12h) -- on the request's read-only
+connection and write nothing; the orphan sweep that `sd-db usage` runs is the verb's alone. Metrics'
+Configure saves provider enabled flags and both role orders together, after the
 complete proposal passes the author/reviewer guard. Resources reuse bounded
 read-only collectors; research configuration is parsed as data, never executed.
 The obsolete Obsidian Skill Proposals action is replaced by the Skills workflow.

@@ -447,7 +447,7 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
             raise ValueError("Provide the complete provider configuration and current revision.")
         return lambda connection: provider_controls.configure(connection, enabled=values["enabled"],
             orders=values["orders"], expected_revision=values["revision"], who="dashboard")
-    from .operations_screen import BILL_NAME
+    from .metrics_screen import BILL_NAME
 
     match = re.fullmatch(f"/api/bills/({BILL_NAME})/cap", path)
     if match:
@@ -994,10 +994,10 @@ class Dashboard(BaseHTTPRequestHandler):
                     "revision": state["revision"],
                 })
             if path == "/operations":
-                from .operations_screen import MOVED
+                from .operations_screen import moved_to
 
-                # pack sd:7517: Services and Sessions moved to Management; a bookmark opens the view that holds them.
-                moved = MOVED.get((parameters.get("area") or [""])[0])
+                # pack sd:7517: a retired area's bookmark opens the view that holds it now.
+                moved = moved_to(parameters)
                 if moved:
                     return self._send(301, b"", "text/plain; charset=utf-8", overrides={"Location": moved})
             if path == "/queue":

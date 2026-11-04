@@ -99,10 +99,11 @@ class OperationsActions(BrowserSession):
         self.assertTrue(reloaded["capabilities"]["retry"]["allowed"])
         self.assertEqual(self.backend.calls, [("cancel", "fixture/running-fixture")])
 
-    def test_operations_tabs_select_one_kept_area_and_default_to_usage(self):
+    def test_operations_tabs_select_one_kept_area_and_default_to_resources(self):
         # sd:3402 retired Jobs, Ports, Progress, Repos, Reports and Commands; pack sd:7517 moved Services and
-        # Sessions to Management (test_v2_management), and their old addresses answer 301 there.
-        headings = {"usage": "Week, cost and provider details", "resources": "<h2>Resources</h2>", "trackers": "<h2>Trackers</h2>"}
+        # Sessions to Management (test_v2_management) and pack sd:7524 Usage to Metrics (test_v2_metrics), and their
+        # old addresses answer 301 there.
+        headings = {"resources": "<h2>Resources</h2>", "trackers": "<h2>Trackers</h2>"}
         # Resources reads sd_tile in a child, which runs launchctl; the test reads a fixture instead.
         patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
         patcher.start()
@@ -113,21 +114,24 @@ class OperationsActions(BrowserSession):
                 self.assertEqual(status, 200)
                 # pack sd:7266: the five areas are the shell's views; only the one asked for is drawn and shown.
                 panels = re.findall(r'<div id="view-(\w+)"( hidden)?>', page)
-                self.assertEqual([key for key, _ in panels], ["usage", "resources", "trackers"])
+                self.assertEqual([key for key, _ in panels], ["resources", "trackers"])
                 self.assertEqual([key for key, hidden in panels if not hidden], [area])
                 self.assertIn(heading, page)
                 for other in headings.values():
                     if other != heading:
                         self.assertNotIn(other, page)
-        self.assertIn(headings["usage"], self.request("/operations")[2])
+        self.assertIn(headings["resources"], self.request("/operations")[2])
         for area in ("unknown", "jobs", "progress", "ports"):
             self.assertEqual(self.request(f"/operations?area={area}")[0], 404, area)
         self.assertEqual(self.backend.calls, [])
 
     def test_a_moved_area_address_answers_301_to_its_management_view(self):
-        """pack sd:7517: Services and Sessions moved to Management; a bookmark lands on the view that holds them."""
+        """pack sd:7517: a retired area's bookmark lands on the view that holds it now."""
         host, port = self.listening.server_address[:2]
-        for area, target in (("services", "/management#view=deploys"), ("sessions", "/management#view=sessions")):
+        # pack sd:7524: Usage moved to Metrics' Spend view, and the month its picker named rides along.
+        for area, target in (("services", "/management#view=deploys"), ("sessions", "/management#view=sessions"),
+                             ("usage", "/metrics#view=spend"), ("usage&month=2026-08", "/metrics?month=2026-08#view=spend"),
+                             ("usage&month=soon", "/metrics#view=spend")):
             with self.subTest(area=area):
                 connection = http.client.HTTPConnection(host, port, timeout=10)
                 try:

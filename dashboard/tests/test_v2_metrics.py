@@ -120,6 +120,18 @@ class TheDocument(Fixture):
         self.assertEqual(doc, {"error": "", **usage.read(self.connection, month=None, now=NOW).document()})
         self.assertEqual({b["name"]: (b["spent"], b["cap"]) for b in doc["bills"]}, {"capped": (80.0, 100.0), "plan": (0.0, None)})
 
+    def test_a_month_asked_is_that_months_read_and_the_badge_keeps_this_month(self):
+        """pack sd:7524: ?month= reads any month, as Operations Usage's picker did; the badge stays on this month."""
+        self.cost("run", "2026-08-10T10:00:00Z", provider="kimi", bill="capped", role="author", usd=120)
+        doc = metrics_screen.document(self.connection, now=NOW, month="2026-08")
+        self.assertEqual(doc["usage"], {"error": "", **usage.read(self.connection, month="2026-08", now=NOW).document()})
+        self.assertEqual(({b["name"]: b["spent"] for b in doc["usage"]["bills"]}, doc["usage"]["today"]),
+                         ({"capped": 120.0, "plan": 0.0}, None))
+        self.assertEqual(doc["attention"], self.doc()["attention"])
+        self.assertNotEqual(metrics_screen._attention(doc["usage"], doc["trend"], doc["ci"]), doc["attention"])
+        self.assertEqual(metrics_screen.document(self.connection, now=NOW, month="soon")["usage"],
+                         {"error": "SdDbError: a month is YYYY-MM, not 'soon'"})
+
     def test_the_trend_is_the_last_7_day_window_reading_of_each_of_seven_days(self):
         trend = self.doc()["trend"]
         self.assertEqual((trend["days"][0], trend["days"][-1], len(trend["days"])), ("2026-08-31", "2026-09-06", 7))
@@ -561,7 +573,16 @@ class ThePage(BrowserSession):
         status, _, body = self.request("/api/metrics?range=6mo", headers=cookie)
         self.assertEqual((status, json.loads(body)["range"], len(json.loads(body)["ranged"]["months"])), (200, "6mo", 6))
 
-    def test_the_rail_opens_metrics_at_its_page_and_keeps_the_classic_usage_screen(self):
+    def test_the_data_route_takes_one_month(self):
+        """pack sd:7524: the month Operations Usage's picker read, as ?month=YYYY-MM, alone or with the range."""
+        cookie = {"Cookie": self.cookie}
+        for query in ("month=soon", "month=2026-08&month=2026-07", "month=", "month=2026-8"):
+            self.assertEqual(self.request(f"/api/metrics?{query}", headers=cookie)[0], 400, query)
+        for query in ("month=2026-08", "range=6mo&month=2026-08"):
+            status, _, body = self.request(f"/api/metrics?{query}", headers=cookie)
+            self.assertEqual((status, json.loads(body)["usage"]["month"]), (200, "2026-08"), query)
+
+    def test_the_rail_opens_metrics_at_its_page(self):
         self.assertEqual(v2.SECTIONS["Metrics"], "/metrics")
         self.assertNotIn("Metrics", v2.CLASSIC)
 
@@ -842,6 +863,68 @@ press('30d', 'off'); press('7d'); await flush(); R.back = ELS['months-block'].hi
         self.assertIn("<code>sd-db usage --month 2026-07</code>", r["july"])
         self.assertIn("<dt>plan</dt><dd>window, not dollars</dd><dt>No bill</dt><dd>$2.00</dd>", r["july"])
         self.assertEqual(out["toasts"], [["off", False]], "a range that is off says why and reads nothing")
+
+    def test_spend_draws_each_capped_bills_burn_its_cap_and_the_projection(self):
+        """pack sd:7524: Operations Usage's burn line, ported. 80 by day 6 is 13.33 a day: 400 by day 30, and the
+        cap of 100 is passed on day 7.5, so day 8. A plan bill draws its windows and no burn."""
+        burns = self.run_page("R.burns = ELS.burns.html;")["R"]["burns"]
+        self.assertEqual(re.findall(r'data-burn="([^"]+)"', burns), ["capped"])
+        self.assertIn('class="cap" data-cap="100.00"', burns)
+        self.assertIn('data-points="2:80.00"', burns)
+        self.assertIn('class="proj" data-end="400.00" data-cross="8"', burns)
+        self.assertIn("passes its cap on day 8", burns)
+
+    def test_the_projection_meets_the_cap_rule_on_the_day_it_crosses(self):
+        """Usage's own case (test_usage_screen, PR #430 review): 40 by day 8 is 5 a day, 100 is passed on day 20, and the
+        drawn line stops there on the cap's height; a day earlier the rate is 40/7 and 17.5 is day 18. A past month
+        draws no projection."""
+        def burns(today, month="2026-09"):
+            doc = self.doc()
+            doc["usage"].update(today=today, days=30, month=month)
+            doc["usage"]["bills"][0].update(burn=[[1, 10.0], [5, 40.0]], cap=100.0, spent=40.0)
+            return self.run_page("R.burns = ELS.burns.html;", doc)["R"]["burns"]
+
+        drawn = burns(8)
+        self.assertIn('class="proj" data-end="150.00" data-cross="20"', drawn)
+        cap = re.search(r'<line class="cap" data-cap="[\d.]+" x1="([\d.]+)" x2="([\d.]+)" y1="([\d.]+)"', drawn)
+        line = re.search(r'<line class="proj" data-end="[\d.]+" data-cross="\d+" x1="[\d.]+" y1="[\d.]+" x2="([\d.]+)" y2="([\d.]+)"', drawn)
+        self.assertIsNotNone(cap, drawn)
+        self.assertIsNotNone(line, drawn)
+        left, right = float(cap.group(1)), float(cap.group(2))
+        self.assertAlmostEqual(float(line.group(1)), left + (right - left) * 19 / 29, places=1)
+        self.assertEqual(line.group(2), cap.group(3))
+        self.assertIn('data-end="171.43" data-cross="18"', burns(7))
+        self.assertNotIn('class="proj"', burns(None, "2026-08"))
+
+    def test_the_month_picker_reads_that_month_and_keeps_it_in_the_address(self):
+        """pack sd:7524: Operations Usage's ?month= picker, on Spend. A past month's lamp is that month, not to date."""
+        august = metrics_screen.document(self.connection, now=NOW, month="2026-08")
+        out = self.run_page("""var AUG = %s;
+ANSWER = path => path === '/api/metrics?month=2026-08' ? [200, AUG] : path === '/api/metrics' ? [STATUS, DOC] : [404, { error: 'no answer' }];
+OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
+R.before = ELS.month.value; R.head = ELS['bills-h'].textContent;
+ELS.month.value = '2026-08'; ELS.month.listeners.change[0]({ target: ELS.month }); await flush();
+R.after = ELS['bills-h'].textContent; R.lamps = ELS.annunciator.html;
+ELS.month.value = ''; ELS.month.listeners.change[0]({ target: ELS.month }); await flush();""" % json.dumps(august))
+        r = out["R"]
+        self.assertEqual((r["before"], r["head"], r["after"]), ("2026-09", "Dollars in 2026-09, by bill", "Dollars in 2026-08, by bill"))
+        self.assertEqual(out["gets"], ["/api/metrics", "/api/metrics?month=2026-08", "/api/metrics"])
+        self.assertEqual(out["urls"], [[["month", "2026-08"]], []])
+        self.assertRegex(r["lamps"], r'data-cell="spend".*?<small>2026-08 · 2 bills</small>')
+        self.assertNotIn("/operations", METRICS_JS, "Metrics opens no Operations area")
+
+    def test_a_week_number_with_no_rows_is_unknown_not_a_measured_zero(self):
+        """Operations Usage's rule (test_controls_actions, retired in pack sd:7524): no cost row is not $0.00."""
+        doc = self.doc()
+        for row in doc["numbers"]["rows"]:
+            row["value"] = None
+        week = self.run_page("R.week = ELS['week-body'].html;", doc)["R"]["week"]
+        self.assertEqual(len(re.findall(r'<td class="g g-unknown">', week)), len(doc["numbers"]["rows"]))
+        self.assertNotIn("$0.00", week)
+
+    def test_the_address_opens_the_page_at_its_month_and_range(self):
+        out = self.run_page("", before="location.search = '?range=6mo&month=2026-08';\n")
+        self.assertEqual(out["gets"], ["/api/metrics?range=6mo&month=2026-08"])
 
     def test_the_address_opens_the_page_at_6mo(self):
         out = self.run_page("R.range = ELS.range.html;", before="location.search = '?range=6mo';\n")

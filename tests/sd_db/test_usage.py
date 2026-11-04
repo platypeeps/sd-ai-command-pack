@@ -300,8 +300,8 @@ class TheMergedCaps(UsageCase):
         self.assertEqual(reads.cost_by_bill(self.db, caps=None)[1]["cap_usd_month"], 5.0)
 
     def test_a_registry_that_cannot_be_opened_or_parsed_leaves_the_row_as_the_cap(self):
-        """#438's review: `_provider_controls` catches `SdDbError`, `OSError`
-        and `ValueError` and prints the trouble; the tile and the card fall
+        """#438's review: the dashboard's provider controls catch `SdDbError`,
+        `OSError` and `ValueError` and print the trouble; the tile and the card fall
         back to the row under the same three, and the page still renders."""
         self.assertEqual(self.db.execute("UPDATE bill SET cap_usd_month = 5.0 WHERE name = 'open'").rowcount, 1)
         self.registry_path.unlink()

@@ -95,7 +95,7 @@ class DeliberateWriteControls(ScreenCase):
                 self.assertIn('action="/api/', form, path)
                 self.assertIn('data-workflow-form', form, path)
                 # The palette form shows the registered command it runs; the CLI that mirrored it went with the runner (sd:3041).
-                # No pack verb sets a bill cap, so that form names none (`operations_screen._bill_caps`).
+                # No pack verb sets a bill cap, so a cap form would name none (Metrics' Cap says so, pack sd:7524).
                 if "data-palette-form" not in form and "/cap\"" not in form:
                     self.assertRegex(form, r'data-cli="sd (task|note|work|writing|assignments|providers) ', path)
                 self.assertNotIn('<code class="command">', form)

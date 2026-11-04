@@ -91,8 +91,7 @@ VOID = {"br", "hr", "img", "input", "link", "meta"}
 #: in foreign content, where a start tag without a slash opens an element that
 #: stays open -- so `<rect><rect>` nests the second bar inside the first, and a
 #: `rect` is a shape, not a container, so its children never draw. These close
-#: themselves. `charts.py:150` already writes `<line ... />` by hand, which is
-#: the same rule stated in the one place that did not come through `tag()`.
+#: themselves.
 SELF_CLOSING = {"path", "rect", "line", "circle", "use"}
 
 

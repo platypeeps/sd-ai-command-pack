@@ -8,7 +8,7 @@ address opens it there.
 registry beside it, and writes nothing.
 
 Dollars are the month to date, as `sd usage` reads them (`usage.read`), so the
-page, the classic Usage screen and the CLI agree. The design asked for dollars
+page and the CLI agree. The design asked for dollars
 this week by bill and provider; a week of spend would be a second computation
 of the same ledger, so the bars show the month. The window trend is the last
 7-day-window meter reading of each day for a week (`reads.meter_days`).
@@ -33,8 +33,15 @@ It reads 7 days whatever the range. A lane with no entry folds into one line;
 a read that failed is its own unknown row. A median wait past an hour is
 caution: the lane run files the parallel-lanes question then.
 
-Configure and Cap write (sd:3387). They post the routes the classic Usage
-forms post, `/api/providers/configure` and `/api/bills/<bill>/cap`, with the
+The month picker in the filter row took Operations Usage's (pack sd:7524):
+`?month=YYYY-MM` reads that month for Spend and Usage, and the rail badge
+stays on this month. Spend draws each capped bill's burn: spend to date, the
+cap rule, and in the current month the straight projection from the month's
+rate, with the day it passes the cap. `/operations?area=usage` answers 301 to
+`/metrics#view=spend`, with its month.
+
+Configure and Cap write (sd:3387). They post
+`/api/providers/configure` and `/api/bills/<bill>/cap`, with the
 registry revision the page read; the library refuses it once the registry, a
 cap or the order policy changed. Cap asks for the new number and takes `none`
 to clear. A bill a `start` entry is billed to takes no cap, except the clear of
