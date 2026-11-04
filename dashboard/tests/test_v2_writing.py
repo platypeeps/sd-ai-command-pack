@@ -181,6 +181,27 @@ class TheDocument(Pieces):
         json.dumps(doc, allow_nan=False)
         self.assertIsNone({p["id"]: p for p in doc["pieces"]}[self.ids["fixture"]]["publication"])
 
+    def test_a_claim_state_or_item_fields_with_an_int_past_the_digit_limit_leave_the_page_readable(self):
+        """pack sd:7329: json.loads refuses an integer literal past 4,300 digits with ValueError, and the claim
+        table's json_valid check accepts one. One such claim or one such field raised out of piece_state, so
+        /api/writing failed for every piece and the item page failed for that one. The number reads as unset."""
+        big = "9" * 5000
+        item = self.ids["fixture"]
+        self.connection.execute(
+            "INSERT INTO publication_claim (id, item, payload, state, created_at, updated_at) VALUES (?, ?, '{}', ?, ?, ?)",
+            ("c0aim0000000", item, '{"phase": %s, "url": %s}' % (big, big), NOW, NOW))
+        held = self.connection.execute("SELECT fields FROM item WHERE id = ?", (item,)).fetchone()[0]
+        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (held[:-1] + ', "weight": %s}' % big, item))
+        self.connection.commit()
+        doc = writing_screen.document(self.connection, now=NOW)
+        json.dumps(doc, allow_nan=False)
+        self.assertIsNone({p["id"]: p for p in doc["pieces"]}[item]["publication"])
+        # The item page's controls name the claim's phase as text, whatever the claim holds.
+        from sd_dashboard import controls
+
+        row = dict(self.connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone())
+        self.assertIn("Publication", str(controls.writing_controls(self.connection, row)))
+
     def test_a_failed_ideas_read_is_unknown_with_its_reason_and_the_pieces_still_read(self):
         with mock.patch.object(writing_screen, "read_ideas", side_effect=sqlite3.OperationalError("no such column: stage")):
             doc = writing_screen.document(self.connection, now=NOW)
