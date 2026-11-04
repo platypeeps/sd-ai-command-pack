@@ -70,14 +70,18 @@ ASSETS = {"type": "FeatureCollection", "features": [
                                             ("WELL-A2", "well", "Well A2", "in service", 10.0012, 50.0004),
                                             ("V-01", "valve", "Valve 1", "unknown", 10.0003, 50.0003)]]}
 
-#: hoa #413's types beside the water assets: a street light (out of service) and an irrigation line. Synthetic only.
+#: hoa #413's types beside the water assets: a street light (out of service), an irrigation line and the booster
+#: station. Synthetic only.
 LIGHTS = {"type": "FeatureCollection", "features": ASSETS["features"] + [
     {"type": "Feature", "properties": {"id": "LGT-1", "type": "light", "name": "Street light 1", "status": "out of service",
                                        "accuracy": "approximate", "source": "walk", "notes": "", "updated": "2026-09-01"},
      "geometry": {"type": "Point", "coordinates": [10.0008, 50.0009]}},
     {"type": "Feature", "properties": {"id": "IRL-1", "type": "irrline", "name": "Irrigation line 1", "status": "in service",
                                        "accuracy": "drawing", "source": "walk", "notes": "", "updated": "2026-09-01"},
-     "geometry": {"type": "LineString", "coordinates": [[10.0001, 50.0001], [10.0006, 50.0006], [10.0011, 50.0002]]}}]}
+     "geometry": {"type": "LineString", "coordinates": [[10.0001, 50.0001], [10.0006, 50.0006], [10.0011, 50.0002]]}},
+    {"type": "Feature", "properties": {"id": "BST-1", "type": "booster", "name": "Booster station", "status": "in service",
+                                       "accuracy": "approximate", "source": "walk", "notes": "", "updated": "2026-09-01"},
+     "geometry": {"type": "Point", "coordinates": [10.0004, 50.0012]}}]}
 
 
 def parcels(root: Path, rows=None, *, base_sha=None) -> Path:
@@ -504,7 +508,8 @@ document.dispatchEvent(new CustomEvent('shell:open', { detail: 'asset:TANK-01' }
         self.assertIn("Cistern · TANK-01", out["R"]["det"])
 
     def test_street_lights_and_irrigation_lines_are_drawn_and_listed(self):
-        # sd:7516: hoa #413 added light and irrline; the map filtered both out and the legend never listed them.
+        # sd:7516: hoa #413 added light and irrline; the map filtered both out and the legend never listed them. The
+        # booster station (hoa's booster type) was filtered the same way; its glyph is a box under a ground line.
         checkout(self.hoa, assets=LIGHTS)
         parcels(self.hoa)
         out = self.run_page("""R.map = ELS.map.html; R.legend = ELS.legend.html;
@@ -515,6 +520,9 @@ for (const id of ['LGT-1', 'IRL-1']) { document.dispatchEvent(new CustomEvent('s
         self.assertEqual(len(re.findall(r'<path class="(?:hit|run)" d="M[\d.]+,[\d.]+L[\d.]+,[\d.]+L[\d.]+,[\d.]+"', line)), 2)
         self.assertNotIn("transform=", line)
         self.assertIn("Irrigation lines <b>1</b>", out["R"]["legend"])
+        booster = re.search(r'<g class="asset t-booster st-ok" data-asset="BST-1".*?</g>', out["R"]["map"]).group(0)
+        self.assertRegex(booster, r'class="[^"]*\bground\b')
+        self.assertIn("Booster stations <b>1</b>", out["R"]["legend"])
         self.assertLess(out["R"]["map"].index('data-asset="IRL-1"'), out["R"]["map"].index('data-asset="TANK-01"'),
                         "a line lies under the glyphs")
         self.assertIn("Street light · LGT-1", out["R"]["LGT-1"])

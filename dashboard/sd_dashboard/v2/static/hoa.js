@@ -115,13 +115,16 @@ let polling = 0;
     well:    { label: 'Well',    size: 22, svg: html`<circle class="halo" cx="12" cy="12" r="8"/><circle class="body" cx="12" cy="12" r="8" fill-opacity=".2"/><circle class="body" cx="12" cy="12" r="3.2"/>` },
     hydrant: { label: 'Hydrant', size: 18, svg: html`<path class="halo" d="M8 8a4 4 0 0 1 8 0v11H8z"/><path class="body" d="M8 8a4 4 0 0 1 8 0v11H8z"/><path class="body" d="M5 11h3v4H5zM16 11h3v4h-3zM6 19h12v2.5H6z"/>` },
     valve:   { label: 'Valve',   size: 16, svg: html`<path class="halo" d="M3 6l9 6-9 6zM21 6l-9 6 9 6z"/><path class="body" d="M3 6l9 6-9 6zM21 6l-9 6 9 6z"/><path class="line" d="M12 12V4M9 4h6"/>` },
+    // sd:7516: hoa's booster type is the booster station, the "submarine": a pump box buried under a ground line, its
+    // riser through it, as the cistern's.
+    booster: { label: 'Booster station', size: 22, svg: html`<path class="halo" d="M2 8h20M4 11h16v10H4z"/><path class="body" d="M4 11h16v10H4z" fill-opacity=".55"/><circle class="body" cx="12" cy="16" r="2.6"/><path class="line ground" d="M2 8h20M12 8v3"/>` },
     // sd:7516: hoa #413's types. A street light is a pole, its arm and the lamp head; an irrigation point a sprinkler on its
     // riser. An irrigation line is drawn as its run (drawMap); this glyph is its legend key.
     light:   { label: 'Street light', size: 18, svg: html`<path class="halo" d="M7.2 5h1.6v16H7.2zM8 4h8v1.6H8zM14 5.6h6l-1.6 3.2h-2.8z"/><path class="body" d="M7.2 5h1.6v16H7.2zM8 4h8v1.6H8zM14 5.6h6l-1.6 3.2h-2.8z"/><path class="line" d="M4.5 21h7"/>` },
     irrigation: { label: 'Irrigation point', size: 14, svg: html`<path class="halo" d="M10.5 14h3v7h-3z"/><circle class="halo" cx="12" cy="13" r="2.8"/><path class="body" d="M10.5 14h3v7h-3z"/><circle class="body" cx="12" cy="13" r="2.8"/><path class="line" d="M12 9V4M9.2 10.2 5.5 6.5M14.8 10.2l3.7-3.7"/>` },
     irrline: { label: 'Irrigation line', line: true, svg: html`<path class="line run" d="M3 18c6 0 6-12 18-12"/>` },
   };
-  const ORDER = ['tank', 'well', 'hydrant', 'valve', 'light', 'irrigation', 'irrline'];
+  const ORDER = ['tank', 'booster', 'well', 'hydrant', 'valve', 'light', 'irrigation', 'irrline'];
   const glyph = type => html`<svg viewBox="0 0 24 24" aria-hidden="true">${TYPES[type].svg}</svg>`;
   const stClass = s => s === 'in service' ? 'st-ok' : s === 'unknown' ? 'st-unknown' : 'st-out';
   const W = 1000, ZOOMS = [1, 2, 4, 8, 16, 32], LABEL_ZOOM = 4;

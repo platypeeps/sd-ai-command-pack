@@ -2,6 +2,7 @@
  * theme: foundation tokens (dark default) · display/body: IBM Plex Sans · data: IBM Plex Mono · icons: Lucide
  * map: one SVG of the files' vectors (lots + asset glyphs on paper); no map library and no tiles (dashboard CSP)
  * asset glyphs: valve = bow-tie (the drafting symbol), hydrant = silhouette, well = wellhead ring, tank = cylinder,
+ *   booster station = pump box under a ground line,
  *   street light = pole and lamp head, irrigation = sprinkler on its riser, irrigation line = dashed run; status by colour + dash
  * build (sd:2116): the design source's products/system/designs/pages/hoa.css; the Leaflet rules became the SVG map rules below.
  * pre-emit critique: P5 H4 E4 S5 R5 V4

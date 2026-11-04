@@ -5,7 +5,8 @@ No new store: an asset's attachments are its Drive folder's listing. The design 
 
 - **Where.** The `hoa.water_system_folder` setting holds the Water System folder id, and `hoa.google_account` the
   account workspace-mcp reads it as. Subfolders are found by name (`place`): a valve or hydrant is `Main/<asset id>`,
-  made on its first attachment; `WELL-A1` and `WELL-A2` are `Well A1` and `Well A2`; the tank is `Cistern`.
+  made on its first attachment; `WELL-A1` and `WELL-A2` are `Well A1` and `Well A2`; the tank is `Cistern`; the booster
+  station is `Submarine`.
 - **List**, `GET /api/hoa/attachments?asset=<id>`: the folder's items. A `.url` file is a Reference; its target is read
   from its text. A missing asset folder is an empty list, and nothing is made.
 - **Picture**, `GET /api/hoa/attachments/picture?id=<file id>`: one picture's bytes, through workspace-mcp's download
@@ -62,6 +63,8 @@ def place(asset: dict) -> tuple[str, str | None]:
         return f"Well {asset['id'][-2:]}", None
     if asset.get("type") == "tank":
         return "Cistern", None
+    if asset.get("type") == "booster":
+        return "Submarine", None
     raise ValueError(f"{asset.get('id')} ({asset.get('type')}) has no Water System folder.")
 
 

@@ -27,6 +27,7 @@ Add no store. An asset's attachments are its Drive folder's listing.
   The id stays in the database, never in this public tree.
 - **Folders, found by name.** A valve or hydrant is `Main/<asset id>`, made on its first attachment.
   `WELL-A1` and `WELL-A2` are `Well A1` and `Well A2`; the tank is `Cistern`.
+  The booster station is `Submarine` (sd:7516).
 - **Credential.** Every Drive call goes through workspace-mcp over HTTP, as Import to Slides does.
   The dashboard holds no Google token, and nothing copies one.
 - **List.** `GET /api/hoa/attachments?asset=<id>` lists the folder.
