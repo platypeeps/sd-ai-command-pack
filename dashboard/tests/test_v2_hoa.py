@@ -507,6 +507,18 @@ R.near = ELS.map.html;""", self.tract_doc())
         self.assertEqual(len(re.findall(r'class="hoa-mark"', out["R"]["near"])), 0)
         self.assertEqual(len(re.findall(r'<path class="lot k-tract" data-tract="[^"]+" data-owned', out["R"]["near"])), 2)
 
+    def test_the_ring_key_shows_only_while_a_ring_is_drawn(self):
+        out = self.run_page("""R.far = ELS.legend.html;
+for (let i = 0; i < 3; i++) ELS['zoom-in'].listeners.click[0]();
+R.near = ELS.legend.html;
+for (let i = 0; i < 3; i++) ELS['zoom-out'].listeners.click[0]();
+R.back = ELS.legend.html;""", self.tract_doc())
+        key = "ring: tract too small to draw at this zoom"
+        self.assertIn(key, out["R"]["far"])
+        self.assertNotIn("ring:", out["R"]["near"])
+        self.assertIn("HOA-owned tracts", out["R"]["near"])
+        self.assertIn(key, out["R"]["back"])
+
     def test_no_tract_means_no_hoa_legend_entry(self):
         out = self.run_page("R.legend = ELS.legend.html;")
         self.assertNotIn("HOA-owned", out["R"]["legend"])
