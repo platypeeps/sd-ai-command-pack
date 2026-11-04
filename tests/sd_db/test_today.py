@@ -141,6 +141,12 @@ class TheSections(TodayCase):
                                 (today.PUSHED + due[0]["key"], WHEN))
         self.assertEqual(today.push_due(self.connection, now=NOW), [])
 
+    def test_a_failed_health_check_is_due_for_a_push(self):
+        """Pack sd:6097: a health check failed after an auto-pickup merge is a critical push, once."""
+        filed = self.item(today.HEALTH + "build/sd-1", repo=APP)
+        due = [row for row in today.push_due(self.connection, now=NOW) if row["key"].startswith("health:")]
+        self.assertEqual([(row["key"], row["body"]) for row in due], [(f"health:{filed}", today.HEALTH + "build/sd-1")])
+
     def test_planned_is_open_items_due_after_today_soonest_first(self):
         later = self.item("Later", due="2026-09-30")
         sooner = self.item("Sooner", due="2026-09-07")

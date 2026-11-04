@@ -487,6 +487,11 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     put($('queue-filters'), shell.list.fseg('qshow', 'Show', [['suggested', 'Suggested'], ['open', 'All items'], ['ended', 'Ended builds']].map(([v, label]) =>
       ({ v, pressed: qShow.has(v), label: html`${label} <span class="n">${String(every.filter(c => c.type === v).length)}</span>` }))));
     put($('queue-tally'), html`${tally(every.filter(c => !QSHOW.includes(c.type))).map(([t, n]) => html`<span>${n} ${t}</span>`)}`);
+    // Auto-pickup (pack sd:6097): its state, and On or Off, bound to the end this read saw.
+    const pk = QV.built && QV.built.pickup;
+    put($('queue-pickup'), !pk ? html`` : pk.error ? html`Auto-pickup not read: ${pk.error}`
+      : pk.on ? html`Auto-pickup is on until ${at(pk.until)}: each tick queues ready items into free builder room. <button class="btn quiet sm" type="button" data-pickup="off"${QV.busy ? html` disabled` : ''}>Turn off</button>`
+      : html`Auto-pickup is off. <button class="btn quiet sm" type="button" data-pickup="on" aria-label="Turn auto-pickup on until ${at(pk.next)}"${QV.busy ? html` disabled` : ''}>On until ${at(pk.next)}</button>`);
     const said = $('queue-said'); said.hidden = !qSaid; said.textContent = qSaid ? qSaid.text : ''; said.setAttribute('role', qSaid && !qSaid.ok ? 'alert' : 'status');
     const parent = g => { const on = qOpen === g.key, name = g.key || 'Unassociated';
       return html`<tr class="repo" data-repo="${g.key}" aria-expanded="${String(on)}">${marker(g.s, 'repo')}
@@ -922,6 +927,19 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       const b = e.target.closest('button[data-build]'); if (b) { if (!b.disabled) buildAct(b); return; }
       const p = e.target.closest('tr.repo'); if (p && !e.target.closest('a, [data-copy]')) { qOpen = qOpen === p.dataset.repo ? null : p.dataset.repo; return queueView(); }
       pickRow('tr[data-id]')(e);
+    });
+    $('queue-pickup').addEventListener('click', async e => {
+      const b = e.target.closest('button[data-pickup]'); if (!b || b.disabled || !QV.built) return;
+      const on = b.dataset.pickup === 'on';
+      QV.busy = true; queueView();
+      try {
+        const out = await shell.post('/api/queue/builds/pickup', { on, until: QV.built.pickup.until });
+        qSaid = { ok: true, text: out.on ? `Auto-pickup is on until ${at(out.until)}.` : 'Auto-pickup is off.' };
+      } catch (err) {
+        qSaid = { ok: false, text: `Auto-pickup not turned ${on ? 'on' : 'off'}: ${err.message}` };
+      }
+      QV.busy = false;
+      await loadQueue();
     });
     $('queue-filters').addEventListener('click', e => {
       const b = e.target.closest('button[data-f="qshow"]'); if (!b) return;
