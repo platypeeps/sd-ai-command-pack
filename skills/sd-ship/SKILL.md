@@ -133,8 +133,8 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Do not move another checkout's main branch.
    Report the branch, worktree, merge, and installation state separately.
 
-`sd-spec` is outside this sequence.
-Use it on the PR branch when documented behavior changes and the operator requests it.
+A spec update is outside this sequence.
+Update `docs/spec/` on the PR branch when documented behavior changes and the operator requests it.
 
 ## Executable interface
 

@@ -114,7 +114,7 @@ class TheTrialVerb(TrialCase):
         )
 
     def test_a_skill_already_on_a_path_is_refused_rather_than_trialled(self):
-        rc, output = self.run_try("sd-plan")
+        rc, output = self.run_try("sd-check")
         self.assertEqual(rc, 1)
         self.assertIn("already on a path", output)
         self.assertEqual(self.trial_rows(), [])
@@ -144,37 +144,37 @@ class TheListVerb(TrialCase):
 
     def test_usage_prints_the_count_recorded_for_each_skill(self):
         for surface in ("claude", "claude", "codex"):
-            sd_db.record_skill_use(self.connection, "sd-plan", surface=surface)
+            sd_db.record_skill_use(self.connection, "sd-check", surface=surface)
         rc, output = self.run_list("--usage")
         self.assertEqual(rc, 0, output)
-        self.assertIn("uses=3", self.line(output, "sd-plan"))
+        self.assertIn("uses=3", self.line(output, "sd-check"))
         self.assertIn("uses=0", self.line(output, "sd-ship"))
 
     def test_usage_prints_each_skills_last_use_for_the_weekly_audit(self):
         """pack sd:5992: the KISS audit lists unused skills; an all-time count cannot say "not lately"."""
-        sd_db.record_skill_use(self.connection, "sd-plan", surface="claude", timestamp="2026-08-01T09:00:00Z")
-        sd_db.record_skill_use(self.connection, "sd-plan", surface="codex", timestamp="2026-09-02T09:00:00Z")
+        sd_db.record_skill_use(self.connection, "sd-check", surface="claude", timestamp="2026-08-01T09:00:00Z")
+        sd_db.record_skill_use(self.connection, "sd-check", surface="codex", timestamp="2026-09-02T09:00:00Z")
         rc, output = self.run_list("--usage")
         self.assertEqual(rc, 0, output)
-        self.assertIn("uses=2  last=2026-09-02", self.line(output, "sd-plan"))
+        self.assertIn("uses=2  last=2026-09-02", self.line(output, "sd-check"))
         self.assertIn("uses=0  last=never", self.line(output, "sd-ship"))
         rc, output = self.run_list("--json")
         skills = {skill["name"]: skill for skill in json.loads(output)["skills"]}
-        self.assertEqual(skills["sd-plan"]["last"][:19], "2026-09-02T09:00:00")
+        self.assertEqual(skills["sd-check"]["last"][:19], "2026-09-02T09:00:00")
         self.assertIsNone(skills["sd-ship"]["last"])
 
     def test_the_default_listing_prints_no_count(self):
-        sd_db.record_skill_use(self.connection, "sd-plan", surface="claude")
+        sd_db.record_skill_use(self.connection, "sd-check", surface="claude")
         rc, output = self.run_list()
         self.assertEqual(rc, 0, output)
         self.assertNotIn("uses=", output)
 
     def test_the_default_listing_prints_each_skills_last_use(self):
         """pack sd:5992: the audit reads the last use with no flag; the operator wants no new flags."""
-        sd_db.record_skill_use(self.connection, "sd-plan", surface="claude", timestamp="2026-09-02T09:00:00Z")
+        sd_db.record_skill_use(self.connection, "sd-check", surface="claude", timestamp="2026-09-02T09:00:00Z")
         rc, output = self.run_list()
         self.assertEqual(rc, 0, output)
-        self.assertIn("sd-plan  path  last=2026-09-02  ", self.line(output, "sd-plan"))
+        self.assertIn("sd-check  path  last=2026-09-02  ", self.line(output, "sd-check"))
         self.assertIn("sd-ship  path  last=never  ", self.line(output, "sd-ship"))
 
 
@@ -257,7 +257,7 @@ class TheExpiry(TrialCase):
         claude = self.home / ".claude" / "skills"
         self.assertTrue((claude / "sd-grill" / sd_install.SKILL_FILE).is_file())
         self.assertFalse((claude / "sd-coherence-audit").exists())
-        self.assertTrue((claude / "sd-plan" / sd_install.SKILL_FILE).is_file())
+        self.assertTrue((claude / "sd-check" / sd_install.SKILL_FILE).is_file())
 
         remaining = {row["skill"] for row in sd_db.trials(self.connection)}
         self.assertEqual(remaining, {"sd-grill"})
