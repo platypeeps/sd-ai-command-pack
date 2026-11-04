@@ -990,7 +990,7 @@ window.shell.reconcile = o => { if (o.current != null) return o.current;"""
         self.assertIn("shell.read(", DOCUMENTS_JS)
         self.assertNotIn("fetch(", DOCUMENTS_JS)
         out = self.run_page("")
-        self.assertEqual(out["states"][0]["text"], "Reading the documents. Rows appear when /api/documents answers.")
+        self.assertEqual(out["states"][0]["text"], "Reading the documents. Rows appear when the read finishes.")
 
     def test_a_document_the_next_read_drops_runs_no_command_and_loses_the_selection(self):
         out = self.run_page("""const first = ANSWER()[1];

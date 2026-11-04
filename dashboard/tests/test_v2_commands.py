@@ -150,6 +150,10 @@ def block(name):
     return re.search(rf"  function {name}\(.*?\n  \}}\n", SHELL, re.S).group(0)
 
 
+def block_tip():
+    return re.search(r"  const tipOf = \(c, o\) => \{\n.*?\n  \};\n", SHELL, re.S).group(0)
+
+
 class EveryCommandSaysWhatItDoes(unittest.TestCase):
     def test_every_command_on_a_converted_page_has_does(self):
         missing = [f"{name}: {found}" for name, text in SCRIPTS.items() if name not in NOT_YET
@@ -189,7 +193,7 @@ class EveryCommandSaysWhatItDoes(unittest.TestCase):
         self.assertIn('data-tip="${tipOf(c, o)}"', bar)
         self.assertIn("return html`<div class=\"actions\">${on.map(button)}</div>", bar)
         self.assertIn("const doesOf = (c, o) => (typeof c.does === 'function' ? c.does(o) : c.does) || '';", SHELL)
-        self.assertIn("const s = shownCli(c, o), d = doesOf(c, o)", SHELL)
+        self.assertIn("const d = doesOf(c, o)", block_tip())
         self.assertIn("document.addEventListener('focusin', e => { const b = e.target.closest?.('.help, [data-tip]');", SHELL)
 
     def test_a_command_a_field_covers_stays_off_the_act_bar_but_not_off_the_menu(self):

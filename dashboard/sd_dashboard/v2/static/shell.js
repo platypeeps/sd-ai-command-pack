@@ -434,7 +434,7 @@
             <textarea id="chat-input" rows="1" placeholder="Ask about this view" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false"></textarea>
             <button class="icon-btn" type="submit" aria-label="Send">${ICON('send')}</button>
           </div>
-          <div class="meta"><span>Reads files only · changes nothing</span><span>claude -p · 2 min</span></div>
+          <div class="meta"><span>Reads files only · changes nothing</span><span>Claude · up to 2 min</span></div>
         </form>
       </div>
     </div>`);
@@ -572,7 +572,7 @@
     if (!text || asking) return;
     const about = selId;
     put(thread, html`<div class="msg"><span class="who label">${ICON('user')}You</span><p>${text}</p></div>
-      <div class="msg" aria-busy="true"><span class="who label">${ICON('bot')}Claude · ${scope}</span><p class="why">Asking claude -p in the ${scope} scope; an answer takes up to 2 minutes.</p></div>`, 'append');
+      <div class="msg" aria-busy="true"><span class="who label">${ICON('bot')}Claude · ${scope}</span><p class="why">Asking Claude about ${scope}; an answer takes up to 2 minutes.</p></div>`, 'append');
     const reply = thread.lastElementChild; suggested = '';
     thread.scrollTop = thread.scrollHeight;
     const show = (answer, failed) => {
@@ -583,7 +583,7 @@
       if (!failed) remember(text, answer, about);
     };
     // The mockup has no server; it says so instead of pretending.
-    if (!window.SHELL_PAGES) return show(`Mockup: no chat backend here. The build sends this to claude -p in the ${scope} scope.`, false);
+    if (!window.SHELL_PAGES) return show(`Mockup: chat does not work here. The real page asks Claude about ${scope}.`, false);
     asking = true; sendBtn.disabled = true;
     askChat({ scope, page: page || '', selected: chatRow(OBJ.get(about)), text })
       .then(a => show(a.text, a.failed))
@@ -766,13 +766,14 @@
   // executes: true when the dashboard runs the CLI line itself; false when the line is shown for Copy only. A declaration may
   // say so; otherwise an `sd` verb runs and anything else (git, rm, uv, gh, sd-review, a pipe) is copy-only (commands.md).
   const executes = (c, o) => typeof c.executes === 'boolean' ? c.executes : /^sd\s/.test(shownCli(c, o));
-  // Hover help on a command button (sd:3457, sd:5287), the one helper for every command button: what the command does, then
-  // the line it runs (or that it has none) and whether it asks first or offers Undo. The button carries it as data-tip; the
+  // Hover help on a command button (sd:3457, sd:5287), the one helper for every command button: what the command does in
+  // plain words, and whether it asks first or offers Undo. Pack sd:7536: it names no command; the line it runs stays in the
+  // "Same thing from the CLI" fold. A copy-only line says the operator runs it. The button carries it as data-tip; the
   // help popover shows it after --delay-help on a hover, so a pass over the buttons shows nothing, and at once on focus.
   const tipOf = (c, o) => {
-    const s = shownCli(c, o), d = doesOf(c, o), r = c.previews ? ' Asks first, with a preview.' : c.risk === 'confirm' || asksFirst(c, o) ? ' Asks first.' : c.risk === 'undo' && c.undo ? ' Undo offered.' : '';
-    const line = !s ? 'dashboard only, no CLI line' : executes(c, o) ? `runs ${s}` : `copy only, the dashboard does not run ${s}`;
-    return d ? `${/[.!?]$/.test(d) ? d : `${d}.`} ${line[0].toUpperCase()}${line.slice(1)}.${r}` : `${c.label}: ${line}.${r}`;
+    const d = doesOf(c, o), r = c.previews ? ' Asks first, with a preview.' : c.risk === 'confirm' || asksFirst(c, o) ? ' Asks first.' : c.risk === 'undo' && c.undo ? ' Undo offered.' : '';
+    const own = shownCli(c, o) && !executes(c, o) ? ' Gives you a command to run yourself.' : '';
+    return `${d ? (/[.!?]$/.test(d) ? d : `${d}.`) : `${c.label}.`}${own}${r}`;
   };
   // What a command does, in one plain sentence (sd:4963): a declaration's `does`, a string or o => a string. The button's tip
   // leads with it (sd:5287) and the ⋯ menu shows it under the label.
@@ -1022,7 +1023,7 @@
     select: id => { const changed = id !== selId; selId = id; const o = OBJ.get(id); setContext(o?.label); writeRow(id); if (changed) { details?.querySelector('.asked')?.remove(); renderAsked(); } },
     selected: () => OBJ.get(selId),
     rowActions, bar, openMenu, run, runBulk, offWhy,
-    pick: id => { const o = OBJ.get(id); if (!o) return; if (!REG.some(c => c.on === o.type && c.bulk)) { toast(`No bulk command for a ${o.type}.`); return; } picked.has(id) ? picked.delete(id) : picked.add(id); renderBulk(); },
+    pick: id => { const o = OBJ.get(id); if (!o) return; if (!REG.some(c => c.on === o.type && c.bulk)) { toast('This row has no action that works on several rows at once.'); return; } picked.has(id) ? picked.delete(id) : picked.add(id); renderBulk(); },
   };
 
   // ---------- Capture (n) ----------
@@ -1912,13 +1913,15 @@
     slot.className = 'state'; slot.setAttribute('role', 'status');
     const k = s && STATES[s.kind];
     if (!k) { slot.hidden = true; slot.replaceChildren(); delete slot.dataset.kind; return; }
+    // Pack sd:7536: the text says what holds; the route or file it read stays on the slot's data, not on the page.
     slot.hidden = false; slot.dataset.kind = s.kind;
-    put(slot, html`<span class="g-${k[0]}" aria-hidden="true">${GLYPHS[k[0]]}</span><b>${s.title || k[1]}</b><span>${s.text || ''}</span>${s.source ? html`<code>${s.source}</code>` : ''}`);
+    if (s.source) slot.dataset.source = s.source; else delete slot.dataset.source;
+    put(slot, html`<span class="g-${k[0]}" aria-hidden="true">${GLYPHS[k[0]]}</span><b>${s.title || k[1]}</b><span>${s.text || ''}</span>`);
   }
   // Screenshot and review hooks: #loading, #error and #empty show each variant on any page.
-  const hookState = { '#loading': { kind: 'loading', text: 'Reading the collector. Rows appear when it answers.' },
-    '#error': { kind: 'error', text: 'The collector did not answer, so nothing below is current. Reload retries it.' },
-    '#empty': { kind: 'empty', text: 'The collector answered with no rows.' } }[location.hash];
+  const hookState = { '#loading': { kind: 'loading', text: 'Loading. Rows appear when the data arrives.' },
+    '#error': { kind: 'error', text: 'The data did not load, so nothing below is current. Reload tries again.' },
+    '#empty': { kind: 'empty', text: 'Nothing to show.' } }[location.hash];
   state(hookState || window.PAGE_STATE || null);
 
   // shell.ready settles after load and two frames, when every page script and the shell have drawn; 'shell:ready' fires then.

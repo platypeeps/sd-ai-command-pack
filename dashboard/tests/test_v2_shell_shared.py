@@ -2038,6 +2038,37 @@ class TheWholeShell(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "ok", result.stderr)
 
 
+class TheStateSlot(unittest.TestCase):
+    """Pack sd:7536: the state banner says what holds in plain words; the route or file it read is not shown text."""
+
+    STATE = re.search(r"  const STATES = .*?\n  function state\(s, at\) \{.*?\n  \}\n", SHELL_JS, re.S).group(0)
+    STATE = re.sub(r"  let stateSlot = .*?\n  if \(!stateSlot.*?\n", "", STATE)
+
+    def draw(self, spec):
+        script = (STAND_IN + MARKUP_JS + "\nconst { html, put: realPut } = window.markup;\n"
+                  + "const SLOT = { className: '', hidden: true, dataset: {}, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, replaceChildren() {} };\n"
+                  + "let stateSlot = SLOT; const put = (el, m) => { el.html = String(m); };\n" + self.STATE
+                  + f"\nvar R = {{}};\ntry {{ state({spec}); R.html = SLOT.html; R.source = SLOT.dataset.source; }}"
+                  + " catch (e) { OUT.error = String(e) + ' ' + e.stack; }\n"
+                  + "function run() { OUT.R = R; return JSON.stringify(OUT); }\n")
+        result = subprocess.run([OSASCRIPT, "-l", "JavaScript", "-e", script], capture_output=True, text=True, timeout=60, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertIsNone(out["error"])
+        return out["R"]
+
+    def test_the_banner_shows_the_text_and_keeps_the_route_off_the_page(self):
+        got = self.draw("{ kind: 'error', text: 'The rows were not read: boom.', source: '/api/rows' }")
+        self.assertIn("The rows were not read: boom.", got["html"])
+        self.assertNotIn("/api/rows", got["html"])
+        # The route stays on the slot's data for a reader with dev tools.
+        self.assertEqual(got["source"], "/api/rows")
+
+    def test_the_review_hooks_say_plain_words(self):
+        hooks = re.search(r"const hookState = \{.*?\}\[location\.hash\];", SHELL_JS, re.S).group(0)
+        self.assertNotIn("collector", hooks)
+
+
 class TheRowActions(unittest.TestCase):
     """sd:5457: a row's act is its icon when the command declares one, a text button when it does not, then ⋯."""
 
@@ -2060,14 +2091,14 @@ class TheRowActions(unittest.TestCase):
         html = self.row("{ id: 'x.hide', label: 'Hide', does: 'Hides this row.', key: 'h', icon: 'eye-off', risk: 'undo', undo() {},"
                         " primary: () => true, cli: () => 'no CLI: view state' }")
         self.assertIn('<button class="icon-btn" type="button" data-cmd="x.hide" data-obj="r1" aria-label="Hide" aria-keyshortcuts=". h"'
-                      ' data-tip="Hide (. h): Hides this row. Dashboard only, no CLI line. Undo offered.">'
+                      ' data-tip="Hide (. h): Hides this row. Undo offered.">'
                       '<svg class="i" aria-hidden="true"><use href="#i-eye-off"/></svg></button>', html)
         self.assertNotIn(">Hide<", html)
         self.assertIn('data-menu-for="r1"', html)
 
     def test_a_command_without_an_icon_stays_a_text_button(self):
         html = self.row("{ id: 'x.run', label: 'Run', does: 'Runs it.', risk: 'safe', primary: () => true, cli: () => 'sd run' }")
-        self.assertIn('<button class="btn quiet sm" type="button" data-cmd="x.run" data-obj="r1" data-tip="Runs it. Runs sd run.">Run</button>', html)
+        self.assertIn('<button class="btn quiet sm" type="button" data-cmd="x.run" data-obj="r1" data-tip="Runs it.">Run</button>', html)
 
     def test_icons_shows_every_live_command_with_an_icon_and_keeps_text_ones_in_the_menu(self):
         # sd:5747: a row that offers what its Details offer; a text-only command stays in the ⋯ menu.

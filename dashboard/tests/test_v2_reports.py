@@ -624,7 +624,7 @@ R.does = fix.does(o); shellRun(fix, o); await flush(); R.href = location.href;""
         self.assertIn("shell.read(", REPORTS_JS)
         self.assertNotIn("getJSON('/api/reports')", REPORTS_JS)
         out = self.run_page("")
-        self.assertEqual(out["states"][0]["text"], "Reading the reports, jobs and job logs. Rows appear when /api/reports answers.")
+        self.assertEqual(out["states"][0]["text"], "Reading the reports, jobs and job logs. Rows appear when the read finishes.")
 
     def test_a_failed_read_after_a_good_one_clears_the_rows_and_runs_no_command(self):
         n = self.ids["clean"]

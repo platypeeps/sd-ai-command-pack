@@ -608,8 +608,10 @@ OUT.toasts[0].undo(); await flush();""")
   asksFirst({ askFirst: o => o.exit === 127 }, { exit: 127 }), asksFirst({ askFirst: o => o.exit === 127 }, { exit: 7 })];""")
         self.assertEqual(out["got"], [True, False, True, False])
 
-    def test_a_command_button_hover_help_names_the_line_it_runs_and_whether_it_asks_or_undoes(self):
-        """sd:3457: each command button carries a title, which the browser shows after a hover delay."""
+    def test_a_command_button_hover_help_says_what_it_does_and_whether_it_asks_or_undoes(self):
+        """sd:3457: each command button carries a tip, which the help popover shows after a hover delay.
+        Pack sd:7536: the tip says what the press does in plain words; the command it runs stays in the
+        "Same thing from the CLI" fold, and a copy-only line says the operator runs it."""
         out = self.settle("""OUT.got = [
   tipOf({ label: 'Ready', cli: o => `sd task status ${o.id} ready`, risk: 'undo', undo() {} }, obj(7)),
   tipOf({ label: 'Remove', cli: () => 'git worktree remove /tmp/x', risk: 'confirm' }, obj(7)),
@@ -619,14 +621,14 @@ OUT.toasts[0].undo(); await flush();""")
   tipOf({ label: 'Retry', does: 'Runs the job again now', cli: o => `sd jobs run job-${o.id}`, risk: 'undo', undo() {} }, obj(7)),
   tipOf({ label: 'Hide', does: o => `Hides ${o.id} here only.` }, obj(7))];""")
         self.assertEqual(out["got"], [
-            "Ready: runs sd task status 7 ready. Undo offered.",
-            "Remove: copy only, the dashboard does not run git worktree remove /tmp/x. Asks first.",
-            "Retry: runs sd jobs run x. Asks first.",
-            "Ask in chat: dashboard only, no CLI line.",
-            "Pin: dashboard only, no CLI line.",
-            # sd:5287: what the command does leads, then the line.
-            "Runs the job again now. Runs sd jobs run job-7. Undo offered.",
-            "Hides 7 here only. Dashboard only, no CLI line.",
+            "Ready. Undo offered.",
+            "Remove. Gives you a command to run yourself. Asks first.",
+            "Retry. Asks first.",
+            "Ask in chat.",
+            "Pin.",
+            # sd:5287: what the command does leads; pack sd:7536: no command follows it.
+            "Runs the job again now. Undo offered.",
+            "Hides 7 here only.",
         ])
         # The foundation's help popover shows it after --delay-help, in the theme's tokens; a native title would not.
         # The Details bar and a row's text button share one form (sd:5747: rowActions names its command c too).
