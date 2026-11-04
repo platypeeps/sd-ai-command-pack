@@ -1,7 +1,8 @@
 /* Hallmark · route: custom (bespoke, locked by foundation/ + v2 shell.css) · structure: annunciator + map workbench + trend strip + alarm ledger; Tasks view: kind chips + one sortable ledger (sd:4959)
  * theme: foundation tokens (dark default) · display/body: IBM Plex Sans · data: IBM Plex Mono · icons: Lucide
  * map: one SVG of the files' vectors (lots + asset glyphs on paper); no map library and no tiles (dashboard CSP)
- * asset glyphs: valve = bow-tie (the drafting symbol), hydrant = silhouette, well = wellhead ring, tank = cylinder; status by colour + dash
+ * asset glyphs: valve = bow-tie (the drafting symbol), hydrant = silhouette, well = wellhead ring, tank = cylinder,
+ *   street light = pole and lamp head, irrigation = sprinkler on its riser, irrigation line = dashed run; status by colour + dash
  * build (sd:2116): the design source's products/system/designs/pages/hoa.css; the Leaflet rules became the SVG map rules below.
  * pre-emit critique: P5 H4 E4 S5 R5 V4
  */
@@ -133,6 +134,11 @@ main { container-type: inline-size; }
 .asset.st-unknown { color: var(--color-unknown); }
 .asset.st-unknown .body { fill: var(--color-paper); stroke-dasharray: 2 2; }
 .asset:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+/* sd:7516: an irrigation line is a dashed run under the glyphs, in the status colour as a glyph is; the wide clear stroke takes the tap. */
+.asset .run { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-dasharray: 8 4; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.asset .hit { fill: none; stroke: transparent; stroke-width: 14; vector-effect: non-scaling-stroke; }
+.asset.st-unknown .run { stroke-dasharray: 2 3; }
+.legend .run { stroke-dasharray: 5 3; }
 .asset[aria-current="true"] { color: var(--color-accent); }
 .zk { font: 500 var(--text-md)/1 var(--font-data); min-width: 1rem; text-align: center; }
 .state-unknown { margin: var(--space-xs) 0; padding: var(--space-xs) var(--space-sm); border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-ink-2);
