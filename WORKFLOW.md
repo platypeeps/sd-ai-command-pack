@@ -107,7 +107,7 @@ These run only when asked by name.
   item's row. A checkout or CI runner with no database asks git whether the
   item is delivered, by the merge trailers, and nothing else.
   `ready_to_send` marks a finished artifact waiting on you.
-- `sd-spec`. Run it when a change alters behaviour that `docs/spec/` documents.
+- Update `docs/spec/` on the same branch when a change alters behaviour it documents.
 - A review pass beyond the table below. Ask for it by name; the item records
   that you did.
 - `sd-handoff`. Write a packet when you stop mid-task. Followups, decisions and
@@ -240,17 +240,16 @@ In a shared repository:
   holds them.
   Two machines enforce that refusal. `sd-review --scope planning` calls
   `sd_lib.guest_artifact_refusal`, which resolves the mode and names refused
-  paths. `sd-plan` uses that review before promotion. `sd-ship` checks the
+  paths. `sd-ship` checks the
   same list, `sd_lib.guest_refused_dirs`, before a guest push.
   A `guest_allow: docs/decisions` line in the local block takes decision
   records out of both checks for that repository (sd:2168).
   `docs/work/` and `docs/spec/` stay refused; naming either is an error.
   Nothing yet refuses a `docs/spec/` or
-  `docs/decisions/` write at the moment it happens — `sd-spec` and `sd-plan
-  --decision` are still prose there, and the push gate is where those are
-  caught.
+  `docs/decisions/` write at the moment it happens; the push gate is where
+  those are caught.
 - No labels, review comments, reviewer requests, or bot posts from any pack
-  surface. `sd-review` and `sd-receive-review` never post.
+  surface. `sd-review` never posts.
 - No workflow files or repository settings unless the owner of that
   repository asked for them.
 - No merge without `runner_merge: auto` on the row or an operator request for that merge;
@@ -269,8 +268,8 @@ After review, take a newer default branch with `git merge origin/<base>`, never 
 a rebase rewrites the reviewed commits, and the next push no longer fast-forwards
 the branch `sd-ship` pushed. `sd-ship prepare --catch-up` makes that merge.
 
-Change that earns a work item: `sd-plan` adds the row, and writes `design.md`
-only for a change that moves state in steps; it asks only for missing decisions. Then the small-change
+Change that earns a work item: `sd task add` adds the row; write `design.md`
+from the pack's `templates/design.md` only for a change that moves state in steps. Then the small-change
 path runs with the applicable review points. An item can span several pull
 requests. `Item: <item>` associates a merge without closing the item;
 `Delivers: <item>` declares the delivering merge. Changes without an associated
@@ -380,13 +379,15 @@ Workers:
   Cancel a silent writer and confirm it stopped before starting a replacement; if you cannot confirm, escalate.
   Then write one `sd task note` on each of its items: what stopped, its head and what is left (pack sd:5963).
   Only a read-only worker may be replaced on the deadline alone.
+- **Register each in-session builder so Today lists it** (pack sd:7221): on spawn run
+  `sd assignments beat <items> --start --worktree <path> --branch <branch> --budget <minutes>`; on its final report, `--end` before the lane enqueue, which refuses a held item. Only `--end` ends a run: silence and a done item do not.
 - **Fan out only when the targets are independent, share no mutable state, and are cheap to verify.**
 - **Batch a repository's ready items into one pull request per wave**, one commit per row; rows that change the same files always group.
   A wave is the round of builders the lead starts together (grill Q26, pack sd:6005).
   Keep a group near 300 changed lines. Name every grouped row in the pull request. Where goldens exist, bless them once per bundle.
   A change that moves state in steps still gets its own pull request.
   Add a bundle's shadow columns in one schema migration, not one per feature (pack sd:6358).
-  Bundling comes before parallel lanes: revisit them only when Metrics' Lane times median wait (pack sd:6006) passes 1 hour.
+  Bundling comes before parallel lanes: revisit them only when Metrics' Lane times median wait (pack sd:6006) passes 30 min (pack sd:7412).
 - **Repository work uses the existing `ready` status (pack sd:6000).** A second status would split one queue in two.
   A ruling with a clear spec moves its item to `ready`: nothing is left to ask before a build.
   The lane brief and "pick up open items" take `ready` items first: a builder can finish them without a question.
@@ -453,7 +454,7 @@ The merge lane:
   A verb that needs a lock or a directory beside the database refuses with `HubOnly` off the hub: run it on the hub.
   The list and the refusals are in [docs/sd-db.md § Hub-only verbs](docs/sd-db.md#hub-only-verbs).
 
-A session writes on its own branch in its own worktree, one writer per worktree: `sd-plan --worktree` puts a new branch in a worktree of its own, and `git worktree add` makes one for any other session.
+A session writes on its own branch in its own worktree, one writer per worktree: `git worktree add` makes one.
 Before writing a fix, look on the remote for a branch or pull request that already claims it, by the item id or by the changed path.
 
 ## Modes

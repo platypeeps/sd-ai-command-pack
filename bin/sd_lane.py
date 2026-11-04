@@ -34,7 +34,9 @@ database and runs it under one runner lock per repository:
            with `--retry-review` after an incomplete review, sd:3037),
            then `merge`; a failed entry is marked and the runner goes on.
            A failed or skipped entry notes each item it carries with its
-           step, reason and head (`note_ended`, sd:5963).
+           step, reason and head (`note_ended`, sd:5963): a comment on a
+           hub-hosted lane, an open followup on any other, which the
+           next passing entry for that item resolves (sd:7357).
            While one entry ships, the next one's gate runs on its predicted
            landing (sd:2586, below). After a merge it deletes the remote
            branch, notes the item with the worktree's removal command and
@@ -47,9 +49,11 @@ database and runs it under one runner lock per repository:
            back to pending, at most `HUB_RETRIES` times, and the run stops
            (sd:3239, below); so does one whose prepare refused retryably
            and spent no review pass, once (sd:3478, below). It claims
-           nothing while load5 is at or above the gate's load limit,
-           `sd.gate_load_max` (`load_stop`, sd:3479), nor inside the
-           repository's freeze window (`freeze_stop`, sd:6879);
+           under any load: its gate waits in the gate queue's ticket
+           order and load rule, at most the run's budget left, and a
+           wait that ran out puts the entry back (pack sd:7412, below).
+           It claims nothing inside the repository's freeze window
+           (`freeze_stop`, sd:6879);
   watch    print each gate end a lane or builder log records, once; with
            `--item N`, repeated, wait until each item's newest entry that is
            not cancelled ends, print one line each, and exit 0 only when all
@@ -137,6 +141,14 @@ before the next prepare. A wrong prediction costs only the machine time: the
 receipt names a tree that prepare never gates, and prepare runs its own check.
 The next entry records what happened as its `speculation`.
 
+The speculation goes two deep (`DEPTH`, pack sd:7412). The entry after next
+is gated on both landings, the second a commit on the first's predicted
+landing, so its gate runs while two prepares go ahead of it. No entry is
+gated twice. After a merge the runner waits only for the next entry's gate;
+the one two ahead runs on. An entry that does not merge cancels each gate
+whose prediction ran through it, and the next claim gates those entries
+again. A stop, a TERM or the deadline cancels every gate.
+
 After a merge the runner lands the entry (sd:2568). It deletes the remote
 branch with `--force-with-lease` while the worktree's tip is the merged head.
 It never removes a builder's worktree: no lock excludes its builder, and a
@@ -208,6 +220,19 @@ refusal spent (`passes_spent`); when it says 0 and the blocker is
 count and stops, as after a hub fault. A refusal that does not say spent an
 unknown count and fails the entry, and so does `gate_failed`
 (`NOT_PUT_BACK`): a failed gate runs again only when asked.
+
+The lane claims under load (pack sd:7412). It used to claim nothing while
+load5 stood at the gate's load limit (sd:3479), and builders' gates, holding
+tickets in the gate queue, took every slot each time load fell: the pack lane
+sat idle 25.6 h in one week with work pending. The gate queue's admission
+(`sd_gate_slots`, sd:2262, in ticket order, sd:5409) is now the one load
+bound. Prepare's gate waits for its slot at most the run's budget left
+(`slot_wait_seconds`, `sd-ship prepare --slot-timeout`), so the wait ends
+before the job's TERM, which would spend a reclaim. A wait that ran out ran
+no gate: `sd-ship` refuses `gate_slot_wait`, and the runner puts the entry
+back, counts `slot_waits` on it, spends no reclaim and no retry, and stops.
+The review that cleared is kept (sd:2721) and serves the next prepare. A
+speculative gate still waiting at the run's deadline is cancelled.
 """
 
 from __future__ import annotations
@@ -251,6 +276,8 @@ ENTRY_SECONDS = 65 * 60
 #: How long a stopped run waits for its cancelled speculative gate, once after
 #: SIGTERM and once after SIGKILL (sd:3361).
 CANCEL_SECONDS = 10
+#: How many entries ahead of their turn the runner gates, one gate each, on the landings predicted before them.
+DEPTH = 2
 #: The lines a gate writes when it ends: the pack's test runner, `make`'s own
 #: failure, and the system repository's check script.
 GATE_END = re.compile(r"run-tests: end head=|check\.sh: every suite passed|make: \*\*\*")
@@ -265,8 +292,9 @@ PLACES = ("up", "down", "top")
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
 Gate = Callable[[pathlib.Path, str, str], dict[str, Any]]
-#: `(item, body, main checkout) -> what happened`: the landing's item note (sd:2568).
-Note = Callable[[int, str, pathlib.Path], str]
+#: `(item, body, main checkout) -> what happened`: the landing's item note (sd:2568). `note_ended` also
+#: passes `kind=`, `comment` or `followup` (sd:7357).
+Note = Callable[..., str]
 #: The codes of an entry that stops `prepared` for want of merge authority (sd:3132).
 RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
@@ -279,11 +307,15 @@ HUB_RETRIES = 2
 RETRYABLE_RETRIES = 1
 #: Retryable refusals the lane does not put back: a failed gate runs again only when asked (sd:3478).
 NOT_PUT_BACK = frozenset({"gate_failed"})
+#: The refusal of a gate whose slot wait ran out at the bound the runner gave it: no gate ran (pack sd:7412).
+SLOT_WAIT = sd_ship_workflow.GATE_SLOT_WAIT
 #: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254), and a cancelled
 #: one at the head the caller read (sd:3389).
 BLOCKED = ("failed", "skipped", "prepared")
 #: The ends whose entry notes each item it carries (`note_ended`, sd:5963), as the retired runner noted its runs.
 NOTED = ("failed", "skipped")
+#: How each `note_ended` body starts: a passing entry resolves the open followups that start so (sd:7357).
+LANE_ENDED = tuple(f"Lane {status} in " for status in NOTED)
 
 
 class LaneError(RuntimeError):
@@ -774,9 +806,25 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
                 entry["cited"] = cited
                 entry["body"] = sd_ship_body.with_cited(
                     body, [f"- {repo} sd:{row['item']}: {row['source']}" for row in cited])
+        on_hub(queue, lambda connection: refuse_teammate(connection, entry))  # the whole set
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}", refuse_before_push,
                       lambda tip: tip_past(worktree, branch, tip, head))
     return add_entry(queue, entry)
+
+
+def refuse_teammate(connection: Any, entry: dict[str, Any]) -> None:
+    """Refuse an entry delivering an item an open teammate run holds (`sd_ship_body.refuse_teammate_held`, pack sd:7221):
+    the claimed item, each `--item` and each cited close; `sd-ship merge` checks the set again before it publishes.
+    The set is `reads.lane_delivered`, which `teammate.start` reads the other way round (pack sd:7288)."""
+    import sd_ship_body  # noqa: PLC0415
+    sd_lib.import_sd_db()  # every caller holds an sd_db connection, so this finds it
+    from sd_db.reads import lane_delivered  # noqa: PLC0415
+    from sd_ship_remote import Refusal  # noqa: PLC0415
+    try:
+        sd_ship_body.refuse_teammate_held(connection, lane_delivered(entry))
+    except Refusal as error:
+        raise LaneError(f"{error}; {error.workflow['next_action']} Nothing was queued.",
+                        code=error.workflow["blocker"]["code"]) from None
 
 
 def forwarded_to(connection: Any, queue: Queue) -> str | None:
@@ -1127,7 +1175,7 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
         row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
         return row
     row = update(queue, mark, read_first)
-    noted = note_ended(row, root)  # a release at merge fails the entry
+    noted = note_ended(row, root, queue=queue)  # a release at merge fails the entry
     return {**row, "note": noted} if noted else row
 
 
@@ -1203,8 +1251,9 @@ def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
 
 #: The days the Queue page's wait and gate times read back (pack sd:6006).
 TIMES_DAYS = 7
-#: A median wait past this files the parallel-lanes question (operator ruling, grill Q27).
-WAIT_QUESTION_SECONDS = 3600
+#: A median wait past this files the parallel-lanes question (operator ruling, grill Q27): the 30 min target
+#: (pack sd:7412 Q3), read weekly; an hour let a 59 min week pass.
+WAIT_QUESTION_SECONDS = 1800
 
 
 def _instant(stamp: Any) -> float | None:
@@ -1318,12 +1367,14 @@ def lane_times(connection: Any, repository: str, *, now: float, days: int = TIME
 
 
 def wait_question(connection: Any, repository: str, path: str, *, now: float) -> int | None:
-    """File the parallel-lanes question once `repository`'s median wait passes an hour (pack sd:6006); its note id.
+    """File the parallel-lanes question once `repository`'s median wait passes the target (pack sd:6006); its note id.
 
     The question goes on one item per repository, `task-ref` `lane-wait:<repository>`, opened in `path`'s repo the
-    first time. Nothing is filed while that item is done (the operator settled it), while one of its questions is open,
-    or within `TIMES_DAYS` of its last question, so an answer is not asked again within the week it read. None when
-    nothing was filed.
+    first time. Nothing is filed while one of its questions is open, or within `TIMES_DAYS` of its last question, so
+    an answer is not asked again within the week it read. A done item (the operator settled it, or its fix landed)
+    stays quiet for `TIMES_DAYS` after it went done, the week that measures the fix, then a miss reopens it: the target
+    is read weekly (pack sd:7412 Q3). One with no status change on record stays done: when it closed is unknown.
+    None when nothing was filed.
     """
     require_sd_db()
     from sd_db import writes  # noqa: PLC0415
@@ -1333,13 +1384,18 @@ def wait_question(connection: Any, repository: str, path: str, *, now: float) ->
         return None
     found = connection.execute("SELECT id, status FROM item WHERE source = 'task-ref' AND external_id = ?",
                                (f"lane-wait:{repository}",)).fetchone()
+    recent = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - TIMES_DAYS * 86400))
     if found is not None:
-        if found["status"] == "done":
-            return None
-        recent = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - TIMES_DAYS * 86400))
         if connection.execute("SELECT 1 FROM note WHERE item = ? AND kind = 'question' AND (resolved_at IS NULL "
                               "OR timestamp >= ?)", (found["id"], recent)).fetchone():
             return None
+        if found["status"] == "done":
+            closed = connection.execute("SELECT MAX(timestamp) FROM note WHERE item = ? AND kind = 'status_change'",
+                                        (found["id"],)).fetchone()[0]
+            if closed is None or closed >= recent:
+                return None
+            writes.transition(connection, found["id"], "planning", who="sd-lane",
+                              reason=f"the median lane wait passed {WAIT_QUESTION_SECONDS // 60} min again")
     item = found["id"] if found is not None else writes.create_item(
         connection, kind="task", title=f"Decide: parallel lanes for {repository}", repo=path, source="task-ref",
         external_id=f"lane-wait:{repository}")
@@ -1347,7 +1403,8 @@ def wait_question(connection: Any, repository: str, path: str, *, now: float) ->
     return writes.add_note(connection, item, "question", (
         f"The median lane wait in {repository} was {round(times['wait'] / 60)} min over the last {times['days']} days "
         f"({times['entries']} entries; median gate {round((times['gate'] or 0) / 60)} min; slowest sd:"
-        f"{slowest.get('item')} at {round((slowest.get('total') or 0) / 60)} min). That is past an hour. "
+        f"{slowest.get('item')} at {round((slowest.get('total') or 0) / 60)} min). That is past the "
+        f"{WAIT_QUESTION_SECONDS // 60} min target. "
         "Run more than one entry of this lane at a time?\nOption: Plan parallel lanes (Recommended)\nOption: Not now"))
 
 
@@ -1759,7 +1816,7 @@ def import_locked(root: pathlib.Path, queue: Queue, path: pathlib.Path) -> dict[
             kept = kept.with_name(f"{kept.name.split('~')[0]}~{count}")
         path.rename(kept)
     drop_imported_bodies(queue)
-    noted = [note_ended(row, root) for row in ended_on_import(rows, old, host, path, landed)]
+    noted = [note_ended(row, root, queue=queue) for row in ended_on_import(rows, old, host, path, landed)]
     return {"imported": written, "file": str(path), **({"noted": noted} if noted else {})}
 
 
@@ -1821,7 +1878,7 @@ def default_runner_merge(root: pathlib.Path) -> str:
         raise LaneError(str(imported.problem), code=RUNNER_MERGE_UNKNOWN)
     from sd_db.database import connect, default_path  # noqa: PLC0415
     from sd_db.protection import github_slug  # noqa: PLC0415
-    from sd_db.repos import registered_for  # noqa: PLC0415
+    from sd_db.repos import policy_merge, registered_for  # noqa: PLC0415
 
     origin = lane_git(root, "config", "--get", "remote.origin.url")
     try:
@@ -1831,7 +1888,7 @@ def default_runner_merge(root: pathlib.Path) -> str:
                         else RUNNER_MERGE_UNKNOWN) from None
     try:
         row = sd_lib.repo_row(connection, registered_for(connection, str(root.resolve()), origin))
-        value = row["runner_merge"] if row is not None and "runner_merge" in row.keys() else None
+        value = None if row is None else policy_merge(row["declarations"])  # pack sd:7366: `policy.merge`
         own = github_slug(origin) if origin else None
         if row is None or own is None or github_slug(row["remote"] or "") != own:
             why = f"no repo row has the remote {origin}"
@@ -1892,10 +1949,11 @@ def answered_retryable(answer: dict[str, Any]) -> bool:
 
 
 def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None],
-            renewed: Callable[[], None] = lambda: None) -> dict[str, Any]:
+            renewed: Callable[[], None] = lambda: None, deadline: float = math.inf) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it.
 
-    `prepare_step` prepares, and `prepare_stop` reads its answer.
+    `prepare_step` prepares, its gate's slot wait bounded by the run's
+    `deadline` (pack sd:7412), and `prepare_stop` reads its answer.
     `advance` is the before-merge write (`step: merge`); it raises `Stop`
     when the claim is lost or the hub stays down, and no merge starts.
     """
@@ -1906,7 +1964,7 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     shot = draw_shots(worktree, logs / f"shots-{item}-{stamp}")
     if shot.get("shots"):
         entry = {**entry, "body": with_shots(str(entry.get("body") or ""), shot["shots"])}
-    prepared, prepare_log = prepare_step(entry, worktree, logs / f"prepare-{item}-{stamp}", ship, renewed)
+    prepared, prepare_log = prepare_step(entry, worktree, logs / f"prepare-{item}-{stamp}", ship, renewed, deadline)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head"),
                               **shot}
     stopped = prepare_stop(entry, worktree, prepared)
@@ -1975,12 +2033,13 @@ def with_shots(body: str, files: list[str]) -> str:
 
 
 def prepare_step(entry: dict[str, Any], worktree: pathlib.Path, log: pathlib.Path, ship: Ship,
-                 renewed: Callable[[], None]) -> tuple[dict[str, Any], pathlib.Path]:
+                 renewed: Callable[[], None], deadline: float = math.inf) -> tuple[dict[str, Any], pathlib.Path]:
     """`sd-ship prepare`'s answer and its log; the body and acceptance texts go to private temporary files.
 
     An incomplete review gets the one `--retry-review` an operator would
     give it, and no second (sd:3037); `renewed` renews the claim's lease
-    first (`renew`, sd:3481).
+    first (`renew`, sd:3481). Each prepare's gate waits for a slot at most
+    the run's budget left, read as it starts (`slot_wait_seconds`, pack sd:7412).
     """
     prepare_log = log.with_name(f"{log.name}.log")
     with tempfile.TemporaryDirectory(prefix="sd-lane-texts-") as private:  # 0700, removed with the step
@@ -1993,11 +2052,12 @@ def prepare_step(entry: dict[str, Any], worktree: pathlib.Path, log: pathlib.Pat
         closes = [part for number in entry.get("closes") or () for part in ("--item", str(number))]
         argv = ["-C", str(worktree), "prepare", "--item", str(entry["item"]), *closes, *claim, "--catch-up",
                 "--title", entry["title"], "--body-file", str(body), "--json"]
-        prepared = ship(argv, prepare_log)
+        prepared = ship([*argv, "--slot-timeout", str(slot_wait_seconds(deadline, clock()))], prepare_log)
         if blocker_code(prepared) == "review_incomplete":
             renewed()
             prepare_log = log.with_name(f"{log.name}-retry.log")
-            prepared = ship([*argv, "--retry-review"], prepare_log)
+            prepared = ship([*argv, "--slot-timeout", str(slot_wait_seconds(deadline, clock())), "--retry-review"],
+                            prepare_log)
     return prepared, prepare_log
 
 
@@ -2029,6 +2089,7 @@ def prepare_stop(entry: dict[str, Any], worktree: pathlib.Path, prepared: dict[s
     return {"status": "failed", "step": "prepare", "phase": prepared.get("phase"),
             "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
             **({"hub_fault": True} if answered_hub_fault(prepared) else
+               {"slot_wait": True} if blocker_code(prepared) == SLOT_WAIT else
                {"retryable": True} if answered_retryable(prepared) else {})}
 
 
@@ -2041,8 +2102,11 @@ class SpeculativeGate(threading.Thread):
     group that starts after the cancel is ended at once.
     """
 
-    def __init__(self, target: Callable[[], None], name: str) -> None:
+    def __init__(self, target: Callable[[], None], name: str, follower: tuple[str, str] = ("", ""),
+                 chain: tuple[str, ...] = ()) -> None:
         super().__init__(target=target, name=name)
+        self.follower, self.chain = follower, chain  # the gated entry's (id, head); the ids predicted to land first
+        self.why = "the run stopped, so it ended this gate (sd:3361)"
         self.cancelled = False
         self.group: int | None = None
         self.guard = threading.RLock()  # `signal_gate` may run in a SIGTERM handler while this thread holds it
@@ -2116,16 +2180,17 @@ def catch_up_in(tree: pathlib.Path, ref: str, message: str) -> bool:
     return False
 
 
-def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
-    """`{"head", "base"}` for `following`'s gate once `entry` lands, or `{"skipped": why}`.
+def predict(ahead: list[dict[str, Any]], following: dict[str, Any]) -> dict[str, Any]:
+    """`{"head", "base"}` for `following`'s gate once the `ahead` entries land in order, or `{"skipped": why}`.
 
-    `base` stands in for `entry`'s squash merge: its catch-up merge's tree, as
-    a commit on the fetched base branch. `head` is `following`'s catch-up
-    merge onto `base`, so its tree is the one `following`'s prepare will gate.
+    `base` stands in for the last entry's squash merge: the chain of each
+    entry's catch-up merge's tree, as a commit on the one before, from the
+    fetched base branch (`landings`). `head` is `following`'s catch-up merge
+    onto `base`, so its tree is the one `following`'s prepare will gate.
     """
     import sd_gate_receipts  # noqa: PLC0415 -- the declaration reader loads only for a speculation
     root = pathlib.Path(following["worktree"])
-    for row, whose in ((entry, f"sd:{entry['item']}'s"), (following, "its")):
+    for row, whose in [*((row, f"sd:{row['item']}'s") for row in ahead), (following, "its")]:
         if lane_git(pathlib.Path(row["worktree"]), "rev-parse", "HEAD") != row["expected_head"]:
             return {"skipped": f"{whose} worktree's HEAD moved from the queued head"}
     remote = lane_git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD") or ""
@@ -2134,20 +2199,15 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
         return {"skipped": "origin/HEAD names no base branch"}
     if scratch_git(root, "fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{branch}:{remote}") is None:
         return {"skipped": f"origin/{branch} could not be fetched"}
-    fork, message = lane_git(root, "rev-parse", "--verify", "--quiet", remote), f"Merge origin/{branch}"
+    fork = lane_git(root, "rev-parse", "--verify", "--quiet", remote)
     with tempfile.TemporaryDirectory(prefix="sd-lane-speculate-") as parent:
         tree = pathlib.Path(parent) / "tree"
-        if not fork or scratch_git(root, "worktree", "add", "--quiet", "--detach", str(tree), entry["expected_head"]) is None:
+        if not fork or scratch_git(root, "worktree", "add", "--quiet", "--detach", str(tree), fork) is None:
             return {"skipped": "the scratch worktree could not be made"}
         try:
-            if not catch_up_in(tree, fork, message):
-                return {"skipped": f"sd:{entry['item']} conflicts with origin/{branch}"}
-            landed = scratch_git(tree, "commit-tree", "HEAD^{tree}", "-p", fork, "-m",
-                                 f"sd-ship lane: sd:{entry['item']} as predicted to land")
-            if not landed or scratch_git(tree, "checkout", "--quiet", "--detach", following["expected_head"]) is None:
-                return {"skipped": "the predicted landing could not be built"}
-            if not catch_up_in(tree, landed, message):
-                return {"skipped": f"it conflicts with sd:{entry['item']}'s predicted landing"}
+            landed = landings(tree, ahead, following, fork, branch)
+            if "skipped" in landed:
+                return landed
             try:
                 keyed = sd_gate_receipts.keyed_by_tree(tree)
             except sd_lib.DatabaseUnreadable as error:
@@ -2157,48 +2217,93 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
             head = scratch_git(tree, "rev-parse", "HEAD")
         finally:
             scratch_git(root, "worktree", "remove", "--force", str(tree))
-    return {"head": head, "base": landed} if head else {"skipped": "the merged head could not be read"}
+    return {"head": head, "base": landed["base"]} if head else {"skipped": "the merged head could not be read"}
 
 
-def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = False) -> SpeculativeGate | None:
-    """The next entry's gate on `entry`'s predicted landing, not yet started, or None.
+def landings(tree: pathlib.Path, ahead: list[dict[str, Any]], following: dict[str, Any], fork: str,
+             branch: str) -> dict[str, Any]:
+    """In the scratch `tree`, each `ahead` entry's landing as a commit on the one before, from `fork`.
 
-    The caller holds it before it starts it, so a SIGTERM during the start still ends it (sd:5776).
-
-    An entry the runner may not merge (`merge_refusal`) stops prepared and
-    never lands, so nothing follows it to predict. `busy` says an earlier
-    speculative gate still runs; one at a time. Either entry with no
-    worktree of its own on this host gets no gate (sd:3283). What happened
-    goes on the next entry as `speculation`, and the gate's whole result to
-    a log beside the others.
+    It leaves `following`'s catch-up onto the last landing checked out, and
+    answers `{"base": that landing}`, or `{"skipped": why}` on a conflict.
     """
-    host = this_host()
+    landed, onto, message = fork, f"origin/{branch}", f"Merge origin/{branch}"
+
+    def merged_onto(row: dict[str, Any], whose: str) -> str | None:
+        if scratch_git(tree, "checkout", "--quiet", "--detach", row["expected_head"]) is None:
+            return "the predicted landing could not be built"
+        return None if catch_up_in(tree, landed, message) else f"{whose} conflicts with {onto}"
+    for row in ahead:
+        why = merged_onto(row, f"sd:{row['item']}")
+        if why is not None:
+            return {"skipped": why}
+        landed = scratch_git(tree, "commit-tree", "HEAD^{tree}", "-p", landed, "-m",
+                             f"sd-ship lane: sd:{row['item']} as predicted to land") or ""
+        if not landed:
+            return {"skipped": "the predicted landing could not be built"}
+        onto = f"sd:{row['item']}'s predicted landing"
+    why = merged_onto(following, "it")
+    return {"base": landed} if why is None else {"skipped": why}
+
+
+def speculate(entry: dict[str, Any], queue: Queue, gate: Gate,
+              gates: list[SpeculativeGate] | tuple[()] = ()) -> list[SpeculativeGate]:
+    """The next entries' gates on the landings predicted ahead of them, not yet started.
+
+    The caller holds each before it starts it, so a SIGTERM during the start still ends it (sd:5776).
+
+    Up to `DEPTH` followers: the next entry on `entry`'s landing, the one
+    after it on both (pack sd:7412). An entry the runner may not merge
+    (`merge_refusal`) stops prepared and never lands, so nothing past it is
+    predicted. A follower one of `gates` already gated is skipped, so no
+    entry is gated twice, and at most `DEPTH` gates run at once.
+    """
     try:
-        following = next((row for row in read_queue(queue) if runnable(row)), None)
+        followers = [row for row in read_queue(queue) if runnable(row)][:DEPTH]
     except LaneError:  # a hub fault here left the claimed entry running under a runner that raised (sd:4184)
-        return None
-    if following is None or merge_refusal(entry) is not None:
-        return None
+        return []
+    gated = {held.follower for held in gates}
+    running = sum(held.is_alive() for held in gates)
+    chain, made = [entry], list[SpeculativeGate]()
+    for following in followers:
+        if merge_refusal(chain[-1]) is not None:
+            break
+        if (following["id"], following["expected_head"]) not in gated:
+            made += speculate_one(chain, following, queue, gate, busy=running + len(made) >= DEPTH)
+        chain.append(following)
+    return made
+
+
+def speculate_one(chain: list[dict[str, Any]], following: dict[str, Any], queue: Queue, gate: Gate,
+                  busy: bool) -> list[SpeculativeGate]:
+    """`following`'s gate once the `chain` entries land, as a list of one, or none.
+
+    `busy` says `DEPTH` speculative gates still run. Any entry with no
+    worktree of its own on this host gets no gate (sd:3283). What happened
+    goes on `following` as `speculation`, and the gate's whole result to a
+    log beside the others.
+    """
+    host, chain = this_host(), list(chain)  # the caller's list grows on after this returns
 
     def record_speculation(fields: dict[str, Any]) -> None:
         def on_follower(entries: list[dict[str, Any]]) -> None:
             for row in entries:
                 if row["id"] == following["id"]:
-                    row["speculation"] = {"after": entry["item"], **fields}
+                    row["speculation"] = {"after": chain[-1]["item"], "depth": len(chain), **fields}
         with contextlib.suppress(LaneError, OSError):  # a note that cannot be written stops nothing
             update(queue, on_follower)
     def own_tree_here(row: dict[str, Any]) -> bool:
         return row.get("enqueued_on") == host and pathlib.Path(str(row.get("worktree") or "")).is_dir()
+    items = " or ".join(f"sd:{row['item']}" for row in [*chain, following])
     try:
-        plan = ({"skipped": "an earlier speculative gate still runs"} if busy else
-                {"skipped": f"no worktree on this host for sd:{entry['item']} or sd:{following['item']}; "
-                            "a lane worktree is made only when its entry runs"}
-                if not (own_tree_here(entry) and own_tree_here(following)) else predict(entry, following))
+        plan = ({"skipped": f"{DEPTH} earlier speculative gates still run"} if busy else
+                {"skipped": f"no worktree on this host for {items}; a lane worktree is made only when its entry runs"}
+                if not all(own_tree_here(row) for row in [*chain, following]) else predict(chain, following))
     except Exception as error:  # a speculation that cannot be set up gates nothing; the lane goes on
         plan = {"skipped": f"{type(error).__name__}: {error}"[:600]}
     if "skipped" in plan:
         record_speculation({"status": "skipped", "reason": plan["skipped"]})
-        return None
+        return []
     log = queue.lane / "logs" / f"speculate-{following['item']}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.log"
     record_speculation({"status": "running", **plan, "log": str(log), "log_host": this_host()})
 
@@ -2211,12 +2316,13 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
         except Exception as error:
             result = fields = {"status": "error", "reason": f"{type(error).__name__}: {error}"[:600]}
         if thread.cancelled:
-            fields = {"status": "cancelled", "reason": "the run stopped, so it ended this gate (sd:3361)"}
+            fields = {"status": "cancelled", "reason": thread.why}
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         record_speculation({**plan, "log": str(log), "log_host": this_host(), **fields})
-    thread = SpeculativeGate(run_gate, f"sd-lane-speculate-{following['item']}")
-    return thread
+    thread = SpeculativeGate(run_gate, f"sd-lane-speculate-{following['item']}",
+                             (following["id"], following["expected_head"]), tuple(row["id"] for row in chain))
+    return [thread]
 
 
 def default_note(item: int, body: str, main: pathlib.Path, kind: str = "comment") -> str:
@@ -2271,7 +2377,7 @@ def builder_busy(connection: Any, tree: pathlib.Path, item: int) -> str:
     held = sessions.describe(sessions.holders(connection, str(tree), machine=this_host()))
     # Filtered here, not in SQL: bin/'s bandit audit refuses an interpolated query.
     active = next((row for row in connection.execute("SELECT id, status FROM assignment WHERE item = ?", (item,))
-                   if row["status"] in build.ACTIVE), None)
+                   if row["status"] in build.OWNING), None)
     return held or (f"build assignment {active['id']} of item {item} is active" if active else "") or (
         build._held(connection, item) or "")
 
@@ -2810,18 +2916,23 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
     return fields
 
 
-def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None) -> dict[str, str]:
+def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None, *,
+               queue: Queue) -> dict[str, str]:
     """Note each item `row` carries, its own and its `closes`, once it ends failed or skipped (sd:5963).
 
     The note names the step, the reason's first line, the head and the step's
-    log, where the full text is (sd:7133), as a `comment`: `sd task note`
-    writes no `exec` note. No item status changes; the entry holds that
-    state. A write that fails is kept in the answer, `{"sd:N": "written" or
-    "failed: ..."}`, and changes no outcome. `note`
-    defaults to `default_note`, read at the call, so a suite can replace it.
+    log, where the full text is (sd:7133). It is a `comment` on a hub-hosted
+    lane and an open `followup` on any other (`ended_kind`, sd:7357), so the
+    lane host's own sessions see it in `sd today` with no message sent; a
+    passing entry resolves it (`resolve_ended`). `sd task note` writes no
+    `exec` note. No item status changes; the entry holds that state. A write
+    that fails is kept in the answer, `{"sd:N": "written" or "failed: ..."}`,
+    and changes no outcome. `note` defaults to `default_note`, read at the
+    call, so a suite can replace it.
     """
     if row.get("status") not in NOTED:
         return {}
+    kind = ended_kind(queue)
     reason = next((line.strip() for line in str(row.get("reason") or "").splitlines() if line.strip()),
                   str(row.get("code") or "no reason recorded"))
     head = str(row.get("head") or row.get("expected_head") or "an unrecorded head")[:12]
@@ -2832,10 +2943,78 @@ def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None
     written: dict[str, str] = {}
     for item in dict.fromkeys([row.get("item"), *(row.get("closes") or ())]):
         try:
-            written[f"sd:{item}"] = (note or default_note)(int(item), body, sd_lib.main_worktree_root(root))
+            written[f"sd:{item}"] = (note or default_note)(int(item), body, sd_lib.main_worktree_root(root),
+                                                            kind=kind)
         except Exception as error:  # noqa: BLE001 -- the entry's end stands; the answer says the note did not land
             written[f"sd:{item}"] = f"failed: {type(error).__name__}: {error}"[:400]
     return written
+
+
+def ended_kind(queue: Queue) -> str:
+    """`comment` when the hub hosts `queue`'s lane, else `followup` (sd:7357).
+
+    The hub hosts it when `repo.lane_host` is NULL, or names this machine
+    and this machine is the hub. Every other answer, a host that does not
+    read included, is a `followup`: an open note costs one resolve, a
+    failure no session on the lane host sees costs more. A lane host that
+    names the hub read from another machine is a `followup` too, for the
+    same reason. Without `sd_db` there is no other host.
+    """
+    if sd_lib.import_sd_db().module is None:
+        return "comment"
+    import sd_gate_receipts  # noqa: PLC0415
+    from sd_db.database import connect  # noqa: PLC0415
+
+    try:
+        database = hub_database(queue.environ)
+        connection = connect(database, write=False)
+        try:
+            host = sd_lib.lane_host(connection, queue.repository)[0]
+        finally:
+            connection.close()
+        if host is None or (host == this_host() and sd_gate_receipts.served_hub(database) is None):
+            return "comment"
+    except Exception:  # noqa: BLE001 -- unknown is not the hub's: the failure stays open
+        return "followup"
+    return "followup"
+
+
+def resolve_ended(row: dict[str, Any], queue: Queue) -> dict[str, str]:
+    """Resolve the open lane followups on each item a passing entry carries (sd:7357).
+
+    A passing entry is `merged` or `prepared` (`GATE_PASSED`); a lane
+    followup is an open `followup` whose body starts as `note_ended`'s does
+    (`LANE_ENDED`). Other followups stay open. The answer is
+    `{"sd:N": "resolved #id, ..." or "failed: ..."}` for each item that had
+    one or whose read failed; a failure leaves the followup open on every
+    machine and changes no outcome.
+    """
+    if row.get("status") not in GATE_PASSED or sd_lib.import_sd_db().module is None:
+        return {}
+    from sd_db import writes  # noqa: PLC0415
+    from sd_db.database import connect  # noqa: PLC0415
+
+    items = [int(item) for item in dict.fromkeys([row.get("item"), *(row.get("closes") or ())])]
+    try:
+        connection = connect(hub_database(queue.environ), write=True)
+    except Exception as error:  # noqa: BLE001 -- the entry passed; its followups stay open
+        return {f"sd:{item}": f"failed: {type(error).__name__}: {error}"[:400] for item in items}
+    resolved: dict[str, str] = {}
+    try:
+        for item in items:
+            try:
+                open_ids = [found["id"] for found in connection.execute(
+                    "SELECT id, body FROM note WHERE item = ? AND kind = 'followup' AND resolved_at IS NULL"
+                    " ORDER BY id", (item,)) if str(found["body"]).startswith(LANE_ENDED)]
+                for number in open_ids:
+                    writes.resolve_note(connection, number)
+                if open_ids:
+                    resolved[f"sd:{item}"] = "resolved " + ", ".join(f"#{number}" for number in open_ids)
+            except Exception as error:  # noqa: BLE001 -- what is not resolved stays open
+                resolved[f"sd:{item}"] = f"failed: {type(error).__name__}: {error}"[:400]
+    finally:
+        connection.close()
+    return resolved
 
 
 def lane_host_reason(root: pathlib.Path, environ: dict[str, str] | None = None) -> str | None:
@@ -3548,26 +3727,32 @@ def requeue(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, 
 
     A hub fault puts it back `HUB_RETRIES` times (sd:3239), then held, never
     failed (`hub_fields`, sd:4184); a retryable prepare refusal that spent no
-    review pass `RETRYABLE_RETRIES` times (sd:3478). Each has its own count.
+    review pass `RETRYABLE_RETRIES` times (sd:3478); a gate slot wait that
+    ran out every time, counted in `slot_waits`: no gate ran, and the kept
+    review serves the next prepare (pack sd:7412). Each has its own count.
     It keeps its place, and `hub_fault` or `retryable_fault` says what failed
     where; a later outcome writes its own fields beside it. Its
     `expected_head` moves only to a catch-up merge prepare pushed
     (`pushed_catch_up`, sd:3283).
     """
     hub, retryable = outcome.pop("hub_fault", False), outcome.pop("retryable", False)
+    waited = outcome.pop("slot_wait", False)
     retries = int(entry.get("hub_retries" if hub else "retryable_retries") or 0)
-    if not (hub or retryable) or (not hub and retries >= RETRYABLE_RETRIES):
+    if not (hub or retryable or waited) or (retryable and retries >= RETRYABLE_RETRIES):
         return None
     expected = pushed_catch_up(pathlib.Path(entry["worktree"]), str(entry.get("branch") or ""), entry["expected_head"])
     fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log", "log_host")
                              if key in outcome}
     fields = (hub_fields(retries, fault) if hub else
+              {"slot_waits": int(entry.get("slot_waits") or 0) + 1, "slot_wait": {**fault, "at": stamp_now()}}
+              if waited else
               {"retryable_retries": retries + 1, "retryable_fault": {**fault, "at": stamp_now()}})
     put_back(queue, entry, token, expected, **fields)
     if fields.get("held"):
         return (f"a hub fault after {retries} retries; it is held at its place, and "
                 f"`sd-ship lane release {entry['item']}` runs it again")
-    return f"{'a hub fault' if hub else 'a retryable refusal'}; it is pending again, and the next run retries it"
+    met = "a hub fault" if hub else "a gate slot wait that ran out at the run's budget" if waited else "a retryable refusal"
+    return f"{met}; it is pending again, and the next run retries it"
 
 
 def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
@@ -3591,7 +3776,7 @@ def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
         return settled
     reclaimed = runner_write(queue, reclaim_stopped)
     drop_hub_stops(queue, set(stops) - running)
-    noted = [note_ended(row, root) for row in ended]
+    noted = [note_ended(row, root, queue=queue) for row in ended]
     return {**({"import": imported} if imported else {}), **({"reclaimed": reclaimed} if reclaimed else {}),
             **({"noted": noted} if noted else {})}
 
@@ -3602,13 +3787,13 @@ def clock() -> float:
 
 
 def load_stop(environ: dict[str, str]) -> str | None:
-    """Why the runner claims no entry under this load, or None (sd:3479).
+    """Why a second lane may not start under this load, or None (`lane_room`, sd:3479).
 
     The gate's own limit, `sd.gate_load_max` or `SD_GATE_LOAD_MAX`
-    (`sd_gate_slots.load_rule`), read against load5: six gates timed out at
-    one hour under load, and a retry minutes later met the same load. Off
-    while the limit is 0, as the gate queue's rule is. A limit or a load
-    that cannot be read claims nothing: unknown is not low.
+    (`sd_gate_slots.load_rule`), read against load5. Off while the limit is
+    0, as the gate queue's rule is. A limit or a load that cannot be read is
+    no room: unknown is not low. A lane already running claims under any
+    load; its gate waits in the gate queue (pack sd:7412).
     """
     import sd_gate_slots  # noqa: PLC0415 -- stdlib only, and only the runner reads it
     try:
@@ -3644,9 +3829,9 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     """Drain this repository's queue in order under its runner lock; never wait for the lock.
 
     It first imports the file queue and reclaims dead holders here
-    (`settle_checkout`). One speculative gate runs at a time (`speculate`);
-    after a merge the runner lands the entry (`land`), then waits for that
-    gate, so the next prepare finds its receipt. `note` defaults to
+    (`settle_checkout`). Up to `DEPTH` speculative gates run (`speculate`);
+    after a merge the runner lands the entry (`land`), then waits for the
+    next entry's gate, so the next prepare finds its receipt (`settle_gates`). `note` defaults to
     `default_note`, read at the call, so a suite can replace it. Off the lane
     host it refuses before any of that (sd:3003). Each claim reads the host
     in its own transaction (`claim_entry`): after a move it claims nothing and
@@ -3658,7 +3843,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     nothing (sd:3273). Once `clock` passes `deadline`, by default
     `RUN_BUDGET_SECONDS` from now, it claims no next entry and says so in
     `stopped`; an entry it started still finishes (sd:3287). A stopped run
-    cancels its speculative gate (`SpeculativeGate.cancel_gate`) rather than wait
+    cancels its speculative gates (`SpeculativeGate.cancel_gate`) rather than wait
     on it, and says how that went in `speculative_gate` (sd:3361). So does a
     run that ends on SIGTERM or an exception; the TERM reaches the gate's group
     as it arrives, before prepare's group ends (sd:5776). A run that
@@ -3677,36 +3862,32 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             return {"ran": [], "busy": "the tools this lane runs are moving; the next run retries"}
         ran: list[dict[str, Any]] = []
         answer: dict[str, Any] = {"ran": ran, **settle_checkout(root, queue)}
-        ahead: SpeculativeGate | None = None
+        gates: list[SpeculativeGate] = []
         deadline = clock() + RUN_BUDGET_SECONDS if deadline is None else deadline
 
         def term_gate() -> None:
-            if ahead is not None:
-                ahead.signal_gate(signal.SIGTERM)
+            for held in gates:
+                held.signal_gate(signal.SIGTERM)
         with sd_lib.term_ends_group(first=term_gate):
             try:
                 while True:
                     entry, token = next_claim(queue, environ, deadline, answer)
                     if entry is None:
                         break
-                    if ahead is not None and ahead.is_alive():
-                        speculate(entry, queue, gate, busy=True)  # notes the skip: one speculative gate at a time
-                    else:
-                        ahead = speculate(entry, queue, gate)
-                    if ahead is not None and ahead.ident is None:  # held before it starts: a TERM in its start ends it
-                        ahead.start()
-                    row, stopped = run_entry(root, queue, entry, token, environ, ship, note or default_note)
+                    for made in speculate(entry, queue, gate, gates):
+                        gates.append(made)  # held before it starts: a TERM in its start ends it
+                        made.start()
+                    row, stopped = run_entry(root, queue, entry, token, environ, ship, note or default_note, deadline)
                     if row is not None:
                         ran.append(row)
                     if stopped is not None:
                         answer["stopped"] = stopped
                         break
-                    if ahead is not None and row is not None and row.get("status") == "merged":
-                        ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
-                answer = finish_speculation(ahead, answer)
+                    settle_gates(gates, entry, row, deadline)
+                answer = finish_speculation(gates, answer, deadline)
             except BaseException:  # a SIGTERM among them: no speculative gate outlives the run (sd:5776)
-                if ahead is not None:
-                    ahead.cancel_gate()
+                for held in gates:
+                    held.cancel_gate()
                 raise
         answer = release_chain(root, queue, environ, answer)
     return post_merge(root, queue, environ, answer)
@@ -3717,10 +3898,6 @@ def next_claim(queue: Queue, environ: dict[str, str], deadline: float,
     """The entry `run_lane` claims next and its token, or None, with why the run stops in `answer` when it does."""
     if clock() >= deadline:
         answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
-        return None, ""
-    loaded = load_stop(environ)
-    if loaded is not None:
-        answer["stopped"] = loaded
         return None, ""
     try:
         held = freeze_stop(queue)
@@ -3740,21 +3917,64 @@ def next_claim(queue: Queue, environ: dict[str, str], deadline: float,
     return None, token
 
 
-def finish_speculation(ahead: SpeculativeGate | None, answer: dict[str, Any]) -> dict[str, Any]:
-    """`answer` once the speculative gate is done: waited for, or cancelled when the run stopped (sd:3361).
+def settle_gates(gates: list[SpeculativeGate], entry: dict[str, Any], row: dict[str, Any] | None,
+                 deadline: float) -> None:
+    """After `entry` ends: wait for the next entry's gate once it merged, else cancel each gate its landing fed.
 
-    A stopped run waits on no check, so it frees its runner lock now.
+    The next prepare reads the receipt of the gate that predicted `entry`
+    last; a gate two ahead runs on. An entry that did not merge makes every
+    prediction through it wrong, so those gates end and leave `gates`, and
+    the next claim gates their entries again (pack sd:7412).
     """
-    if ahead is not None and "stopped" in answer:
-        answer["speculative_gate"] = ("cancelled" if ahead.cancel_gate() else
+    merged = row is not None and row.get("status") == "merged"
+    for held in [held for held in gates if entry["id"] in held.chain]:
+        if merged and held.chain[-1] == entry["id"]:
+            held.join(remaining(deadline, PREPARE_SECONDS))
+        elif not merged:
+            held.why = f"sd:{entry['item']} did not merge, so the landing this gate predicted will not happen"
+            if not held.is_alive() or held.cancel_gate():
+                gates.remove(held)
+
+
+def finish_speculation(gates: list[SpeculativeGate], answer: dict[str, Any],
+                       deadline: float = math.inf) -> dict[str, Any]:
+    """`answer` once the speculative gates are done: waited for, or cancelled when the run stopped (sd:3361).
+
+    A stopped run waits on no check, so it frees its runner lock now. Any
+    other waits until `deadline` at most, then cancels them too: a gate queued
+    behind builders' tickets would hold the lock past the job (pack sd:7412).
+    """
+    if "stopped" not in answer:
+        for held in gates:
+            held.join(remaining(deadline, PREPARE_SECONDS))
+    alive = [held for held in gates if held.is_alive()]
+    if alive:
+        ended = all([held.cancel_gate() for held in alive])
+        answer["speculative_gate"] = ("cancelled" if ended else
                                       f"still ending {2 * CANCEL_SECONDS}s after SIGKILL; the lock is freed anyway")
-    elif ahead is not None:
-        ahead.join()
     return answer
 
 
+def remaining(deadline: float, cap: float) -> float:
+    """The seconds from `clock` to `deadline`, from 0 to `cap`: NaN, a past deadline or an unknown clock is 0."""
+    left = deadline - clock()
+    return min(float(cap), left) if left > 0 else 0.0
+
+
+def slot_wait_seconds(deadline: float, now: float) -> int:
+    """Prepare's `--slot-timeout`: the whole seconds from `now` to the run's `deadline`, 1 to `GATE_SLOT_SECONDS`.
+
+    An entry claimed by `deadline` still has `ENTRY_SECONDS` to end before
+    the job's TERM (`RUN_BUDGET_SECONDS`), so a slot wait inside the budget
+    left keeps it there (pack sd:7412). `sd-check` takes no 0; an unknown or
+    spent budget (NaN, past, infinite clock) waits 1 s.
+    """
+    left = deadline - now
+    return int(min(float(sd_lib.GATE_SLOT_SECONDS), left)) if left >= 1 else 1
+
+
 def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
-              ship: Ship, note: Note) -> tuple[dict[str, Any] | None, str | None]:
+              ship: Ship, note: Note, deadline: float = math.inf) -> tuple[dict[str, Any] | None, str | None]:
     """Find a checkout here (`checkout_for`), then prepare, merge and record one claimed entry.
 
     Its row for `ran`, and why the run stops, or None. An `origin` that did
@@ -3769,7 +3989,7 @@ def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: st
         found = {"status": "failed", "step": "worktree", "reason": str(error)[:600]}
     tree = found.pop("tree", None)
     try:
-        return run_checkout(root, queue, entry, token, environ, ship, note, tree, found)
+        return run_checkout(root, queue, entry, token, environ, ship, note, tree, found, deadline)
     finally:
         if tree is not None and found.get("made"):
             drop_lane_worktree(sd_lib.main_worktree_root(root), tree, found.get("branch_made"), made=True)
@@ -3788,7 +4008,7 @@ def unknown_checkout(queue: Queue, entry: dict[str, Any], token: str,
 
 def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
                  ship: Ship, note: Note, tree: pathlib.Path | None,
-                 found: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+                 found: dict[str, Any], deadline: float = math.inf) -> tuple[dict[str, Any] | None, str | None]:
     """`run_entry` in `tree`, or the skip `found` holds when there is none.
 
     `stage` follows `advance`, so a raise after the before-merge write names
@@ -3804,7 +4024,7 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
             built = {"lane_worktree": True, "builder_worktree": entry.get("worktree"),
                      "builder_host": entry.get("enqueued_on")}
             local = {**entry, "worktree": str(tree), **(built if found.get("made") else {})}
-            outcome = process(local, queue, ship, advanced, functools.partial(renew, queue, local, token))
+            outcome = process(local, queue, ship, advanced, functools.partial(renew, queue, local, token), deadline)
             if outcome.get("moved"):
                 put_back(queue, entry, token, pushed_catch_up(tree, str(entry.get("branch") or ""),
                                                               entry["expected_head"]),
@@ -3828,9 +4048,13 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
         outcome = {"status": "failed", **stage, "reason": f"{type(error).__name__}: {error}"[:600]}
     except Exception as error:  # a broken entry is marked; the next one still runs
         outcome = {"status": "failed", **stage, "reason": f"{type(error).__name__}: {error}"[:600]}
-    noted = note_ended({**entry, **outcome}, root, note)  # before the finish write, so a hub stop keeps it
+    # Before the finish write, so a hub stop keeps it.
+    noted = note_ended({**entry, **outcome}, root, note, queue=queue)
     if noted:
         outcome["note"] = noted
+    resolved = resolve_ended({**entry, **outcome}, queue)
+    if resolved:
+        outcome["resolved"] = resolved
     try:
         finish_entry(queue, entry, token, outcome)
     except Stop as error:
@@ -3856,7 +4080,7 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     default a lane runs here, to its end, before the next starts. While the
     run lasts, a lane whose worker ended and that got new work starts again
     (`new_work`, sd:5809), rather than wait for a later scheduled run.
-    Once the lanes ended, each hosted lane whose median wait passed an hour
+    Once the lanes ended, each hosted lane whose median wait passed 30 min
     files the parallel-lanes question (`ask_wait`, pack sd:6006), and each same-head gate flake files its
     suite as a defect (`file_flakes`, pack sd:6739).
     A build refusal on the repo-table read (`BUILD_FAULTS`) skips the run

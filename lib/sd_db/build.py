@@ -34,18 +34,20 @@ import subprocess
 import time
 import uuid
 from collections.abc import Collection
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from . import paths, reads
 from .database import transaction
 from .errors import SdDbError
-from .runner import RUNNABLE_KINDS, queue_state, restoration_pending
+from .runner import IN_SESSION, OWNING, RUNNABLE_KINDS, queue_state, restoration_pending
 from .writes import (
     add_note,
     cancel_done_blocked,
     create_assignment,
     create_item,
+    read_settings,
     set_item_fields,
     set_setting,
     transition,
@@ -106,6 +108,13 @@ CANCELLABLE = ("claimed", "worktree", "building", "reviewing", "fixing")
 ACTIVE = ("queued", "running", "ending")
 #: Auto-pickup's end, a UTC timestamp, or none for off (design, "Auto-pickup").
 AUTO_PICKUP = "build.auto_pickup_until"
+#: Who auto-pickup queues as. Its queue note on the lead's item marks the bundle as auto-pickup's for every run
+#: and retry of it, so the merge gets `checking` and the two-blocked rule counts it (pack sd:6097).
+PICKUP = "auto-pickup"
+#: The title prefix of the item a failed health check after an auto-pickup merge files; the push reads it.
+HEALTH = "Auto-pickup off: health failed after the merge of "
+#: On ends at the next morning here (design, "Auto-pickup").
+MORNING, ZONE = 7, ZoneInfo("America/Denver")
 
 
 class BuildRefused(SdDbError):
@@ -148,7 +157,7 @@ def _item(connection, item: int) -> dict:
     if refused:
         raise BuildRefused(refused)
     active = connection.execute(
-        f"SELECT id, status FROM assignment WHERE item = ? AND status IN {ACTIVE} LIMIT 1", (item,)).fetchone()
+        f"SELECT id, status FROM assignment WHERE item = ? AND status IN {OWNING} LIMIT 1", (item,)).fetchone()
     if active:
         raise BuildRefused(f"item {item} has {active['status']} assignment {active['id']}")
     held = _held(connection, item)
@@ -203,6 +212,121 @@ def eligible(connection, *, now: str | None = None) -> list[dict]:
             continue
         found.append({"id": row["id"], "title": row["title"], "repo": row["repo"], "priority": row["priority"]})
     return found
+
+
+def morning(now: str | None = None) -> str:
+    """The next 07:00 America/Denver after `now`, in UTC: where On ends."""
+    here = datetime.fromisoformat(now or clock()).astimezone(ZONE)
+    end = here.replace(hour=MORNING, minute=0, second=0, microsecond=0)
+    if end <= here:
+        end = (here + timedelta(days=1)).replace(hour=MORNING, minute=0, second=0, microsecond=0)
+    return end.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def pickup_state(connection, *, now: str | None = None) -> dict:
+    """Auto-pickup now: `on`, `until` (the end set, or None) and `since` (when the setting was last written)."""
+    until = read_settings(connection, [AUTO_PICKUP]).get(AUTO_PICKUP)
+    row = connection.execute("SELECT timestamp FROM state WHERE kind = 'setting' AND key = ? ORDER BY id DESC LIMIT 1",
+                             (AUTO_PICKUP,)).fetchone()
+    try:
+        end = datetime.fromisoformat(until) if until else None
+        on = end is not None and end.tzinfo is not None and end > datetime.fromisoformat(now or clock())
+    except ValueError:
+        on = False  # a value that does not read is off, never on
+    return {"on": on, "until": until, "since": row["timestamp"] if row else None}
+
+
+def set_pickup(connection, on: bool, *, now: str | None = None) -> dict:
+    """On writes the next morning's end; Off writes none. The state after."""
+    set_setting(connection, AUTO_PICKUP, morning(now) if on else None)
+    return pickup_state(connection, now=now)
+
+
+def picked(connection, lead: int) -> bool:
+    """Whether auto-pickup queued the bundle whose lead assignment is `lead`."""
+    return connection.execute(
+        "SELECT 1 FROM note JOIN assignment ON assignment.item = note.item WHERE assignment.id = ? AND note.body = ?",
+        (lead, f"Build assignment {lead} queued by {PICKUP}")).fetchone() is not None
+
+
+def pickup(connection, available: dict, *, now: str | None = None) -> list[int]:
+    """One tick of auto-pickup while it is on: queue `eligible` items, as `PICKUP`, to fill the room; the items.
+
+    The press queue goes first: while any build is queued, nothing is picked
+    and the claim drains it. Each free builder slot takes one bundle of up
+    to `BUNDLE_MAX` items of one repository, each repository at most its
+    `room_for`. No room, or no item, queues nothing.
+    """
+    if available["why"] or not pickup_state(connection, now=now)["on"]:
+        return []
+    if connection.execute("SELECT 1 FROM assignment WHERE status = 'queued' AND scope = ? LIMIT 1",
+                          (SCOPE,)).fetchone():
+        return []
+    slots, chosen = available["machine"], []
+    bundles: dict[str, list[list[int]]] = {}
+    for row in eligible(connection, now=now):
+        repo = row["repo"]
+        taken = bundles.setdefault(repo, [])
+        if taken and len(taken[-1]) < BUNDLE_MAX:
+            taken[-1].append(row["id"])
+        elif slots > 0 and len(taken) < room_for(available, repo):
+            taken.append([row["id"]])
+            slots -= 1
+        else:
+            continue
+        chosen.append(row["id"])
+    if not chosen:
+        return []
+    try:
+        queue(connection, chosen, who=PICKUP)
+    except BuildRefused:
+        return []  # an item moved since `eligible` read it: the next tick reads again
+    return chosen
+
+
+def stop_on_blocks(connection, *, now: str | None = None) -> str | None:
+    """Two auto-pickup bundles in a row that end blocked, since On was written, turn auto-pickup off with no push.
+
+    A bundle ends `done` (it reached the lane) or `blocked`; a blocked run,
+    a second loss and a denied run each end it blocked. A cancel is the
+    operator's and does not count. The note on the latest one's item says
+    why. The reason, or None.
+    """
+    state = pickup_state(connection, now=now)
+    if not state["on"]:
+        return None
+    rows = connection.execute(
+        "SELECT id, item, status FROM assignment WHERE scope = ? AND parent IS NULL AND status IN ('done', 'blocked') "
+        "AND ended >= ? ORDER BY ended DESC, id DESC", (SCOPE, state["since"])).fetchall()
+    ended = [row for row in rows if picked(connection, row["id"])][:2]
+    if len(ended) < 2 or any(row["status"] != "blocked" for row in ended):
+        return None
+    reason = (f"auto-pickup is off: build assignments {ended[1]['id']} and {ended[0]['id']} ended blocked in a row; "
+              f"turn it on again on Queue once they are looked at")
+    with transaction(connection):
+        set_setting(connection, AUTO_PICKUP, None)
+        add_note(connection, ended[0]["item"], "comment", reason[0].upper() + reason[1:])
+    return reason
+
+
+def health_failed(connection, ident: str, why: str) -> int:
+    """A failed health check after an auto-pickup merge: auto-pickup off first, then one item filed per branch,
+    in one transaction; the tick's push reads the item (`today.push_due`). No revert. The item's id."""
+    row = run(connection, ident)
+    title = f"{HEALTH}{row['branch']}"
+    with transaction(connection):
+        set_setting(connection, AUTO_PICKUP, None)
+        found = connection.execute("SELECT id FROM item WHERE title = ? AND status != 'done'", (title,)).fetchone()
+        if found:
+            return found["id"]  # a check run again after a kill files nothing twice
+        filed = create_item(connection, kind="task", title=title, repo=row["repo"])
+        add_note(connection, filed, "comment",
+                 f"Build run {ident} merged {row['branch']}, and the health check after it failed: {why}. Auto-pickup "
+                 f"({AUTO_PICKUP}) is off; nothing was reverted. Look at `dashboard.sh health`, then turn it on again.")
+        for member in row["members"]:
+            add_note(connection, member["item"], "comment",
+                     f"Build run {ident}: health failed after the merge; auto-pickup is off, item {filed} filed")
+        return filed
 
 
 def _key(repo: str | None) -> str | None:
@@ -309,7 +433,9 @@ def _held(connection, item: int) -> str | None:
     """Why no build of `item` may start while a run holds it, or None."""
     run = connection.execute(_holding("?") + " LIMIT 1", (item,)).fetchone()
     if run is None:
-        return None
+        session = connection.execute("SELECT id FROM assignment WHERE item = ? AND status = ? LIMIT 1",
+                                     (item, IN_SESSION)).fetchone()
+        return f"item {item} has in_session assignment {session['id']}: a teammate builds it" if session else None
     return (f"item {item} is held by build run {run['id']} ({run['outcome'] or 'open'}), which releases once "
             f"its process groups read gone")
 
@@ -317,7 +443,7 @@ def _held(connection, item: int) -> str | None:
 _RECHECK = (f"EXISTS (SELECT 1 FROM item WHERE item.id = assignment.item AND item.status = 'ready' "
             f"AND item.kind IN ({', '.join(repr(kind) for kind in RUNNABLE_KINDS)})) "
             f"AND NOT EXISTS (SELECT 1 FROM assignment other WHERE other.item = assignment.item "
-            f"AND other.id != assignment.id AND other.status IN {ACTIVE}) "
+            f"AND other.id != assignment.id AND other.status IN {OWNING}) "
             f"AND NOT EXISTS ({_holding('assignment.item')})")
 
 
@@ -632,7 +758,8 @@ def end(connection, ident: str, outcome: str, detail: str, *, question: str | No
 
 
 def merged(connection, read: dict) -> bool:
-    """The tick moves an `enqueued` run whose lane entry merged to `cleaning`, with a fresh beat and no supervisor.
+    """The tick moves an `enqueued` run whose lane entry merged to `cleaning`, or to `checking` when auto-pickup
+    queued it (`picked`), with a fresh beat and no supervisor.
 
     The compare-and-set matches the row read, at `enqueued` and open; the
     process columns of the supervisor that enqueued it are cleared, so the
@@ -640,11 +767,12 @@ def merged(connection, read: dict) -> bool:
     """
     with transaction(connection):
         stamp = clock()
+        step = "checking" if picked(connection, read["assignment"]) else "cleaning"
         return connection.execute(
-            f"UPDATE runner_run SET step = 'cleaning', heartbeat_at = ?, supervisor_pid = NULL, "
+            f"UPDATE runner_run SET step = ?, heartbeat_at = ?, supervisor_pid = NULL, "
             f"supervisor_pgid = NULL, supervisor_start = NULL, builder_pgid = NULL, builder_start = NULL, "
             f"updated_at = ? WHERE id = ? AND step = 'enqueued' AND {_SAME}",
-            (stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount == 1
+            (step, stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount == 1
 
 
 def lane_failed(connection, read: dict, reason: str) -> bool:

@@ -751,6 +751,58 @@ class ReviewCompanions(WritingCase):
         with self.assertRaisesRegex(WorkflowError, "26% of the draft"):
             self.reconcile()
 
+    def test_a_research_generation_past_the_int_digit_limit_is_an_earlier_generation(self):
+        """pack sd:7242 review: int() refuses a digit string past 4,300 digits with ValueError. A research stamp is
+        file text, and piece_state reads it for every piece on /api/writing, so such a stamp is an old generation."""
+        stamp = f"<!-- reconciled-with-draft: {self.digest} on 2026-09-08 gen={'9' * 5000} -->"
+        (self.folder / "research.md").write_text(f"{stamp}\nSource.\n")
+        self.assertIn("research.md belongs to an earlier gate generation", readiness(self.db, self.item)["problems"])
+
+    def set_fields(self, **extra):
+        held = json.loads(self.db.execute("SELECT fields FROM item WHERE id = ?", (self.item,)).fetchone()[0])
+        # json.dumps refuses an int past 4,300 digits too, so the stored text is spliced by hand.
+        text = json.dumps({**held, **{key: 0 for key in extra}})
+        for key, raw in extra.items():
+            text = text.replace(f'"{key}": 0', f'"{key}": {raw}')
+        self.db.execute("UPDATE item SET fields = ? WHERE id = ?", (text, self.item))
+        self.db.commit()
+
+    def test_item_fields_with_an_int_past_the_digit_limit_leave_piece_state_readable(self):
+        """pack sd:7329, same class as sd:7242: json.loads refuses an integer literal past 4,300 digits with
+        ValueError, and the item fields are JSON that SQLite's json_valid accepts. piece_state runs for every
+        piece on /api/writing, so such a number reads as unset and the rest of the piece still reads."""
+        big = "9" * 5000
+        gate = ('{"verdict": "pass", "generation": %s, "draft_digest": "%s", "findings": '
+                '[{"id": %s, "disposition": "open", "confidence": "CERTAIN"}]}' % (big, self.digest, big))
+        self.set_fields(writing_gates='{"fact-check": %s}' % gate, weight=big)
+        state = piece_state(self.db, self.item)["writing"]
+        json.dumps(state, allow_nan=False)  # an int past 4,300 digits would raise ValueError here too
+        self.assertIn("fact-check gate is stale against this draft or generation", state["gates"]["problems"])
+        self.assertEqual(state["metadata"]["title"], "A piece")
+
+    def test_a_claim_state_with_an_int_past_the_digit_limit_reads_it_as_unset(self):
+        """pack sd:7329: a claim's state is JSON text; one number past 4,300 digits raised out of piece_state."""
+        big = "9" * 5000
+        claim = ("INSERT INTO publication_claim (id, item, payload, state, created_at, updated_at) "
+                 "VALUES (?, ?, '{}', ?, ?, ?)")
+        self.db.execute(claim, ("c0aim0000000", self.item, '{"phase": "published", "document_id": %s, "url": %s,'
+                                ' "reconcile_required": [%s]}' % (big, big, big), now(), now()))
+        self.db.commit()
+        claims = piece_state(self.db, self.item)["writing"]["publications"]
+        json.dumps(claims, allow_nan=False)
+        self.assertEqual([(c["phase"], c["document_id"], c["url"]) for c in claims], [("published", None, None)])
+
+    def test_reconcile_refuses_a_run_record_past_the_int_digit_limit(self):
+        """pack sd:7242 review, same class: a run record's word count is file text, so one past 4,300 digits is no
+        run record; the reconcile then cannot tell what the run read and refuses as a WorkflowError."""
+        self.write_draft(SENTENCES)
+        digest = readiness(self.db, self.item)["digest"]
+        record = f"<!-- adversarial-reviewed: words={'9' * 5000} sentences=0000aaaa -->"
+        (self.folder / "adversarial.md").write_text(f"<!-- reconciled-with-draft: 000000000000 on 2026-09-08 -->\n\n{record}\n\n# Old review\n")
+        self.assertNotEqual(digest, "000000000000")
+        with self.assertRaisesRegex(WorkflowError, "cannot tell how much of the draft the last run read"):
+            self.reconcile()
+
     def test_research_reconcile_stamps_the_draft_and_generation(self):
         self.write_draft(SENTENCES)
         self.assertIn("research.md is missing, unstamped or stale against this draft", readiness(self.db, self.item)["problems"])

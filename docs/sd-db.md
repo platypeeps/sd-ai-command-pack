@@ -481,20 +481,13 @@ A pair whose old answer is not a number is counted and not compared.
 Examples are a `--fallback` marker, or a noul asked under a `--gate` other than 0.5.
 A stage with no such pair says `no paired samples with the old mechanism`.
 
-## `telemetry export`: build runs as traces
-
-`sd-db telemetry export [--endpoint URL]` sends every ended build run as one OTLP/JSON trace, Phoenix project `sd-workflow`.
-Spans: the run, then claim, build, each review round, enqueue, lane and merge, from the run's row, notes and cost rows.
-The root carries repo, items, titles, model, cost, tokens, review round, outcome and a failure class (`telemetry.CLASSES`).
-No note body, prompt or `detail` text is sent.
-The run id is the trace id and span ids hash it, so a repeat export is a no-op in Phoenix; each export sends the whole history.
-The endpoint is `--endpoint`, else `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, else `http://127.0.0.1:4338/v1/traces`.
-No collector there prints a skip and exits 0.
-A build's spawn env appends `sd.build_run` and `sd.items` to `OTEL_RESOURCE_ATTRIBUTES`, so Claude Code's own OTel joins the trace.
+## `telemetry report`: the monthly lane report
 
 `sd-db telemetry report [--month YYYY-MM] [--out FILE]` writes the monthly lane report draft for the writing pipeline (pack sd:6947), last month by default, to stdout or `FILE`.
-It reads the same runs: merged PRs with cost and lead time, failure classes against the month before, review rounds and the repeat-blocker rate, denied tool calls, database-lock refusals, and a Phoenix trace link for the first run of each failure class and the three costliest merges.
-Like the export it carries item ids, PR numbers, counts and cost, never a title, note body or `detail`.
+It reads every ended build run from the store: merged PRs with cost and lead time, failure classes against the month before (`telemetry.CLASSES`), review rounds and the repeat-blocker rate, denied tool calls, database-lock refusals, and the run id of the first run of each failure class and of the three costliest merges.
+It carries item ids, PR numbers, run ids, counts and cost, never a title, note body or `detail`.
+sd-db sends no traces: the genai-traces collector is the one sink (pack sd:7365).
+A build's spawn env appends `sd.build_run` and `sd.items` to `OTEL_RESOURCE_ATTRIBUTES`, so Claude Code's own OTel names the run.
 
 ## `review`: one queue of small questions
 

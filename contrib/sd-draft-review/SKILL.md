@@ -26,6 +26,7 @@ sd config get sdw.drive_writing_folder
 
 An unset value exits 1 and prints the `config set` command that fixes it. Stop and show the user that line. Never guess an address or a folder.
 This skill writes only the drafts folder. It never writes the publishing folder: a draft there is published unreviewed. `sd-publish-drive` owns that folder.
+Change marks belong to this review copy alone. `sd-publish-drive` imports a clean copy, because the primary blog publishes from the publishing folder and a review mark must never ship.
 
 ## push
 
@@ -39,10 +40,16 @@ This skill writes only the drafts folder. It never writes the publishing folder:
 4. Build both documents with `pack review build-html --piece <year>/<slug> --out <scratch dir>`. It writes `draft.html` (the `## Draft` prose only, never `Notes / angle` or `Outline`) and `research.html` (all of `research.md`, marked internal), with images inlined. Do not hand-roll a converter.
    Check the printed `images=` count against the piece's `images/` folder. A `WARNING: missing image(s)` line is a stop.
 5. Confirm the folder: `get_drive_shareable_link` on `drive_writing_folder` must return the drafts folder's name, not the publishing folder's. If it returns the publishing folder, the two keys are swapped: stop and tell the user.
-6. Copy both files into the `workspace-mcp` attachments folder (`~/.workspace-mcp/attachments` by default; the server's refusal names it). Always pass `file_path`, never `content`.
+6. Copy both files into the `workspace-mcp` attachments folder (a re-push writes the marked copies there in step 7 instead). The folder is `~/.workspace-mcp/attachments` by default; the server's refusal names it. Always pass `file_path`, never `content`.
 7. Each piece gets `<drafts>/<year>/<slug>/`. Search for the year and slug folders before creating them.
    - First push: `import_to_google_doc` per document with `user_google_email`, `folder_id`, `file_name` (the title, or `Research — <title>`), `file_path`, and `source_format: "html"`.
-   - Re-push: `update_drive_file` with the recorded `file_id`, the new `file_path`, and `source_format: "html"`. Say in the report that comment anchors detach, and that revision history keeps the old body.
+   - Re-push: mark what changed first, then `update_drive_file` with the recorded `file_id`, the marked file's `file_path`, and `source_format: "html"`. Say in the report that comment anchors detach, and that revision history keeps the old body.
+     Per document, read the current Doc with `get_doc_as_markdown` (`comment_mode: "none"`) into `<scratch dir>/<name>.previous.md`, then run
+     `sd-research-kit highlight --previous <scratch dir>/<name>.previous.md --since "<push time>" --skip-header <scratch dir>/<name>.html <attachments>/<name>.html`.
+     `--skip-header` leaves the header block above the first rule uncompared, since its push time changes every push; no other caller passes it.
+     `<push time>` is the `pushed` time in that copy's header. Changed paragraphs, list items, headings, table cells and code blocks get a yellow background. One note under the header gives the count, how many earlier paragraphs no longer appear, and their sections; `No changes since` when neither.
+     Reviewer edits are in that read-back, so they count as already seen. A failed read or a refusal stops the re-push: an unknown baseline would mark nothing or everything.
+     A first push imports unmarked: it has nothing to compare against.
    - A result that is not `application/vnd.google-apps.document` is a failure to report.
 8. Read the doc back with `get_doc_as_markdown` (`comment_mode: "none"`). Check the header word count and push date, that images came back as `googleusercontent` URLs, and that headings arrived as `##`.
 9. `pack pieces set-review-url --piece <year>/<slug> --target gdocs --url <draft URL>`. It also stamps `review_urls.gdocs_digest`. It changes no stage.
@@ -50,7 +57,7 @@ This skill writes only the drafts folder. It never writes the publishing folder:
     `sd store get sdw.blog-idea "<idea title>" --section 'Drive docs'`, merge, then `sd store set sdw.blog-idea "<idea title>" --section-file 'Drive docs=<file>'`.
     The section is replaced whole, so carry the old lines over. One `- <label>: <url>` line per document: `Draft review copy`, `Research notes`, `Published copy`. Without `obsidian_source`, say so.
 
-Push report: the URL, word count, stage, and how comments come back (`/sd-draft-review pull`; nothing watches for them). A failed push leaves `review_urls.gdocs` unchanged.
+Push report: the URL, word count, stage, the `highlight` count and sections on a re-push, and how comments come back (`/sd-draft-review pull`; nothing watches for them). A failed push leaves `review_urls.gdocs` unchanged.
 
 ## pull
 

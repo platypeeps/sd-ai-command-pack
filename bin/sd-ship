@@ -47,6 +47,7 @@ from sd_ship_review import (
     carry_forward,
     dropped_catch_up,
     failing_check_tails,
+    gate_code,
     is_ancestor,
     lead_review,
     named_commits,
@@ -1265,14 +1266,15 @@ class Ship(SharedReview):
             return False
         base = self.gate_check_base()
         check = adjudicated_check(self.root, head, base, self.database if base else None,
-                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS)
+                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS,
+                                  slot_timeout=getattr(self.args, "slot_timeout", None) or sd_lib.GATE_SLOT_SECONDS)
         passed = check["status"] == "pass"
         self.save(review_skipped={**tiered, "head": head, "check": check, "recorded_at": self.runtime.clock()},
                   reviewed_head=head if passed else None)
         if not passed:
             said = "\n".join(failing_check_tails(check.get("checks"))) or check.get("detail") or "no check output"
             raise Refusal(f"review skipped: {tiered['tier']}; the repository gate failed at {head[:12]}: {said}",
-                          code="gate_failed", boundary="runtime", state="retryable_failure",
+                          code=gate_code(check), boundary="runtime", state="retryable_failure",
                           next_action="Fix the gate, or rerun prepare when the machine is less loaded "
                                       "(--review-timeout raises the limit); no review pass was spent.")
         print(f"sd-ship: review skipped: {tiered['tier']} ({tiered['reason']}); the gate passed at {head[:12]}, "
@@ -1429,6 +1431,7 @@ class Ship(SharedReview):
             return self.reconcile()
         self.refuse_live_review()
         self.require_claim()
+        self.check_held(tuple(dict.fromkeys(self.args.closes)))  # before it commits or catches up (pack sd:7221)
         if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))
                 and (self.args.path or self.args.message_file)):
             raise Refusal("additional review cannot commit; name an already committed exact head")
@@ -1821,12 +1824,13 @@ class Ship(SharedReview):
         grant.
         """
         try:
-            from sd_db.repos import registered_for
+            from sd_db.repos import policy_merge, registered_for
 
             origin = git(self.root, "config", "--get", "remote.origin.url")
             path = registered_for(self.connection, str(self.root.resolve()), origin)
             row = sd_lib.repo_row(self.connection, path)  # `~/...` or legacy (sd:1439)
-            if row is None or row["runner_merge"] != "auto":
+            # pack sd:7366: the setting is the row's `policy.merge`; anything but `auto` there is no grant.
+            if row is None or policy_merge(row["declarations"]) != "auto":
                 return False
             return slug(row["remote"] or "") == self.repository
         except (ImportError, LookupError, OSError, Refusal, sqlite3.Error, ValueError):
@@ -1949,6 +1953,12 @@ class Ship(SharedReview):
         """Refuse a co-delivered item the merge could not close, before anything is published (`sd_ship_body.refuse_unclosable`)."""
         if not self.args.no_item:
             sd_ship_body.refuse_unclosable(self.connection, self.args.item, self.item["repo"], named, deliver)
+        self.check_held(named)
+
+    def check_held(self, named: tuple[int, ...]) -> None:
+        """Refuse delivering the item or any of `named` while an open teammate run holds it (pack sd:7221)."""
+        if not self.args.no_item:
+            sd_ship_body.refuse_teammate_held(self.connection, (self.args.item, *named))
 
     def title_left_open(self, title: str, closing: list[int], deliver: bool) -> list[str]:
         """One warning when a delivering title names items this merge leaves open (sd:3704)."""
@@ -2321,6 +2331,7 @@ class Ship(SharedReview):
         if self.merge_head() != head:
             raise Refusal("HEAD moved immediately before merge")
         self.merge_authority()
+        self.check_held(self.co_delivered())  # a teammate run may have started during the gate (pack sd:7221)
         self.still_allowed(base, observed["number"], head, protection)
         # `row_authorized_merge` is written here, with the phase that says a
         # merge is going out, and it is written on every dispatch rather than
@@ -2931,10 +2942,14 @@ def review_timeout_flag(action) -> None:
 
     It reaches sd-review's `--timeout`, which bounds the repository gate and
     each reviewer, and sd-review's timing plan sizes the watchdog from it.
+    `--slot-timeout` reaches the gate's slot wait the same way (pack sd:7412).
     """
     action.add_argument("--review-timeout", type=review_seconds, metavar="SECONDS",
                         help="per-phase limit for sd-review: the repository gate, then each reviewer "
                              "(default: sd-review's own)")
+    action.add_argument("--slot-timeout", type=sd_lib.slot_bound_seconds, metavar="SECONDS",
+                        help="the repository gate's wait for a slot; the lane passes its run budget left "
+                             f"(default {sd_lib.GATE_SLOT_SECONDS})")
 
 
 def no_item_record_flags(action) -> None:

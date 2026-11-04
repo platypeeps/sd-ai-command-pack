@@ -133,6 +133,33 @@ class TheBuilders(TodayCase):
                          {"quiet": ("building", "stalled"), "lane": ("lane", "running"), "held": ("building", "blocked")})
         self.assertEqual(rows["quiet"]["quiet"], 600)
 
+    def test_a_teammate_run_shows_its_items_worktree_and_budget_as_its_eta(self):
+        """pack sd:7221: a lead's in-session builder is a builder row too; its ETA is its start plus the budget."""
+        from sd_db import teammate
+
+        first = self.item("Port the page", kind="task", repo=self.repo_path, status="in_progress")
+        second = self.item("Fix the link", kind="task", repo=self.repo_path, status="in_progress")
+        run = teammate.start(self.connection, [first, second], worktree="/w/pack-7221", branch="feat/x",
+                             budget_minutes=60, owner="lead")
+        self.connection.execute("UPDATE runner_run SET created_at = ?, heartbeat_at = ? WHERE id = ?",
+                                (ago(minutes=30), ago(minutes=12), run["id"]))
+        self.connection.commit()
+        [row] = self.today()["builders"]["rows"]
+        self.assertEqual((row["run"], row["teammate"], row["repo"], [it["item"] for it in row["items"]], row["stage"],
+                          row["state"], row["worktree"], row["branch"]),
+                         (run["id"], True, "pack", [first, second], "building", "running", "/w/pack-7221", "feat/x"))
+        self.assertEqual((row["started"], row["eta"], row["eta_why"], row["quiet"]),
+                         ("2026-09-06T11:30:00Z", "2026-09-06T12:30:00Z", "its lead's 60 min budget", 720))
+        self.connection.execute("UPDATE runner_run SET created_at = ? WHERE id = ?", (ago(minutes=61), run["id"]))
+        self.connection.commit()
+        self.assertEqual(self.today()["builders"]["rows"][0]["state"], "stalled")
+        self.connection.execute("UPDATE runner_run SET created_at = ?, heartbeat_at = ? WHERE id = ?",
+                                (ago(minutes=91), ago(minutes=91), run["id"]))
+        self.connection.commit()
+        row = self.today()["builders"]["rows"][0]
+        self.assertEqual(row["state"], "stalled")
+        self.assertIn("overdue: no beat for 91 min", row["eta_why"])
+
     def test_a_build_read_that_failed_is_its_reason_never_no_builders(self):
         from sd_db import build
 
@@ -155,11 +182,22 @@ class TheQueues(TodayCase):
         rows = self.today()["queues"]["rows"]
         self.assertIn(("ready", ready, "P1"), [(row["queue"], row["id"], row["detail"]) for row in rows])
 
+    def test_the_queues_carry_what_sd_next_suggests_in_its_order(self):
+        """Pack sd:7314: the Queue view's Suggested rows are `sd_db.today.suggested`: ready, planned, unscheduled."""
+        from sd_db import create_item
+
+        loose = create_item(self.connection, kind="task", title="Loose", priority=2)
+        dated = create_item(self.connection, kind="task", title="Dated", due="2026-09-20")
+        ready = create_item(self.connection, kind="task", title="Build me next", status="ready", priority=1)
+        found = self.today()["queues"]["suggested"]
+        self.assertEqual([(row["id"], row["why"]) for row in found if row["id"] in (loose, dated, ready)],
+                         [(ready, "ready"), (dated, "planned"), (loose, "unscheduled")])
+
     def test_a_queues_read_that_failed_is_its_reason_never_empty(self):
         from sd_db import today
 
         with mock.patch.object(today, "queues", side_effect=sqlite3.OperationalError("database is locked")):
-            self.assertEqual(self.today()["queues"], {"rows": [], "error": "database is locked"})
+            self.assertEqual(self.today()["queues"], {"rows": [], "suggested": [], "error": "database is locked"})
 
 
 QUEUED = [{"queue": "ready", "id": 7, "repo": "~/repos/pack", "title": "Port the page", "status": "ready",
@@ -223,6 +261,13 @@ class RowDetails(ReaderCase):
         self.assertIn("pack: next, position 2", out["R"]["live"])
         self.assertIn("nightly-sync failed with exit 7", out["R"]["job"])
         self.assertEqual(out["R"]["sel"], ["job:nightly-sync:7"])
+
+    def test_a_teammate_row_shows_its_worktree_in_its_details(self):
+        self.doc["builders"]["rows"].append({**BUILDER, "run": "team", "teammate": True, "worktree": "/w/pack-7221",
+                                             "eta_why": "its lead's 60 min budget"})
+        out = self.run_page(self.click("queue", "tr[data-id]", "run:team") + " R.details = ELS.details.html;")
+        for text in ("Teammate run · running", "<dt>Worktree</dt><dd>/w/pack-7221</dd>", "its lead&#39;s 60 min budget"):
+            self.assertIn(text, out["R"]["details"])
 
     def test_the_address_keeps_a_live_selection(self):
         out = self.run_page("R.details = ELS.details.html; R.row = location.search;", search="?row=live%3A7")

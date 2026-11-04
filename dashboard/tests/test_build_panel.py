@@ -4,6 +4,7 @@
 """
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -132,6 +133,28 @@ class BuildsPanel(Fixture):
         self.assertIsNotNone(build.run(self.connection, run["id"])["cancel_requested"])
         again = builds.panel(self.connection, now=run["created_at"])["runs"][0]["cancel"]
         self.assertFalse(again["allowed"])
+
+    def test_a_teammate_run_is_a_working_row_with_its_worktree_due_time_and_no_cancel(self):
+        """pack sd:7221: a lead's in-session builder shows beside the headless runs; past its budget it is stalled."""
+        from sd_db import teammate
+
+        items = [self.ready(status="in_progress"), self.ready(status="in_progress")]
+        run = teammate.start(self.connection, items, worktree="/w/pack-7221", branch="feat/x", budget_minutes=90,
+                             owner="lead")
+        [row] = self.panel(run["created_at"])["runs"]
+        self.assertEqual((row["run"], row["teammate"], [m["item"] for m in row["items"]], row["state"], row["worktree"],
+                          row["branch"], row["due"], row["budget"]),
+                         (run["id"], True, items, "working", "/w/pack-7221", "feat/x", run["due"], 90))
+        self.assertFalse(row["cancel"]["allowed"])
+        self.assertIn(f"sd assignments beat {items[0]} --end", row["cancel"]["reason"])
+        late = self.panel(run["due"])["runs"][0]
+        self.assertEqual((late["state"], late["why"]), ("stalled", "past its budget"))
+        edge = (datetime.fromisoformat(run["created_at"]) + timedelta(minutes=90 + teammate.GRACE_MINUTES)).isoformat()
+        overdue = self.panel(edge)["runs"][0]
+        self.assertEqual(overdue["state"], "stalled")
+        self.assertTrue(overdue["why"].startswith("overdue: no beat for 120 min"), overdue["why"])
+        teammate.end(self.connection, items[0])
+        self.assertEqual(self.panel(run["created_at"])["runs"], [])
 
     def test_a_silent_supervisor_is_lost_and_a_quiet_builder_log_is_stalled(self):
         run = self.claimed([self.ready()])
@@ -276,3 +299,21 @@ class SendToBuilder(Fixture):
             "SELECT COUNT(*) FROM assignment WHERE scope = 'build' AND status = 'queued'").fetchone()[0], 0)
         self.assertEqual(self.connection.execute(
             "SELECT COUNT(*) FROM note WHERE body LIKE 'Send to builder:%'").fetchone()[0], 0)
+
+
+class AutoPickup(Fixture):
+    """pack sd:6097: the Builds panel shows auto-pickup and its On and Off write it, bound to the value read."""
+
+    def test_on_and_off_write_the_setting_against_the_value_read(self):
+        state = builds.panel(self.connection, now=clock())["pickup"]
+        self.assertEqual((state["on"], state["until"], state["error"]), (False, None, ""))
+        status, _, body = self.post("/api/queue/builds/pickup", {"on": True, "until": None})
+        self.assertEqual((status, body["on"], body["until"]), (200, True, build.morning()), body)
+        self.assertEqual(len(self.kicks), 1, "On starts a tick now")
+        status, _, body = self.post("/api/queue/builds/pickup", {"on": False, "until": None})
+        self.assertEqual(status, 409, body)
+        self.assertTrue(build.pickup_state(self.connection)["on"], "a stale Off writes nothing")
+        status, _, body = self.post("/api/queue/builds/pickup", {"on": False, "until": build.morning()})
+        self.assertEqual((status, body["on"]), (200, False), body)
+        for payload in ({"on": "yes", "until": None}, {"on": True}):
+            self.assertEqual(self.post("/api/queue/builds/pickup", payload)[0], 400, payload)

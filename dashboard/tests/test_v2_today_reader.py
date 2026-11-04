@@ -34,6 +34,8 @@ SNOOZE_JS = (V2 / "static" / "snooze.js").read_text(encoding="utf-8")
 SHELL_JS = (V2 / "static" / "shell.js").read_text(encoding="utf-8")
 MARKUP_JS = (V2 / "static" / "markup.js").read_text(encoding="utf-8")
 COMMANDS_JS = (V2 / "static" / "commands.js").read_text(encoding="utf-8")
+# pack sd:7271: a suggested Queue row's Details are the Tasks page's, so today.html loads task-details.js before today.js.
+TASK_DETAILS_JS = (V2 / "static" / "task-details.js").read_text(encoding="utf-8")
 # reconcile reads the walk's rule for a shown row (sd:5113), so the extract carries that line too.
 RECONCILE = (re.search(r"^  const shownRow = .*$", SHELL_JS, re.M).group(0) + "\n"
              + re.search(r"^  function reconcile\(.*?^  }$", SHELL_JS, re.S | re.M).group(0))
@@ -87,7 +89,7 @@ class ReaderCase(ScreenCase):
     def run_page(self, body, search="", after=""):
         script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + PAGE + SHELL_MORE + READ_SHELL
                   + f"\nconst DOC0 = {json.dumps(self.doc)};\nlocation.search = {json.dumps(search)};\n"
-                  + "ANSWER = () => [200, DOC0];\n" + SNOOZE_JS + COMMANDS_JS + TODAY_JS + after
+                  + "ANSWER = () => [200, DOC0];\n" + SNOOZE_JS + COMMANDS_JS + TASK_DETAILS_JS + TODAY_JS + after
                   + "\nvar R = {};\n(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
                   + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
                   + "function run() { OUT.R = R; return JSON.stringify(OUT); }\n")
@@ -256,6 +258,58 @@ decline(cmd('today.lane.approve'), o); await flush(); R.said = (cmd('today.lane.
         self.assertEqual(out["confirms"], [])
         self.assertEqual([(path, body["action"]) for path, body, _ in out["posts"]], [("/api/queue/move", "retry")])
 
+    STALE = "The queue changed since the page read it. Read it again, then retry."
+
+    def test_a_stale_retry_reads_today_again_and_says_so_until_the_next_press(self):
+        # pack sd:7315: a 409 left only a passing toast, and the row looked the same. Today reads again, then a lasting
+        # line above the list says the queue changed and that a press acts on the fresh read; it retries nothing itself.
+        # The next press clears the line, and one that lands leaves it hidden.
+        out = self.run_page(self.DECLINE + f"""let answer = [409, {{ error: {json.dumps(self.STALE)}, reload: true }}];
+ANSWER = (path, body) => path === '/api/queue/move' ? answer : [200, DOC0];
+const said = () => [ELS['needs-said'].hidden, ELS['needs-said'].textContent];
+shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.stale = said(); R.gets = OUT.gets.slice(); R.toast = OUT.toasts[OUT.toasts.length - 1].msg;
+answer = [200, {{ ok: true }}]; shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.landed = said();""")
+        self.assertEqual([body["action"] for _, body, _ in out["posts"]], ["retry", "retry"], "nothing retries by itself")
+        self.assertEqual(out["R"]["gets"], ["/api/now", "/api/now"])
+        hidden, text = out["R"]["stale"]
+        self.assertFalse(hidden)
+        self.assertRegex(text, r"^system: sd:5780 not queued again: The queue changed since the page read it\. "
+                               r"Read again at \d\d:\d\d; a press now acts on that read\.$")
+        self.assertIn("Read again at", out["R"]["toast"])
+        self.assertTrue(out["R"]["landed"][0], "a press that lands hides the line")
+
+    def test_a_stale_retry_whose_read_again_failed_claims_no_fresh_read(self):
+        out = self.run_page(self.DECLINE + f"""ANSWER = (path, body) => path === '/api/queue/move' ? [409, {{ error: {json.dumps(self.STALE)}, reload: true }}]
+  : OUT.gets.length > 1 ? [500, {{ error: 'fleet collection was stopped' }}] : [200, DOC0];
+shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.said = ELS['needs-said'].textContent;""")
+        self.assertEqual(out["gets"], ["/api/now", "/api/now"])
+        self.assertEqual(out["R"]["said"], "system: sd:5780 not queued again: The queue changed since the page read it."
+                                           " It was not read again: Read again tries it.")
+
+    def test_a_stale_retry_whose_today_read_left_its_lane_out_claims_no_fresh_read(self):
+        # Review of pack sd:7315: Today was read again, but not this repo's lane; the line claims no fresh read.
+        for name, part in (("lane dark", {"sources": {**self.doc["sources"], "lane": "lane collector failed"}}),
+                           ("lane partial", {"lane": {**self.doc["lane"], "unread_paths": ["/repos/system"]}})):
+            with self.subTest(name):
+                out = self.run_page(self.DECLINE + f"""const DOC1 = {{ ...DOC0, ...{json.dumps(part)} }};
+ANSWER = (path, body) => path === '/api/queue/move' ? [409, {{ error: {json.dumps(self.STALE)}, reload: true }}]
+  : OUT.gets.length > 1 ? [200, DOC1] : [200, DOC0];
+shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.said = ELS['needs-said'].textContent;""")
+                self.assertEqual(out["gets"], ["/api/now", "/api/now"])
+                self.assertEqual(out["R"]["said"], "system: sd:5780 not queued again: The queue changed since the page read it."
+                                                   " It was not read again: Read again tries it.")
+
+    def test_a_retry_with_no_answer_says_its_outcome_is_not_known(self):
+        out = self.run_page(self.DECLINE + f"""ANSWER = (path, body) => path === '/api/queue/move' ? [502, {{ error: 'sd-ship lane gave no answer.' }}] : [200, DOC0];
+shellRun(cmd('today.lane.retry'), C.get('{self.ENTRY}')); await flush(); await flush();
+R.said = [ELS['needs-said'].hidden, ELS['needs-said'].textContent];""")
+        self.assertEqual(out["R"]["said"], [False, "system: not known whether sd:5780 was queued again: sd-ship lane gave no"
+                                                   " answer. The lane was read again; check sd:5780 there before you act again."])
+
     def test_a_group_act_past_the_bulk_limit_asks_first_and_a_small_one_runs(self):
         out = self.run_page(self.DECLINE + """decline(cmd('today.group.snooze'), C.get('group:late'));
 decline(cmd('today.group.seen'), C.get('group:briefs')); await flush();
@@ -348,11 +402,23 @@ class TheTrack(ReaderCase):
         self.assertEqual((out["R"]["key"], out["R"]["table"]), ("", True))
 
 
+HELP = {
+    "jobs": "Failed scheduled jobs. Press to list them in Needs you.",
+    "lane": "Lane entries blocked until someone acts; merging and next are counted under it. Press to list the blocked ones in Needs you.",
+    "reports": "Open job alerts and reports. Press to list them in Needs you.",
+    "pulls": "Pull requests waiting on you. Press to list them in Needs you.",
+    "mail": "Mail waiting for you. Press to list it in Needs you.",
+    "repos": "Checkouts to tidy: ahead of origin, dirty or pinned. Press to list them in Needs you.",
+    "sessions": "Work items with a live session; the small count is sessions. Press to open the Queue view.",
+    "gate": "Gate slots running of the cap, and runs waiting for one; load5 is the machine load. Press to open the Queue view.",
+}
+
+
 class TheLamps(ReaderCase):
     """sd:TBD: a fleet area the server's snapshot kept says when it was read; a stale one is unknown, never green."""
 
     CELLS = """const CELLS = ['repos', 'sessions'].map(src => { const c = El('div'), val = El('span');
-  c.dataset = { src }; c.querySelector = () => val; c.removeAttribute = k => { delete c[k]; }; c.val = val; return c; });
+  c.dataset = { src }; c.querySelector = () => val; c.val = val; return c; });
 document.querySelectorAll = sel => sel === '.cell[data-src]' ? CELLS : [];
 DOC0.observed = { repos: { at: '2026-09-06T11:31:00Z', stale: 'git did not answer' }, sessions: { at: '2026-09-06T11:58:00Z', stale: null } };
 refresh(); await flush();
@@ -360,8 +426,18 @@ R.cells = CELLS.map(c => [c.dataset.src, c.dataset.state, c.title || null]);"""
 
     def test_a_kept_fleet_area_shows_its_read_time_and_a_stale_one_is_unknown(self):
         out = self.run_page(self.CELLS)
-        self.assertEqual(out["R"]["cells"], [["repos", "unknown", "observed 11:31 UTC · stale: git did not answer"],
-                                            ["sessions", "ok", "observed 11:58 UTC"]])
+        self.assertEqual(out["R"]["cells"], [["repos", "unknown", HELP["repos"] + "\nobserved 11:31 UTC · stale: git did not answer"],
+                                            ["sessions", "ok", HELP["sessions"] + "\nobserved 11:58 UTC"]])
+
+    def test_every_lamp_says_what_it_counts_and_what_a_press_does_on_hover(self):
+        # Pack sd:7383: the six source cells and the Sessions and Gate links carry a native title; a lamp's own detail follows it.
+        out = self.run_page("""const CELLS = Object.keys(HELP0).filter(k => k !== 'sessions' && k !== 'gate').map(src => { const c = El('button'), val = El('span');
+  c.dataset = { src }; c.querySelector = () => val; return c; });
+document.querySelectorAll = sel => sel === '.cell[data-src]' ? CELLS : [];
+refresh(); await flush();
+R.titles = Object.fromEntries([...CELLS.map(c => [c.dataset.src, c.title]), ['sessions', ELS['lamp-sessions'].title], ['gate', ELS['lamp-gate'].title]]);""".replace(
+            "Object.keys(HELP0)", json.dumps(sorted(HELP))))
+        self.assertEqual(out["R"]["titles"], HELP)
 
 
 class TheUnreadLamps(ReaderCase):
@@ -382,9 +458,9 @@ document.querySelectorAll = sel => sel === '.cell[data-src]' ? [lane] : [];
 refresh(); await flush();
 R.lane = [lane.dataset.state, lane.title, val.html]; const ses = ELS['lamp-sessions']; R.ses = [ses.dataset.state, ses.title];""")
         state, title, text = out["R"]["lane"]
-        self.assertEqual((state, title), ("unknown", "pack: sd-ship gave no answer"))
+        self.assertEqual((state, title), ("unknown", HELP["lane"] + "\npack: sd-ship gave no answer"))
         self.assertIn("<b>1</b> blocked", text)
-        self.assertEqual(out["R"]["ses"], ["unknown", "herdr: herdr did not answer"])
+        self.assertEqual(out["R"]["ses"], ["unknown", HELP["sessions"] + "\nherdr: herdr did not answer"])
 
 
 class TheSnoozedDarkLamps(ReaderCase):
@@ -619,7 +695,7 @@ class TheBadge(ReaderCase):
                   + "ANSWER = (path, body) => path === '/api/now' ? [200, DOC0]"
                     " : path === '/api/decisions' ? [200, DECISIONS]"
                     " : [200, { revision: 'b'.repeat(64), ruling: { id: 99, kind: 'decision', body: 'x' } }];\n"
-                  + SNOOZE_JS + COMMANDS_JS + TODAY_JS + "\n" + DECISIONS_JS
+                  + SNOOZE_JS + COMMANDS_JS + TASK_DETAILS_JS + TODAY_JS + "\n" + DECISIONS_JS
                   + "\nvar R = {};\nconst click = (note, i) => ELS.decisions.listeners.click[0]({ target: { closest: s => s === 'button[data-option]'"
                     " ? { dataset: { note: String(note), option: String(i) }, closest: () => null } : null } });\n"
                   + "(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"

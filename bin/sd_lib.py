@@ -1250,8 +1250,34 @@ GATE_CHECK_SECONDS = 3600
 GATE_SLOT_SECONDS = 4 * 3600
 
 
+def slot_bound_seconds(text: str) -> int:
+    """`--slot-timeout` of `sd-ship` and `sd-review`: whole seconds above 0, at most `GATE_SLOT_SECONDS`.
+
+    The lane passes its run budget left, so a gate queued under load ends its
+    wait before the job's TERM (pack sd:7412).
+    """
+    if not text.isascii() or not text.isdigit() or not 0 < int(text) <= GATE_SLOT_SECONDS:
+        raise argparse.ArgumentTypeError(f"takes whole seconds from 1 to {GATE_SLOT_SECONDS} (got '{text}')")
+    return int(text)
+
+
+def gate_slot_bound(args: argparse.Namespace) -> int:
+    """The gate's slot-wait bound: `--slot-timeout` when given, the lane's run budget left (pack sd:7412), else
+    `GATE_SLOT_SECONDS` (sd:2611). Here, not in `sd-review`, so the review lane's line cap stays put."""
+    return getattr(args, "slot_timeout", None) or GATE_SLOT_SECONDS
+
+
+def slot_ran_out(gate: Mapping[str, Any]) -> bool:
+    """Whether `sd_gate_run.check_in_worktree`'s gate waited out its slot bound and ran no check (`sd-check`'s
+    `gate_slot.timed_out`, pack sd:7412); a reused receipt or an unread report did not."""
+    return ((gate.get("report") or {}).get("gate_slot") or {}).get("timed_out") is True
+
+
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
-    """`repo.ci` for the repository `root` is a checkout of, else `github`.
+    """`policy.ci.provider` for the repository `root` is a checkout of, `github` or `local` (pack sd:7366).
+
+    `jenkins` reads `github` here, as its column did: `sd-ship` reads the
+    Jenkins job from the policy itself (`jenkins_ci`).
 
     Resolved through `registered_for`, as `sd-ship`'s runner-merge read is, so
     a worktree or a runner clone answers for its row. Every failure answers
@@ -1267,12 +1293,7 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
 
         origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
         path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
-        reader = getattr(repos, "repo_ci", None)
-        if reader is not None:
-            value = reader(connection, path)
-        else:
-            row = repo_row(connection, path)
-            value = row["ci"] if row is not None and "ci" in row.keys() else "github"
+        value = repos.repo_ci(connection, path)  # pack sd:7366: the row's `policy.ci.provider`
     except Exception:  # every fault is "not said"; see the docstring
         return "github"
     return value if value in CI_MODES else "github"

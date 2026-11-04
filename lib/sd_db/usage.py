@@ -127,6 +127,8 @@ def text(usage: reads.Usage) -> str:
             f"estimated {_money(bill.estimated)}, held {_money(bill.held)}, cap {_money(bill.cap)}"
             + (f", room {_money(bill.room)}" if bill.room is not None else "")
         )
+    if usage.unbilled is not None:
+        lines.append(f"  no bill: spent {_money(usage.unbilled)}")
     if usage.roles:
         lines.append("roles:")
     for row in usage.roles:

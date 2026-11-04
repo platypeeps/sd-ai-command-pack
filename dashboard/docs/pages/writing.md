@@ -5,8 +5,11 @@ per stage with four gate lamps per piece, a focused editor and the strip of
 gate counts. `GET /api/writing` (`writing_screen.document`) gives every
 piece, parked ones too: its stage, gate problems, next and correction stages
 and publication claims from `writing.piece_state`, each file's size from
-`writing.piece_files`, and the opening of its draft. The repository goes out
-by its folder name only. Stage asks first and posts
+`writing.piece_files`, and its draft up to `DRAFT_CHARS`, cut at a paragraph
+and marked `draft_cut` past that. The repository goes out by its folder name
+only. Show draft (pack sd:7242), on each piece's row menu, the palette and
+Details, selects the piece and opens its draft in the read-only editor.
+Stage asks first and posts
 `POST /api/items/<id>/stage` with the piece's revision; it has no Undo,
 because going back is a correction. Correct asks for a reason and posts the
 same route with `correct`. Park and Revive post `/park` and `/revive` and
@@ -32,10 +35,20 @@ button per option or a box for words; each answer posts
 is answered, posts Fix with `{"grill": "apply"}`: claude edits the draft to
 follow each ruling and leaves the edit uncommitted.
 
-Not read yet, so drawn as gaps:
+The Ideas column (pack sd:7244) is `ideas` in the same read: the
+`sdw.blog-idea` rows at stage inbox, read with `records.list_rows`, highest
+score first. It shows `IDEAS` of them with the inbox count in its header and
+the strip, and links a title only to an http address. A failed read leaves
+the column unknown with its reason; the pieces still read.
 
-- the vault's blog ideas column: the design read `sd store list sdw.blog-idea`,
-  and the database holds no vault idea rows;
-- the evidence summaries inside `research.md`, `fact-check.md` and
-  `adversarial.md`: the editor shows each file's size, time and lamp;
-- a draft save: the editor is read only, since no route writes a draft.
+Each gate row in Details has a refresh and a view icon (pack sd:7242).
+Draft's refresh reads the pieces again and its view is Show draft.
+Adversarial's refresh is Refresh review. No route runs research or a
+fact-check, so their refresh copies the line that does, to run in the
+content repository. A report's view opens it in the editor's evidence
+pane, read only from `GET /api/writing/<id>/<gate>`
+(`writing_screen.report`) and cut at `REPORT_CHARS`; a missing report's
+view is off and says so.
+
+Not read yet, so drawn as a gap: a draft save. The editor is read only,
+since no route writes a draft.

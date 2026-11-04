@@ -334,7 +334,7 @@ def apply_proposals(connection, item, notes, *, expected_revision, who):
         source = json.loads(state["item"]["fields"] or "{}").get("skill_review", {})
         if not is_review(state["item"]) or not source.get("review_result"):
             raise workflow.WorkflowError("a completed skill review is required")
-        if connection.execute("SELECT 1 FROM assignment WHERE item=? AND status IN ('queued','running','ending')", (item,)).fetchone():
+        if connection.execute(f"SELECT 1 FROM assignment WHERE item=? AND status IN {runner.OWNING}", (item,)).fetchone():
             raise workflow.WorkflowError("wait for the reviewer to finish and release its checkout")
         if connection.execute("SELECT 1 FROM runner_run JOIN assignment ON assignment.id=runner_run.assignment WHERE assignment.item=? AND runner_run.released_at IS NULL", (item,)).fetchone():
             raise workflow.WorkflowError("the review checkout needs reconciliation before applying proposals")

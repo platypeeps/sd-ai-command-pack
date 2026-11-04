@@ -6,7 +6,7 @@ tests pin: a folded pane kept the rail as a 216 px column beside the page on a n
 past the screen edge, and Today's band folds were 23 px tall. A second probe, on a fixture store with open builds, found
 the Build controls' faults: the Tasks board's lanes were 2 px wide, the Build dialog cut each item number to "#", a
 builder run's ETA sentence squeezed its title to one word a line on Today, and Queue's ended-builds fold was 19 px tall.
-The auto-pickup control is not built yet (system design step 7), so it has no layout to pin.
+The auto-pickup line (pack sd:6097) is a `.filtered` line with one `.btn.quiet.sm`, the Queue controls' own.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ SHELL_CSS = (STATIC / "shell.css").read_text(encoding="utf-8")
 TODAY_CSS = (STATIC / "today.css").read_text(encoding="utf-8")
 DECISIONS_CSS = (STATIC / "decisions.css").read_text(encoding="utf-8")
 TASKS_CSS = (STATIC / "tasks.css").read_text(encoding="utf-8")
+# The Build dialog is Tasks' and Today's (commands.build, pack sd:7271); its item list is styled with the Details.
+TASK_DETAILS_CSS = (STATIC / "task-details.css").read_text(encoding="utf-8")
 
 
 def blocks(css: str, query: str, at: str = "@media") -> str:
@@ -84,7 +86,7 @@ class TheBuildControls(unittest.TestCase):
 
     def test_the_build_dialog_keeps_each_item_number_whole(self):
         # `.palette li code` ellipsizes; in a wrapping title row it left "#" and hid which item the Build is for.
-        bodies = [body for sels, body in rules(TASKS_CSS) if ".palette .start-list li code" in sels]
+        bodies = [body for sels, body in rules(TASK_DETAILS_CSS) if ".palette .start-list li code" in sels]
         self.assertEqual(len(bodies), 1)
         self.assertIn("flex: none", bodies[0])
         self.assertIn("overflow: visible", bodies[0])

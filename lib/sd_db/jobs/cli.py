@@ -69,7 +69,7 @@ from ..schema import SCHEMA_VERSION
 from ..sources import index_cache, issues, register
 from ..sources import run as run_sitting
 from ..sources import verify as verify_source
-from ..writes import OPEN_STATE_KINDS
+from ..writes import OPEN_STATE_KINDS, policy_ci, policy_merge
 
 
 def _home() -> Path:
@@ -159,11 +159,8 @@ def command_fence(argv: list[str]) -> int:
     if argv:
         print("sd-db fence: takes no arguments", file=sys.stderr)
         return 1
-    from ..hub import Role, read, role_at
-    satellite = read(_home())
-    # A satellite holds no database and no role, whatever the hub's setting says.
-    found = (Role("elsewhere", satellite.host, f"this machine is a satellite of {satellite.host} (hub.json)")
-             if satellite is not None else role_at(default_path(_home())))
+    from ..hub import role_at, satellite_role
+    found = satellite_role(_home()) or role_at(default_path(_home()))
     print(f"sd-db: fence: {found.state}: {found.reason}")
     return 1 if found.refuses else 0
 
@@ -222,36 +219,11 @@ def command_usage(argv: list[str]) -> int:
 
 
 def command_telemetry(argv: list[str]) -> int:
-    """`telemetry export [--endpoint URL]`: every ended build run as OTLP traces (pack sd:6943).
-    `telemetry report [--month YYYY-MM] [--out FILE]`: the monthly lane report draft (pack sd:6947).
-
-    The endpoint is `--endpoint`, else `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`,
-    else `telemetry.ENDPOINT`. No collector there is a skip, exit 0.
-    """
-    rest = list(argv)
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or telemetry.ENDPOINT
-    if rest[:1] == ["report"]:
-        return _telemetry_report(rest[1:])
-    if rest[:1] != ["export"]:
-        print("sd-db telemetry: expected export [--endpoint URL] or report [--month YYYY-MM] [--out FILE]",
-              file=sys.stderr)
+    """`telemetry report [--month YYYY-MM] [--out FILE]`: the monthly lane report draft (pack sd:6947)."""
+    if argv[:1] != ["report"]:
+        print("sd-db telemetry: expected report [--month YYYY-MM] [--out FILE]", file=sys.stderr)
         return 1
-    rest.pop(0)
-    if rest[:1] == ["--endpoint"] and len(rest) == 2:
-        endpoint = rest[1]
-    elif rest:
-        print("sd-db telemetry export: takes --endpoint URL", file=sys.stderr)
-        return 1
-    connection = _open_for_read()
-    try:
-        result = telemetry.export(connection, endpoint)
-    finally:
-        connection.close()
-    if result["skipped"]:
-        print(f"sd-db telemetry: skip: {result['skipped']}")
-    else:
-        print(f"sd-db telemetry: sent {result['spans']} span(s) of {result['runs']} build run(s) to {endpoint}")
-    return 0
+    return _telemetry_report(argv[1:])
 
 
 def _telemetry_report(rest: list[str]) -> int:
@@ -879,10 +851,11 @@ def command_repo(argv: list[str]) -> int:
                       "`bin/sd-db repo managed PATH yes`", file=sys.stderr)
                 return 0
         for row in rows:
+            # pack sd:7366: `ci` and the last field read the policy, in the words the columns used.
             print(f"sd-db: {row['path']}  {row['remote'] or '-'}  "
                   f"{'yes' if row['managed'] else 'no'}  "
-                  f"{row['ci']}  {issues_policy(connection, row['path'])}  "
-                  f"{row['lane_host'] or LANE_HUB}  {row['runner_merge']}")
+                  f"{policy_ci(row['declarations'])}  {issues_policy(connection, row['path'])}  "
+                  f"{row['lane_host'] or LANE_HUB}  {policy_merge(row['declarations'])}")
         return 0
     finally:
         connection.close()
@@ -1011,8 +984,10 @@ def _repo_declare(connection, rest: list[str]) -> int:
         return 0
     kind, word = rest[1], rest[2]
     target, before = set_declaration(connection, path, kind, declaration_value(kind, word))
+    # `off` on a policy keeps its `merge` and `ci` (pack sd:7366), so the row says what it holds now.
+    after = (declarations(connection, target) or {}).get(kind)
     print(f"sd-db: {target} {kind} {'declared' if before is not None else 'none'} -> "
-          f"{'none' if word == DECLARATION_OFF else 'declared'}")
+          f"{'none' if after is None else 'declared'}")
     return 0
 
 

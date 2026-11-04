@@ -339,7 +339,7 @@ class Supervise(Case):
         self.assertEqual(done.returncode, 2, done.stderr)
 
     def test_the_builder_env_carries_the_run_and_items_for_otel(self):
-        """pack sd:6943: Claude Code's OTel joins the run's trace; a value already there stays first."""
+        """pack sd:6943: Claude Code's OTel names the run; a value already there stays first."""
         self.press(2)
         self.env["OTEL_RESOURCE_ATTRIBUTES"] = "host.name=fixture"
         env = self.supervisor().env
@@ -911,6 +911,59 @@ class Supervise(Case):
         self.assertFalse(Path(self.bundle["work_path"]).exists())
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM runner_run WHERE released_at IS NULL").fetchone()[0], 0)
 
+    def checks(self, sync=0, health=0):
+        """`checking`'s tools: each logs its argv to `checks.log` and exits with the code given."""
+        log = self.root / "checks.log"
+        for name, code in (("sync", sync), ("health", health)):
+            script = self.root / "tools" / f"{name}.py"
+            script.write_text(f"import sys\nopen({str(log)!r}, 'a').write({name!r} + ' ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+                              f"sys.exit({code})\n")
+            setattr(self.tools, name, [sys.executable, str(script)])
+        return log
+
+    def picked_to_checking(self):
+        self.items = [create_item(self.db, kind="task", title="Picked", repo=str(self.repo), status="ready")]
+        build.set_pickup(self.db, True)
+        build.queue(self.db, self.items, who=build.PICKUP)
+        bundle = build.claim(self.db, owner="fixture", load=1.0, load_cap=40.0, interactive=[],
+                             root=self.root / "worktrees")
+        assert bundle is not None
+        self.bundle = bundle
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor().run()
+        entries = json.loads((self.plans / "lane.json").read_text())
+        (self.plans / "lane.json").write_text(json.dumps([{**row, "status": "merged"} for row in entries]))
+        self.assertTrue(build.merged(self.db, build.run(self.db, self.bundle["id"])))
+        self.assertEqual(build.run(self.db, self.bundle["id"])["step"], "checking")
+
+    def test_checking_refreshes_then_checks_health_then_cleans(self):
+        """pack sd:6097: after an auto-pickup merge, repo-sync refresh, then dashboard health, then cleaning."""
+        log = self.checks()
+        self.picked_to_checking()
+        self.assertEqual(self.supervisor().run()["outcome"], "done")
+        self.assertEqual(log.read_text().splitlines(), [f"sync refresh {self.repo}", "health health"])
+        self.assertTrue(build.pickup_state(self.db)["on"], "a passing check leaves auto-pickup on")
+        self.assertFalse(Path(self.bundle["work_path"]).exists())
+
+    def test_a_failed_health_check_turns_auto_pickup_off_and_files(self):
+        """Failure table, Checking: a non-zero exit turns auto-pickup off and files an item; no revert."""
+        log = self.checks(health=1)
+        self.picked_to_checking()
+        self.assertEqual(self.supervisor().run()["outcome"], "done")
+        self.assertEqual(len(log.read_text().splitlines()), 2)
+        self.assertFalse(build.pickup_state(self.db)["on"])
+        filed = self.db.execute("SELECT title FROM item WHERE title LIKE ?", (build.HEALTH + "%",)).fetchall()
+        self.assertEqual([row["title"] for row in filed], [build.HEALTH + self.bundle["branch"]])
+        self.assertFalse(Path(self.bundle["work_path"]).exists(), "the run still cleans up")
+
+    def test_a_failed_refresh_skips_the_health_check(self):
+        log = self.checks(sync=2)
+        self.picked_to_checking()
+        self.supervisor().run()
+        self.assertEqual(log.read_text().splitlines(), [f"sync refresh {self.repo}"])
+        self.assertFalse(build.pickup_state(self.db)["on"])
+
     def hold(self, session: str) -> None:
         work = Path(self.bundle["work_path"])
         sessions.beat(self.db, session, machine=this_host(), cwd=None, found=sessions.worktrees([str(work)]))
@@ -1000,6 +1053,17 @@ class Tick(Case):
             with self.subTest(inputs=inputs):
                 self.assertEqual(self.tick(**inputs)["claimed"], [])
         self.assertEqual(self.spawned, [])
+
+    def test_a_tick_picks_up_ready_items_while_on_and_claims_them(self):
+        """pack sd:6097: each tick while on queues ready items as auto-pickup, and the same tick claims them."""
+        items = [create_item(self.db, kind="task", title="Ready", repo=str(self.repo), status="ready")
+                 for _ in range(2)]
+        self.assertEqual(self.tick()["picked"], [], "off picks nothing")
+        build.set_pickup(self.db, True)
+        self.assertEqual(self.tick(load=None)["picked"], [], "an unread load picks nothing")
+        result = self.tick()
+        self.assertEqual((result["picked"], len(result["claimed"])), (items, 1))
+        self.assertEqual([item_state(self.db, item)["item"]["status"] for item in items], ["in_progress"] * 2)
 
     def test_a_merged_entry_moves_the_run_to_cleaning(self):
         """Failure table, Lane watch: on `merged` the run goes to cleaning with a fresh beat and gets a supervisor."""

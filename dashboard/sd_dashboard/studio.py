@@ -1,24 +1,52 @@
-"""Studio (sd:6920, slice 2 of sd:6919): creative projects, each a folder with a `project.json`, and their artifacts.
+"""Studio (sd:6920, sd:6921; slices 2 and 3 of sd:6919): creative projects, each a folder with a `project.json`.
 
-The shape is `docs/work/2026-10-31-studio/design.md`. This slice reads and serves; it writes nothing.
+The shape is `docs/work/2026-10-31-studio/design.md`. Slice 2 reads and serves; slice 3 moves a project's stage on its
+sd item and pins or hides a file; slice 4 (sd:6922) runs a project's tools and starts its brief session.
 
 **Which projects.** Every `project.json` in a registered repository that sits under `REPO_ROOT`, found by a walk a few
 folders deep that skips dot folders and build output. The page names no repository: a machine with no `project.json`
 shows an empty list, but a folder the walk cannot list, or a `REPO_ROOT` that does not resolve, is a problem the page
-shows first (sd:7151), not an empty list. A repository's key is its folder name; two registered repositories with one name share no key,
-so neither is served and the document names the contest, as Documents does.
+shows first (sd:7151), not an empty list. A repository's key is its folder name; two registered repositories with one
+name each take their path under `REPO_ROOT` with `-` for `/` (`alpha-tools`, `beta-tools`), so both are read (sd:7392).
+A key that two still share is neither's, and the document names it. `repositories` counts the ones the scan read.
 
 **What a project says.** `kind` (`shirt`, `song`, `episode`; a file with no `kind` is another tool's), `title`, `brief`, `item` (`sd:<n>`) and `roots`, a map
 from a role (`reference`, `candidates`, ...) to a folder relative to the project's. A file that does not parse lists
 with its error; a root that leaves the project folder, or names an unknown role, is dropped with its reason.
 
 **The gallery.** Each root's files, listed from disk (the media is untracked: git is never asked), served at
-`/studio/files/<repo key>/<path in the repository>` by `designs.resolve`'s rules with `TYPES` here: every segment a
-name, the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
-file answers under `POLICY`, a sandbox, so an opened SVG runs nothing.
+`/studio/files/<repo key>/<path in the repository>`, each segment percent-encoded, by `designs.resolve`'s rules with
+`TYPES` here: every folder a name, the file's own name a `file_name` (a title with spaces and `!` is one, sd:7395),
+the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
+image answers under `POLICY`, a sandbox, so an opened SVG runs nothing; audio and video under `MEDIA_POLICY`, the
+same without the sandbox, whose null origin Chrome refuses to play (sd:7513). Each file carries its mtime
+(`modified`), each root whether its role is in `RESULTS`, a rendered end result, and each project `updated`, the
+newest mtime of its `project.json` and the files it lists (sd:7490). A kind's `OUTPUTS`, the files its tool renders
+outside any root (a song's `final-video.mp4` in the project folder, and each film directly in
+`illustrated-film/renders/`, sd:7514), list under the role `FINAL`, a result; each is served by its name, resolving
+to itself, so no other file of those folders is, and no deeper one. A renders folder that does not list is a problem.
 
 **Seeking.** `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and `Content-Range` (`byte_range`): past the end
 is 416, and a header that does not parse, or asks for several ranges, gets the whole file (200).
+
+**The stage.** The item a project names holds its stage, as a Writing piece's does: `STAGES` is each kind's strip, and
+`move_stage` moves the item one step along it, at the revision the page read, with a note. A stale revision is a 409
+(`StaleItem`); a stage that is not the next one is a 400; neither writes. The page posts `/api/items/<n>/stage`, the
+route Writing and Watches post; `server.action_route` sends an item that is no writing piece and that one project names
+here. An item at a stage off its strip is refused, so a move never overwrites another tool's stage.
+
+**Pin and hide.** Documents' view state (`writes.set_view`), keyed `studio/<repo key>/<path in the repository>`: a
+rejected candidate hides without a delete. `view_request` refuses a file the gallery does not serve. A view store that
+does not read pins and hides nothing, and `store.reason` says why.
+
+**Actions.** `ACTIONS` here are rows of `run_actions.ACTIONS`, posted to `/api/actions/run` with a project id the
+server finds again: `studio.check` runs `make check` in its checkout, `studio.episode` and `studio.song` run the
+tool in the nearest `tools/` above the project with a verb from `EPISODE_VERBS` or `SONG_VERBS`, and
+`studio.session` starts claude in herdr in the checkout, told to read the brief from `project.json`, and notes the
+pane on the project's item. A song verb that needs more than the song (`import`, `runway`) is not offered.
+A file of a result root re-renders with `RENDER`, its kind's verb, posted as that kind's tool row; a kind with no
+verb there offers no Re-render. A song's `assemble` runs with `--replace` (`SONG_FLAGS`): the tool keeps the last
+render in `media/final-backups`.
 """
 
 from __future__ import annotations
@@ -26,8 +54,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 from . import designs
 
@@ -39,6 +70,14 @@ PROJECT = "project.json"
 
 KINDS = ("shirt", "song", "episode")
 ROLES = ("reference", "candidates", "selected", "print", "stickers", "previews", "media")
+#: The roles that hold a rendered end result (sd:7490): `reference` and `candidates` are inputs and options.
+RESULTS = ("selected", "print", "stickers", "previews", "media")
+#: The files a kind's tool renders outside any root (decision #43036): song_pipeline.py assemble writes final-video.mp4
+#: in the project folder, and song_delivery.py and the hyperframes scripts write each film to
+#: illustrated-film/renders/<Title>.mp4 (sd:7514). An entry ending in `/` is a folder: its own files list, no deeper one.
+#: Each lists under the role `FINAL`, a result, and is served alone, by name.
+OUTPUTS = {"song": ("final-video.mp4", "illustrated-film/renders/")}
+FINAL = "final"
 
 #: The media the gallery serves, each with its type. Anything else is a 404: no page, script or Markdown.
 TYPES = {
@@ -68,9 +107,30 @@ FILES = 500
 
 #: A served file's policy, replacing the dashboard's for that response: nothing runs, nothing loads but itself.
 POLICY = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
+#: The `RANGED` types' policy (sd:7513): under `sandbox` a media document has origin null, and Chrome blocks its own
+#: load (CORS, ERR_FAILED), so nothing plays. Audio and video run no script; `default-src 'none'` and nosniff stay.
+MEDIA_POLICY = POLICY.removeprefix("sandbox; ")
 
 #: The file route's prefix.
 FILES_PREFIX = "/studio/files/"
+
+#: Each kind's stage strip, in order (the design's table). A project's item moves one stage at a time along it.
+STAGES = {
+    "shirt": ("brief", "candidates", "selected", "print_export", "approved", "ordered"),
+    "song": ("lyrics", "suno", "selections", "film", "delivered"),
+    "episode": ("idea", "outlined", "scripted", "in_production", "published"),
+}
+
+#: The first segment of a studio file's view key, so it shares no key with a Documents root.
+VIEW_ROOT = "studio"
+
+
+def file_name(name: str) -> bool:
+    """Whether a gallery file may carry `name` (sd:7395): a render is named like its title (`Song Title!.mp4`), so any
+    name but one that starts with a dot (`.`, `..`, a hidden file), holds a `/`, or holds a control or format character
+    (NUL, a tab, a right-to-left override). Its folders stay `designs.SEGMENT`s."""
+    return (bool(name) and not name.startswith(".") and "/" not in name
+            and not any(unicodedata.category(c) in ("Cc", "Cf") for c in name))
 
 
 def _repo_root(repo_root: Path | None = None) -> Path:
@@ -79,14 +139,18 @@ def _repo_root(repo_root: Path | None = None) -> Path:
 
 def repositories(connection, repo_root: Path | None = None) -> tuple[dict[str, Path], list[str]]:
     """(key -> checkout) for each registered repository under `REPO_ROOT`, and the problems: a `REPO_ROOT` that does not
-    resolve, or a contested key."""
+    resolve, or a key two checkouts still share.
+
+    A key is the checkout's folder name; two checkouts of one name each take their path under `REPO_ROOT`, its folders
+    joined by `-` (`alpha/tools` is `alpha-tools`), so both are read (sd:7392). A key that is still not one checkout's
+    is neither's, and the problem names it."""
     from sd_db import repos
 
     try:
         base = _repo_root(repo_root).resolve(strict=True)
     except (OSError, RuntimeError) as problem:
         return {}, [f"REPO_ROOT {_repo_root(repo_root)} does not resolve: {problem}"]
-    found: dict[str, list[Path]] = {}
+    named: dict[str, set[Path]] = {}
     for row in repos.registered(connection):
         path = Path(str(row["path"])).expanduser()
         try:
@@ -96,11 +160,21 @@ def repositories(connection, repo_root: Path | None = None) -> tuple[dict[str, P
         if resolved == base or not resolved.is_relative_to(base) or not resolved.is_dir():
             continue
         if designs.SEGMENT.fullmatch(resolved.name):
-            found.setdefault(resolved.name, []).append(resolved)
-    keys = {key: paths[0] for key, paths in found.items() if len(set(paths)) == 1}
-    problems = [f"Two registered repositories are named {key}: neither is served." for key, paths in sorted(found.items())
-                if len(set(paths)) > 1]
-    return dict(sorted(keys.items())), problems
+            named.setdefault(resolved.name, set()).add(resolved)
+    claims: dict[str, set[Path]] = {}
+    for name, paths in named.items():
+        for path in paths:
+            claims.setdefault(name if len(paths) == 1 else "-".join(path.relative_to(base).parts), set()).add(path)
+    keys, problems = {}, []
+    for key, paths in sorted(claims.items()):
+        where = ", ".join(sorted(path.relative_to(base).as_posix() for path in paths))
+        if len(paths) > 1:
+            problems.append(f"Two registered repositories take the key {key} ({where}): neither is served.")
+        elif not designs.SEGMENT.fullmatch(key):
+            problems.append(f"The registered repository {where} shares its name, and {key} is no key: it is not served.")
+        else:
+            keys[key] = next(iter(paths))
+    return keys, problems
 
 
 def _project_files(checkout: Path) -> tuple[list[Path], list[OSError]]:
@@ -115,6 +189,20 @@ def _project_files(checkout: Path) -> tuple[list[Path], list[OSError]]:
     return sorted(out), unread
 
 
+def _address(file: str) -> str | None:
+    """`file` percent-encoded for the file route, or None for a name with undecodable bytes (sd:7406: a Linux name
+    holding a surrogate, as os.walk reads it, which `quote` cannot encode and which no URL could carry)."""
+    try:
+        return quote(file)
+    except UnicodeEncodeError:
+        return None
+
+
+def _stamp(seconds: float) -> str:
+    """An mtime as the page's `time.rel` reads it: UTC, to the second."""
+    return datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
     """A root's servable files, as the gallery links them, and whether the list was cut at `FILES`."""
     out, cut = [], False
@@ -122,18 +210,69 @@ def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
         folders[:] = sorted(f for f in folders if designs.SEGMENT.fullmatch(f))
         for name in sorted(names):
             relative = (Path(current) / name).relative_to(checkout).as_posix()
-            found = designs.resolve(relative, checkout, TYPES)
+            address = _address(relative)
+            found = None if address is None else designs.resolve(address, checkout, TYPES, file_name)
             if found is None or not found[0].is_relative_to(root):
                 continue
             if len(out) >= FILES:
                 return out, True
-            target, kind = found
-            try:
-                size = target.stat().st_size
-            except OSError:
-                continue
-            out.append({"path": relative, "name": name, "bytes": size, "type": kind.split("/")[0], "ranged": target.suffix.lower() in RANGED})
+            listed = _listed(found, relative, name)
+            if listed is not None:
+                out.append(listed)
     return out, cut
+
+
+def _listed(found: tuple[Path, str], relative: str, name: str) -> dict | None:
+    """A served file as the gallery lists it, or None when it does not stat."""
+    target, kind = found
+    try:
+        stat = target.stat()
+    except OSError:
+        return None
+    return {"path": relative, "name": name, "bytes": stat.st_size, "type": kind.split("/")[0], "ranged": target.suffix.lower() in RANGED,
+            "modified": _stamp(stat.st_mtime)}
+
+
+def _named(base: Path, names: tuple[str, ...], problems: list[str]):
+    """Each `OUTPUTS` name under the project folder `base`: a file's as it is, and a folder's (`name/`) each of its own
+    files, in name order. A folder that is not there names none; one that is there and does not list is a problem."""
+    for name in names:
+        if not name.endswith("/"):
+            yield name
+            continue
+        try:
+            entries = sorted(os.listdir(base / name))
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as problem:
+            problems.append(f"{FINAL} {name} could not be read: {problem.strerror or problem}")
+            continue
+        yield from (name + entry for entry in entries)
+
+
+def _output(base: Path, names: list[str], target: Path) -> bool:
+    """Whether `target`, a file as requested and resolved, is one `names` names under `base`: a file by its name, or a
+    direct file of a folder (`name/`)."""
+    return any(target.parent == base / name if name.endswith("/") else target == base / name for name in names)
+
+
+def _outputs(checkout: Path, base: Path, names: tuple[str, ...], problems: list[str]) -> tuple[list[dict], bool]:
+    """The `OUTPUTS` named in the project folder `base` that are there, each passing `designs.resolve` and resolving to
+    itself, so one that links elsewhere, even to a sibling, is not listed; and whether the list was cut at `FILES`. A
+    folder that does not list adds to `problems`."""
+    out = []
+    for name in _named(base, names, problems):
+        relative = (base / name).relative_to(checkout).as_posix()
+        address = _address(relative)
+        found = None if address is None else designs.resolve(address, checkout, TYPES, file_name)
+        if found is None or found[0] != base / name:
+            continue
+        if len(out) >= FILES:
+            return out, True
+        listed = _listed(found, relative, Path(name).name)
+        if listed is not None:
+            out.append(listed)
+    return out, False
 
 
 def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) -> dict | None:
@@ -146,7 +285,11 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
     folder = manifest.parent
     relative = folder.relative_to(checkout).as_posix()
     entry = {"id": key if relative == "." else f"{key}/{relative}", "repo": key, "folder": relative, "kind": "", "title": folder.name, "brief": "", "item": None,
-             "roots": [], "problems": [], "error": ""}
+             "roots": [], "problems": [], "error": "", "updated": "", "render": ""}
+    try:
+        entry["updated"] = _stamp(manifest.stat().st_mtime)
+    except OSError:
+        pass
     try:
         data = json.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as problem:
@@ -162,6 +305,7 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
         entry["problems"].append(f"kind {kind!r} is not one of {', '.join(KINDS)}")
     else:
         entry["kind"] = kind
+        entry["render"] = RENDER.get(kind, "")
     for name in ("title", "brief"):
         if isinstance(data.get(name), str) and data[name].strip():
             entry[name] = data[name].strip()
@@ -196,55 +340,175 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
             entry["problems"].append(f"root {role} {value} leaves the project folder")
             continue
         files, cut = _files(checkout, target) if listing else ([], False)
-        entry["roots"].append({"role": role, "path": value, "files": files, "cut": cut})
+        entry["roots"].append({"role": role, "path": value, "files": files, "cut": cut, "result": role in RESULTS})
     entry["roots"].sort(key=lambda r: ROLES.index(r["role"]))
+    if entry["kind"] in OUTPUTS:
+        files, cut = _outputs(checkout, base, OUTPUTS[entry["kind"]], entry["problems"]) if listing else ([], False)
+        if files or not listing:
+            entry["roots"].append({"role": FINAL, "path": ".", "files": files, "cut": cut, "result": True,
+                                   "only": list(OUTPUTS[entry["kind"]])})
+    entry["updated"] = max([entry["updated"], *(f["modified"] for r in entry["roots"] for f in r["files"])])
     return entry
 
 
-def projects(connection, repo_root: Path | None = None) -> tuple[list[dict], list[str]]:
-    """Every project under `REPO_ROOT`, by repository then folder, and the scan's own problems."""
+def projects(connection, repo_root: Path | None = None, *, listing: bool = True) -> tuple[list[dict], list[str], int]:
+    """Every project under `REPO_ROOT`, by repository then folder, the scan's own problems, and how many repositories
+    it read (one whose own folder does not list is not read); `listing` false leaves each root's files out."""
     keys, problems = repositories(connection, repo_root)
-    found = []
+    found, read = [], 0
     for key, checkout in keys.items():
         manifests, unread = _project_files(checkout)
+        read += not any(Path(problem.filename or checkout) == checkout for problem in unread)
         for problem in unread:
             folder = Path(problem.filename or checkout).relative_to(checkout, walk_up=True).as_posix()
             problems.append(f"{key}{'' if folder == '.' else ': ' + folder} could not be read: {problem.strerror or problem}")
-        found.extend(entry for entry in (_project(key, checkout, manifest) for manifest in manifests) if entry is not None)
-    return found, problems
+        found.extend(entry for entry in (_project(key, checkout, manifest, listing=listing) for manifest in manifests)
+                     if entry is not None)
+    return found, problems, read
 
 
 def document(connection, *, now: str = "", repo_root: Path | None = None) -> dict:
     """`/api/studio`: the projects, each with its roots' files, and `attention`, the projects that list an error."""
+    from .documents_screen import views
     from .v2.pages import attention
 
-    found, problems = projects(connection, repo_root)
+    found, problems, read = projects(connection, repo_root)
+    kept, unread = views(connection)
+    for entry in found:
+        _stage(connection, entry)
+        for root in entry["roots"]:
+            for file in root["files"]:
+                state = kept.get(view_key(f"{entry['repo']}/{file['path']}"), {})
+                file["pinned"], file["hidden"] = bool(state.get("pinned")), bool(state.get("hidden"))
     return {
         "read": now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "root": str(_repo_root(repo_root)), "projects": found, "problems": problems,
+        "root": str(_repo_root(repo_root)), "projects": found, "problems": problems, "repositories": read,
+        "store": {"available": not unread, "reason": unread},
         "attention": attention(("caution" if p["error"] or p["problems"] else "ok" for p in found),
                                {"caution": "projects whose project.json lists a problem"}),
     }
 
 
+def view_key(file: str) -> str:
+    """The view key of `/studio/files/<file>`: `studio/<repo key>/<path in the repository>`."""
+    return f"{VIEW_ROOT}/{file}"
+
+
+def next_stage(kind: str, current: str | None) -> str | None:
+    """The stage after `current` on the kind's strip: the first for an item with none, None at the end or off the strip."""
+    strip = STAGES[kind]
+    if not current:
+        return strip[0]
+    if current not in strip:
+        return None
+    at = strip.index(current) + 1
+    return strip[at] if at < len(strip) else None
+
+
+def _stage(connection, entry: dict) -> None:
+    """`entry` with its item's `stage`, the `next` one, the `strip` and the `revision` a move posts; a problem when the
+    item is missing, or at a stage off its kind's strip."""
+    from sd_db import workflow
+
+    entry.update(strip=list(STAGES.get(entry["kind"], ())), stage="", next="", revision="")
+    if entry["item"] is None or not entry["kind"]:
+        return
+    try:
+        state = workflow.item_state(connection, entry["item"])
+    except workflow.MissingItem:
+        entry["problems"].append(f"item sd:{entry['item']} does not exist")
+        return
+    current = state["item"]["stage"] or ""
+    entry.update(stage=current, next=next_stage(entry["kind"], current) or "", revision=state["revision"])
+    if current and current not in STAGES[entry["kind"]]:
+        entry["problems"].append(f"item sd:{entry['item']} is at stage {current!r}, which is not on the {entry['kind']} strip")
+
+
+def naming(connection, item: int, repo_root: Path | None = None) -> dict | None:
+    """The one project whose `project.json` names `item` and a kind, or None; ValueError when two name it."""
+    found = [p for p in projects(connection, repo_root, listing=False)[0] if p["item"] == item and p["kind"]]
+    if len(found) > 1:
+        raise ValueError(f"Two projects name sd:{item}: {', '.join(p['id'] for p in found)}. Name it in one project.json.")
+    return found[0] if found else None
+
+
+def move_stage(connection, item: int, project: dict, target: str, *, who: str, expected_revision: str) -> dict:
+    """Move `item` to `target`, the next stage on `project`'s strip, at `expected_revision`, with a comment note; the
+    item's state after. A stale revision raises `StaleItem` (409); any other stage raises `WorkflowError` (400). The
+    stage and the note are one transaction, so a failure writes neither."""
+    from sd_db import workflow
+    from sd_db.database import transaction
+    from sd_db.writes import add_note, set_item_fields
+
+    kind = project["kind"]
+    with transaction(connection):
+        state = workflow.item_state(connection, item)
+        if state["revision"] != expected_revision:
+            raise workflow.StaleItem(f"item {item} changed; reload it before applying this change")
+        current = state["item"]["stage"] or None
+        if current == target:
+            return state
+        if current and current not in STAGES[kind]:
+            raise workflow.WorkflowError(f"sd:{item} is at stage {current!r}, which is not on the {kind} strip; "
+                                         "move it from the shell")
+        following = next_stage(kind, current)
+        if target != following:
+            raise workflow.WorkflowError(f"A {kind} moves one stage at a time: {current or 'no stage'} goes to "
+                                         f"{following or 'nothing; it is at the end of its strip'}, not {target}.")
+        set_item_fields(connection, item, stage=target)
+        add_note(connection, item, "comment", f"Studio stage {current or 'none'} -> {target} by {who} ({project['id']})",
+                 session=who)
+    return workflow.item_state(connection, item)
+
+
+def view_request(payload: dict):
+    """`POST /api/studio/view`: `{"file", "pinned" | "hidden"}`, `file` as `/studio/files/<file>` names it; the write as
+    `action_route` returns one. A file the gallery does not serve now is refused, so a stale page writes nothing."""
+    from sd_db import writes
+
+    fields = {name: payload[name] for name in ("pinned", "hidden") if name in payload}
+    if (not isinstance(payload.get("file"), str) or set(payload) - {"file", "pinned", "hidden"} or not fields
+            or not all(type(value) is bool for value in fields.values())):
+        raise ValueError("Send the file, and pinned or hidden, true or false.")
+    file = payload["file"]
+
+    def write(connection):
+        address = _address(file)
+        if address is None or located(connection, address) is None:
+            raise ValueError(f"No studio file {file} is served: read the projects again.")
+        return {"file": file, **writes.set_view(connection, view_key(file), **fields)}
+    return write
+
+
 def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path, str] | None:
     """The file `/studio/files/<tail>` names and its type, or None: in a registered repository, inside a root a project
-    of that repository names now, and passing `designs.resolve` with `TYPES`."""
+    of that repository names now, and passing `designs.resolve` with `TYPES` and `file_name`. `tail` is percent-encoded,
+    as the URL carries it; a caller holding a file's plain path quotes it first."""
     key, _, rest = tail.partition("/")
     checkout = repositories(connection, repo_root)[0].get(key)
     if checkout is None or not rest:
         return None
-    found = designs.resolve(rest, checkout, TYPES)
+    found = designs.resolve(rest, checkout, TYPES, file_name)
     if found is None:
         return None
     target = found[0]
+    # An `OUTPUTS` file resolves to itself, as `_outputs` lists it: the path asked for is the file served.
+    asked = checkout.joinpath(*unquote(rest).split("/"))
     for manifest in _project_files(checkout)[0]:
         entry = _project(key, checkout, manifest, listing=False)
         for root in entry["roots"] if entry else ():
             base = (manifest.parent / root["path"]).resolve()
-            if target.is_relative_to(base):
+            if "only" in root:
+                if target == asked and _output(base, root["only"], target):
+                    return found
+            elif target.is_relative_to(base):
                 return found
     return None
+
+
+def policy(target: Path) -> str:
+    """The Content-Security-Policy a served file answers under: `MEDIA_POLICY` for a `RANGED` type, else `POLICY`."""
+    return MEDIA_POLICY if target.suffix.lower() in RANGED else POLICY
 
 
 def byte_range(header: str | None, size: int) -> tuple[int, int, int]:
@@ -273,3 +537,115 @@ def byte_range(header: str | None, size: int) -> tuple[int, int, int]:
             return 416, 0, 0
         end = min(end, size - 1)
     return 206, start, min(end - start + 1, CHUNK)
+
+
+#: The tool verbs Studio runs; each takes the project alone (sd:6922).
+EPISODE_VERBS = ("check", "pack")
+SONG_VERBS = ("validate", "suno-export", "assemble")
+#: The verb that renders a kind's result again, a sub-row's Re-render (sd:7490). A shirt has no tool, and an episode's
+#: `pack` writes Markdown the gallery does not serve, so neither has one.
+RENDER = {"song": "assemble"}
+#: Fixed flags a song verb runs with: assemble replaces the last render, and the tool keeps it in media/final-backups
+#: (decision #43036); without it, assemble refuses while final-video.mp4 exists.
+SONG_FLAGS = {"assemble": ("--replace",)}
+#: The bounds on `make check` and on one tool verb, in seconds.
+CHECK_SECONDS, TOOL_SECONDS = 600, 300
+
+
+def _found(connection, values: dict, names: set[str]) -> tuple[dict, Path, dict]:
+    """The project the page names, read again from disk, its checkout, and the action's fields."""
+    from .run_actions import _fields, _text
+
+    given = _fields(values, names)
+    ident = _text(given["project"], "project")
+    entries = projects(connection, listing=False)[0]
+    entry = next((e for e in entries if e["id"] == ident and not e["error"]), None)
+    if entry is None:
+        raise ValueError(f"{ident!r} is not a Studio project; nothing ran.")
+    return entry, repositories(connection)[0][entry["repo"]], given
+
+
+def _tool(entry: dict, checkout: Path, kind: str, name: str, verbs: tuple[str, ...], verb) -> Path:
+    if entry["kind"] != kind:
+        raise ValueError(f"{entry['id']} is a {entry['kind'] or 'project of no kind'}, not a {kind}; nothing ran.")
+    if verb not in verbs:
+        raise ValueError(f"Choose one of {', '.join(verbs)}; nothing ran.")
+    folder = checkout / entry["folder"]
+    for above in (folder, *folder.parents):
+        if (above / "tools" / name).is_file():
+            return above / "tools" / name
+        if above == checkout:
+            break
+    raise ValueError(f"There is no tools/{name} above {entry['folder']}; nothing ran.")
+
+
+def check_action(connection, values, jobs=None):
+    """`make check` in the project's checkout."""
+    from .run_actions import Step
+
+    _, checkout, _ = _found(connection, values, {"project"})
+    return Step(line=f"cd {checkout} && make check", argv=("make", "check"), cwd=str(checkout), seconds=CHECK_SECONDS)
+
+
+def episode_action(connection, values, jobs=None):
+    """`episode.py <verb> <episode folder>`."""
+    from .run_actions import Step
+
+    entry, checkout, given = _found(connection, values, {"project", "verb"})
+    tool = _tool(entry, checkout, "episode", "episode.py", EPISODE_VERBS, given["verb"])
+    argv = (sys.executable, str(tool), given["verb"], str(checkout / entry["folder"]))
+    return Step(line=" ".join(argv[1:]), argv=argv, cwd=str(checkout), seconds=TOOL_SECONDS)
+
+
+def song_action(connection, values, jobs=None):
+    """`song_pipeline.py <verb> [SONG_FLAGS] <song>`, the song by its folder name."""
+    from .run_actions import Step
+
+    entry, checkout, given = _found(connection, values, {"project", "verb"})
+    tool = _tool(entry, checkout, "song", "song_pipeline.py", SONG_VERBS, given["verb"])
+    argv = (sys.executable, str(tool), given["verb"], *SONG_FLAGS.get(given["verb"], ()), Path(entry["folder"]).name)
+    return Step(line=" ".join(argv[1:]), argv=argv, cwd=str(tool.parent.parent), seconds=TOOL_SECONDS)
+
+
+def session_action(connection, values, jobs=None):
+    """claude in herdr in the project's checkout, told where the brief is; a note on the item names the pane."""
+    import sqlite3
+
+    from sd_db import workflow
+    from sd_db.errors import SdDbError
+
+    from . import fix_session
+    from .run_actions import Step
+
+    entry, checkout, _ = _found(connection, values, {"project"})
+    label = "studio-" + entry["id"].replace("/", "-")
+    manifest = PROJECT if entry["folder"] == "." else f"{entry['folder']}/{PROJECT}"
+    text = (f"You are a Studio session for the {entry['kind'] or 'unkinded'} project {entry['id']}, started from the "
+            f"dashboard. Read {manifest} for its brief and roots, then work on it with the operator. "
+            "Order, upload or buy nothing.")
+
+    def call():
+        pane = fix_session._launch(checkout, label, text)
+        if isinstance(pane, tuple):
+            status, said = pane
+            return (None if status == 504 else 1), said["error"].removeprefix("Fix failed: ")
+        started = f"claude started in herdr pane {pane}"
+        if entry["item"] is None:
+            return 0, f"{started}, workspace {label}, in {checkout}."
+        body = f"Studio: started a claude session in herdr workspace {label}, pane {pane}, for {entry['id']}."
+        try:
+            workflow.add_item_note(connection, entry["item"], kind="comment", who="dashboard", body=body)
+        except (SdDbError, sqlite3.Error) as problem:
+            return 1, f"{started}, but the note on sd:{entry['item']} was not recorded: {problem}"
+        return 0, f"{started}, workspace {label}; noted on sd:{entry['item']}."
+
+    return Step(line=f"cd {checkout} && claude {json.dumps(text)}", call=call, seconds=100)
+
+
+#: The rows `run_actions.ACTIONS` takes from here: name -> (label, check).
+ACTIONS = {
+    "studio.check": ("Check", check_action),
+    "studio.episode": ("Run episode tool", episode_action),
+    "studio.song": ("Run song tool", song_action),
+    "studio.session": ("Start session", session_action),
+}

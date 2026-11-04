@@ -7,7 +7,8 @@ The Queue view (pack sd:7234; the Queue page until then, sd:2585) reads each rep
 and a running row's Release post /api/queue/move, which runs `sd-ship lane move|hold|release|cancel|retry` and nothing
 else. The build runs read /api/queue/builds (`builds.panel`), with ?show=all the ended runs too (pack sd:6834); a blocked
 or cancelled run's Retry posts /api/queue/builds/retry, and its Send to builder posts the same route with a `finding`
-(pack sd:6020); a running build's Cancel posts the assignment cancel route that exists. The runner assignments (pack
+(pack sd:6020); a running build's Cancel posts the assignment cancel route that exists. Auto-pickup's On and Off post
+/api/queue/builds/pickup (`builds.pickup`, pack sd:6097). The runner assignments (pack
 sd:7115, sd:7217) read /api/queue/runner (`queue_screen.runner`)."""
 
 from __future__ import annotations
@@ -53,6 +54,12 @@ def _retry(payload, principal):
     return write
 
 
+def _pickup(payload, principal):
+    from ... import builds
+
+    return builds.pickup(payload)
+
+
 def _move(payload, principal):
     from ... import queue_screen
 
@@ -65,7 +72,8 @@ PAGE = Page(
     html="today.html",
     item="sd:2110",
     api=(Api("/api/queue", _read), Api("/api/queue/move", write=_move), Api("/api/queue/builds", _builds, query=True),
-         Api("/api/queue/builds/retry", write=_retry), Api("/api/queue/runner", _runner)),
+         Api("/api/queue/builds/retry", write=_retry), Api("/api/queue/builds/pickup", write=_pickup),
+         Api("/api/queue/runner", _runner)),
     # server.py serves /api/now and keeps each read's badge for the rail (sd:3446).
     count="/api/now",
 )

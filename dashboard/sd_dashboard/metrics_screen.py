@@ -18,8 +18,8 @@ Progress areas already make:
 - `lanes`: each managed repository's lane over the last 7 days (`times`, pack sd:6006, moved from Queue in pack
   sd:7233): the median wait from enqueue to claim, the median gate time (the speculative gate plus the prepare step)
   and the slowest entry, enqueue to end, read from each entry's history rows by the pack's `sd_lane.lane_times`. A
-  median wait past an hour is `over`: the lane runner files the parallel-lanes question then. The range leaves it at 7
-  days, as it leaves Age.
+  median wait past the 30 min target (pack sd:7412) is `over`: the lane runner files the parallel-lanes question
+  then. The range leaves it at 7 days, as it leaves Age.
 - `controls`: the provider registry as `provider_controls.snapshot` reads it, with its `revision`, and per bill the
   one cap write the route takes (`_writes`), the read the classic Usage area's forms make (sd:3387).
 - `range`: the page's range, `7d` or `6mo` (`RANGES`, pack sd:7208). With `6mo`, `ranged` holds the parts the range
@@ -58,7 +58,7 @@ from .operations_screen import BILL_NAME
 from .queue_screen import READ_FAILURES
 from .tasks_screen import is_scheduled
 
-__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "MONTHS", "RANGES", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW",
+__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "MONTHS", "RANGES", "SLOT_WAIT", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW",
            "document", "health", "slow", "times"]
 
 #: The vendor window the trend draws: seven days, in minutes.
@@ -84,6 +84,9 @@ MONTHS = 6
 #: the refusal's text; its `code` is mostly empty, so the codes count only when present.
 GATE_FAILED = re.compile(r"\bthe repository gate failed\b|\bsd/local-gate is failure on\b")
 GATE_CODES = frozenset({"gate_failed", "ci_not_passing"})
+#: sd-ship's refusal when the gate's slot wait ran out (pack sd:7412). Its text says the gate failed, but no check ran,
+#: so the entry is no gate run; the lane puts such an entry back, and only a lane before it failed one.
+SLOT_WAIT = "gate_slot_wait"
 
 #: An entry the gate passed: the lane merged it (merge refuses a failed `sd/local-gate`) or prepare cleared it.
 PASSED = ("merged", "prepared")
@@ -159,6 +162,8 @@ def _age(connection, now):
 def _failure(entry: dict) -> str:
     """What stopped a failed lane entry: `gate`, `review` (it stopped before the gate ran), `other`, or `unknown`."""
     reason = entry.get("reason")
+    if entry.get("code") == SLOT_WAIT:
+        return "other"
     if entry.get("code") in GATE_CODES or (isinstance(reason, str) and GATE_FAILED.search(reason)):
         return "gate"
     if not isinstance(reason, str) or not reason.strip():
@@ -369,20 +374,18 @@ def _months(today) -> list[str]:
 def _spend_months(connection, now, months):
     """Dollars by bill for each month, one `usage.read` a month, as `sd-db usage --month` reads it.
 
-    `unbilled` is the month's run and bound dollars on rows naming no listed bill (a start session's row may name
-    none), from the read's `roles`, which the bill list leaves out; None when no such row. `spent` is both. `rows` is
-    whether a bill's burn line has a point or such a row exists: a month without either is no rows, not $0.
+    `unbilled` and `spent` are the read's own: the dollars on rows naming no listed bill, and every bill's with them
+    (pack sd:7219). `rows` is whether the month has a run or bound row: a bill's burn point or `unbilled`, both the
+    month's own. A month without either is no rows, not $0. The roles are not asked: they carry every open hold
+    whatever its month (pack sd:7229).
     """
     found, bills = [], {}
     for month in months:
         read = usage.read(connection, month=month, now=now).document()
-        names = {bill["name"] for bill in read["bills"]}
         for bill in read["bills"]:
             bills.setdefault(bill["name"], bill["cost_basis"])
-        loose = [role for role in read["roles"] if role["bill"] not in names]
-        unbilled = round(sum(role["spent"] for role in loose), 6) if loose else None
-        found.append({"month": month, "rows": bool(loose) or any(bill["burn"] for bill in read["bills"]),
-                      "spent": round(read["spent"] + (unbilled or 0.0), 6), "unbilled": unbilled,
+        found.append({"month": month, "rows": read["unbilled"] is not None or any(bill["burn"] for bill in read["bills"]),
+                      "spent": read["spent"], "unbilled": read["unbilled"],
                       "bills": {bill["name"]: bill["spent"] for bill in read["bills"]}})
     return {"error": "", "bills": [{"name": name, "cost_basis": basis} for name, basis in bills.items()], "months": found}
 

@@ -424,7 +424,7 @@ def document(connection, *, now: str = "") -> dict:
         # pack sd:6016: the realm tab that lists the lane, its checkout's realm (None: the realm list was not read).
         lanes.append({"repo": Path(path).name, "path": path, "realm": realm_of(path, "lane", rules), "lane": str(lane),
                       "revision": revision(entries),
-                      "runner_merge": managed[path]["runner_merge"], "host": managed[path]["lane_host"] or "hub",
+                      "runner_merge": repos.policy_merge(managed[path]["declarations"]), "host": managed[path]["lane_host"] or "hub",
                       "rows": rows(entries, path=path, lane=lane, now=clock, done=closed(connection, entries))})
     return {"read": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock)), "load": _load(), "gates": gates,
             "lanes": lanes, "problems": problems, "root": str(root) if root else None, "edits": EDITS,
@@ -454,7 +454,7 @@ def move(payload: dict):
         if row is None:
             raise ValueError("That repository is not registered.")
         path = os.path.expanduser(row["path"])
-        if values["action"] == "approve" and row["runner_merge"] != "manual":
+        if values["action"] == "approve" and repos.policy_merge(row["declarations"]) != "manual":
             raise ValueError("Approve grants the merge on a repository whose runner_merge is manual; this one needs no grant.")
         listed = lane_list(path)
         if not listed.get("ok"):

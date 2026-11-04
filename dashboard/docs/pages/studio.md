@@ -12,14 +12,51 @@ A file that does not parse lists with its error; an unknown kind or role,
 or a root that leaves the project folder, lists as a problem and the root
 is left out. A machine with no `project.json` shows an empty list.
 
+A repository's key is its folder name. Two registered repositories of one
+name each take their path under `REPO_ROOT` with `-` for `/`
+(`alpha-tools`, `beta-tools`), so both are read (sd:7392); a key two still
+share is served for neither and listed as a problem. When the scan names
+a problem and finds no project, the banner says how many repositories it
+read.
+
 Details shows each root's images, audio and video, listed from disk: the
 media is untracked, so git is never asked. Each file is served at
 `/studio/files/<repo>/<path in the repository>` under `designs.resolve`'s
-rules (every segment a name, the file inside the repository) and only
+rules (every folder a name, the file inside the repository) and only
 inside a root a project names; each answer carries a sandbox policy.
+A file's own name may hold spaces and punctuation, such as
+`Song Title!.mp4` (sd:7395): the link encodes it and the server decodes
+it. A name that starts with a dot, or holds a `/` or a control
+character, is never listed or served.
 `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and
 `Content-Range`, so a player seeks; a range past the end is 416, and a
 header that does not parse gets the whole file.
 
-The page writes nothing. The stage strip, pin and hide are slice 3
-(sd:6921); the `studio.*` actions are slice 4 (sd:6922).
+Details draws the kind's stage strip (sd:6921): shirt is brief,
+candidates, selected, print_export, approved, ordered; song is lyrics,
+suno, selections, film, delivered; episode is idea, outlined, scripted,
+in_production, published. The stage is the `stage` of the item the
+`project.json` names. Next stage posts `/api/items/<n>/stage` with the
+revision the page read, the route Writing and Watches post: the server
+sends an item that is no writing piece and that one project names to
+`studio.move_stage`. It moves one stage forward and writes a comment
+note in the same transaction. A stale revision answers 409, any other
+stage 400, and neither writes. An item at a stage off its strip is
+refused and listed as a problem; the shell moves it.
+
+Each gallery file has Pin and Hide, Documents' view state keyed
+`studio/<repo>/<path>` and written by `POST /api/studio/view`
+(`{"file", "pinned" | "hidden"}`). A pinned file leads its root; a
+hidden one folds under the root's Hidden. A file the gallery does not
+serve is refused.
+
+A project has Check, the episode or song tool verbs, and Brief session
+(slice 4, sd:6922). Each posts `/api/actions/run` with the project id;
+the server finds the project again and runs a fixed argv. Check runs
+`make check` in the repository. An episode runs `tools/episode.py
+check|pack <folder>`, a song `tools/song_pipeline.py
+validate|suno-export|assemble <song>`, from the nearest `tools/` above
+the project. A song verb that needs more than the song is not offered.
+Brief session starts claude in herdr in the repository, told to read
+the brief from `project.json`; a comment note on the project's item
+names the pane. Details shows each output.

@@ -227,6 +227,17 @@ window.shell = { aside: (() => { const { html } = window.markup;
         self.assertIn("GitHub #3", drawn["issues"])
         self.assertIn("3 open", drawn["issues-tally"])
 
+    def test_each_row_says_when_it_was_last_updated(self):
+        # pack sd:7464: an Updated column, the stored updated_at as a relative time; none stored says so.
+        rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix", "reason": "filed",
+                 "url": None, "state": None, "updated_at": "2026-11-01T10:00:00Z"},
+                {"repo": "anvil", "tracker": "GitHub", "ref": "#3", "key": "github:anvil#3", "title": "Crash", "reason": "assigned",
+                 "url": None, "state": None}]
+        drawn = self.drawn({"issues": rows, "error": ""})["issues"]
+        self.assertIn('<td class="when"><time class="rel" datetime="2026-11-01T10:00:00Z"></time></td>', drawn)
+        self.assertIn('<td class="when"><span class="ph">not stored</span></td>', drawn)
+        self.assertIn("<th>Updated</th>", (V2 / "github.html").read_text(encoding="utf-8"))
+
     def test_a_closed_row_shows_with_closed_only_and_a_failed_github_read_is_said(self):
         # sd:5899: Your issues holds the operator's closed GitHub issues of the window; State open hides them.
         rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix", "reason": "filed",
@@ -244,7 +255,7 @@ window.shell = { aside: (() => { const { html } = window.markup;
         self.assertIn("Jira EXAMPLE-8", failed["issues"])
 
     def test_your_issues_says_open_once_and_one_chip_adds_the_closed_ones(self):
-        """Pack sd:7084: Open | Hidden | All already says open; the State group is one with closed chip, no second open."""
+        """Pack sd:7084: Open | Hidden already says open; the State group is one with closed chip, no second open."""
         rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix", "reason": "filed",
                  "url": None, "state": None},
                 {"repo": "upstream/tool", "tracker": "GitHub", "ref": "#6", "key": "github:upstream/tool#6", "title": "Old crash",
@@ -499,7 +510,7 @@ JOB = {"name": "shadow-sync-nightly", "service": "gui/501/local.sd.shadow-sync-n
 
 
 class TheGitHubPage(ScreenCase):
-    """github.js and issues.js on the stand-in page with the shared commands: Hide, Open | Hidden | All and Refresh from
+    """github.js and issues.js on the stand-in page with the shared commands: Hide, Open | Hidden and Refresh from
     GitHub (sd:6175, sd:6701, pack sd:6702).
     The stand-in server keeps the hidden keys a view POST writes and answers each read with them."""
 
@@ -527,7 +538,7 @@ class TheGitHubPage(ScreenCase):
                   + "window.shell.row = () => null; window.shell.url = q => { location.search = q ? '?' + q : ''; };\n"
                   + GITHUB_JS + ISSUES_JS
                   + "\nvar R = {};\nconst show = id => document.dispatchEvent(new CustomEvent('shell:view', { detail: { id } }));\n"
-                  # sd:6701: click('hidden', v) presses Open | Hidden | All's v, Hidden by default.
+                  # sd:6701: click('hidden', v) presses Open | Hidden's v, Hidden by default.
                   + "const click = (f, v = 'aside') => (DOC_LISTENERS.click || []).forEach(h => h({ target: { closest: s => s.includes(`[data-f=\"${f}\"]`)"
                     " ? { dataset: { f, v: '1' } } : f === 'hidden' && s.includes('[data-aside=\"hidden\"]') ? { dataset: { aside: f, v } } : null } }));\n"
                   + "const act = (id, obj) => C.run(cmd(id), C.get(obj));\n"
@@ -562,17 +573,26 @@ class TheGitHubPage(ScreenCase):
                             " click('hidden'); await flush(); R.shown = ELS.issues.html; R.search = location.search;"
                             " R.unhide = C.offWhy(cmd('jira issue.unhide'), C.get('iss:jira:EXAMPLE-8'));"
                             " R.hide = C.offWhy(cmd('jira issue.hide'), C.get('iss:jira:EXAMPLE-8'));"
-                            " act('jira issue.unhide', 'iss:jira:EXAMPLE-8'); await flush(); R.after = ELS.issues.html;"
-                            " click('hidden', 'all'); await flush(); R.all = ELS.issues.html; R.allSearch = location.search;")
+                            " act('jira issue.unhide', 'iss:jira:EXAMPLE-8'); await flush(); R.after = ELS.issues.html;")
         r = out["R"]
         self.assertIn("Fix the widget", r["shown"])
         self.assertNotIn("Crash on start", r["shown"])
         self.assertEqual(r["search"], "?hidden=1")
         self.assertEqual((r["unhide"], r["hide"]), ("", "already hidden"))
         self.assertNotIn("Fix the widget", r["after"])
-        self.assertIn("Fix the widget", r["all"])
-        self.assertIn("Crash on start", r["all"])
-        self.assertEqual(r["allSearch"], "?hidden=all")
+
+    def test_each_bar_is_open_and_hidden_and_an_older_hidden_all_link_lands_on_open(self):
+        # Pack sd:7263 (operator 2026-11-02): Your issues and Intake drop All; ?hidden=all, which All kept, lands on Open.
+        out = self.run_page("location.search = '?hidden=all'; show('issues'); await flush();"
+                            " act('jira issue.hide', 'iss:jira:EXAMPLE-8'); await flush(); act('github issue.hide', 'iss:github:example/project#21');"
+                            " await flush(); R.rows = ELS.issues.html; R.bar = ELS['issues-filters'].html;"
+                            " show('intake'); await flush(); R.intake = ELS.intake.html; R.ibar = ELS['intake-filters'].html;")
+        r, seg = out["R"], r'data-aside="hidden" data-v="(\w+)" aria-pressed="(\w+)">(\w+) <span class="n">(\d+)</span>'
+        self.assertNotIn("Fix the widget", r["rows"])
+        self.assertIn("Crash on start", r["rows"])
+        self.assertNotIn("Docs typo", r["intake"])
+        self.assertEqual(re.findall(seg, r["bar"]), [("open", "true", "Open", "1"), ("aside", "false", "Hidden", "1")])
+        self.assertEqual(re.findall(seg, r["ibar"]), [("open", "true", "Open", "0"), ("aside", "false", "Hidden", "1")])
 
     def test_a_page_opened_with_hidden_1_shows_the_hidden_rows(self):
         rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget",

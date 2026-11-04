@@ -1,6 +1,6 @@
 // Writing (sd:2125). Built from the design source's products/system/designs/pages/writing.js at 2729265.
 // build: pieces come from /api/writing through shell.read; Stage, Correct, Park and Revive post the routes the old item page
-// posts. The vault ideas column, the draft editor's save and the evidence summaries have no reader or writer yet (see below).
+// posts. The draft editor's save and the evidence summaries have no reader or writer yet (see below).
 // Page commands for the palette; the shell reads this when it loads.
 const { html, put } = window.markup;
 window.PAGE_COMMANDS = [
@@ -106,7 +106,7 @@ addEventListener('DOMContentLoaded', () => {
     put(document.getElementById('strip'), html`<span class="fact"><b>${act.length}</b> active</span>
        <span class="fact"><span class="g-caution" aria-hidden="true">▲</span><b>${bad}</b> gates want you</span>
        <span class="fact"><b>${act.filter(p => p.stage === 'ready').length}</b> at Ready, <b>${pub}</b> publishable</span>
-       <span class="fact"><span class="g-unknown" aria-hidden="true">▨</span>vault ideas not read</span>
+       ${D.ideas?.state === 'read' ? html`<span class="fact"><b>${D.ideas.count}</b> ideas in the vault inbox</span>` : html`<span class="fact" title="${D.ideas?.reason || 'the read gave no ideas'}"><span class="g-unknown" aria-hidden="true">▨</span>vault ideas not read</span>`}
        <button class="help" type="button" aria-label="Help: lamps" data-help="<b>D R F A</b>: draft, research, fact-check, adversarial, in that order on every card. <b>●</b> passes against this draft, <b>▲</b> stale or findings open, <b>■</b> verdict not pass, <b>◌</b> not written yet, <b>▨</b> file exists but no gate verdict is recorded. Source: <code>sd_db.writing._problems</code>.">${ICON('circle-help')}</button>
        <span class="src">read ${String(D.read).slice(11, 16)} UTC</span>`);
     const parkedN = pieces.filter(p => p.parked).length;
@@ -115,7 +115,7 @@ addEventListener('DOMContentLoaded', () => {
 
   // ---------- Board ----------
   // selected is the piece the editor and the URL follow.
-  // parked: Open | Parked | All (sd:6701), kept as ?parked=.
+  // parked: Open | Parked (sd:6701), kept as ?parked=.
   let selected = null, parked = window.shell.aside.mode('parked'), view = 'board';
   const keep = () => { const v = window.shell.aside.param(parked); return v ? { parked: v } : {}; };
   function card(p) {
@@ -129,12 +129,16 @@ addEventListener('DOMContentLoaded', () => {
   }
   function renderBoard() {
     const v = pieces.filter(p => window.shell.aside.shows(parked, p.parked));
-    // build: no reader for the vault's blog ideas exists yet (the design read `sd store list sdw.blog-idea --json`), so the
-    // column says so and keeps its drop zone, which refuses a piece as the design does.
+    // pack sd:7244: the inbox blog ideas, highest score first, from writing_screen's `ideas`. An idea card is no piece: it
+    // takes no selection, and its title links out only where the read gave an http href. The drop zone refuses a piece.
+    const I = D?.ideas || { state: 'unknown', reason: 'the read gave no ideas', rows: [] };
+    const idea = i => html`<article class="card idea" aria-label="Idea: ${i.title}"><div class="top"><span class="id">${i.created || ''}</span><span class="tag">${i.score == null ? 'no score' : `${i.score}/10`}</span></div>
+      <div class="t">${i.href ? html`<a class="ext" href="${i.href}" target="_blank" rel="noopener noreferrer">${i.title}</a>` : i.title}</div></article>`;
     const ideaCol = html`<div class="col vault" data-drop="stage:ideas">
-      <header><span class="label">Ideas · vault</span><span class="n" title="vault ideas are not read here">—</span></header>
+      <header><span class="label">Ideas · vault</span>${I.state === 'read' ? html`<span class="n" title="inbox ideas in the vault">${I.count}</span>` : html`<span class="n" title="vault ideas not read">—</span>`}</header>
       <div><p class="refusal" role="note"></p><div class="drop">
-        <p class="empty">Not read: the dashboard has no reader for the vault's blog ideas yet. <code>sd store list sdw.blog-idea --json</code> lists them.</p>
+        ${I.state === 'read' ? html`${I.rows.map(idea)}<p class="empty">${I.count ? `Highest ${I.rows.length} of ${I.count} inbox ideas.` : 'No idea in the vault inbox.'} <a href="/tasks?base=blog-idea">Tasks</a> lists them all.</p>`
+          : html`<p class="empty">Not read: ${I.reason}</p>`}
       </div></div></div>`;
     put(document.getElementById('view-board'), html`<div class="board" id="board" role="listbox" aria-label="Pieces by stage">${ideaCol}${STAGES.map(([s, name]) => {
       const rows = v.filter(p => p.stage === s);
@@ -162,16 +166,31 @@ addEventListener('DOMContentLoaded', () => {
         ${p.publication ? html`<dt>Published</dt><dd>${p.publication.href ? html`<a class="ext" href="${p.publication.href}" target="_blank" rel="noopener noreferrer">${p.publication.url}</a>` : html`<code>${p.publication.url}</code>`}</dd>` : ''}
       </dl>
       <h3 class="label">Gates</h3>
-      <ul class="gates">${L.map(([, n, s, w]) => html`<li><span class="g g-${s}" aria-hidden="true">${GLYPH[s]}</span><span>${n}</span><span class="what">${w}</span></li>`)}</ul>
+      <ul class="gates">${L.map(([k, n, s, w]) => html`<li><span class="g g-${s}" aria-hidden="true">${GLYPH[s]}</span><span>${n}</span><span class="what">${w}</span><span class="acts">${gateActs(p, k, n)}</span></li>`)}</ul>
       <div class="publish">
         <span class="label">Publish gate</span>
         ${P.ok ? html`<p class="why">Open: stage Ready, gates pass, readiness recorded for this draft. Publish is copy only, since it posts outside: <code>sd writing publication-claim</code>, then <code>publication-dispatch</code> on the recorded claim.</p>` : html`<p class="why">Closed. Publish stays off until each of these clears:</p><ul>${P.why.map(w => html`<li>${w}</li>`)}</ul>`}
       </div>
       ${grillPane(p)}
       <h3>Act</h3>${C.bar(String(p.id))}
-      <div class="actions"><button class="btn quiet sm" type="button" id="open-ed">${ICON('pen-line')}Open in editor</button></div>
       <p class="foot">Observed ${utc(D.read)} from the workflow database and the piece files in <code>${p.repo}/${p.folder}/${p.piece}/</code>.</p>`);
-    el.querySelector('#open-ed')?.addEventListener('click', () => setView('editor'));
+  }
+
+  // pack sd:7242: each gate's refresh and view icons. Draft reads the pieces again and shows the draft; Adversarial runs
+  // Refresh review. No route runs research or a fact-check, so theirs copies the line that does, run in the content
+  // repository. A report's view opens it read only in the editor's evidence pane; a missing one's view is off.
+  const GATE = { R: ['research', 'research.md'], F: ['factcheck', 'fact-check.md'], A: ['adversarial', 'adversarial.md'] };
+  const cmdIcon = (id, p, icon, label) => {
+    const why = C.offWhy(CMDS.find(c => c.id === id), { id: String(p.id) }), say = why ? `${label}: ${why}` : label;
+    return html`<button class="icon-btn" type="button" data-cmd="${id}" data-obj="${p.id}" aria-label="${say}" title="${say}"${why ? html` disabled` : ''}>${ICON(icon)}</button>`;
+  };
+  function gateActs(p, k, n) {
+    if (k === 'D') return html`<button class="icon-btn" type="button" data-gate-again="" aria-label="Draft: read the pieces again" title="Draft: read the pieces again">${ICON('rotate-ccw')}</button>${cmdIcon('piece.draft', p, 'eye', 'Draft: Show draft')}`;
+    const line = { R: `claude "/sd-research piece=${p.piece}"`, F: `claude "/sd-fact-check input=${p.folder}/${p.piece}/index.md"` }[k];
+    const again = line ? html`<button class="icon-btn" type="button" data-copy="${line}" aria-label="${n}: no route runs it; copy the line to run in ${p.repo}" title="Copy, to run in ${p.repo}: ${line}">${ICON('copy')}</button>`
+      : cmdIcon('piece.review', p, 'rotate-ccw', 'Adversarial: Refresh review');
+    const [tab, file] = GATE[k], say = p.files[file] ? `${n}: view ${file}` : `${n}: missing`;
+    return html`${again}<button class="icon-btn" type="button" data-gate-view="${tab}" aria-label="${say}" title="${say}"${p.files[file] ? '' : html` disabled`}>${ICON('eye')}</button>`;
   }
 
   // pack sd:6700: the first open grill question, with a button per option or a box for words.
@@ -188,17 +207,33 @@ addEventListener('DOMContentLoaded', () => {
   }
 
   // ---------- Editor ----------
-  // build: read only. No route writes a draft, so the design's Edit button and its save state are not drawn, and the
-  // evidence tabs show each file's facts and its lamp: no reader summarises research.md, fact-check.md or adversarial.md yet.
+  // build: read only. No route writes a draft, so the design's Edit button and its save state are not drawn. The evidence
+  // tabs show each file's facts, its lamp and its text, read once per change time from /api/writing/<id>/<gate> (pack sd:7242).
+  // The change time is whole seconds, so two versions in one second share a key (pack sd:7328): every read of the pieces
+  // drops the cache, and a read that answers after that drop does not fill it.
   let evTab = 'research';
+  const reports = new Map();
+  function evText(p, file, gate) {
+    const key = `${p.id}/${file}/${p.files[file].mtime}`, got = reports.get(key), tab = evTab;
+    if (!got) {
+      const pending = { state: 'reading' };
+      reports.set(key, pending);
+      window.shell.getJSON(`/api/writing/${p.id}/${gate}`).then(r => ({ state: 'read', ...r }), e => ({ state: 'failed', reason: e.message }))
+        .then(r => { if (reports.get(key) !== pending) return; reports.set(key, r); if (view === 'editor' && +selected === p.id && evTab === tab) renderEditor(); });
+    }
+    const r = reports.get(key);
+    if (r.state === 'reading') return html`<p>Reading ${file}…</p>`;
+    if (r.state === 'failed') return html`<p>${file} not read: ${r.reason}. Reloading the page retries it.</p>`;
+    return html`<pre class="ev-text" tabindex="0" aria-label="${file}, read only">${r.text}</pre>${r.cut ? html`<p>The first ${r.text.length.toLocaleString()} characters; the rest stays in the file.</p>` : ''}`;
+  }
   function renderEditor() {
     const p = byId(selected), el = document.getElementById('view-editor');
     if (!p) { put(el, html`<p class="note">${D ? 'Select a piece on the board first.' : 'The pieces were not read. Reload retries it.'}</p>`); return; }
     const P = publishState(p), fx = p.files;
     const fm = n => fx[n] ? `${(fx[n].bytes / 1024).toFixed(1)} KB · ${utc(fx[n].mtime)}` : 'missing';
     const g = gates(p);
-    const ev = { research: ['research.md', 1], factcheck: ['fact-check.md', 2], adversarial: ['adversarial.md', 3] };
-    const [file, at] = ev[evTab];
+    const ev = { research: ['research.md', 1, 'research'], factcheck: ['fact-check.md', 2, 'fact-check'], adversarial: ['adversarial.md', 3, 'adversarial'] };
+    const [file, at, gate] = ev[evTab];
     put(el, html`<div class="ed-head">
         <button class="btn quiet sm" type="button" id="back">${ICON('chevron-left')}Board</button>
         <h2>#${p.id} ${p.title}</h2>${lamps(p)}
@@ -209,11 +244,11 @@ addEventListener('DOMContentLoaded', () => {
       <div class="editor">
         <div class="draft">
           <p class="path">${p.repo}/${p.folder}/${p.piece}/index.md · ## Draft</p>
-          <article class="page" aria-label="Draft">${p.draft.length ? html`<div id="draft-text" role="textbox" aria-multiline="true" aria-label="Draft text, #${p.id}" aria-readonly="true" tabindex="0">${p.draft.map(x => html`<p>${x.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')}</p>`)}</div><p class="more">First ${markup.plural(p.draft.length, 'paragraph')} of ${p.words.toLocaleString()} words. Edit the draft in its file.</p>` : html`<p class="more">No draft yet. <code>sdw-research</code> comes first, then <code>sdw-draft</code>.</p>`}</article>
+          <article class="page" aria-label="Draft">${p.draft.length ? html`<div id="draft-text" role="textbox" aria-multiline="true" aria-label="Draft text, #${p.id}" aria-readonly="true" tabindex="0">${p.draft.map(x => html`<p>${x.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')}</p>`)}</div><p class="more">${p.draft_cut ? `The first ${markup.plural(p.draft.length, 'paragraph')} of ${p.words.toLocaleString()} words; the rest stays in the file.` : `The whole draft, ${p.words.toLocaleString()} words. Edit it in its file.`}</p>` : html`<p class="more">No draft yet. <code>sdw-research</code> comes first, then <code>sdw-draft</code>.</p>`}</article>
         </div>
         <aside class="evidence" aria-label="Evidence">
           <div class="seg" role="group" aria-label="Evidence file">${[['research', 'Research'], ['factcheck', 'Fact-check'], ['adversarial', 'Adversarial']].map(([k, n]) => html`<button type="button" data-ev="${k}" aria-pressed="${String(evTab === k)}">${n}</button>`)}</div>
-          <div class="ev"><h3 class="label">${file}</h3>${fx[file] ? html`<dl><dt>File</dt><dd>${fm(file)}</dd><dt>Lamp</dt><dd>${GLYPH[g[at][2]]} ${g[at][3]}</dd></dl>` : html`<p>${file} is missing.</p>`}</div>
+          <div class="ev"><h3 class="label">${file}</h3>${fx[file] ? html`<dl><dt>File</dt><dd>${fm(file)}</dd><dt>Lamp</dt><dd>${GLYPH[g[at][2]]} ${g[at][3]}</dd></dl>${evText(p, file, gate)}` : html`<p>${file} is missing.</p>`}</div>
           <p class="why">An edit changes the draft digest, so every gate goes stale until research is re-stamped and both verdicts are recorded again.</p>
         </aside>
       </div>`);
@@ -241,7 +276,11 @@ addEventListener('DOMContentLoaded', () => {
   const asked = p => { const n = p.grill?.open.length; return n ? `${markup.plural(n, 'grill question')} open; answer them first` : ''; };
   const fixPost = (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision }).then(out => { reading?.reread(); return out; });
   // An answer is Decide's: /api/decisions/answer writes the ruling and resolves the question under the piece's revision.
+  // pack sd:7242: a gate's view opens its report in the editor; Draft's refresh reads the pieces again.
   document.getElementById('details').addEventListener('click', e => {
+    const v = e.target.closest?.('[data-gate-view]');
+    if (v) { evTab = v.dataset.gateView; setView('editor'); return; }
+    if (e.target.closest?.('[data-gate-again]')) { reading?.load(); return; }
     const b = e.target.closest?.('[data-grill-answer]'), p = byId(selected), q = p?.grill?.open[0];
     if (!b || !q) return;
     const option = (b.dataset.grillAnswer || document.getElementById('details').querySelector('#grill-text')?.value || '').trim();
@@ -283,6 +322,11 @@ addEventListener('DOMContentLoaded', () => {
       when: o => { const P = publishState(P_(o)); return P.ok || P.why.join(' '); },
       consequence: () => 'Publishes to the destinations in sd-plugin.json; the canonical destination comes first. The publication claim records the URL. It posts outside, so the dashboard sends nothing: copy the two lines.',
       run: o => `Copy the two lines to publish #${P_(o).id}; publishing posts outside, so the dashboard does not run them` },
+    // pack sd:7242: the row menu's and the palette's way to the draft; Details show it in their bar. The editor is the answer.
+    { id: 'piece.draft', on: 'piece', label: 'Show draft', does: 'Selects the piece and opens its whole draft in the read-only editor.', key: 'd', icon: 'file-text', risk: 'safe',
+      cli: o => `no CLI: the draft is the ## Draft section of ${P_(o).repo}/${P_(o).folder}/${P_(o).piece}/index.md`,
+      when: o => { const p = P_(o); return !p ? 'not listed' : p.draft.length ? true : 'no draft yet'; },
+      run: o => { select(o.id); setView('editor'); return null; } },
     // pack sd:6700: Grill writes the piece's questions as notes; Details walks them; Apply answers edits the draft to follow them.
     window.commands.grill('piece', 'ask', { item: o => P_(o).id, post: fixPost,
       ready: o => { const p = P_(o); return !p ? 'not listed' : !p.words ? 'no draft to grill yet' : asked(p) || true; } }),
@@ -472,7 +516,7 @@ addEventListener('DOMContentLoaded', () => {
     adopt: doc => {
       // Personal stays, as on Tasks (sd:5642): it is where personal writing goes, so its tab shows with nothing in it.
       (window.PAGE_VIEWS || []).forEach(v => { if (v.id !== 'personal') window.shell.view?.hide(v.id, !(doc.pieces || []).some(p => inRealm(p, v.id))); });
-      D = doc; pieces = (doc.pieces || []).filter(p => inRealm(p));
+      D = doc; pieces = (doc.pieces || []).filter(p => inRealm(p)); reports.clear();
       document.body.dataset.observed = D.read;
       const known = ['read', 'partial'].includes(doc.realms?.state);
       // Each repo once, with the realm that claims it: "sd-writing under Work".

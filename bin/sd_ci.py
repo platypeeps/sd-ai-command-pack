@@ -160,11 +160,11 @@ def ci_step(root: pathlib.Path, database: pathlib.Path | None) -> Step:
             raise CiRefusal(f"{target} is not a registered repository; run `bin/sd-db repo add {target}`")
         if not sd_lib.is_managed(row):
             raise CiRefusal(sd_lib.unmanaged_text(row["path"]))
-        current = row["ci"] if "ci" in row.keys() else None
+        current = repos.policy_ci(row["declarations"])  # pack sd:7366: `policy.ci.provider`
     finally:
         connection.close()
-    if current is None:
-        raise CiRefusal("this database has no repo.ci column; upgrade the sd_db library")
+    if current == "jenkins":
+        raise CiRefusal(f"{target}'s policy declares jenkins checks; change them with `sd-db repo declare`")
     if current == "local":
         return Step("ok", "repo.ci", f"local for {target}")
 

@@ -312,6 +312,11 @@ class TheRows(Lane, ScreenCase):
         self.assertEqual(now_screen.lane_summary(doc)["blocked"], 1)
         self.assertEqual([row["item"] for row in now_screen.lane_rows(doc["lanes"])], [still])
 
+    def test_todays_lane_summary_names_each_checkout_whose_lane_was_not_read(self):
+        # Review of pack sd:7315: Today's Retry claims a fresh read only for a lane this list leaves out.
+        doc = {"lanes": [], "problems": [{"repo": "/repos/pack", "error": "sd-ship gave no answer"}, "malformed"]}
+        self.assertEqual(now_screen.lane_summary(doc)["unread_paths"], ["/repos/pack"])
+
     # sd:3398: a cancelled entry is a row, so Re-queue can name the head the operator cancelled.
     def test_a_cancelled_entry_carries_its_head_and_when_it_was_cancelled(self):
         cancelled = next(row for row in self.doc()["lanes"][0]["rows"] if row["state"] == "cancelled")
@@ -851,7 +856,10 @@ class TheRealLaneBound(unittest.TestCase):
         self.assertEqual(self.waited(TheRealRelease), waited)
 
     def test_a_stand_in_lane_keeps_the_short_bound(self):
-        self.assertEqual(self.waited(TheMove), 5)
+        # A stand-in lane runs no `sd-ship`: it keeps the base bound, not the real lane's list-and-verb one (sd:7289).
+        waited = self.waited(TheMove)
+        self.assertEqual(waited, BrowserSession.http_timeout)
+        self.assertLess(waited, self.waited(TheRealLane))
 
 
 class TheRealLane(RealLane):
@@ -1076,6 +1084,13 @@ class TheShotRoute(Lane, BrowserSession):
             self.assertEqual(self.fetch(path)[0], 404, path)
 
 
+def as_suggested(rows):
+    """`sd_db.today.suggested`'s rows for queue rows that are all ready (pack sd:7314): the reason, due and priority."""
+    return [{"id": r["id"], "repo": r["repo"], "title": r["title"], "status": r["status"], "why": "ready", "due": None,
+             "priority": int(r["detail"][1:]) if r["detail"].startswith("P") else None, "since": r["since"]}
+            for r in rows if r["queue"] == "ready"]
+
+
 class TheView(Lane, ReaderCase):
     """pack sd:7234: Today's Queue view against the lane document `queue_screen` builds from the fixture, the build runs
     and runner assignments below, and the /api/now document with a live item and ready items."""
@@ -1115,15 +1130,16 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
     def setUp(self):
         super().setUp()
         self.doc["active"] = {"rows": [self.LIVE], "sources": {}, "error": ""}
-        self.doc["queues"] = {"rows": self.READY, "error": ""}
+        self.doc["queues"] = {"rows": self.READY, "suggested": as_suggested(self.READY), "error": ""}
 
-    def run_view(self, body, search="", answers=None):
+    # pack sd:7314: with no `show` key Suggested is on; the view's tests start from every filter off, as `?show=` keeps it.
+    def run_view(self, body, search="?show=", answers=None, before=""):
         answers = {"/api/queue": [200, queue_screen.document(self.connection, now=NOW)],
                    "/api/queue/builds?show=all": [200, self.BUILDS], "/api/queue/runner": [200, self.RUNNER],
                    "/api/queue/move": [200, {"ok": True, "edits": "Edits take effect at the next item boundary."}],
                    **(answers or {})}
         after = (f"\nconst QDOCS = {json.dumps(answers)};\n"
-                 "ANSWER = (p, b) => p === '/api/now' ? [200, DOC0] : QDOCS[p] || [404, { error: 'no answer' }];\n")
+                 "ANSWER = (p, b) => p === '/api/now' ? [200, DOC0] : QDOCS[p] || [404, { error: 'no answer' }];\n" + before)
         start = ("document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: 'queue', first: true } }));\n"
                  "await flush(); await flush(); await flush();\n")
         return self.run_page(self.JS + start + body, search=search, after=after)
@@ -1159,6 +1175,78 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         # Every row has its type in words: no row is told by its colour alone.
         self.assertEqual(len(re.findall(r'<tr class="child"', out["R"]["html"])) + 1, len(found))
 
+    @staticmethod
+    def repo_detail(html, key):
+        """The detail cell of repo `key`'s parent row: its extra classes, its other attributes and its contents."""
+        found = re.search(rf'<tr class="repo" data-repo="{key}".*?<td class="detail([^"]*)"([^>]*)>(.*?)</td>', html, re.S)
+        return found.group(1, 2, 3)
+
+    BOX = {"merging": "merging: claimed by the lane runner, being merged",
+           "working": "working: live sessions, build runs and lane gates now running",
+           "next": "next: queued in the lane, not started",
+           "blocked": "blocked: stopped in the lane until someone acts",
+           "suggested": "suggested: ready or planned items sd-next offers, up to 3"}
+
+    def test_each_box_says_its_count_and_what_it_counts_on_hover(self):
+        # Pack sd:7383: the native title names the count and the meaning; the aria-label stays.
+        out = self.run_view("open('system'); R.html = ELS.queue.html;")
+        titles = re.findall(r'<span class="pip[^"]*" title="([^"]*)">', self.repo_detail(out["R"]["html"], "system")[2])
+        self.assertEqual(titles, [f"{n} {self.BOX[k]}" for n, k in zip((1, 3, 2, 2, 3), self.BOX, strict=True)])
+
+    def test_each_repo_row_counts_working_merging_next_blocked_and_suggested_in_five_boxes(self):
+        # pack sd:7470: merging is the leftmost box (operator 2026-11-04).
+        # pack sd:7272: the lane ledger's three boxes (#1768 removed them) stand in the parent row's detail cell, in place
+        # of the text tally. Pack sd:7314 adds working first and suggested last (operator 07:10 MST: a repo with five
+        # working rows read 0 0 0). Each counts every row of the repo, so a filter hides no count. A box is lit only when
+        # its count is not zero; blocked is the warning lamp; the label says all five in words. Suggested is off in the
+        # first read and on in the second: its count is 3 in both.
+        out = self.run_view("R.closed = ELS.queue.html; press('ended'); press('suggested'); open('system');"
+                            " R.open = ELS.queue.html; R.tally = ELS['queue-tally'].html;")
+        # Pack sd:7383: each box also carries its count and meaning in its title.
+        system = ' aria-label="1 merging, 3 working, 2 next, 2 blocked, 3 suggested"', \
+            (f'<span class="pip on" title="1 {self.BOX["merging"]}">1</span><span class="pip on" title="3 {self.BOX["working"]}">3</span>'
+             f'<span class="pip on" title="2 {self.BOX["next"]}">2</span><span class="pip warn" title="2 {self.BOX["blocked"]}">2</span>'
+             f'<span class="pip on" title="3 {self.BOX["suggested"]}">3</span>')
+        alpha = ' aria-label="0 merging, 1 working, 0 next, 0 blocked, 0 suggested"', \
+            f'<span class="pip" title="0 {self.BOX["merging"]}">0</span><span class="pip on" title="1 {self.BOX["working"]}">1</span>' + "".join(
+                f'<span class="pip" title="0 {self.BOX[k]}">0</span>' for k in ("next", "blocked", "suggested"))
+        for html in (out["R"]["closed"], out["R"]["open"]):
+            self.assertEqual(self.repo_detail(html, "system"), (" pipe", *system))
+            self.assertEqual(self.repo_detail(html, "alpha"), (" pipe", *alpha))
+        self.assertEqual(re.sub(r"<[^>]*>", "", self.repo_detail(out["R"]["closed"], "system")[2]), "13223", "the text tally is gone")
+        self.assertRegex(out["R"]["tally"], r"<span>\d+ working</span>", "the page's tally stays")
+
+    def test_the_boxes_recount_on_the_30_s_read_and_on_a_read_after_a_build_starts(self):
+        # pack sd:7314: a repo with five working rows read 0 0 0. Its working box counts each read's rows: the 30 s
+        # timer's, and Today's read again after a write such as Build (reading.reread draws, and the draw reads the queue).
+        builds = json.loads(json.dumps(self.BUILDS))
+
+        def more(n):
+            return {**builds["runs"][0], "run": f"r{n}", "items": [{"item": n, "assignment": n, "status": "running", "title": "More"}],
+                    "cancel": {**builds["runs"][0]["cancel"], "assignment": n}}
+        out = self.run_view(
+            "const label = () => (ELS.queue.html.match(/data-repo=\"alpha\"[\\s\\S]*?class=\"detail pipe\" aria-label=\"([^\"]*)\"/) || [])[1];"
+            " R.first = label(); window.shell.view.current = () => 'queue';"
+            f" QDOCS['/api/queue/builds?show=all'] = [200, {json.dumps({**builds, 'runs': [*builds['runs'], more(70)]})}];"
+            " TICKS[0](); await flush(); await flush(); await flush(); R.tick = label();"
+            f" QDOCS['/api/queue/builds?show=all'] = [200, {json.dumps({**builds, 'runs': [*builds['runs'], more(70), more(71)]})}];"
+            " refresh(); await flush(); await flush(); await flush(); await flush(); R.reread = label();",
+            before="var TICKS = []; setInterval = f => TICKS.push(f);\n")
+        self.assertEqual((out["R"]["first"], out["R"]["tick"], out["R"]["reread"]),
+                         tuple(f"0 merging, {n} working, 0 next, 0 blocked, 0 suggested" for n in (1, 2, 3)))
+
+    def test_a_lane_that_was_not_read_counts_nothing_and_says_so(self):
+        # A failed read is not zero (sd:7272): a repo whose lane was not read says so in place of its boxes.
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["problems"] = [{"repo": "/repos/alpha", "error": "no checkout on this machine"}]
+        read = self.run_view("R.html = ELS.queue.html;", answers={"/api/queue": [200, lanes]})["R"]["html"]
+        self.assertIn('<span class="pip warn" title="2 blocked', self.repo_detail(read, "system")[2])
+        self.assertEqual(self.repo_detail(read, "alpha")[1:], ("", '<span class="g-unknown" aria-hidden="true">▨</span> lane not read'))
+        unread = self.run_view("R.html = ELS.queue.html;", answers={"/api/queue": [502, {"error": "down"}]})["R"]["html"]
+        for key in ("system", "alpha"):
+            self.assertNotIn("pip", self.repo_detail(unread, key)[2], key)
+            self.assertIn("lane not read", self.repo_detail(unread, key)[2], key)
+
     def test_suggested_adds_three_ready_items_per_repo_and_a_repo_that_has_only_those(self):
         out = self.run_view("R.before = repos(); press('suggested'); open('system'); R.after = repos(); R.kids = kids();"
                             " R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;")
@@ -1172,6 +1260,40 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         kept = self.run_view("R.repos = repos();", search="?show=suggested")
         self.assertIn("beta:false", kept["R"]["repos"])
 
+    def test_suggested_is_on_with_no_show_key_and_turned_off_stays_off_on_a_reload(self):
+        # pack sd:7314 (operator request): no `show` key starts Suggested on. Turning every filter off writes `show=` empty,
+        # so a reload keeps them off; a key naming other filters keeps Suggested off, as before.
+        out = self.run_view("R.filters = ELS['queue-filters'].html; R.before = repos(); press('suggested'); R.after = repos();",
+                            search="")
+        self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="true"', out["R"]["filters"])
+        self.assertIn("beta:false", out["R"]["before"])
+        self.assertNotIn("beta:false", out["R"]["after"])
+        self.assertEqual(out["urls"], [{"show": ""}])
+        for search in ("?show=", "?show=ended"):
+            with self.subTest(search=search):
+                kept = self.run_view("R.filters = ELS['queue-filters'].html; R.repos = repos();", search=search)
+                self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="false"', kept["R"]["filters"])
+                self.assertNotIn("beta:false", kept["R"]["repos"])
+
+    def test_suggested_is_sd_nexts_order_less_live_items_three_per_repo_each_with_why(self):
+        # pack sd:7314: Suggested is what sd-next offers next, ranked server-side (sd_db.today.suggested): ready, then
+        # planned, then unscheduled. The view drops a live item and keeps the first three per repo. Each detail says why;
+        # a row that is not ready shows its status and offers no Build.
+        def row(n, why, status, priority=None, due=None):
+            return {"id": n, "repo": "~/repos/example/system", "title": f"Next {n}", "status": status, "why": why,
+                    "due": due, "priority": priority}
+        self.doc["queues"]["suggested"] = [row(60, "ready", "ready", 1), row(40, "planned", "in_progress", due="2026-09-08"),
+                                           row(80, "planned", "planning", 2, "2026-09-20"), row(81, "unscheduled", "planning", 0),
+                                           row(82, "unscheduled", "ready")]
+        out = self.run_view("open('system'); R.html = ELS.queue.html; R.build = cmd('item.build').when({ id: '80' });",
+                            search="?show=suggested")
+        found = re.findall(r'<tr class="child" data-type="suggested" data-item="(\d+)".*?<td class="detail">(.*?)</td>',
+                           out["R"]["html"], re.S)
+        self.assertEqual(found, [("60", "ready · P1"), ("80", "planned for 2026-09-20 · P2 · planning"),
+                                 ("81", "unscheduled P0 · planning")])
+        self.assertIn('aria-label="1 merging, 3 working, 2 next, 2 blocked, 3 suggested"', out["R"]["html"])
+        self.assertEqual(out["R"]["build"], "a build takes a ready task; this one is planning")
+
     def test_ended_builds_adds_ended_rows_and_a_repo_that_has_only_those(self):
         out = self.run_view("R.before = repos(); press('ended'); R.after = repos(); open('gamma'); R.gamma = ELS.queue.html;"
                             " open('system'); R.kids = kids(); press('suggested');")
@@ -1183,6 +1305,23 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["urls"], [{"show": "ended"}, {"show": "suggested,ended"}])
         kept = self.run_view("R.repos = repos();", search="?show=ended")
         self.assertIn("gamma:false", kept["R"]["repos"])
+
+    def test_a_teammate_run_is_a_working_row_with_its_worktree_due_time_and_beat(self):
+        """pack sd:7221: a lead's in-session builder shows beside the build runs, by repo, with its bundle's items."""
+        team = {**self.BUILDS["runs"][0], "run": "t1", "teammate": True, "state": "working", "model": "", "log": "",
+                "pull": "", "worktree": "/w/alpha-8", "branch": "feat/sd-8", "due": "2026-09-06T13:00:00Z", "beat": 300,
+                "items": [{"item": 8, "assignment": 8, "status": "in_session", "title": "Eight"},
+                          {"item": 9, "assignment": 9, "status": "in_session", "title": "Nine"}],
+                "cancel": {"assignment": 8, "allowed": False, "reason": "its lead ends it: sd assignments beat 8 --end",
+                           "revision": ""}}
+        builds = {**self.BUILDS, "runs": [*self.BUILDS["runs"], team]}
+        out = self.run_view("open('alpha'); R.alpha = ELS.queue.html;",
+                            answers={"/api/queue/builds?show=all": [200, builds]})
+        row = out["R"]["alpha"].split('<tr class="child" data-type="working" data-run="t1"')[1].split("</tr>")[0]
+        for text in ("#8 Eight", "#9 Nine", "<b>working</b> · teammate · worktree <code>/w/alpha-8</code>",
+                     "branch feat/sd-8", "beat 5m 0s ago", 'title="its lead ends it: sd assignments beat 8 --end"'):
+            self.assertIn(text, row)
+        self.assertRegex(row, r"due \d\d:\d\d")
 
     def test_the_working_rows_hold_live_items_build_runs_the_lane_builders_and_free_assignments(self):
         out = self.run_view("open('system'); R.system = ELS.queue.html; open('alpha'); R.alpha = ELS.queue.html;"
@@ -1202,10 +1341,197 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
     def test_a_click_on_a_live_row_shows_its_details_and_keeps_its_fix_and_open_commands(self):
         out = self.run_view("open('system'); ELS.queue.listeners.click[0]({ target: { closest: s => s === 'tr[data-id]' ? "
                             "{ dataset: { id: 'live:40' } } : null } }); R.details = ELS.details.html; R.row = location.search;"
-                            " R.cmds = REG.filter(c => c.on === 'live item').map(c => c.id);")
+                            " R.cmds = REG.filter(c => c.on === 'live item').map(c => c.id);", search="")
         self.assertIn("Live work", out["R"]["details"])
         self.assertEqual(out["R"]["row"], "?row=live%3A40")
         self.assertEqual(sorted(out["R"]["cmds"]), ["live item.fix", "today.live.assignment", "today.live.open"])
+
+    # pack sd:7271: a suggested row is an item row: a click selects it (?row=<id>), its Details are the Tasks page's
+    # (task-details.js, from /api/tasks/<id>), and its act is Tasks' Build, which reads the plan before it queues.
+    def suggested(self):
+        from sd_dashboard import tasks_screen
+        from sd_db import workflow
+        item = self.item("Ship the pickup", kind="task", priority=2, repo=str(self.checkout))
+        workflow.change_status(self.connection, item, "ready", who="test")
+        self.doc["queues"]["rows"] = [{"queue": "ready", "id": item, "repo": "~/repos/example/system", "title": "Ship the pickup",
+                                       "status": "ready", "detail": "P2", "since": NOW}] + self.READY
+        self.doc["queues"]["suggested"] = as_suggested(self.doc["queues"]["rows"])
+        return item, {f"/api/tasks/{item}": [200, tasks_screen.details(self.connection, item, now=NOW)]}
+
+    PICK = ("C.rowActions = id => mk`<i data-acts=\"${id}\"></i>`; open('system'); R.html = ELS.queue.html;"
+            " ELS.queue.listeners.click[0]({ target: { closest: s => s === 'tr[data-id]' ? { dataset: { id: 'ID' } } : null } });"
+            " await flush(); await flush(); R.details = ELS.details.html; R.row = location.search;")
+
+    def test_a_suggested_row_selects_and_shows_the_items_task_details(self):
+        item, answers = self.suggested()
+        out = self.run_view(self.PICK.replace("ID", str(item)), search="?show=suggested", answers=answers)
+        self.assertIn(f'data-type="suggested" data-item="{item}" data-id="{item}" aria-selected=', out["R"]["html"])
+        self.assertEqual(out["R"]["row"], f"?show=suggested&row={item}")
+        self.assertIn(f"/api/tasks/{item}", out["gets"])
+        # The Tasks page's Details: its editable fields, read from the item route.
+        self.assertIn('id="det-title" class="fld" value="Ship the pickup"', out["R"]["details"])
+        self.assertIn('id="det-status"', out["R"]["details"])
+
+    def test_a_suggested_row_acts_with_build_and_build_reads_the_plan_first(self):
+        item, answers = self.suggested()
+        plan = {"read": NOW, "budget_minutes": 60, "refused": [], "room": {"machine": 4, "why": "", "cap": 6, "repo_cap": 3},
+                "bundles": [{"repo": str(self.checkout), "name": "system", "room": 2, "model": "opus", "branch": "build/sd-1",
+                             "items": [{"id": item, "title": "Ship the pickup", "revision": "c" * 64}]}]}
+        answers[f"/api/tasks/build/plan?items={item}"] = [200, plan]
+        answers["/api/tasks/build"] = [200, {"queued": [{"id": 9, "item": item, "status": "queued"}], "kickstart": {"ok": True}}]
+        out = self.run_view(self.PICK.replace("ID", str(item))
+                            + f" const o = C.get('{item}'), on = REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true));"
+                            " R.live = on.map(c => c.id); R.primary = (on.find(c => c.primary && c.primary(o)) || {}).id;"
+                            " shellRun(cmd('item.build'), o); await flush();"
+                            " const D = MADE.find(e => /id=\"build-h\"/.test(e.html || '')); R.shown = D ? D.html : null; R.before = OUT.posts.length;"
+                            " if (D) { D.returnValue = 'build'; D.onclose(); await flush(); }",
+                            search="?show=suggested", answers=answers)
+        self.assertIn(f'<i data-acts="{item}"></i>', out["R"]["html"], "the row's act cell draws its commands")
+        self.assertIn("item.build", out["R"]["live"])
+        self.assertEqual(out["R"]["primary"], "item.build")
+        self.assertIn(f"<code>#{item}</code> Ship the pickup", out["R"]["shown"])
+        self.assertEqual(out["R"]["before"], 0, "Build posts nothing before the dialog's Build")
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/tasks/build", {"items": [item], "revisions": {str(item): "c" * 64}}]])
+
+    def test_build_on_an_unread_suggested_row_reads_the_queue_rows_repository(self):
+        """Pack sd:7275. Before Details load, Build reads the queue row: its repo path allows, a null one refuses."""
+        item, answers = self.suggested()
+        on = self.run_view(f"R.on = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
+        self.assertIs(on["R"]["on"], True)
+        self.doc["queues"]["suggested"][0]["repo"] = None
+        off = self.run_view(f"R.off = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
+        self.assertEqual(off["R"]["off"], "a build needs a repository")
+
+    # pack sd:7334: a planned or an unscheduled suggested row offers its next status before its Details are read, as a
+    # Tasks list row does: its task is the /api/tasks row, read while Suggested shows, not only once Details open.
+    def test_a_planned_and_an_unscheduled_suggestion_offer_their_next_status_unopened(self):
+        from sd_dashboard import tasks_screen
+        from sd_db import workflow
+        planned = self.item("Due later", kind="task", priority=2, repo=str(self.checkout), due="2026-09-20")
+        workflow.change_status(self.connection, planned, "in_progress", who="test", reason="test")
+        loose = self.item("No date", kind="task", priority=1, repo=str(self.checkout))
+        self.doc["queues"]["suggested"] = [
+            {"id": planned, "repo": "~/repos/example/system", "title": "Due later", "status": "in_progress",
+             "why": "planned", "due": "2026-09-20", "priority": 2},
+            {"id": loose, "repo": "~/repos/example/system", "title": "No date", "status": "planning",
+             "why": "unscheduled", "due": None, "priority": 1}]
+        answers = {"/api/tasks": [200, tasks_screen.document(self.connection, now=NOW)]}
+        def primary(n):
+            return (f"(() => {{ const o = C.get('{n}'), on = REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true));"
+                    " return (on.find(c => c.primary && c.primary(o)) || {}).id; })()")
+        out = self.run_view(f"open('system'); R.html = ELS.queue.html; R.planned = {primary(planned)}; R.loose = {primary(loose)};"
+                            f" R.done = cmd('item.status.done').when({{ id: '{planned}' }});"
+                            f" R.ready = cmd('item.status.ready').when({{ id: '{loose}' }});",
+                            search="?show=suggested", answers=answers)
+        self.assertIn(f'data-type="suggested" data-item="{loose}"', out["R"]["html"])
+        self.assertEqual([g for g in out["gets"] if g.startswith("/api/tasks/")], [], "no Details were read")
+        self.assertEqual(out["R"]["done"], True)
+        self.assertEqual(out["R"]["ready"], True)
+        self.assertEqual(out["R"]["planned"], "item.status.done")
+        self.assertEqual(out["R"]["loose"], "item.status.ready")
+        # Turned on from off, Suggested reads the tasks; a tasks read that failed is said, not taken as no task.
+        on = self.run_view("R.before = OUT.gets.slice(); press('suggested'); await flush(); await flush(); await flush();"
+                           f" R.ready = cmd('item.status.ready').when({{ id: '{loose}' }});", answers=answers)
+        self.assertNotIn("/api/tasks", on["R"]["before"], "off, the view reads no tasks")
+        self.assertIn("/api/tasks", on["gets"])
+        self.assertEqual(on["R"]["ready"], True)
+        failed = self.run_view("R.note = ELS['queue-note'].textContent;", search="?show=suggested",
+                               answers={"/api/tasks": [500, {"error": "tasks down"}]})
+        self.assertIn("Suggested items' tasks not read", failed["R"]["note"])
+
+    # pack sd:7271 (#40961): All items adds the repo's other open items, read from /api/tasks only while it is on. Each
+    # is an item row as a suggested one is, and its act is the one Tasks' list row offers: the move to its next status.
+    def open_items(self):
+        from sd_dashboard import tasks_screen
+        from sd_db import workflow
+        made = {}
+        for title, status in (("Held up", "blocked"), ("Half done", "in_progress"), ("Finished", "done")):
+            made[status] = self.item(title, kind="task", priority=2, repo=str(self.checkout))
+            workflow.change_status(self.connection, made[status], status, who="test", reason="test")
+        answers = {"/api/tasks": [200, tasks_screen.document(self.connection, now=NOW)]}
+        for n in made.values():
+            answers[f"/api/tasks/{n}"] = [200, tasks_screen.details(self.connection, n, now=NOW)]
+        return made, answers
+
+    def test_all_items_adds_the_repos_other_open_items_read_from_tasks_only_while_on(self):
+        made, answers = self.open_items()
+        out = self.run_view("R.before = OUT.gets.slice(); press('open'); await flush(); await flush(); open('system');"
+                            " R.kids = kids(); R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;", answers=answers)
+        self.assertNotIn("/api/tasks", out["R"]["before"], "off, the view reads no tasks")
+        self.assertIn("/api/tasks", out["gets"])
+        self.assertEqual(out["urls"], [{"show": "open"}])
+        self.assertIn('data-f="qshow" data-v="open" aria-pressed="true"', out["R"]["filters"])
+        self.assertIn("All items", out["R"]["filters"])
+        for status in ("blocked", "in_progress"):
+            n = made[status]
+            self.assertIn(f'data-type="open" data-item="{n}" data-id="{n}" aria-selected=', out["R"]["html"])
+        self.assertNotIn("Finished", out["R"]["html"], "a done item is not open")
+        self.assertIn("open", out["R"]["kids"])
+        kept = self.run_view("open('system'); R.kids = kids();", search="?show=open", answers=answers)
+        self.assertIn("open", kept["R"]["kids"])
+
+    def test_an_open_row_selects_into_task_details_and_offers_its_next_status_move(self):
+        made, answers = self.open_items()
+        for status, move in (("blocked", "item.status.ready"), ("in_progress", "item.status.done")):
+            n = made[status]
+            out = self.run_view(self.PICK.replace("ID", str(n))
+                                + f" const o = C.get('{n}'), on = REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true));"
+                                " R.primary = (on.find(c => c.primary && c.primary(o)) || {}).id;",
+                                search="?show=open", answers=answers)
+            self.assertIn(f'<i data-acts="{n}"></i>', out["R"]["html"], "the row's act cell draws its commands")
+            self.assertEqual(out["R"]["row"], f"?show=open&row={n}")
+            self.assertIn(f"/api/tasks/{n}", out["gets"])
+            self.assertIn('id="det-status"', out["R"]["details"])
+            self.assertEqual(out["R"]["primary"], move, status)
+
+    # pack sd:7251: a read that stops listing a lane entry or an open item retires its command object, as the reader
+    # retires a Needs you row: it becomes 'not listed', so no row menu or Details bar runs on it.
+    def test_a_read_that_drops_an_entry_or_an_open_row_retires_its_commands(self):
+        made, answers = self.open_items()
+        n, gone, kept = made["blocked"], f"entry:{self.checkout}:9", f"entry:{self.checkout}:12"
+        out = self.run_view(f"press('open'); await flush(); await flush(); R.before = [C.get('{gone}').type, C.get('{n}').type];"
+                            " const L = QDOCS['/api/queue'][1].lanes[0]; L.rows = L.rows.filter(r => r.item !== 9);"
+                            " refresh(); await flush(); await flush(); await flush();"
+                            f" R.entry = [C.get('{gone}').type, C.get('{kept}').type];"
+                            f" press('open'); await flush(); await flush(); R.open = C.get('{n}').type;", answers=answers)
+        self.assertEqual(out["R"]["before"], ["entry", "item"])
+        self.assertEqual(out["R"]["entry"], ["not listed", "entry"])
+        self.assertEqual(out["R"]["open"], "not listed")
+
+    # pack sd:7251: a filter's count counts its rows in every repo, also a repo that shows only while the filter is on.
+    def test_each_filter_counts_the_rows_of_repos_it_would_add(self):
+        out = self.run_view("R.filters = ELS['queue-filters'].html;")
+        counts = dict(re.findall(r'data-v="(\w+)" aria-pressed="false">[^<]+<span class="n">(\d+)</span>', out["R"]["filters"]))
+        self.assertEqual(counts, {"suggested": "4", "open": "0", "ended": "3"})
+
+    # pack sd:7251 (#41066): with Suggested off, All items shows the ready items Suggested would; on, each shows once.
+    def test_all_items_alone_shows_the_ready_items_suggested_holds(self):
+        from sd_dashboard import tasks_screen
+        item, answers = self.suggested()
+        answers["/api/tasks"] = [200, tasks_screen.document(self.connection, now=NOW)]
+        out = self.run_view("open('system'); R.alone = ELS.queue.html; press('suggested'); await flush(); await flush();"
+                            " R.both = ELS.queue.html;", search="?show=open", answers=answers)
+        self.assertIn(f'data-type="open" data-item="{item}"', out["R"]["alone"])
+        self.assertIn(f'data-type="suggested" data-item="{item}"', out["R"]["both"])
+        self.assertNotIn(f'data-type="open" data-item="{item}"', out["R"]["both"])
+
+    # pack sd:7251 (#41066): a task selected once keeps its read row; a later read at another revision replaces it, so
+    # its actions follow the fresh status, not the one it had when it was selected.
+    def test_an_open_row_selected_before_acts_on_the_fresh_row_after_a_read(self):
+        from sd_dashboard import tasks_screen
+        from sd_db import workflow
+        made, answers = self.open_items()
+        n = made["blocked"]
+        workflow.change_status(self.connection, n, "in_progress", who="test", reason="test")
+        moved = tasks_screen.document(self.connection, now=NOW)
+        click = "ELS.queue.listeners.click[0]({ target: { closest: s => s === 'tr[data-id]' ? { dataset: { id: 'ID' } } : null } }); await flush(); await flush();"
+        primary = (f"(() => {{ const o = C.get('{n}'), on = REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true));"
+                   " return (on.find(c => c.primary && c.primary(o)) || {}).id; })()")
+        out = self.run_view(f"open('system'); {click.replace('ID', str(n))} R.before = {primary}; {click.replace('ID', 'live:40')}"
+                            f" QDOCS['/api/tasks'] = [200, {json.dumps(moved)}]; refresh(); await flush(); await flush(); await flush();"
+                            f" R.after = {primary};", search="?show=open", answers=answers)
+        self.assertEqual(out["R"]["before"], "item.status.ready")
+        self.assertEqual(out["R"]["after"], "item.status.done")
 
     def test_a_next_row_moves_with_the_lanes_revision(self):
         out = self.run_view(f"open('system'); act('button[data-act]', {{ repo: {json.dumps(str(self.checkout))}, item: '12', act: 'up' }});"
@@ -1245,6 +1571,33 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
                             answers={"/api/queue/move": [400, {"error": "sd:3 is running; the queue changes only between items"}]})
         self.assertEqual(out["R"]["said"], "system: sd:12 not moved up: sd:3 is running; the queue changes only between items."
                                            " The queue is unchanged.")
+
+    def test_a_stale_write_reads_the_lane_again_and_says_a_press_acts_on_that_read(self):
+        # pack sd:7315: Queue and Today say a 409 the same way: the page already read the lane again.
+        out = self.run_view(f"open('system'); act('button[data-act]', {{ repo: {json.dumps(str(self.checkout))}, item: '12', act: 'up' }});"
+                            " await flush(); await flush(); R.said = ELS['queue-said'].textContent;",
+                            answers={"/api/queue/move": [409, {"error": "The queue changed since the page read it. Read it"
+                                                                        " again, then retry.", "reload": True}]})
+        self.assertRegex(out["R"]["said"], r"^system: sd:12 not moved up: The queue changed since the page read it\. "
+                                           r"Read again at \d\d:\d\d; a press now acts on that read\.$")
+        self.assertEqual(out["gets"].count("/api/queue"), 2)
+
+    def test_a_stale_write_whose_read_again_failed_claims_no_fresh_read(self):
+        # A 409, then a lane read that failed, or one that left this repo out, claims no read (review of pack sd:7315).
+        lost = queue_screen.document(self.connection, now=NOW)
+        lost = {**lost, "lanes": [x for x in lost["lanes"] if x["path"] != str(self.checkout)],
+                "problems": [{"repo": str(self.checkout), "error": "database is locked"}]}
+        for name, after in (("offline", [502, {"error": "offline"}]), ("left out", [200, lost])):
+            with self.subTest(name):
+                out = self.run_view("const A2 = ANSWER; let moved = false;"
+                                    f" ANSWER = (p, b) => {{ if (p === '/api/queue/move') moved = true;"
+                                    f" return moved && p === '/api/queue' ? {json.dumps(after)} : A2(p, b); }};"
+                                    f"open('system'); act('button[data-act]', {{ repo: {json.dumps(str(self.checkout))}, item: '12', act: 'up' }});"
+                                    " await flush(); await flush(); await flush(); R.said = ELS['queue-said'].textContent;",
+                                    answers={"/api/queue/move": [409, {"error": "The queue changed since the page read it. Read it"
+                                                                                " again, then retry.", "reload": True}]})
+                self.assertEqual(out["R"]["said"], "system: sd:12 not moved up: The queue changed since the page read it."
+                                                   " It was not read again: Read again tries it.")
 
     def test_a_build_run_cancel_asks_first_and_send_to_builder_asks_for_the_finding(self):
         out = self.run_view("window.shell.confirm = a => { OUT.asked = a; return Promise.resolve(true); };"
@@ -1302,7 +1655,7 @@ class TheRegistration(unittest.TestCase):
         pages = {page.name: page for page in registry().PAGES}
         self.assertNotIn("queue", pages)
         self.assertEqual(tuple(api_paths(pages["today"])), ("/api/queue", "/api/queue/move", "/api/queue/builds",
-                                                            "/api/queue/builds/retry", "/api/queue/runner"))
+                                                            "/api/queue/builds/retry", "/api/queue/builds/pickup", "/api/queue/runner"))
         self.assertNotIn("Queue", v2.SECTIONS)
         self.assertNotIn("'Queue'", GROUP_BLOCK)
         for gone in ("queue.html", "static/queue.js", "static/queue.css", "pages/queue.py"):

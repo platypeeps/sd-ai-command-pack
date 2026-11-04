@@ -390,8 +390,8 @@ def render(connection: sqlite3.Connection, vault: Path | str | None) -> dict[str
 
     The copy is `body.text` with `hashed`'s `mirror-hash` line. A file
     is written only when its bytes differ, by temporary file and rename, and
-    overwritten only when its own `mirror-hash` holds, or it has none and
-    equals the row's text: else it is a hand edit, kept and refused. A
+    overwritten only when its own `mirror-hash` holds, or its text without
+    that line is the row's: else it is a hand edit, kept and refused. A
     stem-shaped `.md` no row holds is refused and kept too. `folder` maps
     each owning repository to the folder its `channels` setting names, None
     when its obsidian channel is off. A folder that moved is kept as
@@ -528,14 +528,22 @@ def _write(folder: Path, row: dict[str, Any], copies: dict[str, Any]) -> None:
 
 
 def _refuse_hand_edit(held: bytes, text: str) -> None:
+    """Refuse a file an overwrite would lose text from: one whose hash fails and whose text is not the row's.
+
+    A file whose text without its `mirror-hash` line is the row's loses
+    nothing, whatever its hash says: an import with `--replace` took a hand
+    edit into the row and left the file's stale hash (sd:7488).
+    """
     try:
         found = held.decode("utf-8")
     except UnicodeDecodeError:
         raise BriefRefused("it is not UTF-8: a hand edit, kept") from None
+    if unhashed(found)[0] == text:
+        return
     holds = hash_holds(found)
     if holds is False:
         raise BriefRefused("it differs from its mirror-hash: a hand edit, kept")
-    if holds is None and found != text:
+    if holds is None:
         raise BriefRefused("it has no mirror-hash and differs from its row: a hand edit or a note changed "
                            "since the import, kept; an import of the folder lists it")
 

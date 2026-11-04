@@ -4,7 +4,8 @@ Usage keeps its past-month picker (Metrics reads the current month only), Servic
 Resources keeps Toolbox, Vault and Queues, Trackers keeps the tracker issues, and Sessions keeps the live worktree
 rows. The Jobs, Ports, Progress, Reports, Repos and Commands areas were retired in sd:3402, once Management, Health,
 Metrics, Reports and Activity carried their controls; an address naming one is a 404. Every area draws inside the v2
-shell (sd:3586), under the rail section `SECTIONS` names.
+shell (sd:3586), under Fleet's Operations rail section, as one of its views (pack sd:7266): `/ui/operations.js`
+declares them, and the server draws only the area `?area=` names.
 """
 
 import contextlib
@@ -33,26 +34,23 @@ BILL_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}"
 
 AREAS = (("usage", "Usage"), ("services", "Services"), ("resources", "Resources"), ("trackers", "Trackers"),
          ("sessions", "Sessions"))
-#: Every area draws inside the v2 shell (sd:3586): the rail section it sits under, the v2 page that links it, and its
-#: Details note.
-SECTIONS = {
-    "usage": ("Metrics",
-              "Usage keeps the past months Metrics does not read: each bill's four numbers, its rows and charts."),
-    "services": ("Management",
-                 "Services lists this Mac's launchd services with each one's last request and its controls."),
-    "resources": ("Research",
-                  "Resources shows what the local collectors read: Toolbox, Vault, Research and Queues."),
-    "trackers": ("Today", "Trackers lists the open pull requests and issues that sd shadow sync last saw."),
-    "sessions": ("Today",
-                 "Sessions lists the worktrees each checkout registered and the sd commands running at this read."),
+#: Each area's Details note.
+NOTES = {
+    "usage": "Usage keeps the past months Metrics does not read: each bill's four numbers, its rows and charts.",
+    "services": "Services lists this Mac's launchd services with each one's last request and its controls.",
+    "resources": "Resources shows what the local collectors read: Toolbox, Vault, Research and Queues.",
+    "trackers": "Trackers lists the open pull requests and issues that sd shadow sync last saw.",
+    "sessions": "Sessions lists the worktrees each checkout registered and the sd commands running at this read.",
 }
 
 
-def _navigation(area):
-    return tag("nav", join(tag("a", label, href=f"/operations?area={key}",
-        class_="toggle-current" if area == key else None,
-        aria_current="page" if area == key else None) for key, label in AREAS),
-        class_="view-toggle", aria_label="Operations areas")
+def _views(area, content):
+    """One `view-<key>` panel per area, the shell's views (pack sd:7266); only `area`'s holds its content.
+
+    The shell shows one panel and hides the rest; `/ui/operations.js` loads the address of a view that is not drawn.
+    """
+    return join(tag("div", content if key == area else tag("p", f"Opening {label}…", class_="hint"),
+                    id=f"view-{key}", hidden=key != area) for key, label in AREAS)
 
 
 def _number_detail(number: reads.Number):
@@ -307,13 +305,12 @@ def operations_page(connection, *, parameters, now, services_backend=None):
         from .sessions_screen import sessions_panel
 
         content = sessions_panel(parameters)
-    section, note = SECTIONS[area]
-    return shell_page("Operations", section, _navigation(area), content, subtitle=_subtitle(), screen="operations",
-                      note=note)
+    return shell_page("Operations", "Operations", _views(area, content), subtitle=_subtitle(), screen="operations",
+                      note=NOTES[area], script="operations.js")
 
 
 def _subtitle():
-    """The areas, from `AREAS`, so the summary names every tab the nav draws."""
+    """The areas, from `AREAS`, so the summary names every view the rail lists."""
     words = [label.lower() for _, label in AREAS]
     words[0] = words[0].capitalize()
     return ", ".join(words[:-1]) + " and " + words[-1]

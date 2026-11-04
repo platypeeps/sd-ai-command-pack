@@ -6,12 +6,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from sd_db import (
     connect,
     create_assignment,
     create_item,
+    hub,
     reads,
     review,
     today,
@@ -20,6 +22,8 @@ from sd_db import (
 )
 from sd_db.migrate import initialise
 from sd_db.writes import add_note, transition
+
+from .test_wire import Served
 
 #: A fixed instant, so windows and estimates do not depend on when the suite runs.
 NOW = "2026-09-06T12:00:00Z"
@@ -137,6 +141,12 @@ class TheSections(TodayCase):
                                 (today.PUSHED + due[0]["key"], WHEN))
         self.assertEqual(today.push_due(self.connection, now=NOW), [])
 
+    def test_a_failed_health_check_is_due_for_a_push(self):
+        """Pack sd:6097: a health check failed after an auto-pickup merge is a critical push, once."""
+        filed = self.item(today.HEALTH + "build/sd-1", repo=APP)
+        due = [row for row in today.push_due(self.connection, now=NOW) if row["key"].startswith("health:")]
+        self.assertEqual([(row["key"], row["body"]) for row in due], [(f"health:{filed}", today.HEALTH + "build/sd-1")])
+
     def test_planned_is_open_items_due_after_today_soonest_first(self):
         later = self.item("Later", due="2026-09-30")
         sooner = self.item("Sooner", due="2026-09-07")
@@ -160,6 +170,30 @@ class TheSections(TodayCase):
         self.item("An idea", kind="idea")
         self.item("Done", status="done")
         self.assertEqual([row["id"] for row in today.unscheduled(self.connection)], [high, low, unranked, finished])
+
+    def test_suggested_is_ready_then_planned_then_unscheduled_once_each(self):
+        """Pack sd:7314: what sd-next offers next, in its order. An item counts once, under its first reason; one in
+        the lane or held by a build is the Queue view's merging, next, blocked or working row, so it is left out."""
+        low, high = self.item("Low ready", repo=APP, status="ready", priority=3), self.item("High ready", repo=APP, status="ready", priority=1)
+        later, sooner = self.item("Later", repo=APP, due="2026-09-30"), self.item("Sooner", repo=LIB, due="2026-09-07")
+        dated_ready = self.item("Ready and dated", repo=APP, status="ready", due="2026-09-08")
+        loose, urgent = self.item("Loose", repo=LIB, priority=4), self.item("Urgent", repo=APP, priority=0)
+        laned = self.item("Laned and ready", repo=APP, status="ready")
+        self.lane("example-owner/app", "e1", item=laned, status="failed", position=1)
+        planned_laned = self.item("Laned and dated", repo=APP, due="2026-09-10")
+        self.lane("example-owner/app", "e2", item=planned_laned, status="pending", position=2)
+        building = self.item("Building", repo=APP, status="ready")
+        ident = create_assignment(self.connection, item=building, role="author", status="queued")
+        self.connection.execute("UPDATE assignment SET scope = 'build', queued_at = ? WHERE id = ?", (WHEN, ident))
+        rows = today.suggested(self.connection, now=NOW)
+        self.assertEqual([(row["id"], row["why"]) for row in rows],
+                         [(high, "ready"), (low, "ready"), (dated_ready, "ready"), (sooner, "planned"), (later, "planned"),
+                          (urgent, "unscheduled"), (loose, "unscheduled")])
+        self.assertEqual({k: rows[3][k] for k in ("repo", "status", "due", "priority")},
+                         {"repo": LIB, "status": "planning", "due": "2026-09-07", "priority": None})
+        self.assertEqual(rows[5]["priority"], 0)
+        queued = today.queues(self.connection, now=NOW)
+        self.assertEqual(today.suggested(self.connection, now=NOW, queued=queued), rows, "a read's queues are reused")
 
     def test_blocked_says_why_from_the_status_change_or_a_waiting_note(self):
         vendor = self.item("Vendor")
@@ -286,8 +320,9 @@ class TheSections(TodayCase):
         self.assertEqual(list(found), ["summary", *today.ORDER, "closed_by_hand", "grill"])
         self.assertEqual((found["summary"]["planned"], found["summary"]["planned_this_week"]), (2, 1))
 
-    def test_the_active_assignment_states_match_the_workflow(self):
-        self.assertEqual(today.ACTIVE_ASSIGNMENTS, workflow.ACTIVE_ASSIGNMENTS)
+    def test_the_owning_assignment_states_are_the_workflows_and_a_teammates(self):
+        """Unscheduled skips an item the runner or a teammate run owns (pack sd:7221)."""
+        self.assertEqual(today.OWNING, (*workflow.ACTIVE_ASSIGNMENTS, "in_session"))
 
 
 class TheOperations(TodayCase):
@@ -338,6 +373,124 @@ class TheOperations(TodayCase):
         self.assertEqual((mine["operations"]["gate"], mine["summary"]["operations"]), (found["gate"], 1))
         self.assertEqual(sorted(row["id"] for row in loose["operations"]["findings"]), sorted([exited, folded, unread]))
 
+    def test_a_failed_runs_finding_keeps_its_exit_code(self):
+        """pack sd:7399: `ingest_log` writes `job exited N on <host>`, graded or not, with the job's lines."""
+        bare = self.report("backup-nightly", "job exited 3 on alpha: backup on alpha: the NAS is gone")
+        graded = self.report("sync-nightly", "job exited 4 on alpha (data safe, one step failed: push): sync lagged")
+        self.report("other-nightly", "job exited 5 on alphabet: not this machine")
+        found = today.operations(self.connection, host="alpha", gate=None)["findings"]
+        self.assertEqual(sorted((row["id"], row["finding"]) for row in found), sorted([
+            (bare, "job exited 3: backup on alpha: the NAS is gone"),
+            (graded, "job exited 4 (data safe, one step failed: push): sync lagged"),
+        ]))
+
+
+class TheHubRequests(TodayCase):
+    """pack sd:7358 (system sd:7324 S3): an open `hub:` item is Attention on the fence holder, not elsewhere."""
+
+    def setUp(self):
+        super().setUp()
+        self.state = "holder"
+        self.asked = 0
+        def role(connection, name=None):
+            self.asked += 1
+            if self.state == "fails":
+                return hub.Role("unknown", "hub.example.test", "Tailscale does not name this node")
+            return hub.Role(self.state, None if self.state == "off" else "hub.example.test", "test")
+        for patch in (mock.patch.object(hub, "role", side_effect=role),
+                      mock.patch.object(hub, "read", return_value=None)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def request(self, slug="sat-mail-1", **fields):
+        return self.item(fields.pop("title", f"Read the {slug} thread"), kind="followup", source="task-ref",
+                         external_id=f"hub:{slug}", **{"repo": APP, **fields})
+
+    def listed(self, **arguments):
+        return [row["id"] for row in today.attention(self.connection, **arguments)]
+
+    def test_the_hub_lists_an_open_hub_request_under_attention(self):
+        asked = self.request()
+        (row,) = today.attention(self.connection)
+        self.assertEqual((row["id"], row["repo"], row["status"]), (asked, APP, "planning"))
+        self.assertIn("hub request", row["why"])
+        found = today.sections(self.connection, now=NOW)
+        self.assertEqual(([row["id"] for row in found["attention"]], found["summary"]["attention"]), ([asked], 1))
+        # A request names no machine's finding: Operations stays the reports'.
+        self.assertEqual(today.operations(self.connection, host="alpha", gate=None)["findings"], [])
+
+    def test_a_fence_that_is_off_lists_it_as_the_one_machine_is_the_hub(self):
+        self.state = "off"
+        asked = self.request()
+        self.assertEqual(self.listed(), [asked])
+
+    def test_a_satellite_lists_none(self):
+        self.request()
+        self.state = "elsewhere"
+        self.assertEqual(self.listed(), [])
+        # `sd-db fence`'s first answer: a home with `hub.json` is a satellite, whatever the setting says.
+        self.state = "holder"
+        with mock.patch.object(hub, "read", return_value=hub.Hub("hub.example.test", 8765, Path("hub.json"))):
+            self.assertEqual(self.listed(), [])
+        with mock.patch.object(hub, "read", side_effect=hub.HubConfigError("hub.json is not a hub config")):
+            (row,) = today.attention(self.connection)
+        self.assertIn("hub.json is not a hub config", row["why"])
+
+    def test_an_unknown_role_lists_it_and_names_the_unknown(self):
+        """A failed fence read is unknown, not a satellite: the row stays and says why."""
+        self.state = "fails"
+        asked = self.request()
+        (row,) = today.attention(self.connection)
+        self.assertEqual(row["id"], asked)
+        self.assertIn("hub role unknown: Tailscale does not name this node", row["why"])
+
+    def test_only_the_exact_hub_ref_counts(self):
+        """The design's risk: a mistyped ref hides a request, so the test pins the source."""
+        asked = self.request()
+        for ref in ("hubs:sat-mail-2", "Hub:sat-mail-3", "job:hub:sat-mail-4", "hub-sat-mail-5"):
+            self.item(f"Not {ref}", kind="followup", source="task-ref", external_id=ref)
+        self.item("Other source", kind="followup", source="cron-report", external_id="hub:sat-mail-6")
+        self.assertEqual(self.listed(), [asked])
+
+    def test_a_claimed_request_older_than_a_day_still_lists(self):
+        """Failure table, S3 work: the session stops after the claim; a later session takes it over."""
+        asked = self.request(created_at="2026-09-01T09:00:00+00:00")
+        transition(self.connection, asked, "in_progress", who="hub-session", reason="claimed")
+        (row,) = today.attention(self.connection)
+        self.assertEqual((row["id"], row["status"], row["at"]), (asked, "in_progress", "2026-09-01T09:00:00+00:00"))
+
+    def test_an_answered_request_lists_until_it_is_closed(self):
+        """Failure table, S3 close: the answer lands but `done` does not; the next session closes it."""
+        asked = self.request()
+        transition(self.connection, asked, "in_progress", who="hub-session", reason="claimed")
+        add_note(self.connection, asked, "comment", "Answer: the thread says ship on Friday")
+        self.assertEqual(self.listed(), [asked])
+        transition(self.connection, asked, "done", who="hub-session", reason="answered in a note")
+        self.assertEqual(self.listed(), [])
+
+    def test_reports_and_requests_list_newest_first_and_follow_the_filter(self):
+        report = self.item("A report", kind="report", repo=APP, fields={"attention": "look"},
+                           created_at="2026-09-02T09:00:00+00:00")
+        older = self.request("sat-mail-old", created_at="2026-09-01T09:00:00+00:00")
+        newer = self.request("sat-mail-new", created_at="2026-09-03T09:00:00+00:00")
+        other = self.request("sat-drive-lib", repo=LIB)
+        self.assertEqual(self.listed(), [other, newer, report, older])
+        self.assertEqual(self.listed(repos=[APP]), [newer, report, older])
+
+    def test_no_fence_read_without_an_open_request(self):
+        """`sd today` asks Tailscale nothing on a database with no open `hub:` item."""
+        done = self.request()
+        transition(self.connection, done, "done", who="hub-session", reason="answered")
+        self.item("A report", kind="report", fields={"attention": "look"})
+        today.sections(self.connection, now=NOW)
+        self.assertEqual(self.asked, 0)
+
+    def test_a_followup_note_on_a_request_stays_a_followup(self):
+        """Followups leaves out a report's own followups only; a request is no report."""
+        asked = self.request()
+        add_note(self.connection, asked, "followup", "Ask the hub again on Friday")
+        self.assertEqual([row["id"] for row in today.followups(self.connection)], [asked])
+
 
 class TheRepositoryFilter(TodayCase):
     """sd:5098: `sd-status` reads the same sections for its own repository and its companions."""
@@ -362,6 +515,38 @@ class TheRepositoryFilter(TodayCase):
         both = today.sections(self.connection, repos=[APP, LIB], now=NOW)
         self.assertEqual({row["repo"] for row in both["unscheduled"]}, {APP, LIB})
         self.assertEqual(len(today.sections(self.connection, now=NOW)["followups"]), 3)
+
+    def test_a_repositorys_rows_list_past_the_fleets_note_cap(self):
+        """pack sd:7400: the filter runs before `open_notes`' 200-row cap, so 200 older rows elsewhere hide none."""
+        busy = self.item("Busy", repo=APP)
+        for n in range(200):
+            add_note(self.connection, busy, "followup", f"Chase {n}")
+            add_note(self.connection, busy, "question", f"Pick {n}\nOption: A (Recommended)\nOption: B")
+        mine = self.item("Mine", repo=LIB)
+        chase = add_note(self.connection, mine, "followup", "Chase the vendor")
+        decision = add_note(self.connection, mine, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
+        self.assertEqual([row["note"] for row in today.followups(self.connection, repos=[LIB])], [chase])
+        self.assertEqual([row["note"] for row in today.decisions(self.connection, repos=[LIB])], [decision])
+        self.assertEqual(today.sections(self.connection, repos=[LIB], now=NOW)["summary"]["decisions"], 1)
+
+    def test_followups_list_past_a_cap_of_a_reports_own(self):
+        """pack sd:7415: a report's own followups are no rows, so 200 of them fill no cap that hides one."""
+        report = self.item("Failing job", repo=APP, kind="report", fields={"attention": "look"})
+        for n in range(200):
+            add_note(self.connection, report, "followup", f"Chase {n}")
+        mine = self.item("Mine", repo=APP)
+        chase = add_note(self.connection, mine, "followup", "Chase the vendor")
+        self.assertEqual([row["note"] for row in today.followups(self.connection)], [chase])
+        self.assertEqual([row["note"] for row in today.followups(self.connection, repos=[APP])], [chase])
+
+    def test_decisions_list_past_a_cap_of_plain_questions(self):
+        """pack sd:7400: questions Decisions leaves out fill no cap that hides one it lists, as in #1663."""
+        busy = self.item("Busy", repo=APP)
+        self.connection.executemany("INSERT INTO note (item, timestamp, kind, body) VALUES (?, ?, 'question', ?)",
+                                    [(busy, f"2026-09-01T00:00:{n % 60:02d}+00:00", f"Plain {n}") for n in range(200)])
+        asked = self.item("Asked", repo=APP)
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
+        self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision])
 
     def test_delivered_and_attention_follow_the_filter(self):
         for repo in (APP, LIB):
@@ -395,3 +580,34 @@ class TheRepositoryFilter(TodayCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSatellite(unittest.TestCase):
+    """pack sd:7357: a satellite's `sd today` reads the hub over the wire and lists its lanes' failure followups."""
+
+    def test_a_satellite_lists_the_open_followup_of_its_own_lane(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        served = Served(Path(tmp.name))
+        self.addCleanup(served.stop)
+        hub = connect(served.database)
+        try:
+            upsert_repo(hub, APP, remote="https://github.com/example-owner/app")
+            upsert_repo(hub, LIB, remote="https://github.com/example-owner/lib")
+            hub.execute("UPDATE repo SET lane_host = 'build-2' WHERE path = ?", (APP,))
+            mine = create_item(hub, kind="task", title="Mine", repo=APP)
+            theirs = create_item(hub, kind="task", title="Hub's", repo=LIB)
+            failed = add_note(hub, mine, "followup", "Lane failed in prepare at aaaaaaaaaaaa: a blocking finding")
+            add_note(hub, theirs, "followup", "Lane failed in merge at bbbbbbbbbbbb: refused")
+            closed = add_note(hub, mine, "followup", "Lane failed in prepare at cccccccccccc: an older failure")
+            hub.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (WHEN, closed))
+        finally:
+            hub.close()
+        satellite: Any = served.connect()  # `sd today` takes either kind of connection
+        self.addCleanup(satellite.close)
+        own = today.sections(satellite, repos=[APP], now=NOW)
+        self.assertEqual([(row["id"], row["note"], row["title"]) for row in own["followups"]],
+                         [(mine, failed, "Lane failed in prepare at aaaaaaaaaaaa: a blocking finding")])
+        self.assertEqual(own["summary"]["followups"], 1)
+        # `sd today` with no `--only` reads every repository: the hub's lane and the satellite's alike.
+        self.assertEqual({row["id"] for row in today.sections(satellite, now=NOW)["followups"]}, {mine, theirs})

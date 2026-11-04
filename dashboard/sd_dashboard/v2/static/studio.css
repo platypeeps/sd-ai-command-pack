@@ -1,6 +1,10 @@
 /* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4
- * Studio (sd:6920): the Documents ledger grammar (documents.css) and, in Details, each root's files as a gallery.
- * Route: locked to foundation/ and the v2 shell.css; every value is a token. */
+ * Studio (sd:6920, sd:6921): the Documents ledger grammar (documents.css) and, in Details, the stage strip and each
+ * root's files as a gallery.
+ * Route: locked to foundation/ and the v2 shell.css; every value is a token.
+ * Hallmark · component: expandable ledger row + file sub-rows (sd:7490) · genre: modern-minimal · theme: design.md
+ * states: default · hover · focus · active (the chevron, Open, Re-render) · disabled, loading, error and success are
+ * the shell's .btn and its run toast · expanded (chevron turned down, sub-rows drawn) · empty (no rendered file). */
 
 /* Gallery: one block per root, its files in a grid; an image fits its cell, a player takes the row. */
 .details .root { margin: 0 0 var(--space-md); }
@@ -15,3 +19,53 @@
 .details .gallery video, .details .gallery audio { display: block; width: 100%; }
 .details .gallery span { display: block; margin-top: var(--space-2xs); font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-muted); overflow-wrap: anywhere; }
 .details ul.problems { margin: var(--space-xs) 0 var(--space-md); padding-left: var(--space-md); font-size: var(--text-sm); }
+
+/* sd:6921 · Stage strip: the kind's stages in a row of hairline steps. Done steps read muted, the item's own stage
+ * carries the accent wash and weight; a phone wraps the row. */
+.details ol.strip { display: flex; flex-wrap: wrap; gap: var(--space-2xs); margin: var(--space-xs) 0 var(--space-sm); padding: 0; list-style: none; }
+.details ol.strip li { margin: 0; padding: var(--space-3xs) var(--space-xs); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-sm);
+  font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); white-space: nowrap; }
+.details ol.strip li.done { color: var(--color-muted); }
+.details ol.strip li.now { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-ink); font-weight: 600; }
+
+/* Pin and Hide sit under each tile; the hidden files fold under the root, closed until opened. */
+.details .gallery .rowact { display: flex; gap: var(--space-3xs); margin-top: var(--space-3xs); }
+.details .gallery .pinmark { font-weight: 600; color: var(--color-ink-2); }
+.details details.aside { margin: var(--space-xs) 0 0; }
+.details details.aside summary { cursor: pointer; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-muted); }
+.details details.aside summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* sd:7490 · The chevron before a project's title expands its row; one row at a time. It turns down when open. It keeps
+ * its own column, so a long title wraps beside it, not under it. */
+.ledger .what .lead { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-2xs); align-items: center; }
+.ledger .what .lead > :not(.expand) { grid-column: 2; }
+.ledger .what button.expand { grid-row: span 2; align-self: start; display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem; border-radius: var(--radius-sm); color: var(--color-ink-2); cursor: pointer; }
+.ledger .what button.expand .i { width: var(--icon-sm); height: var(--icon-sm); transition: transform var(--dur-fast) var(--ease-out); }
+.ledger .what button.expand[aria-expanded="true"] .i { transform: rotate(90deg); }
+.ledger .what button.expand:hover { background: var(--color-well); color: var(--color-ink); }
+.ledger .what button.expand:active { background: var(--color-rule-2); }
+.ledger .what button.expand:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.ledger .when { font: 400 var(--text-xs)/1.3 var(--font-data); color: var(--color-ink-2); }
+/* Sub-rows: one per rendered file, indented under the title, its actions and time at the right; no row hover. */
+.ledger tr.sub td { height: auto; padding-block: var(--space-3xs); background: var(--color-panel); }
+.ledger tr.sub .what { padding-left: calc(1.5rem + var(--space-2xs) + var(--space-xs)); }
+.ledger tr.sub .name { font: 400 var(--text-sm)/1.35 var(--font-data); overflow-wrap: anywhere; }
+.ledger tr.sub .acts .btn + .btn { margin-left: var(--space-2xs); }
+.ledger tr.sub.empty td { font-size: var(--text-xs); color: var(--color-muted); }
+@media (pointer: coarse) {
+  .ledger .what button.expand { width: var(--row-touch); height: var(--row-touch); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ledger .what button.expand .i { transition: none; }
+}
+/* A phone: the main row's time takes the right cell; a sub-row puts its name and time on one line, its actions below. */
+@media (max-width: 899px) {
+  .ledger tbody tr[data-id] .when { grid-area: acts; align-self: center; text-align: right; }
+  .ledger tbody tr.sub { grid-template-areas: "g what when" ". acts acts"; row-gap: var(--space-3xs); }
+  .ledger tr.sub .what { grid-area: what; padding-left: var(--space-2xs); }
+  .ledger tr.sub .when { grid-area: when; text-align: right; }
+  .ledger tr.sub .acts { display: block; grid-area: acts; text-align: left; }
+  .ledger tbody tr.sub.empty { display: block; padding: var(--space-xs) var(--space-2xs); }
+  .ledger tbody tr.sub.empty td { display: inline; }
+}

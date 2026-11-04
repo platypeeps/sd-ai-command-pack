@@ -81,7 +81,7 @@ notes (sd:2549) and daily note (sd:3426) need; `install` prints one line for eac
 still installs. Service controls on Management, Operations > Services and Health's
 Services rows (sd:3707) act only on eligible user LaunchAgents; system daemons and
 dashboard/access services remain read-only. Health's dashboard row shows the
-kickstart line to copy when the served commit is not the checkout's. See [README.md](README.md) for the Operations tabs, one per entry of
+kickstart line to copy when the served commit is not the checkout's. See [README.md](README.md) for the Operations views, one per entry of
 `operations_screen.AREAS`, and their scope. Today's Now section reads the fleet
 (both areas), the shadow table and the launchd jobs on each `/api/now`
 request a page makes, not on the page render; a fleet child or a jobs read that
@@ -206,7 +206,8 @@ assignment is cancelled through
 `/api/assignments/<id>/cancel`, the route `sd assignments cancel` matches,
 bound to the assignment's revision; Queue's Builds panel posts it.
 
-Operations renders one area per entry of `operations_screen.AREAS`.
+Operations renders one area per entry of `operations_screen.AREAS`, the area `?area=` names,
+into its view's panel; `/ui/operations.js` declares the views and loads the address of one not drawn.
 [README.md](README.md) names them, and no list here repeats that inventory.
 Usage's month section and `/api/usage` (`usage_screen.py`) read
 `sd_db.usage.read` -- `reads.usage_month` under the registry's merged caps, so
@@ -294,6 +295,9 @@ A document's Obsidian box (sd:5500) is its `obsidian=` key: ticking runs `sd-res
 Publish now answers 202 with a run id; the run takes Adversarial review's shape under `~/.local/state/system/publish-drain/`, one at a time, bounded at 900 seconds.
 It runs `claude -p` on Sonnet, `--restricted`, allowing Notion and Drive read and write tools, Edit on the queue, and Bash on `sd-db repo channels` and `sd-research-kit delivered` only.
 A drain holding a trash request also gets `notion-delete-pages` and `update_drive_file`; both trash recoverably.
+A drain holding a Drive update, a Drive request that names its `file`, also gets `get_doc_as_markdown`, `update_drive_file`,
+the kit's `highlight` and Write to `sd-<run id>-*` names at the top of the workspace-mcp attachments folder, to mark what
+changed (sd:7252).
 The outcome is read from the queue, not the model. claude is `CLAUDE_BIN`, else on PATH, else `~/.local/bin/claude`; it needs the MCP servers `notion` and `workspace-mcp`.
 Experiment on the Research page (sd:5296, `research_experiments.py`) starts `python3 -m sd_dashboard.research_experiments run <folder>` from this folder through `sweep.spawn`.
 One lock, `~/.local/state/system/research-experiments/lock`, holds every run: a second start is a 409. Each run is one `claude -p` with an exact allowlist: Notion reads and writes through the user's `notion` server alone.

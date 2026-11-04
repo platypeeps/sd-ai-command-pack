@@ -1009,6 +1009,41 @@ class Backup(Case):
         self.assertFalse(backup._copy_runner_journal(self.database, directory, {"runner_run": 1}))
         backup._check_runner_records(self.db, directory)
 
+    def test_a_teammate_run_needs_no_journal(self):
+        """pack sd:7221: a lead's teammate run, open or released, has no runner journal, and the backup passes."""
+        item = self.item(status="in_progress")
+        for released in (None, "2026-11-02T11:00:00+00:00"):
+            self.db.execute("INSERT INTO assignment (item, role, status, scope) VALUES (?, 'author', 'in_session', "
+                            "'teammate')", (item,))
+            lead = self.db.execute("SELECT MAX(id) FROM assignment").fetchone()[0]
+            self.db.execute("INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, "
+                            "retained_path, created_at, updated_at, released_at) "
+                            "VALUES (?, ?, 1, ?, 'feat/x', 'lead', '/w', '/w', '', '', ?)",
+                            (f"teammate{lead}", lead, A, released))
+        directory = self.snapshot()
+        self.assertFalse(backup._copy_runner_journal(self.database, directory, {"runner_run": 2}))
+        backup._check_runner_records(self.db, directory)
+
+    def test_a_draft_run_needs_no_journal(self):
+        """pack sd:7282: a draft run, running or released, has no runner journal, and the backup passes."""
+        item = self.item(status="planning")
+        for status, released in (("running", None), ("done", "2026-11-02T11:00:00+00:00")):
+            self.db.execute("INSERT INTO assignment (item, role, status, scope) VALUES (?, 'author', ?, 'draft')",
+                            (item, status))
+            draft = self.db.execute("SELECT MAX(id) FROM assignment").fetchone()[0]
+            self.db.execute("INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, "
+                            "retained_path, created_at, updated_at, released_at) "
+                            "VALUES (?, ?, 1, ?, ?, 'build-dispatch', ?, ?, '', '', ?)",
+                            (f"draft{draft}", draft, A, f"draft/sd-{item}", A, A, released))
+        directory = self.snapshot()
+        self.assertFalse(backup._copy_runner_journal(self.database, directory, {"runner_run": 2}))
+        backup._check_runner_records(self.db, directory)
+
+    def test_the_unjournaled_scopes_are_the_build_draft_and_teammate_scopes(self):
+        """pack sd:7282: one exemption, read by the backup and the merge guard, names each scope no runner supervises."""
+        from sd_db import draft, teammate
+        self.assertEqual(set(runner.UNSUPERVISED_SCOPES), {build.SCOPE, draft.SCOPE, teammate.SCOPE})
+
     def test_a_runner_run_still_needs_its_journal(self):
         self.db.execute("INSERT INTO assignment (item, role, status, scope) VALUES (?, 'author', 'blocked', 'item')",
                         (self.item(status="planning"),))
@@ -1019,6 +1054,102 @@ class Backup(Case):
         directory = self.snapshot()
         with self.assertRaisesRegex(BackupError, "durable journal is missing"):
             backup._copy_runner_journal(self.database, directory, {"runner_run": 1})
+
+
+class Pickup(Case):
+    """pack sd:6097, design "Auto-pickup": timed pickup of ready items, and the rules that turn it off."""
+
+    NOW = "2026-11-03T20:00:00+00:00"
+
+    def on(self):
+        return build.set_pickup(self.db, True, now=self.NOW)
+
+    def room(self, **inputs):
+        return build.room(self.db, **{**IDLE, **inputs})
+
+    def test_on_ends_at_the_next_seven_in_denver(self):
+        self.assertEqual(build.morning("2026-11-03T20:00:00+00:00"), "2026-11-04T14:00:00+00:00", "MST: 07:00 is 14:00Z")
+        self.assertEqual(build.morning("2026-11-03T13:59:00+00:00"), "2026-11-03T14:00:00+00:00")
+        self.assertEqual(build.morning("2026-07-01T20:00:00+00:00"), "2026-07-02T13:00:00+00:00", "MDT: 13:00Z")
+        state = self.on()
+        self.assertEqual((state["on"], state["until"]), (True, "2026-11-04T14:00:00+00:00"))
+        self.assertFalse(build.pickup_state(self.db, now="2026-11-04T14:00:00+00:00")["on"], "the end is off")
+        self.assertEqual(build.set_pickup(self.db, False, now=self.NOW)["until"], None)
+        set_setting(self.db, build.AUTO_PICKUP, "tomorrow")
+        self.assertFalse(build.pickup_state(self.db, now=self.NOW)["on"], "a value that does not read is off")
+
+    def test_pickup_fills_the_room_by_priority_while_on(self):
+        a = [self.item(priority=n) for n in (1, 2, 3, 4)]
+        b = self.item(repo=B, priority=5)
+        self.item(status="planning", priority=0)
+        self.assertEqual(build.pickup(self.db, self.room(), now=self.NOW), [], "off picks nothing")
+        self.on()
+        self.assertEqual(build.pickup(self.db, self.room(), now=self.NOW), [*a, b])
+        self.assertTrue(all(build.picked(self.db, row["id"]) for row in
+                            self.db.execute("SELECT id FROM assignment WHERE scope = 'build'")))
+        self.assertEqual(build.pickup(self.db, self.room(), now=self.NOW), [], "a queued build is claimed first")
+        self.assertEqual([len(build.run(self.db, self.claim()["id"])["members"]) for _ in range(3)], [3, 1, 1])
+
+    def test_pickup_keeps_to_the_room(self):
+        items = [self.item(priority=n) for n in range(5)]
+        self.on()
+        self.assertEqual(build.pickup(self.db, self.room(load=50.0), now=self.NOW), [], "no room, no pickup")
+        self.assertEqual(build.pickup(self.db, self.room(interactive=[{"repo": B, "session_id": None}] * 5),
+                                      now=self.NOW), items[:3], "one slot left: one bundle")
+        self.assertFalse(build.picked(self.db, build.queue(self.db, [items[3]], who="operator")[0]["id"]))
+
+    def end(self, status):
+        item = self.item()
+        lead = build.queue(self.db, [item], who=build.PICKUP)[0]["id"]
+        self.db.execute("UPDATE assignment SET status = ?, ended = ? WHERE id = ?",
+                        (status, later(build.clock(), self.count("SELECT COUNT(*) FROM assignment")), lead))
+        return item
+
+    def test_two_blocked_runs_turn_off(self):
+        """Failure table, Two blocked: the next tick counts the last two auto-pickup outcomes and writes off."""
+        self.on()
+        self.end("blocked")
+        self.end("done")
+        self.end("blocked")
+        self.assertIsNone(build.stop_on_blocks(self.db, now=self.NOW), "a done between breaks the row")
+        operator = self.item()
+        lead = build.queue(self.db, [operator], who="operator")[0]["id"]
+        self.db.execute("UPDATE assignment SET status = 'blocked', ended = ? WHERE id = ?",
+                        (later(build.clock(), 90), lead))
+        self.assertIsNone(build.stop_on_blocks(self.db, now=self.NOW), "a pressed build is not auto-pickup's")
+        last = self.end("blocked")
+        self.assertIn("ended blocked in a row", build.stop_on_blocks(self.db, now=self.NOW) or "")
+        self.assertFalse(build.pickup_state(self.db, now=self.NOW)["on"])
+        note = self.db.execute("SELECT body FROM note WHERE item = ? ORDER BY id DESC", (last,)).fetchone()
+        self.assertIn("Auto-pickup is off", note["body"])
+        self.on()
+        self.db.execute("UPDATE state SET timestamp = ? WHERE id = (SELECT MAX(id) FROM state)",
+                        (later(build.clock(), 3600),))
+        self.assertIsNone(build.stop_on_blocks(self.db, now=self.NOW), "On again counts only what ends after it")
+
+    def picked_run(self):
+        item = self.item()
+        set_setting(self.db, build.AUTO_PICKUP, "2026-11-04T14:00:00+00:00")
+        build.queue(self.db, [item], who=build.PICKUP)
+        bundle = self.claim()
+        build.write(self.db, bundle["id"], step="enqueuing")
+        build.enqueued(self.db, bundle["id"])
+        return item, build.run(self.db, bundle["id"])
+
+    def test_an_auto_pickup_merge_goes_to_checking(self):
+        item, run = self.picked_run()
+        self.assertTrue(build.merged(self.db, run))
+        self.assertEqual(build.run(self.db, run["id"])["step"], "checking")
+
+    def test_health_failure_turns_off_first(self):
+        """Failure table, Checking: off and the filed item land together; a check run again files nothing twice."""
+        item, run = self.picked_run()
+        filed = build.health_failed(self.db, run["id"], "`dashboard.sh health` exit 1")
+        self.assertEqual(read_settings(self.db, [build.AUTO_PICKUP]), {build.AUTO_PICKUP: None})
+        row = self.db.execute("SELECT title, repo FROM item WHERE id = ?", (filed,)).fetchone()
+        self.assertEqual((row["title"], row["repo"]), (build.HEALTH + run["branch"], A))
+        self.assertEqual(build.health_failed(self.db, run["id"], "again"), filed)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM item WHERE title LIKE 'Auto-pickup off%'"), 1)
 
 
 if __name__ == "__main__":

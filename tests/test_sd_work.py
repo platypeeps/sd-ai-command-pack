@@ -1302,6 +1302,17 @@ class TaskRef(unittest.TestCase):
         (row,) = json.loads(self.call("today", "--json").stdout)
         self.assertEqual((row["id"], row["ref"]), (state["item"]["id"], "hoa:a2-vsd"))
 
+    def test_a_hub_ref_files_and_lists_under_attention(self):
+        """pack sd:7358: a satellite files `--ref hub:<host>-<slug>`; the hub's `sd today` lists it.
+
+        The scratch database names no hub, so the fence is off and this machine is the hub.
+        """
+        item = self.add("Read the release thread", "--kind", "followup", "--ref", "hub:sat-mail-release")["item"]["id"]
+        shown = self.call("today").stdout
+        attention = shown.partition("Attention")[2].partition("Operations")[0]
+        self.assertIn(f"#{item}", attention)
+        self.assertIn("hub request", attention)
+
     def test_a_ref_the_upsert_cannot_keep_is_refused(self):
         for arguments, reason in (
             (("--ref", "job"), "<source>:<id>"),

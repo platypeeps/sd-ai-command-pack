@@ -518,14 +518,22 @@ def _channels(connection: sqlite3.Connection, row: sqlite3.Row) -> None:
         raise ProjectionRefusal(f"the channels setting of {row['repo']} leaves out notion; not projected")
 
 
-def _schema(live: dict[str, Any], target: str, names: tuple[str, ...] | list[str]) -> None:
-    """Refuse a live schema that lacks, retypes or narrows a property this plan writes, naming it."""
+def _schema(live: dict[str, Any], target: str, names: tuple[str, ...] | list[str]) -> list[str]:
+    """The properties of `names` the live schema lacks, which this plan skips (sd:7246).
+
+    Refuses a schema that lacks the title, or retypes or narrows a property this plan writes, naming it.
+    """
     schema = live.get("schema")
     if not isinstance(schema, dict):
         raise ProjectionRefusal("the live file holds no schema; fetch the database before the plan")
+    title = next(iter(PROPERTIES[target]))
+    skipped = []
     for name in names:
         kind = PROPERTIES[target][name]
         found = schema.get(name)
+        if found is None and name != title:
+            skipped.append(name)
+            continue
         if not isinstance(found, dict):
             raise ProjectionRefusal(f"{name}: the {target} database has no such property; fix Notion or the mapping")
         if found.get("type") not in (SELECTS if kind == "select" else (kind,)):
@@ -534,6 +542,7 @@ def _schema(live: dict[str, Any], target: str, names: tuple[str, ...] | list[str
         if kind == "select" and missing:
             raise ProjectionRefusal(f"{name}: the {target} database has no option {missing[0]!r}; "
                                     "sd adds no option")
+    return skipped
 
 
 def _live_row(entry: Any, database: str, what: str) -> dict[str, Any]:
@@ -572,7 +581,8 @@ def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str
     transaction. Refuses, writing nothing, a request that is not a fresh
     recompute of its item (stale), an item whose repo leaves `notion` out, a
     schema that does not fit the mapping, a row in another database, and a
-    row it cannot identify. Otherwise records the intent on the item --
+    row it cannot identify. A property the database lacks, but the title, is
+    not written and is named in `skipped` (sd:7246). Otherwise records the intent on the item --
     `writing`, and `creating` for a create -- bound to the request's
     generation and the designation it was planned under, and returns the
     properties to write. An sd-owned field whose live value differs from
@@ -641,28 +651,30 @@ def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str
                 value.pop("creating")
         planned = {"as": held["as"], "of": held.get("of"), "since": held["since"], "row": value.get("row")}
         if live_row is None:
-            _schema(live, target, list(PROPERTIES[target]))
+            skipped = _schema(live, target, list(PROPERTIES[target]))
             title = next(iter(PROPERTIES[target]))
             properties = {title: row["title"], **{name: given for name, given in values.items() if given is not None}}
             if target == "experiments":
                 properties["Stage"] = stage_value(row["kind"], row["status"])
             elif priority_value(row["priority"]) is not None:
                 properties["Priority"] = priority_value(row["priority"])
+            properties = {name: given for name, given in properties.items() if name not in skipped}
+            writes = {name: given for name, given in values.items() if name not in skipped}
             value["creating"] = {"generation": fresh["fingerprint"], "database": database, "designation": planned,
                                  "target": target, "state": PLANNED}
-            writes = dict(values)
             result = {"action": "create", "database": database, "properties": properties,
-                      "body": POINTER.format(item=item)}
+                      "body": POINTER.format(item=item), "skipped": skipped}
         else:
-            _schema(live, target, OWNED[target])
-            absent = [name for name in OWNED[target] if name not in live_row["properties"]]
+            skipped = _schema(live, target, OWNED[target])
+            owned = [name for name in OWNED[target] if name not in skipped]
+            absent = [name for name in owned if name not in live_row["properties"]]
             if absent:  # an unread value is unknown, not empty: the guard cannot clear it
                 raise ProjectionRefusal(f"{absent[0]}: the live row does not carry it; fetch the row again with "
                                         "every property, an empty one as null")
             unconfirmed = (held.get("writing") or {}).get("values", {})
             written = held.get("written", {})
             writes, yielded = {}, []
-            for name in OWNED[target]:
+            for name in owned:
                 now_live, last = _live(target, name, live_row["properties"][name]), _empty(written.get(name))
                 if now_live == last:
                     if now_live != values[name]:
@@ -680,7 +692,8 @@ def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str
             if not yielded:
                 value.pop("yielded")
             properties = dict(writes)
-            result = {"action": "update", "row": value["row"], "properties": properties, "yielded": yielded}
+            result = {"action": "update", "row": value["row"], "properties": properties, "yielded": yielded,
+                      "skipped": skipped}
         value["writing"] = {"generation": fresh["fingerprint"], "designation": planned, "values": writes,
                             "target": target}
         value.pop("confirmed", None)

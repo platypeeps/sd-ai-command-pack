@@ -13,6 +13,7 @@ import fcntl
 import importlib.util
 import io
 import json
+import math
 import os
 import pathlib
 import signal
@@ -73,12 +74,13 @@ def noted(group, number):
     end_group(group, number)
 
 def gate(root, head, base):
-    code, _, _ = sd_lane.gate_run()([sys.executable, "-c", CHILD, str(marks / "gate.pid")], dict(os.environ), root, 120)
+    mark = marks / f"gate-{{pathlib.Path(root).name}}.pid"
+    code, _, _ = sd_lane.gate_run()([sys.executable, "-c", CHILD, str(mark)], dict(os.environ), root, 120)
     return {{"status": "failure", "summary": f"exit {{code}}"}}
 
 def ship(argv, log):
-    for _ in range(1200):  # the gate's child runs before prepare starts
-        if (marks / "gate.pid").exists() and (marks / "gate.pid").read_text():
+    for _ in range(1200):  # every gate's child runs before prepare starts
+        if sum(1 for mark in marks.glob("gate-*.pid") if mark.read_text()) >= int(sys.argv[4]):
             break
         time.sleep(0.05)
     try:
@@ -958,21 +960,73 @@ class Runner(Lane):
         self.assertEqual([("--retry-review" in call) for call in self.calls], [False])
         self.assertIn("reclaimed or released", answer["stopped"])
 
-    def test_a_loaded_machine_claims_no_entry_until_load5_falls_below_the_gate_limit(self) -> None:
-        """sd:3479. Six gates timed out at one hour under load, and a retry ran the same gate under the same load."""
+    def test_a_loaded_machine_claims_and_its_gate_waits_in_the_slot_queue(self) -> None:
+        """pack sd:7412. The claim-time load stop idled the pack lane 25.6 h in a week while builders took the slots;
+        the gate queue's own load rule, in ticket order, is the one bound now."""
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         environ = {**self.environ, "SD_GATE_LOAD_MAX": "8"}
-        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (2.0, 9.5, 9.0)):
+        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):
             answer = sd_lane.run_lane(self.repo, environ, self.ship)
-        self.assertEqual((self.calls, [row["status"] for row in self.entries()]), ([], ["pending"]))
-        self.assertIn("load5 9.5 is at or above 8", answer["stopped"])
+        self.assertEqual(([c[2] for c in self.calls], [row["status"] for row in self.entries()]),
+                         (["prepare"], ["prepared"]), answer.get("stopped"))
         with mock.patch.object(sd_lane.os, "getloadavg", side_effect=OSError("no load")):
-            answer = sd_lane.run_lane(self.repo, environ, self.ship)
-        self.assertEqual((self.calls, answer["stopped"]), ([], "cannot read the load average (no load); "
-                                                                 "the next run takes the pending entries"))
-        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (9.0, 7.9, 9.0)):
+            sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, claim="deliver")
             sd_lane.run_lane(self.repo, environ, self.ship)
-        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared", "prepared"])
+
+    def test_prepare_waits_for_a_slot_no_longer_than_the_runs_budget(self) -> None:
+        """pack sd:7412, failure table row 2: an unbounded slot wait ran into the job's TERM, which spends a reclaim."""
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        now = [1000.0]
+        with mock.patch.object(sd_lane, "clock", lambda: now[0]):
+            sd_lane.run_lane(self.repo, self.environ, self.ship, deadline=1000.0 + 600.5)
+        prepare = self.calls[0]
+        self.assertEqual(prepare[prepare.index("--slot-timeout") + 1], "600")
+        self.calls.clear()
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship, deadline=float("inf"))
+        prepare = self.calls[0]
+        self.assertEqual(prepare[prepare.index("--slot-timeout") + 1], str(sd_lane.sd_lib.GATE_SLOT_SECONDS))
+
+    #: `sd-ship`'s answer when the gate's slot wait ran out at the bound the lane gave it (pack sd:7412): the review
+    #: cleared and its pass is kept, so the answer says one pass was spent.
+    SLOT_WAIT = {"ok": False, "phase": "prepare", "passes_spent": 1,
+                 "error": "the repository gate failed after the review cleared; the review pass is kept: "
+                          "no gate slot came free within 600s",
+                 "workflow": {"blocker": {"code": "gate_slot_wait", "retryable": True}}}
+
+    def test_a_slot_wait_that_ran_out_puts_the_entry_back_and_spends_no_retry_or_reclaim(self) -> None:
+        """pack sd:7412, failure table row 2: no gate ran, so the entry is not failed; the kept review serves the
+        next prepare, and every run under load puts it back again, in its place."""
+        sd_lane.enqueue_entry(self.worktree("topic"), 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = self.SLOT_WAIT
+        for waits in (1, 2):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+            self.assertIn("sd:1", answer["stopped"])
+            self.assertIn("gate slot", answer["stopped"])
+            one, two = self.entries()
+            self.assertEqual((one["status"], one["slot_waits"], one["slot_wait"]["step"], two["status"]),
+                             ("pending", waits, "prepare", "pending"))
+            for spent in ("reclaims", "retryable_retries", "hub_retries"):
+                self.assertNotIn(spent, one)
+        self.assertEqual([(c[2], c[4]) for c in self.calls], [("prepare", "1"), ("prepare", "1")])
+        del self.answers[(1, "prepare")]
+        self.calls.clear()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(c[2], c[4]) for c in self.calls],
+                         [("prepare", "1"), ("merge", "1"), ("prepare", "2"), ("merge", "2")])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
+
+    def test_a_row_with_slot_waits_claims_and_merges(self) -> None:
+        """pack sd:7412, failure table row 5: a row this version put back carries `slot_waits`; a runner of either
+        version, a rollback included, claims it as any pending row (this test passes on the older runner too)."""
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(
+            slot_waits=3, slot_wait={"step": "prepare", "reason": "no gate slot came free within 600s",
+                                     "at": "2026-11-03T00:00:00Z"}))
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
 
     def test_a_frozen_repository_claims_no_entry_until_the_window_ends(self) -> None:
         """sd:6879. A freeze window holds the lane: every entry stays pending, and a lift lets the run take them."""
@@ -993,12 +1047,6 @@ class Runner(Lane):
         finally:
             connection.close()
         sd_lane.run_lane(self.repo, self.environ, self.ship)
-        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
-
-    def test_no_gate_load_limit_claims_whatever_the_load(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
-        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):
-            sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
 
     def left_running(self, pid: int | None, step: str = "prepare") -> None:
@@ -1215,13 +1263,8 @@ class Reorder(Lane):
         self.assertEqual(lane("cancel", "1")[1]["status"], "cancelled")  # unset keeps today's behaviour
 
 
-class Speculation(Lane):
-    """sd:2586: while one entry ships, the next one's gate runs on the predicted landing.
-
-    A bare `origin` holds main; two worktrees each add a file, and main moves
-    after they fork. The recorder lands entry 1 as
-    GitHub's squash would: its catch-up tree as a new commit on main.
-    """
+class Trees(Lane):
+    """A bare `origin` holds main; two worktrees each add a file, and main moves after they fork."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -1264,6 +1307,57 @@ class Speculation(Lane):
             return git(scratch, "rev-parse", "HEAD^{tree}")
         finally:
             git(self.repo, "worktree", "remove", "--force", str(scratch))
+
+    def assert_termed_run(self, gated: list[str]) -> None:
+        """TERM a runner mid-prepare while a gate runs for each worktree in `gated`; each gate's group ends first."""
+        marks = self.tmp / "marks"
+        marks.mkdir()
+        script = self.tmp / "runner.py"
+        script.write_text(TERMED_RUNNER.format(bin=str(REPO_ROOT / "bin")), encoding="utf-8")
+        runner = subprocess.Popen([sys.executable, str(script), str(self.repo), json.dumps(self.environ), str(marks),
+                                   str(len(gated))],
+                                  env=dict(os.environ), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(runner.kill)
+
+        def pid_of(name: str) -> int | None:
+            text = (marks / name).read_text() if (marks / name).exists() else ""
+            return int(text) if text else None
+        pids: dict[str, int] = {}
+        for name in [f"gate-{tree}.pid" for tree in gated] + ["prepare.pid"]:
+            for _ in range(1200):  # bounded: a runner that never gets there fails on the read below
+                if pid_of(name) is not None or runner.poll() is not None:
+                    break
+                time.sleep(0.05)
+            child = pid_of(name)
+            if child is None:
+                self.fail(f"no {name}: {runner.stderr.read() if runner.poll() is not None else ''}")
+            pids[name] = child
+            self.addCleanup(end_group, child)
+        runner.send_signal(signal.SIGTERM)
+        _, errors = runner.communicate(timeout=60)
+        self.assertEqual(runner.returncode, -signal.SIGTERM, errors)
+        sent = [line.split() for line in (marks / "sent").read_text().splitlines()] if (marks / "sent").exists() else []
+        gates = {str(pids[f"gate-{tree}.pid"]) for tree in gated}
+        self.assertEqual({group for group, number, _ in sent[:len(gated)] if number == str(int(signal.SIGTERM))},
+                         gates, "the runner did not signal every speculative gate's group first")
+        ended = float((marks / "prepare-ended").read_text())
+        self.assertTrue(all(float(at) < ended for _, _, at in sent[:len(gated)]), "TERM waited for prepare")
+        for tree in gated:
+            for _ in range(100):
+                try:
+                    os.kill(pids[f"gate-{tree}.pid"], 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail(f"the speculative gate's child for {tree} outlived the runner")
+
+
+class Speculation(Trees):
+    """sd:2586: while one entry ships, the next one's gate runs on the predicted landing.
+
+    The recorder lands entry 1 as GitHub's squash would: its catch-up tree as a new commit on main.
+    """
 
     def ship(self, argv: list[str], log: pathlib.Path) -> dict:
         verb, item = argv[2], int(argv[argv.index("--item") + 1])
@@ -1422,51 +1516,42 @@ class Speculation(Lane):
             os.kill(int(marker.read_text()), 0)
 
 
+    def test_a_speculative_gate_still_waiting_at_the_runs_deadline_is_cancelled(self) -> None:
+        """pack sd:7412, failure table row 4: with the claim-time load stop gone, a speculative gate may wait in the
+        slot queue past the run's budget; the runner waited for it after the merge with no regard to the deadline."""
+        self.queue_both()
+        marker = self.tmp / "gate-child.pid"
+
+        def waiting(root: pathlib.Path, head: str, base: str) -> dict:
+            """A gate whose child still waits long after the run's budget, run as the real gate runs `sd-check`."""
+            child = f"import os, pathlib, time; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); time.sleep(60)"
+            code, _, _ = sd_lane.gate_run()([sys.executable, "-c", child], dict(os.environ), root, 120)
+            return {"status": "failure", "summary": f"exit {code}"}
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            for _ in range(200):  # the gate's child is running before entry 1 ships
+                if marker.exists() and marker.read_text():
+                    break
+                time.sleep(0.05)
+            return self.ship(argv, log)
+
+        started = time.monotonic()
+        answer = sd_lane.run_lane(self.repo, self.environ, ship, waiting, deadline=sd_lane.clock() + 3)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual(answer["speculative_gate"], "cancelled")
+        self.assertIn("budget", answer["stopped"])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "pending"])
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(marker.read_text()), 0)
+
     def test_a_sigterm_mid_prepare_ends_the_speculative_gate_first(self) -> None:
         """sd:5776. A TERMed runner ended prepare's group, then TERMed itself again with the default action,
         so `cancel_gate` never ran: the gate's `sd-check`, in a group of its own, ran on with ppid 1 and
         held its slot. A real SIGTERM now reaches the gate's group before prepare's group ends."""
         self.queue_both()
-        marks = self.tmp / "marks"
-        marks.mkdir()
-        script = self.tmp / "runner.py"
-        script.write_text(TERMED_RUNNER.format(bin=str(REPO_ROOT / "bin")), encoding="utf-8")
-        runner = subprocess.Popen([sys.executable, str(script), str(self.repo), json.dumps(self.environ), str(marks)],
-                                  env=dict(os.environ), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        self.addCleanup(runner.kill)
-
-        def pid_of(name: str) -> int | None:
-            text = (marks / name).read_text() if (marks / name).exists() else ""
-            return int(text) if text else None
-        pids: dict[str, int] = {}
-        for name in ("gate.pid", "prepare.pid"):
-            for _ in range(1200):  # bounded: a runner that never gets there fails on the read below
-                if pid_of(name) is not None or runner.poll() is not None:
-                    break
-                time.sleep(0.05)
-            child = pid_of(name)
-            if child is None:
-                self.fail(f"no {name}: {runner.stderr.read() if runner.poll() is not None else ''}")
-            pids[name] = child
-            self.addCleanup(end_group, child)
-        runner.send_signal(signal.SIGTERM)
-        _, errors = runner.communicate(timeout=60)
-        self.assertEqual(runner.returncode, -signal.SIGTERM, errors)
-        sent = [line.split() for line in (marks / "sent").read_text().splitlines()] if (marks / "sent").exists() else []
-        self.assertTrue(sent, "the runner never signalled the speculative gate's group")
-        self.assertEqual(sent[0][:2], [str(pids["gate.pid"]), str(int(signal.SIGTERM))])
-        self.assertLess(float(sent[0][2]), float((marks / "prepare-ended").read_text()), "TERM waited for prepare")
-        for _ in range(100):
-            try:
-                os.kill(pids["gate.pid"], 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            self.fail("the speculative gate's child outlived the runner")
+        self.assert_termed_run(["second"])
         [speculation] = [entry["speculation"] for entry in self.entries() if "speculation" in entry]
         self.assertEqual((speculation["after"], speculation["status"]), (1, "cancelled"))
-
 
     def test_an_interruption_while_the_gate_starts_still_ends_it(self) -> None:
         """sd:5776, the step between the gate's start and the runner holding it: the run's cleanup ends it."""
@@ -1496,6 +1581,131 @@ class Speculation(Lane):
         self.assertFalse(gate.is_alive())
         with self.assertRaises(ProcessLookupError):
             os.kill(int(marker.read_text()), 0)
+
+
+class DepthTwo(Trees):
+    """pack sd:7412, slice 2: the entry after next is gated on both predicted landings, chained.
+
+    The recorder lands every merged entry as GitHub's squash would, so each
+    gated tree can be held against the real catch-up after the run.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.third = self.branch("third", {"three.txt": "3\n"})
+        self.fourth = self.branch("fourth", {"four.txt": "4\n"})
+        self.trees = {1: self.first, 2: self.second, 3: self.third, 4: self.fourth}
+        self.landed: dict[int, str] = {}
+
+    def queue_all(self, count: int) -> None:
+        for item in range(1, count + 1):
+            sd_lane.enqueue_entry(self.trees[item], item, f"fix: {item}", self.body, self.environ, manual=True,
+                                  claim="deliver")
+
+    def ship(self, argv: list[str], log: pathlib.Path) -> dict:
+        verb, item = argv[2], int(argv[argv.index("--item") + 1])
+        if verb == "merge":
+            git(self.repo, "fetch", "-q", "origin")
+            tree = self.caught_up(git(self.trees[item], "rev-parse", "HEAD"), "origin/main")
+            self.landed[item] = git(self.repo, "commit-tree", tree, "-p", "origin/main", "-m", f"{item} (#{item})")
+            git(self.repo, "push", "-q", "origin", f"{self.landed[item]}:refs/heads/main")
+        return Lane.ship(self, argv, log)
+
+    def passing(self, root: pathlib.Path, head: str, base: str) -> dict:
+        self.gates.append((root, head, base))
+        return {"status": "success", "summary": "sd-check pass (check pass)", "receipt_revision": 1}
+
+    def endless(self, root: pathlib.Path, head: str, base: str) -> dict:
+        """A gate whose child sleeps far past the run, as the real gate runs `sd-check`; it marks its pid."""
+        self.gates.append((root, head, base))
+        mark = self.tmp / f"gate-{root.name}.pid"
+        child = f"import os, pathlib, time; pathlib.Path({str(mark)!r}).write_text(str(os.getpid())); time.sleep(60)"
+        code, _, _ = sd_lane.gate_run()([sys.executable, "-c", child], dict(os.environ), root, 120)
+        return {"status": "failure", "summary": f"exit {code}"}
+
+    def wait_for_gates(self, *names: str) -> None:
+        for _ in range(200):  # bounded: a gate that never starts fails on the pid read
+            if all((self.tmp / f"gate-{name}.pid").exists() and (self.tmp / f"gate-{name}.pid").read_text()
+                   for name in names):
+                return
+            time.sleep(0.05)
+
+    def assert_ended(self, *names: str) -> None:
+        for name in names:
+            pid = int((self.tmp / f"gate-{name}.pid").read_text())
+            self.addCleanup(end_group, pid)
+            for _ in range(100):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail(f"the gate for {name} outlived the run")
+
+    def tree(self, rev: str) -> str:
+        return git(self.repo, "rev-parse", f"{rev}^{{tree}}")
+
+    def test_each_entry_is_gated_once_two_ahead_on_the_chained_landings(self) -> None:
+        self.queue_all(4)
+        fork = git(self.repo, "rev-parse", "origin/main")
+        sd_lane.run_lane(self.repo, self.environ, self.ship, self.passing)
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged"] * 4)
+        self.assertEqual(sorted(root.name for root, _, _ in self.gates), ["fourth", "second", "third"])
+        gated = {root.name: (head, base) for root, head, base in self.gates}
+        head, base = gated["third"]
+        # Gated while entry 1 shipped: entry 2's landing is predicted on entry 1's predicted landing on the fork.
+        self.assertNotEqual(git(self.repo, "rev-parse", f"{base}^"), self.landed[1])
+        self.assertEqual(git(self.repo, "rev-parse", f"{base}^^"), fork)
+        self.assertEqual(self.tree(f"{base}^"), self.tree(self.landed[1]))
+        self.assertEqual(self.tree(base), self.tree(self.landed[2]))
+        self.assertEqual(self.tree(head), self.caught_up(git(self.third, "rev-parse", "HEAD"), self.landed[2]))
+        head, base = gated["fourth"]
+        self.assertEqual(git(self.repo, "rev-parse", f"{base}^^"), self.landed[1])
+        self.assertEqual(self.tree(base), self.tree(self.landed[3]))
+        self.assertEqual(self.tree(head), self.caught_up(git(self.fourth, "rev-parse", "HEAD"), self.landed[3]))
+        self.assertEqual([(entry["speculation"]["after"], entry["speculation"]["depth"], entry["speculation"]["status"])
+                          for entry in self.entries()[1:]], [(1, 1, "success"), (2, 2, "success"), (3, 2, "success")])
+
+    def test_a_failure_ahead_cancels_both_gates_and_the_next_entry_gates_again(self) -> None:
+        self.queue_all(3)
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+
+        def gate(root: pathlib.Path, head: str, base: str) -> dict:
+            return self.endless(root, head, base) if len(self.gates) < 2 else self.passing(root, head, base)
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            self.wait_for_gates("second", "third")
+            return self.ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, ship, gate, deadline=sd_lane.clock() + 20)
+        self.assert_ended("second", "third")
+        self.assertEqual([root.name for root, _, _ in self.gates], ["second", "third", "third"])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["failed", "merged", "merged"])
+        cancelled = self.entries()[1]["speculation"]
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertIn("sd:1 did not merge", cancelled["reason"])
+        again = self.entries()[2]["speculation"]
+        self.assertEqual((again["after"], again["depth"], again["status"]), (2, 1, "success"))
+
+    def test_the_runs_deadline_cancels_both_gates(self) -> None:
+        self.queue_all(3)
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            self.wait_for_gates("second", "third")
+            return self.ship(argv, log)
+        started = time.monotonic()
+        answer = sd_lane.run_lane(self.repo, self.environ, ship, self.endless, deadline=sd_lane.clock() + 3)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assert_ended("second", "third")
+        self.assertEqual(answer["speculative_gate"], "cancelled")
+        self.assertIn("budget", answer["stopped"])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "pending", "pending"])
+
+    def test_a_sigterm_mid_prepare_ends_both_gates_first(self) -> None:
+        self.queue_all(3)
+        self.assert_termed_run(["second", "third"])
+        self.assertEqual([(entry["speculation"]["after"], entry["speculation"]["status"])
+                          for entry in self.entries()[1:]], [(1, "cancelled"), (2, "cancelled")])
 
 
 class Landing(Lane):
@@ -2491,6 +2701,39 @@ class ItemChecks(SharedQueue):
     def test_an_item_with_no_registered_repository_is_refused_before_any_push(self) -> None:
         self.assertIn("requires an item with a registered repository", str(self.refused(self.unregistered)))
 
+    def test_an_item_a_teammate_run_holds_is_refused_before_any_push(self) -> None:
+        """pack sd:7221: the lane takes the branch only once the lead ends the run, the proof the builder stopped."""
+        import sd_db
+        from sd_db import teammate
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            repo = connection.execute("SELECT repo FROM item WHERE id = ?", (self.own,)).fetchone()["repo"]
+            run = teammate.start(connection, [self.own], worktree=str(self.tree), branch="topic", budget_minutes=60,
+                                 owner="lead")
+            self.assertTrue(repo)
+        finally:
+            connection.close()
+        refused = self.refused(self.own)
+        self.assertEqual(refused.code, "teammate_held")
+        self.assertIn(f"sd:{self.own} is held by teammate run {run['id']}", str(refused))
+        self.assertIn(f"sd assignments beat {self.own} --end", str(refused))
+
+    def test_an_explicit_close_a_teammate_run_holds_is_refused_before_any_push(self) -> None:
+        """pack sd:7221: each later `--item` is delivered too, so it is checked as the claimed item is."""
+        import sd_db
+        from sd_db import teammate
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            repo = connection.execute("SELECT repo FROM item WHERE id = ?", (self.own,)).fetchone()["repo"]
+            other = sd_db.create_item(connection, kind="task", title="a teammate's", status="in_progress", repo=repo)
+            run = teammate.start(connection, [other], worktree="/w/teammate", branch="feat/t", budget_minutes=60,
+                                 owner="lead")
+        finally:
+            connection.close()
+        refused = self.refused(self.own, closes=(other,))
+        self.assertEqual(refused.code, "teammate_held")
+        self.assertIn(f"sd:{other} is held by teammate run {run['id']}", str(refused))
+
     def test_a_body_closes_line_is_refused_before_any_push(self) -> None:
         """sd:3704: the --item list is the one closing set, so a body `Closes:` line waits for no prepare to refuse it."""
         refused = self.refused(self.own, "fix: t", f"Closes: sd:{self.own + 99}\n")
@@ -2667,6 +2910,24 @@ class CitedCloses(SharedQueue):
         [prepare] = [call for call in self.calls if call[2] == "prepare"]
         self.assertEqual([prepare[i + 1] for i, part in enumerate(prepare) if part == "--item"],
                          [str(self.own), str(a), str(b), str(e)])
+
+    def test_a_cited_close_a_teammate_run_holds_is_refused_before_any_push(self) -> None:
+        """pack sd:7221: a cited close is delivered too, and the cited set is known only before the push."""
+        import sd_db
+        from sd_db import teammate
+        a = self.open[0]
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            run = teammate.start(connection, [a], worktree="/w/teammate", branch="feat/t", budget_minutes=60,
+                                 owner="lead")
+        finally:
+            connection.close()
+        before = len(self.entries())
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            self.enqueue("## Summary\n\nWords.\n", f"fix(lane): the slice\n\nCloses: sd:{a}")
+        self.assertEqual(refused.exception.code, "teammate_held")
+        self.assertIn(f"sd:{a} is held by teammate run {run['id']}", str(refused.exception))
+        self.assertEqual((len(self.entries()), "push" in self.git_verbs), (before, False))
 
     def test_each_cited_close_is_listed_in_the_body_and_noted_on_its_item(self) -> None:
         """Lane review of sd:5999, operator ruling: a reader sees every close by citation, so a wrong one is one reopen."""
@@ -2954,7 +3215,7 @@ class ClaimAndLease(SharedQueue):
         claimed = sd_lane.claim_entry(self.store(), "token")
         self.assertEqual((claimed or {}).get("item"), 1)
         gate = mock.Mock()
-        self.assertIsNone(sd_lane.speculate(claimed, self.store(), gate))
+        self.assertEqual(sd_lane.speculate(claimed, self.store(), gate), [])
         gate.assert_not_called()
         speculation = self.entries()[1]["speculation"]
         self.assertEqual((speculation["after"], speculation["status"]), (1, "skipped"))
@@ -3122,6 +3383,22 @@ class ClaimAndLease(SharedQueue):
         self.make_dead()
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((answer["reclaimed"][0]["status"], self.entries()[0]["status"]), ("pending", "merged"))
+
+    def test_a_slot_wait_put_back_that_fails_to_write_is_settled_by_the_next_run(self) -> None:
+        """pack sd:7412, failure table row 2b: the hub fails the write of `slot_waits`; the entry stays running,
+        the next run's reclaim puts it back, and the run after ships it."""
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = Runner.SLOT_WAIT
+        with self.failing_store(lambda entry: "slot_waits" in entry):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertIn("the hub went away", answer["stopped"])
+        self.assertEqual((self.entries()[0]["status"], "slot_waits" in self.entries()[0]), ("running", False))
+        self.make_dead()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(answer["reclaimed"][0]["status"], "pending")
+        del self.answers[(1, "prepare")]
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
 
     def test_a_retryable_put_back_that_fails_to_write_is_reclaimed_and_counts_nothing(self) -> None:
         """Failure table, sd:3478 put-back: the write of the count fails; the entry stays running, a reclaim
@@ -5359,6 +5636,26 @@ class Bounds(unittest.TestCase):
         for bound in (sd_lane.PREPARE_SECONDS, sd_lane.MERGE_SECONDS):
             self.assertGreaterEqual(bound, 3 * 3600 + sd_lane.sd_lib.GATE_SLOT_SECONDS)
 
+    def test_the_slot_wait_bound_is_a_whole_second_count_inside_its_limits_at_any_magnitude(self) -> None:
+        """pack sd:7412. `sd-check --slot-timeout` takes a whole number of seconds above 0; the bound never passes
+        `GATE_SLOT_SECONDS`, and an unknown time left (NaN) waits the least, since the job TERMs on its own clock."""
+        cap, tiny = sd_lane.sd_lib.GATE_SLOT_SECONDS, 5e-324
+        cases = {(0.0, 0.0): 1, (100.0, 0.0): 100, (100.9, 0.0): 100, (0.0, 100.0): 1, (tiny, 0.0): 1,
+                 (-tiny, 0.0): 1, (math.inf, 0.0): cap, (-math.inf, 0.0): 1, (math.nan, 0.0): 1, (0.0, math.nan): 1,
+                 (math.inf, math.inf): 1, (math.inf, -math.inf): cap, (1e308, -1e308): cap, (-1e308, 1e308): 1,
+                 (float(cap) + 0.5, 0.0): cap, (float(cap) - 0.5, 0.0): cap - 1, (2.0 ** 63, 0.0): cap,
+                 (1e15 + 30.0, 1e15): 30}
+        for (deadline, now), expected in cases.items():
+            with self.subTest(deadline=deadline, now=now):
+                bound = sd_lane.slot_wait_seconds(deadline, now)
+                self.assertIs(type(bound), int)
+                self.assertEqual(bound, expected)
+        for exponent in range(-1074, 1024, 7):  # every binary magnitude, both signs, against two clocks
+            for sign in (1.0, -1.0):
+                for now in (0.0, 1e9):
+                    bound = sd_lane.slot_wait_seconds(now + sign * 2.0 ** exponent, now)
+                    self.assertTrue(type(bound) is int and 1 <= bound <= cap, (exponent, sign, now, bound))
+
     def test_a_gate_child_that_starts_after_the_cancel_is_ended_at_once(self) -> None:
         """sd:3361, the step between the cancel and the gate's `sd-check` start: the late group is ended too."""
         go, answers = threading.Event(), []
@@ -5407,6 +5704,25 @@ class Bounds(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 10)
         self.assertEqual(answers[0][0], -signal.SIGKILL)
 
+    def test_a_drained_run_waits_for_its_speculative_gate_only_until_its_deadline(self) -> None:
+        """pack sd:7412, failure table row 4: a run that ran out of entries joined its speculative gate with no
+        bound, so a gate queued behind builders held the runner lock past the job's TERM."""
+        release = threading.Event()
+        gate = sd_lane.SpeculativeGate(lambda: release.wait(60), "queued")
+        gate.start()
+        try:
+            started = time.monotonic()
+            with mock.patch.object(sd_lane, "CANCEL_SECONDS", 0.2):
+                answer = sd_lane.finish_speculation([gate], {}, sd_lane.clock() + 0.5)
+            self.assertLess(time.monotonic() - started, 10)
+            self.assertEqual(answer["speculative_gate"], "still ending 0.4s after SIGKILL; the lock is freed anyway")
+        finally:
+            release.set()
+            gate.join(10)
+        done = sd_lane.SpeculativeGate(lambda: None, "done")
+        done.start()
+        self.assertEqual(sd_lane.finish_speculation([done], {}, sd_lane.clock() + 60), {})
+
     def test_a_gate_that_outlives_both_signals_is_reported_and_left(self) -> None:
         """sd:3361, the last step: a gate still running after SIGKILL does not hold the run; the answer says so."""
         release = threading.Event()
@@ -5414,7 +5730,7 @@ class Bounds(unittest.TestCase):
         gate.start()
         try:
             with mock.patch.object(sd_lane, "CANCEL_SECONDS", 0.2):
-                answer = sd_lane.finish_speculation(gate, {"stopped": "BuildMismatch"})
+                answer = sd_lane.finish_speculation([gate], {"stopped": "BuildMismatch"})
             self.assertEqual(answer["speculative_gate"], "still ending 0.4s after SIGKILL; the lock is freed anyway")
         finally:
             release.set()
@@ -5442,7 +5758,8 @@ class FailureNotes(SharedQueue):
         row = {"status": "failed", "step": "prepare", "item": 1, "expected_head": "a" * 40,
                "reason": "a blocking finding", "prepare_log": "/logs/prepare-1-x.log", "log_host": "hub"}
         notes: list[str] = []
-        sd_lane.note_ended(row, self.repo, lambda item, body, main: notes.append(body) or "written")
+        sd_lane.note_ended(row, self.repo, lambda item, body, main, kind: notes.append(body) or "written",
+                           queue=self.store())
         self.assertEqual(notes, [f"Lane failed in prepare at {'a' * 12}: a blocking finding; full text: "
                                  "/logs/prepare-1-x.log"])
 
@@ -5459,7 +5776,7 @@ class FailureNotes(SharedQueue):
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
 
-        def broken(item: int, body: str, main: pathlib.Path) -> str:
+        def broken(item: int, body: str, main: pathlib.Path, kind: str) -> str:
             raise RuntimeError("the hub refused the note")
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship, note=broken)
         [entry] = self.entries()
@@ -5526,6 +5843,124 @@ class FailureNotes(SharedQueue):
         self.make_dead()
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((self.entries()[0]["status"], len(self.lane_notes())), ("failed", 1))
+
+    def as_satellite(self) -> None:
+        """This machine hosts the lane and is not the hub: a hub serves its database (sd:7357)."""
+        self.repo_row(sd_lane.this_host())
+        patcher = mock.patch("sd_db.database.served_by", lambda target, home=None: "hub.example.test:8765",
+                             create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def failing_prepare(self) -> str:
+        head = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver",
+                                     closes=(2,))["expected_head"]
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        return head
+
+    def test_a_satellite_hosted_failure_writes_an_open_followup_on_each_item(self) -> None:
+        """pack sd:7357, failure table S2 lane ends failed: the lane host's sessions see it in `sd today`."""
+        self.as_satellite()
+        self.failing_prepare()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual(([item for item, _ in self.lane_notes()], self.note_kinds), ([1, 2], ["followup", "followup"]))
+        self.assertEqual((entry["status"], entry["note"]), ("failed", {"sd:1": "written", "sd:2": "written"}))
+
+    def test_a_hub_hosted_failure_writes_a_comment(self) -> None:
+        """Failure table S2 hub lane fails: NULL or this hub's own name; neither gets a followup."""
+        for host in (None, sd_lane.this_host()):
+            with self.subTest(host=host):
+                self.notes.clear()
+                self.note_kinds.clear()
+                self.repo_row(host)
+                row = {"status": "failed", "step": "prepare", "item": 1, "head": "a" * 40, "reason": "no"}
+                self.assertEqual(sd_lane.note_ended(row, self.repo, queue=self.store()), {"sd:1": "written"})
+                self.assertEqual(self.note_kinds, ["comment"])
+
+    def test_another_machines_lane_writes_a_followup_from_the_hub(self) -> None:
+        """A cancel on the hub of a satellite lane's entry: the satellite's sessions must still see it."""
+        self.repo_row("build-2")
+        row = {"status": "failed", "step": "merge", "item": 1, "head": "a" * 40, "reason": "released"}
+        sd_lane.note_ended(row, self.repo, queue=self.store())
+        self.assertEqual(self.note_kinds, ["followup"])
+
+    def test_a_lane_host_that_does_not_read_writes_a_followup(self) -> None:
+        """Failures: an unread host is unknown, not the hub's; the failure stays open rather than lost."""
+        row = {"status": "failed", "step": "prepare", "item": 1, "head": "a" * 40, "reason": "no"}
+        with mock.patch.object(sd_lane.sd_lib, "lane_host", side_effect=sqlite3.OperationalError("the hub went away")):
+            self.assertEqual(sd_lane.note_ended(row, self.repo, queue=self.store()), {"sd:1": "written"})
+        self.assertEqual(self.note_kinds, ["followup"])
+
+    def test_a_followup_that_fails_to_write_is_named_and_the_entry_still_fails(self) -> None:
+        """Failure table S2 lane ends failed, the note write fails: the entry stays failed; the answer names it."""
+        self.as_satellite()
+        self.failing_prepare()
+        kinds: list[str] = []
+
+        def broken(item: int, body: str, main: pathlib.Path, kind: str) -> str:
+            kinds.append(kind)
+            raise RuntimeError("the hub refused the note")
+        sd_lane.run_lane(self.repo, self.environ, self.ship, note=broken)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["reason"], kinds), ("failed", "a blocking finding", ["followup"] * 2))
+        self.assertEqual(entry["note"], {"sd:1": "failed: RuntimeError: the hub refused the note",
+                                         "sd:2": "failed: RuntimeError: the hub refused the note"})
+
+    def followups(self) -> tuple[list[int], dict[int, str | None]]:
+        """Items 1 and 2, each with a lane followup from an earlier failed run and one another session wrote."""
+        import sd_db
+        items = self.register_items(2)
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            notes = [sd_db.add_note(connection, item, "followup", body) for item in items
+                     for body in ("Lane failed in prepare at aaaaaaaaaaaa: a blocking finding", "Chase the vendor")]
+        finally:
+            connection.close()
+        return items, dict.fromkeys(notes)
+
+    def resolved(self, notes: dict[int, str | None]) -> dict[int, bool]:
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            return {number: connection.execute("SELECT resolved_at FROM note WHERE id = ?",
+                                               (number,)).fetchone()[0] is not None for number in notes}
+        finally:
+            connection.close()
+
+    def test_a_passing_run_resolves_only_the_lanes_open_followups(self) -> None:
+        """Failure table S2 session resolves: a later pass closes the lane's followups on each item it carries."""
+        items, notes = self.followups()
+        lane, other, lane_2, other_2 = notes
+        sd_lane.enqueue_entry(self.feature, items[0], "fix: one", self.body, self.environ, claim="deliver",
+                              closes=(items[1],))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertIn(entry["status"], sd_lane.GATE_PASSED)
+        self.assertEqual(self.resolved(notes), {lane: True, other: False, lane_2: True, other_2: False})
+        self.assertEqual(entry["resolved"], {f"sd:{items[0]}": f"resolved #{lane}", f"sd:{items[1]}": f"resolved #{lane_2}"})
+        self.assertEqual(answer["ran"][0]["resolved"], entry["resolved"])
+
+    def test_a_resolve_that_fails_leaves_the_followups_open_and_the_entry_passed(self) -> None:
+        """Failures: the resolve write fails; the followup stays open on every machine, and the answer names it."""
+        items, notes = self.followups()
+        sd_lane.enqueue_entry(self.feature, items[0], "fix: one", self.body, self.environ, claim="deliver")
+        import sd_db.writes
+        with mock.patch.object(sd_db.writes, "resolve_note", side_effect=sqlite3.OperationalError("the hub went away")):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertIn(entry["status"], sd_lane.GATE_PASSED)
+        self.assertEqual(entry["resolved"], {f"sd:{items[0]}": "failed: OperationalError: the hub went away"})
+        self.assertFalse(any(self.resolved(notes).values()))
+
+    def test_a_failed_run_resolves_nothing(self) -> None:
+        """A failure after a failure keeps the earlier followup open beside the new note."""
+        items, notes = self.followups()
+        sd_lane.enqueue_entry(self.feature, items[0], "fix: one", self.body, self.environ, claim="deliver")
+        self.answers[(items[0], "prepare")] = {"ok": False, "phase": "review_blocked", "error": "again"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[0]["status"], "resolved" in self.entries()[0]), ("failed", False))
+        self.assertFalse(any(self.resolved(notes).values()))
 
     def test_a_failure_an_older_version_recorded_is_noted_when_applied(self) -> None:
         """Older state: a hub-stop record from before sd:5963 holds a failure no note was written for."""

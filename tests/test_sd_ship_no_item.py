@@ -582,6 +582,15 @@ class NoItemContracts(unittest.TestCase):
         self.connection.commit()
         self.refused("review", "--create-record", "--assert-new-work", pattern="unreadable|malformed|history")
 
+    def test_a_record_closes_and_reopens_from_a_detached_head(self):
+        # The hub's pack checkout sits on a detached HEAD (sd:3097); the help
+        # says close and reopen run from any branch (sd:7497).
+        review_id, _manifest = self.import_history(1)
+        _git(self.root, "checkout", "-q", "--detach")
+        self.success("review", "--review-id", review_id, "--close-record", "fixture abandoned")
+        self.success("review", "--review-id", review_id, "--reopen-record")
+        self.refused("review", "--review-id", review_id, "--rebind-branch", "topic", pattern="branch")
+
     def test_rebind_and_lifecycle_preserve_spent_history_and_invalidate_identity(self):
         review_id, _manifest = self.import_history(3)
         _key, (_revision, original) = self.record(review_id)

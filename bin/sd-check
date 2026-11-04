@@ -508,8 +508,9 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
                                      label=f"sd-check {pathlib.Path.cwd().name}", lane=True)
     except sd_gate_slots.LauncherExited:
         raise UsageError("the process that started this gate exited while it waited for a slot") from None
+    # `timed_out`: no slot came free within the bound, so no check ran; the lane puts such an entry back (pack sd:7412).
     report: dict[str, object] = {"slots": slots, "source": source, "waited_seconds": float(timeout),
-                                 "bound_seconds": timeout, "path": None}
+                                 "bound_seconds": timeout, "path": None, "timed_out": slot is None}
     if slot is not None:
         report.update(waited_seconds=round(slot.waited, 3), path=str(slot.path) if slot.path else None)
     return slot, report

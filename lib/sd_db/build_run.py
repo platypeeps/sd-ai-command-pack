@@ -43,6 +43,7 @@ from typing import Any, Callable
 
 from . import build, draft, paths, sessions
 from .build import Probe
+from .config import system_checkout
 from .database import Patient
 from .ship import this_host
 from .writes import add_note, now, record_cost, record_state
@@ -59,6 +60,8 @@ TITLE_MAX = 63
 READ_SECONDS = 120
 # Ignored folders that `git worktree remove` may delete: tools rebuild them (pack sd:6979).
 DISPOSABLE = frozenset({"__pycache__", ".ruff_cache", ".mypy_cache", ".pytest_cache"})
+#: The pack checkout this module runs from: its `dashboard/dashboard.sh` is the health check.
+PACK = Path(__file__).resolve().parents[2]
 #: The `heartbeat` state row the tick writes first.
 HEARTBEAT = "build-dispatch"
 #: The lane entry states that end an `enqueued` run without a merge: the lane's `BLOCKED` ends, which
@@ -180,6 +183,9 @@ class Tools:
     ship: list[str]
     lint: list[str]
     git: list[str] = field(default_factory=lambda: ["git"])
+    #: `checking`'s two steps after an auto-pickup merge: `<sync> refresh <repo>`, then `<health> health`.
+    sync: list[str] = field(default_factory=lambda: [str(system_checkout() / "local-repo-sync" / "repo-sync.sh")])
+    health: list[str] = field(default_factory=lambda: [str(PACK / "dashboard" / "dashboard.sh")])
 
 
 def judge(lines: list[str], *, session: str | None = None) -> dict:
@@ -305,7 +311,7 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
         status = entry.get("status") if entry else None
         if status == "merged" and build.verdict(row, probe=probe)[0] == build.GONE:
             if build.merged(connection, row):
-                moved.append({"run": row["id"], "step": "cleaning"})
+                moved.append({"run": row["id"], "step": build.run(connection, row["id"])["step"]})
         elif (entry is not None and status in LANE_ENDED
               and build.verdict(row, probe=probe)[0] == build.GONE):  # a rebuild must not share a live worktree
             reason = f"lane entry {entry.get('id')} {status}: {entry.get('reason') or entry.get('code') or 'no reason'}"
@@ -392,6 +398,11 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     reaped = build.reap(connection, probe=probe, kill=kill) + draft.reap(connection, probe=probe, kill=kill)
     moved = watch(connection, lane=lane, probe=probe)
     swept = sweep(connection)
+    stopped = build.stop_on_blocks(connection)
+    picked: list[int] = []
+    if not why:
+        picked = build.pickup(connection, build.room(connection, load=load, load_cap=load_cap,
+                                                     interactive=interactive))
     claimed: list[str] = []
     while not why and len(claimed) < build.MACHINE_CAP:
         try:
@@ -414,7 +425,8 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
         if row["outcome"] is None and row["supervisor_pid"] is None and row["step"] != "enqueued":
             spawn(row["id"])
             spawned.append(row["id"])
-    return {"reaped": reaped, "moved": moved, "swept": swept, "claimed": claimed, "drafted": drafted, "spawned": spawned, "why": why}
+    return {"reaped": reaped, "moved": moved, "swept": swept, "stopped": stopped, "picked": picked, "claimed": claimed,
+            "drafted": drafted, "spawned": spawned, "why": why}
 
 
 def spawn(argv: list[str], *, log: Path) -> int:
@@ -466,8 +478,8 @@ class Supervisor:
         self.blockers: list[dict] = []
         self.last_beat = 0.0
         self.env = _environ(environ)
-        # Claude Code's own OTel, where the machine turns it on, joins the run's
-        # trace by these (pack sd:6943); the switch and endpoint are system sd:6944's.
+        # Claude Code's own OTel, where the machine turns it on, names the run
+        # by these (pack sd:6943); the switch and endpoint are system sd:6944's.
         self.env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(filter(None, (
             self.env.get("OTEL_RESOURCE_ATTRIBUTES"), f"sd.build_run={ident}",
             "sd.items=" + ";".join(str(item) for item in (self.lead, *self.others)))))
@@ -498,7 +510,7 @@ class Supervisor:
         step = self.row["step"]
         steps = {"claimed": self.worktree, "worktree": self.worktree, "building": self.building,
                  "reviewing": self.reviewing, "fixing": self.reviewing, "enqueuing": self.enqueuing,
-                 "cleaning": self.cleaning}
+                 "checking": self.checking, "cleaning": self.cleaning}
         while step in steps:
             ended = steps[step]()
             if isinstance(ended, dict):
@@ -677,6 +689,21 @@ class Supervisor:
             return self.finish("blocked", f"a cancel was asked after the lane entry was written; cancel it with "
                                           f"`sd-ship lane cancel {delivered[0]}`")
         raise Lost
+
+    def checking(self) -> str:
+        """After an auto-pickup merge: refresh the repository, then the dashboard's health (design, "Auto-pickup").
+
+        A non-zero exit turns auto-pickup off and files an item (`build.health_failed`), then the run cleans up.
+        A check that gives no answer raises, so the reap retries it once; a second loss is `_health_unknown`.
+        """
+        self.enter("checking")
+        for argv, name, said in (([*self.tools.sync, "refresh", str(self.repo)], "checking-sync", "repo-sync.sh refresh"),
+                                 ([*self.tools.health, "health"], "checking-health", "dashboard.sh health")):
+            code = self.child(argv, cwd=self.repo, name=name)
+            if code != 0:
+                build.health_failed(self.db, self.ident, f"`{said}` exit {code}; output in {self.out(name)}")
+                break
+        return "cleaning"
 
     def cleaning(self) -> dict:
         self.enter("cleaning")

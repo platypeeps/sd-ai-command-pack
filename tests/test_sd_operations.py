@@ -113,6 +113,35 @@ class OperationsCLI(unittest.TestCase):
         self.connect.assert_called_with(sd_db, write=True)
         self.assertEqual(self.connection.close.call_count, 2)
 
+    def test_beat_is_one_verb_with_the_leads_start_and_end_as_flags(self):
+        """pack sd:7221 (ruling note #41072): `beat ITEM` beats a teammate run; `--start` and `--end` are the lead's."""
+        team = types.ModuleType("sd_db.teammate")
+        team.start = Mock(return_value={"id": "r1", "due": "2026-11-02T12:00:00+00:00",
+                                        "members": [{"item": 7}, {"item": 9}]})
+        team.beat, team.end = Mock(return_value="r1"), Mock(return_value="r1")
+        with patch.dict(sys.modules, {"sd_db.teammate": team}), patch.object(sd_db, "teammate", team, create=True):
+            started = self.call("assignments", "beat", "sd:7", "9", "--start", "--worktree", "/w/pack-7",
+                                "--branch", "feat/x", "--budget", "90", "--json")
+            beat = self.call("assignments", "beat", "7")
+            ended = self.call("assignments", "beat", "7", "--end", "--reason", "reported")
+            for argv, why in ((["7", "--start", "--branch", "b", "--budget", "9"], "--start needs"),
+                              (["7", "--worktree", "/w"], "go with --start"), (["7", "8"], "one item"),
+                              (["7", "--reason", "x"], "goes with --end")):
+                with self.subTest(argv=argv), self.assertRaisesRegex(cli.WorkRefusal, why):
+                    self.call("assignments", "beat", *argv)
+            with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+                self.parser.parse_args(["assignments", "beat", "7", "--start", "--end"])
+            team.beat.side_effect = sd_db.SdDbError("no open teammate run holds item 7")
+            with self.assertRaisesRegex(cli.WorkRefusal, "no open teammate run"):
+                self.call("assignments", "beat", "7")
+        self.assertEqual(json.loads(started[1]), {"run": "r1", "due": "2026-11-02T12:00:00+00:00", "items": [7, 9]})
+        self.assertEqual(team.start.call_args.args[1:], ([7, 9],))
+        self.assertEqual(team.start.call_args.kwargs, {"worktree": str(Path("/w/pack-7").resolve()), "branch": "feat/x",
+                                                       "budget_minutes": 90, "owner": "operator"})
+        self.assertEqual((beat, ended), ((0, "teammate run r1 beat\n"), (0, "teammate run r1 ended\n")))
+        self.assertEqual(team.end.call_args.kwargs, {"reason": "reported"})
+        self.connect.assert_called_with(sd_db, write=True)
+
     def test_the_dispatcher_is_one_verb_with_its_supervisor_and_sessions_as_flags(self):
         """pack sd:6356 (ruling #31545): `dispatch` takes `--supervise RUN` and `--sessions`; the two old verbs are
         gone, and the flags exclude each other."""

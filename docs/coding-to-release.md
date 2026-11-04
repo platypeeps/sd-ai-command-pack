@@ -8,7 +8,7 @@ An agent runs the commands; the user owns scope, exceptions, and release permiss
 | Step | Command or surface | Owner | Exit condition |
 |---|---|---|---|
 | Inspect | `sd-status --json`; Git status; existing handoff | Coordinating agent | Scope, existing work, and blockers are understood. |
-| Plan when needed | `sd-plan` skill | User decides; agent records | Required decisions and acceptance checks are clear. Small changes need no plan artifact. |
+| Plan when needed | `sd task add`; `design.md` from `templates/design.md` | User decides; agent records | Required decisions and acceptance checks are clear. Small changes need no plan artifact. |
 | Isolate and implement | Git branch or worktree; editor; focused tests | Coding agent | Scoped changes and regression tests exist. Concurrent work remains untouched. |
 | Check readiness | `sd-review --scope branch --challenge --explain --json` | Pack inspects; agent handles approval | Local blockers are resolved before checks or dispatch. Runtime approval remains separate. |
 | Check | `sd-check --json`; repository `make check` | Repository checks, invoked by agent | Required checks pass. A partial test run does not replace the full gate. |
@@ -20,8 +20,7 @@ An agent runs the commands; the user owns scope, exceptions, and release permiss
 | Close out every merge | Ship skill's [post-merge procedure](../skills/sd-ship/references/post-merge-closeout.md) | Agent inspects; user approves exact deletions | Findings have evidenced dispositions; retained work and cleanup candidates are inventoried. |
 | Activate and verify | Pack: `make setup` in the working checkout; `python3 bin/sd_install.py --verify --json`; system: component installer and check | Operator or authorized agent | Receipt, source, rendered files, PATH resolution, and bounded help checks pass. |
 
-`sd-plan` is an agent skill, not a shell executable.
-In Codex, invoke skills with `$sd-plan`, `$sd-review`, or `$sd-ship`.
+In Codex, invoke skills with `$sd-review` or `$sd-ship`.
 Their absence from the `/` menu does not establish that skills or shell commands are missing.
 The `sd-ship` skill coordinates the sequence; its executable has separate prepare, merge, observe, and reconcile operations.
 For itemless changes, use `--no-item --review-id ID` instead of `--item ID` throughout those operations.

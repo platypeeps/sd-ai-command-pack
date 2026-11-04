@@ -70,6 +70,19 @@ ASSETS = {"type": "FeatureCollection", "features": [
                                             ("WELL-A2", "well", "Well A2", "in service", 10.0012, 50.0004),
                                             ("V-01", "valve", "Valve 1", "unknown", 10.0003, 50.0003)]]}
 
+#: hoa #413's types beside the water assets: a street light (out of service), an irrigation line and the booster
+#: station. Synthetic only.
+LIGHTS = {"type": "FeatureCollection", "features": ASSETS["features"] + [
+    {"type": "Feature", "properties": {"id": "LGT-1", "type": "light", "name": "Street light 1", "status": "out of service",
+                                       "accuracy": "approximate", "source": "walk", "notes": "", "updated": "2026-09-01"},
+     "geometry": {"type": "Point", "coordinates": [10.0008, 50.0009]}},
+    {"type": "Feature", "properties": {"id": "IRL-1", "type": "irrline", "name": "Irrigation line 1", "status": "in service",
+                                       "accuracy": "drawing", "source": "walk", "notes": "", "updated": "2026-09-01"},
+     "geometry": {"type": "LineString", "coordinates": [[10.0001, 50.0001], [10.0006, 50.0006], [10.0011, 50.0002]]}},
+    {"type": "Feature", "properties": {"id": "BST-1", "type": "booster", "name": "Booster station", "status": "in service",
+                                       "accuracy": "approximate", "source": "walk", "notes": "", "updated": "2026-09-01"},
+     "geometry": {"type": "Point", "coordinates": [10.0004, 50.0012]}}]}
+
 
 def parcels(root: Path, rows=None, *, base_sha=None) -> Path:
     """The hoa checkout's downloads/parcels/lots.json as tools/fetch-lot-parcels.py writes it. Synthetic names only."""
@@ -286,6 +299,19 @@ class TheDocument(Fixture):
         self.assertEqual([feature["kind"] for feature in doc["base"]["features"]], ["lot", "lot", "tract", "plat"])
         self.assertEqual(len(doc["base"]["features"][2]["rings"][0]), 5)
 
+    def test_a_line_asset_carries_its_path_and_its_middle_vertex(self):
+        # sd:7516: hoa #413's irrigation line is a LineString; it was dropped. Its middle vertex is where Details centres.
+        checkout(self.hoa, assets=LIGHTS)
+        rows = {a["id"]: a for a in self.doc()["assets"]["features"]}
+        self.assertEqual((rows["LGT-1"]["type"], rows["LGT-1"]["lng"], rows["LGT-1"]["lat"]), ("light", 10.0008, 50.0009))
+        line = rows["IRL-1"]
+        self.assertEqual(line["path"], [[10.0001, 50.0001], [10.0006, 50.0006], [10.0011, 50.0002]])
+        self.assertEqual((line["lng"], line["lat"]), (10.0006, 50.0006))
+        # A line with no vertex is the file's error, not a document that does not answer.
+        checkout(self.hoa, assets={"type": "FeatureCollection", "features": [
+            dict(LIGHTS["features"][-1], geometry={"type": "LineString", "coordinates": []})]})
+        self.assertRegex(self.doc()["assets"]["error"], r"^assets.geojson did not parse: IndexError")
+
     def test_the_checkout_is_the_registered_repo_whose_folder_is_named_hoa(self):
         doc = self.doc()
         self.assertEqual(doc["config"], {"state": "read", "source": "the repo table", "problems": []})
@@ -481,6 +507,28 @@ document.dispatchEvent(new CustomEvent('shell:open', { detail: 'asset:TANK-01' }
         self.assertRegex(tank, r'class="[^"]*\bground\b')
         self.assertIn("Cistern · TANK-01", out["R"]["det"])
 
+    def test_street_lights_and_irrigation_lines_are_drawn_and_listed(self):
+        # sd:7516: hoa #413 added light and irrline; the map filtered both out and the legend never listed them. The
+        # booster station (hoa's booster type) was filtered the same way; its glyph is a box under a ground line.
+        checkout(self.hoa, assets=LIGHTS)
+        parcels(self.hoa)
+        out = self.run_page("""R.map = ELS.map.html; R.legend = ELS.legend.html;
+for (const id of ['LGT-1', 'IRL-1']) { document.dispatchEvent(new CustomEvent('shell:open', { detail: `asset:${id}` })); R[id] = ELS.details.html; }""")
+        self.assertRegex(out["R"]["map"], r'<g class="asset t-light st-out" data-asset="LGT-1"')
+        self.assertIn("Street lights <b>1</b>", out["R"]["legend"])
+        line = re.search(r'<g class="asset t-irrline st-ok" data-asset="IRL-1".*?</g>', out["R"]["map"]).group(0)
+        self.assertEqual(len(re.findall(r'<path class="(?:hit|run)" d="M[\d.]+,[\d.]+L[\d.]+,[\d.]+L[\d.]+,[\d.]+"', line)), 2)
+        self.assertNotIn("transform=", line)
+        self.assertIn("Irrigation lines <b>1</b>", out["R"]["legend"])
+        booster = re.search(r'<g class="asset t-booster st-ok" data-asset="BST-1".*?</g>', out["R"]["map"]).group(0)
+        self.assertRegex(booster, r'class="[^"]*\bground\b')
+        self.assertIn("Booster stations <b>1</b>", out["R"]["legend"])
+        self.assertLess(out["R"]["map"].index('data-asset="IRL-1"'), out["R"]["map"].index('data-asset="TANK-01"'),
+                        "a line lies under the glyphs")
+        self.assertIn("Street light · LGT-1", out["R"]["LGT-1"])
+        self.assertIn("Irrigation line · IRL-1", out["R"]["IRL-1"])
+        self.assertIn("50.00060, 10.00060", out["R"]["IRL-1"])
+
     def tract_doc(self):
         """The fixture's base plus a common tract, a tiny common tract and a road parcel: synthetic AINs, as the county prints land use."""
         doc = self.doc()
@@ -506,6 +554,18 @@ R.near = ELS.map.html;""", self.tract_doc())
         self.assertEqual(len(re.findall(r'class="hoa-mark"', out["R"]["far"])), 1)
         self.assertEqual(len(re.findall(r'class="hoa-mark"', out["R"]["near"])), 0)
         self.assertEqual(len(re.findall(r'<path class="lot k-tract" data-tract="[^"]+" data-owned', out["R"]["near"])), 2)
+
+    def test_the_ring_key_shows_only_while_a_ring_is_drawn(self):
+        out = self.run_page("""R.far = ELS.legend.html;
+for (let i = 0; i < 3; i++) ELS['zoom-in'].listeners.click[0]();
+R.near = ELS.legend.html;
+for (let i = 0; i < 3; i++) ELS['zoom-out'].listeners.click[0]();
+R.back = ELS.legend.html;""", self.tract_doc())
+        key = "ring: tract too small to draw at this zoom"
+        self.assertIn(key, out["R"]["far"])
+        self.assertNotIn("ring:", out["R"]["near"])
+        self.assertIn("HOA-owned tracts", out["R"]["near"])
+        self.assertIn(key, out["R"]["back"])
 
     def test_no_tract_means_no_hoa_legend_entry(self):
         out = self.run_page("R.legend = ELS.legend.html;")

@@ -3,9 +3,9 @@
 // /classic/contributions renders, never sample data. The dashboard makes no GitHub call: the "Settled on GitHub" lamp, each
 // row's settle date and the settled-per-day chart read the dates the shadow collector records (sd:5301). Acknowledge, Make task and
 // Dismiss run through dashboard routes and ask first: none has a verb that reverses it. Open on GitHub opens a tab (sd:5628);
-// Re-run collector asks the server to run sd shadow sync (sd:2207). The reference's Trackers view is not ported: its switch opens the classic Operations > Trackers.
+// Re-run collector asks the server to run sd shadow sync (sd:2207).
 // build (sd:5486): Hide and Unhide post /api/contributions/view, the view state Designs' Hide writes, each with Undo. A hidden
-// row leaves the Open rows, the lamps, the tallies and the badge; Hidden, in the Open table's Open | Hidden | All, lists it with Unhide.
+// row leaves the Open rows, the lamps, the tallies and the badge; Hidden, in the Open table's Open | Hidden, lists it with Unhide.
 // Hide persists until Unhide, where Dismiss ends on new activity. An unread store hides nothing and turns both commands off.
 // build (sd:5488): the Filed view lists the Jira tickets and GitHub issues you filed this year, as sd shadow sync stored them
 // (pack sd:5496), with Details and Edit, which opens one in Jira or on GitHub in a new tab; the dashboard writes nothing there.
@@ -14,7 +14,7 @@ const { html, put, plural, cells } = window.markup;
 // Palette "This page" group. shell.js reads it at start, so it is set before the shell runs.
 // The shell's view switch (shell.js, view block, sd:5064): Open, the rows acted on, first; Settled, the record, second;
 // Filed (sd:5488), what you filed in Jira and on GitHub this year, on its own table. The rows the operator hid (sd:5486) are a
-// filter on Open, Hidden in Open | Hidden | All, kept as ?hidden=1 (sd:5753, sd:6701); an older #view=hidden link, from when they were a view, lands on it.
+// filter on Open, Hidden in Open | Hidden, kept as ?hidden=1 (sd:5753, sd:6701); an older #view=hidden link, from when they were a view, lands on it.
 window.PAGE_VIEWS = [{ id: 'open', label: 'Open' }, { id: 'settled', label: 'Settled' }, { id: 'filed', label: 'Filed' }];
 if (location.hash === '#view=hidden') {
   const p = new URLSearchParams(location.search); p.set('hidden', '1');
@@ -61,7 +61,7 @@ addEventListener('DOMContentLoaded', () => {
   // The Filed view (sd:5488): its rows, by key, and whether it is the shown view.
   let FILED = [], FBY = new Map(), FILEDVIEW = false;
   const u0 = new URLSearchParams(location.search);
-  // Open | Hidden | All (sd:6701, after sd:5753's toggle): which rows the Open table draws, kept as ?hidden=.
+  // Open | Hidden (sd:6701, after sd:5753's toggle): which rows the Open table draws, kept as ?hidden=1.
   let HID = window.shell.aside.mode('hidden');
   const inView = r => window.shell.aside.shows(HID, r.hidden), HIDDEN = () => HID === 'aside';
   let scope = SCOPES.includes(u0.get('scope')) ? u0.get('scope') : 'all';
@@ -275,13 +275,13 @@ addEventListener('DOMContentLoaded', () => {
     const cut = DOC.truncated ? `The document lists ${n(DOC.rows.length)} of ${n(DOC.open_total)} open rows; v1 /classic/contributions lists every one.` : '';
     f.hidden = !(lane || v || cut);
     f.textContent = [lane || v ? (rows.length ? `${rows.length} of ${all.length} shown${lane ? ' · ' + LABEL[lane] : ''}${v ? ` · “${v}”` : ''}. Esc clears.` : `Nothing matches${v ? ` “${v}”` : ''}. Esc clears.`) : '', cut].filter(Boolean).join(' ');
-    title.textContent = { open: 'Open', aside: 'Hidden', all: 'All' }[HID];
+    title.textContent = HIDDEN() ? 'Hidden' : 'Open';
     // sd:7211: Re-run collector heads the Open view, as Clean all safe heads Health's Checkouts: the collector's row actions,
     // so the sync needs no Collector pick first.
     putKeep(document.getElementById('tally'), html`${HIDDEN() ? html`${n(tot('hidden'))} hidden`
       : html`<span class="g-caution">▲ ${n(tot('newly_unblocked') + tot('awaiting_you'))} yours</span><span class="g-queued">◌ ${n(tot('awaiting_them'))} theirs</span><span class="g-unknown">▨ ${n(tot('unknown'))} unknown freshness</span>`}${C.rowActions('collector')}`);
     const sort = L.sort !== LIST.sort || L.dir !== LIST.dir ? { sort: L.sort, dir: L.dir > 0 ? 'asc' : 'desc' } : {};
-    // The Open table's filter bar: Open | Hidden | All (sd:6701), counted in the scope.
+    // The Open table's filter bar: Open | Hidden (sd:6701), counted in the scope.
     put(document.getElementById('hidden-seg'), window.shell.aside.seg('hidden', 'Hidden', HID, { open: openN(scope), aside: tot('hidden') }));
     window.shell.url({ ...(scope !== 'all' && { scope }), ...(lane && { lane }), ...(HID !== 'open' && { hidden: window.shell.aside.param(HID) }), ...(v && { q: v }), ...sort });
   }
@@ -488,7 +488,7 @@ addEventListener('DOMContentLoaded', () => {
   document.getElementById('annunciator').addEventListener('click', e => { const c = e.target.closest('button.cell'); if (c) { HID = 'open'; setLane(c.dataset.cell); window.shell.view.show('open'); } });
   document.getElementById('open-filters').addEventListener('click', e => { const b = e.target.closest('button[data-aside="hidden"]'); if (DOC && b) { HID = b.dataset.v; applyFilter(); } });
   document.getElementById('scope').addEventListener('click', e => { const b = e.target.closest('button[data-f="scope"]'); if (b) setScope(b.dataset.v === scope ? 'all' : b.dataset.v); });
-  // Open | Hidden | All sets the Open view's rows aside, so it leaves the filter row on the other views.
+  // Open | Hidden sets the Open view's rows aside, so it leaves the filter row on the other views.
   document.addEventListener('shell:view', e => { document.getElementById('hidden-seg').hidden = e.detail.id !== 'open'; });
   document.getElementById('rows-head').addEventListener('click', e => { if (DOC && window.shell.list.sortBy(e, L)) window.shell.list.keepFocus(e, applyFilter); });
   put(document.getElementById('rows-head'), window.shell.list.sortHead(COLS, L)); // drawn before the read, so a failed one keeps the columns

@@ -16,6 +16,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+from . import hub
+from .build import HEALTH
 from .reads import (
     IDEA_KINDS,
     REVIEW_BATCH,
@@ -25,16 +27,16 @@ from .reads import (
     _unparked_clause,
     backlog_items,
     open_notes,
+    repo_in,
     scheduled_clause,
     today_items,
 )
 from .reporting import _current_basis
+from .runner import OWNING
 from .ship import this_host
 
 #: `sd_lane.KEY_PREFIX`: a lane entry is the newest `checkpoint` row of its key.
 LANE_KEY_PREFIX = "lane:v1:"
-#: `workflow.ACTIVE_ASSIGNMENTS`, copied because `workflow` imports `reads`, which this reads.
-ACTIVE_ASSIGNMENTS = ("queued", "running", "ending")
 #: Lane states in the order `landing` lists them; the queue holds the first two.
 LANE_ORDER = ("running", "pending", "prepared", "handed_back", "failed", "skipped")
 #: The section keys of `sections`, in the order every renderer prints them.
@@ -56,22 +58,13 @@ def _keep(repos: Iterable[str | None] | None) -> set[str | None] | None:
     return None if repos is None else set(repos)
 
 
-def _in(column: str, keep: set[str | None] | None) -> tuple[str, list[Any]]:
-    """A SQL condition keeping `keep`'s repositories, None for a NULL `column`, and its parameters."""
-    if keep is None:
-        return "1", []
-    named = sorted(key for key in keep if key is not None)
-    found = f"{column} IN ({', '.join('?' for _ in named)})"
-    return (f"({found} OR {column} IS NULL)" if None in keep else found), named
-
-
 def _first_line(text: Any) -> str:
     return str(text or "").strip().partition("\n")[0]
 
 
 def _attention_rows(connection: sqlite3.Connection, keep: set[str | None] | None) -> list[tuple[Any, Any]]:
     """Each open report whose fields say it needs attention, newest first, with that `attention` value."""
-    where, values = _in("repo", keep)
+    where, values = repo_in("repo", keep)
     rows = connection.execute(
         f"SELECT * FROM item WHERE kind = 'report' AND source IS NOT 'brief' AND status != 'done' AND {where}"
         " ORDER BY created_at DESC, id DESC", values).fetchall()
@@ -86,14 +79,46 @@ def _attention_rows(connection: sqlite3.Connection, keep: set[str | None] | None
     return found
 
 
+#: A satellite's request for the hub's mail, Slack, Notion or Drive work: `sd task add --ref hub:<host>-<slug>`
+#: (system sd:7324 H2). The exact source, so a mistyped ref is no request.
+HUB_REQUEST = "(item.source IS 'task-ref' AND substr(item.external_id, 1, 4) IS 'hub:')"
+#: A hub request's Attention `why`: what the hub session does with it.
+HUB_WHY = "hub request: claim it, answer in a note, close it"
+
+
+def _hub_rows(connection: sqlite3.Connection, keep: set[str | None] | None) -> list[tuple[Any, str]]:
+    """Each open hub request, with its `why`, when this machine holds the hub role (pack sd:7358).
+
+    The role is `sd-db fence`'s (`hub.machine_role`), asked only when a
+    request is open: `holder` and `off` (one machine, no hub named) list
+    them, `elsewhere` (a satellite) lists none, and `unknown` lists them
+    with the reason, as a failed read is no satellite.
+    """
+    where, values = repo_in("item.repo", keep)
+    rows = connection.execute(
+        f"SELECT * FROM item WHERE item.status != 'done' AND {HUB_REQUEST} AND {where}"
+        " ORDER BY created_at DESC, id DESC", values).fetchall()
+    if not rows:
+        return []
+    found = hub.machine_role(connection)
+    if found.state == "elsewhere":
+        return []
+    why = HUB_WHY if found.state in ("holder", "off") else f"{HUB_WHY}; hub role unknown: {found.reason}"
+    return [(row, why) for row in rows]
+
+
 def attention(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
-    """Open reports whose fields say they need attention, newest first: `status`, `why`, `at`.
+    """Open reports whose fields say they need attention, and on the hub open hub requests (`_hub_rows`),
+    newest first: `status`, `why`, `at`.
 
     Unreadable fields count, as an unknown is no pass.
     """
+    keep = _keep(repos)
+    rows = sorted([*_attention_rows(connection, keep), *_hub_rows(connection, keep)],
+                  key=lambda pair: (pair[0]["created_at"], pair[0]["id"]), reverse=True)
     return [{"id": row["id"], "repo": row["repo"], "status": row["status"], "title": row["title"],
              "why": why if isinstance(why, str) else "", "at": row["created_at"]}
-            for row, why in _attention_rows(connection, _keep(repos))]
+            for row, why in rows]
 
 
 #: The finding of a report whose fields do not parse: it may name this machine, so it is a row, not a pass.
@@ -104,13 +129,22 @@ def _host_findings(basis: Any, host: str) -> list[str]:
     """The lines of a report's attention basis that name `host`, each cut to its finding.
 
     A cron report writes `<job> on <host>: <finding>` per line, and a failed
-    run `job exited N on <host>`; the second is its own finding. A line that
-    only heads the next ones (`App Store updates pending:` over
-    `App Store updates pending: <app>`) is dropped, as the lines under it say it.
+    run `job exited N on <host>`, with a grade in brackets and the job's
+    first line after a colon when it has them (`reporting.ingest_log`). That
+    line keeps all but ` on <host>`, so its finding names the exit code
+    (pack sd:7399). A line that only heads the next ones (`App Store updates
+    pending:` over `App Store updates pending: <app>`) is dropped, as the
+    lines under it say it.
     """
-    pattern = re.compile(rf"^(?P<head>.*?) on {re.escape(host)}(?::[ \t]*(?P<finding>.*)|[ \t]*)$")
-    found = [(match["finding"] or match["head"]).strip()
-             for match in map(pattern.match, str(basis or "").splitlines()) if match]
+    host = re.escape(host)
+    exited = re.compile(rf"^(?P<head>job exited -?[0-9]+) on {host}(?P<rest>(?:[ \t]+\(.*|:.*)?)$")
+    pattern = re.compile(rf"^(?P<head>.*?) on {host}(?::[ \t]*(?P<finding>.*)|[ \t]*)$")
+    found = []
+    for line in str(basis or "").splitlines():
+        if match := exited.match(line):
+            found.append((match["head"] + match["rest"]).strip())
+        elif match := pattern.match(line):
+            found.append((match["finding"] or match["head"]).strip())
     return [text for text in found
             if not (text.endswith(":") and any(other != text and other.startswith(text) for other in found))]
 
@@ -149,12 +183,9 @@ def operations(connection: sqlite3.Connection, *, host: str | None = None, gate:
     return {"host": host, "findings": findings, "gate": machine_gate(gate)}
 
 
-def _notes(connection: sqlite3.Connection, kind: str, keep: set[str | None] | None, *,
-           batches: bool = True) -> list[dict]:
-    return [{"id": note["item"], "note": note["id"], "repo": note["item_repo"], "status": note["item_status"],
-             "title": _first_line(note["body"]),
-             "item_title": note["item_title"], "at": note["timestamp"]}
-            for note in open_notes(connection, kind, batches=batches) if keep is None or note["item_repo"] in keep]
+def _note_row(note: sqlite3.Row) -> dict:
+    return {"id": note["item"], "note": note["id"], "repo": note["item_repo"], "status": note["item_status"],
+            "title": _first_line(note["body"]), "item_title": note["item_title"], "at": note["timestamp"]}
 
 
 def decisions(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
@@ -163,12 +194,13 @@ def decisions(connection: sqlite3.Connection, *, repos: Iterable[str | None] | N
 
     A review batch's questions are `review_questions`' count, not rows: the
     dashboard's Review page labels them, and `sd-next` walks these rows (sd:5130).
+    The read has no cap, as `decisions.document`'s (pack sd:6338): plain and
+    grill questions it leaves out filled one and hid rows (pack sd:7400).
     """
-    keep = _keep(repos)
-    bodies = {note["id"]: note["body"] for note in open_notes(connection, "question", batches=False)}
     grilled = {row["id"] for row in grill(connection, repos=repos)}
-    return [row for row in _notes(connection, "question", keep, batches=False)
-            if len(OPTION_LINE.findall(bodies.get(row["note"], ""))) >= 2 and row["id"] not in grilled]
+    notes = open_notes(connection, "question", batches=False, limit=None, repos=_keep(repos))
+    return [_note_row(note) for note in notes
+            if len(OPTION_LINE.findall(note["body"] or "")) >= 2 and note["item"] not in grilled]
 
 
 def grill(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
@@ -178,7 +210,7 @@ def grill(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None 
     fresh session by saying 'grill', and `sd today` says the grill is ready
     (pack sd:6022).
     """
-    where, values = _in("item.repo", _keep(repos))
+    where, values = repo_in("item.repo", _keep(repos))
     return [dict(row) for row in connection.execute(
         f"""
         SELECT item.id, item.repo, item.title, item.created_at AS at, COUNT(note.id) AS questions
@@ -190,7 +222,7 @@ def grill(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None 
 
 def review_questions(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> int:
     """How many open questions review batches hold, on items neither done nor parked (sd:5130)."""
-    where, values = _in("item.repo", _keep(repos))
+    where, values = repo_in("item.repo", _keep(repos))
     return connection.execute(
         f"SELECT COUNT(*) FROM note JOIN item ON item.id = note.item"
         f" WHERE note.kind = 'question' AND note.resolved_at IS NULL AND item.status != 'done'"
@@ -200,15 +232,16 @@ def review_questions(connection: sqlite3.Connection, *, repos: Iterable[str | No
 def followups(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
     """Open followups, oldest first, except a report's own, which is the report's attention row:
     `note`, `title` (the followup's first line), `item_title`, `at`."""
-    reports = {row["id"] for row in attention(connection, repos=repos)}
-    return [row for row in _notes(connection, "followup", _keep(repos)) if row["id"] not in reports]
+    keep = _keep(repos)
+    reports = {row["id"] for row, _ in _attention_rows(connection, keep)}
+    return [_note_row(note) for note in open_notes(connection, "followup", repos=keep, without=reports)]
 
 
 def _closed(connection: sqlite3.Connection, repos: Iterable[str | None] | None, now: str | None,
             hours: int) -> list[dict]:
     """Every item closed or merged in the last `hours`, newest first, with its `pr` and `commit` or None."""
     cutoff = (_parse(_now(now)) or datetime.now(timezone.utc)) - timedelta(hours=hours)
-    where, values = _in("item.repo", _keep(repos))
+    where, values = repo_in("item.repo", _keep(repos))
     rows = connection.execute(
         f"""
         SELECT note.item, note.body, note.timestamp, item.title, item.repo
@@ -351,7 +384,7 @@ def queues(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None
     step a stopped entry stopped at and `place` for a queued one.
     """
     keep = _keep(repos)
-    where, values = _in("item.repo", keep)
+    where, values = repo_in("item.repo", keep)
     built = connection.execute(
         f"""
         SELECT assignment.item AS id, item.repo, item.title, assignment.status, assignment.queued_at AS since,
@@ -389,7 +422,8 @@ FAILED_LANE = ("failed", "skipped")
 
 def push_due(connection: sqlite3.Connection, *, now: str | None = None) -> list[dict]:
     """Each failure the operator has not had a push for (pack sd:6946): a lane entry that failed or was
-    skipped, and a build run that ended blocked or failed in the last day. Each is `key`, `title` and `body`.
+    skipped, a build run that ended blocked or failed in the last day, and an item a failed health check
+    after an auto-pickup merge filed in the last day. Each is `key`, `title` and `body`.
 
     Success pushes nothing, and each key is pushed once: the caller records `PUSHED + key` after a send.
     """
@@ -408,6 +442,11 @@ def push_due(connection: sqlite3.Connection, *, now: str | None = None) -> list[
         """, (since, *FAILED_OUTCOMES)).fetchall()
     found += [{"key": f"build:{row['id']}", "title": f"Build {row['outcome']}: sd:{row['item']}",
                "body": f"{row['title']}: {_first_line(row['detail'])[:300]}"} for row in runs]
+    # The critical push of a failed health check after an auto-pickup merge (pack sd:6097, system sd:5997).
+    found += [{"key": f"health:{row['id']}", "title": f"Auto-pickup off: health failed, sd:{row['id']}",
+               "body": row["title"]} for row in connection.execute(
+        "SELECT id, title FROM item WHERE substr(title, 1, ?) = ? AND created_at >= ? ORDER BY id",
+        (len(HEALTH), HEALTH, since))]
     pushed = {row[0] for row in connection.execute(
         "SELECT key FROM state WHERE kind = 'watermark' AND substr(key, 1, ?) = ?", (len(PUSHED), PUSHED))}
     return [row for row in found if PUSHED + row["key"] not in pushed]
@@ -421,7 +460,7 @@ def planned(connection: sqlite3.Connection, *, repos: Iterable[str | None] | Non
     series (`reads.opens_on_clause`) is in neither until its lead brings it
     back (pack sd:5648).
     """
-    where, values = _in("item.repo", _keep(repos))
+    where, values = repo_in("item.repo", _keep(repos))
     return [{"id": row["id"], "repo": row["repo"], "status": row["status"], "title": row["title"],
              "due": row["due"], "priority": row["priority"]} for row in connection.execute(
         f"""
@@ -441,7 +480,7 @@ def unscheduled(connection: sqlite3.Connection, *, repos: Iterable[str | None] |
     Blocked items are `blocked`'s, and in-progress ones are `work`'s.
     """
     laned = {entry["id"] for entry in landing(connection, repos=repos)["entries"]}
-    where, values = _in("item.repo", _keep(repos))
+    where, values = repo_in("item.repo", _keep(repos))
     rows = connection.execute(
         f"""
         SELECT item.* FROM item
@@ -449,20 +488,48 @@ def unscheduled(connection: sqlite3.Connection, *, repos: Iterable[str | None] |
            AND item.kind NOT IN ({', '.join('?' for _ in _UNSCHEDULED_SKIPS)})
            AND {_unparked_clause(connection)} AND {where}
            AND NOT EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id
-                            AND assignment.status IN ({', '.join('?' for _ in ACTIVE_ASSIGNMENTS)}))
+                            AND assignment.status IN ({', '.join('?' for _ in OWNING)}))
          ORDER BY item.priority IS NULL, item.priority ASC, item.id ASC
         """,
-        (*_UNSCHEDULED_SKIPS, *values, *ACTIVE_ASSIGNMENTS),
+        (*_UNSCHEDULED_SKIPS, *values, *OWNING),
     ).fetchall()
     return [{"id": row["id"], "repo": row["repo"], "status": row["status"], "title": row["title"],
              "priority": row["priority"], "created_at": row["created_at"]}
             for row in rows if row["id"] not in laned]
 
 
+def suggested(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None, now: str | None = None,
+              queued: list[dict] | None = None) -> list[dict]:
+    """What sd-next offers next (pack sd:7314), in its order: `queues`' ready items, then `planned` soonest first,
+    then `unscheduled` highest priority first. Each row is `id`, `repo`, `title`, `status`, `why` (`ready`,
+    `planned` or `unscheduled`), `due` and `priority`.
+
+    An item counts once, under its first reason. One with a lane entry or a build assignment is left out: the
+    Queue view shows it as a merging, next, blocked or working row. `queued` is `queues`' rows when the caller
+    read them already. Live items and the per-repo cap are the caller's: they depend on what it shows.
+    """
+    queued = queues(connection, repos=repos, now=now) if queued is None else queued
+    taken = {row["id"] for row in queued if row["queue"] in ("build", "lane")}
+    ready = [row for row in queued if row["queue"] == "ready"]
+    fields = {row["id"]: row for row in connection.execute(
+        f"SELECT id, due, priority FROM item WHERE id IN ({', '.join('?' for _ in ready)})",
+        [row["id"] for row in ready])} if ready else {}
+    found = []
+    for why, rows in (("ready", [{**row, **dict(fields[row["id"]])} for row in ready]),
+                      ("planned", planned(connection, repos=repos, now=now)),
+                      ("unscheduled", unscheduled(connection, repos=repos))):
+        for row in rows:
+            if row["id"] not in taken:
+                taken.add(row["id"])
+                found.append({"id": row["id"], "repo": row["repo"], "title": row["title"], "status": row["status"],
+                              "why": why, "due": row.get("due"), "priority": row.get("priority")})
+    return found
+
+
 def blocked(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
     """Open work items (`reads.WORK_KIND`) that are blocked or whose newest comment says they wait on someone:
     `status`, `why` (the reason on the newest move to blocked, else that comment), `since`."""
-    where, values = _in("item.repo", _keep(repos))
+    where, values = repo_in("item.repo", _keep(repos))
     rows = connection.execute(
         f"""
         SELECT item.id, item.title, item.status, item.repo,

@@ -52,6 +52,24 @@ def queue_state(connection, assignment: int) -> dict:
 #: to `followup` keeps both. `delivery_candidates` delivers these less a
 #: skill review, a `task` since sd:7004 (`skills_catalog.is_review`).
 RUNNABLE_KINDS = ("work", "task", "report")
+#: A teammate run's assignment status (pack sd:7221): a lead's in-session builder holds the item.
+IN_SESSION = "in_session"
+#: The statuses that own an item against a second writer: the runner's, plus a teammate's.
+#: Pickup, queueing and claim read these; a status write reads only the runner's (criterion 7.19),
+#: so the session still moves its own items.
+OWNING = ("queued", "running", "ending", IN_SESSION)
+#: The assignment scopes whose runs no runner supervisor walks: a build run (pack sd:6093), a
+#: draft run (pack sd:6361) and a teammate run (pack sd:7221). None writes a runner journal, and
+#: none merges by hand, so `backup.journaled_runs` and `ship.manual_merge_guard` skip them
+#: through `supervised`, the one exemption (pack sd:7282).
+UNSUPERVISED_SCOPES = ("build", "draft", "teammate")
+
+
+def supervised(scope: str) -> str:
+    """A SQL condition, true when the assignment scope column `scope` is a runner's: none of
+    `UNSUPERVISED_SCOPES`. A run with no assignment (NULL) is a runner's."""
+    named = ", ".join(f"'{name}'" for name in UNSUPERVISED_SCOPES)
+    return f"COALESCE({scope}, '') NOT IN ({named})"
 
 
 def _item(connection, item: int, *, delivery=False) -> dict:
@@ -59,7 +77,7 @@ def _item(connection, item: int, *, delivery=False) -> dict:
     if kind is not None and kind["kind"] not in RUNNABLE_KINDS:
         raise RunnerRefused(f"item {item} is a {kind['kind']} item; an agent runs only "
                             f"{', '.join(RUNNABLE_KINDS[:-1])} and {RUNNABLE_KINDS[-1]} items")
-    row = connection.execute("SELECT item.*, repo.remote, repo.runner_merge FROM item "
+    row = connection.execute("SELECT item.*, repo.remote FROM item "
                              "JOIN repo ON repo.path = item.repo WHERE item.id = ?", (item,)).fetchone()
     if row is None:
         raise RunnerRefused(f"item {item} needs a registered repository")
@@ -149,7 +167,7 @@ def enqueue(connection, items: list[int], *, parallel=False, role="author", scop
                 raise RunnerRefused(f"items {pairs[pair]} and {item['id']} share {pair[0]}:{pair[1]}")
             pairs[pair] = item["id"]
             held = connection.execute("SELECT run FROM runner_lease WHERE repo = ? AND branch = ? AND released_at IS NULL", pair).fetchone()
-            active = connection.execute("SELECT id FROM assignment WHERE item = ? AND status IN ('queued','running','ending')", (item["id"],)).fetchone()
+            active = connection.execute(f"SELECT id FROM assignment WHERE item = ? AND status IN {OWNING}", (item["id"],)).fetchone()
             if held or active:
                 raise RunnerRefused(f"item {item['id']} already has queued work or a retained lease")
         created = []
@@ -541,12 +559,13 @@ def merge_authority(connection, ident: str, expected_head: str, *, automatic=Tru
     repo = connection.execute("SELECT * FROM repo WHERE path = ?", (run["repo"],)).fetchone()
     if run["released_at"] or run["quarantine"] or request["role"] != "merge" or request["status"] != "running" or not lease or not lease["exclusive"]:
         raise RunnerRefused("automatic merge requires the live exclusive merge assignment")
-    if (automatic and repo["runner_merge"] != "auto") or run["authored_head"] != expected_head:
+    merge = writes.policy_merge(repo["declarations"])  # pack sd:7366: the policy, not the column
+    if (automatic and merge != "auto") or run["authored_head"] != expected_head:
         raise RunnerRefused("automatic merge policy or exact authored head does not match")
     if not automatic and request["scope"] != "reconcile":
         raise RunnerRefused("manual reconciliation requires an observation-only merge assignment")
     return {"assignment": request["id"], "item": request["item"], "repo": run["repo"], "branch": run["branch"],
-            "owner": run["owner"], "work_path": run["work_path"], "runner_merge": repo["runner_merge"]}
+            "owner": run["owner"], "work_path": run["work_path"], "runner_merge": merge}
 
 
 def record_merge(connection, item: int, *, evidence: dict, run_id: str | None = None) -> int:
@@ -586,7 +605,7 @@ def queue_automatic_merges(connection) -> list[dict]:
             "JOIN item ON item.id = assignment.item JOIN repo ON repo.path = item.repo "
             "JOIN runner_run ON runner_run.assignment = assignment.id "
             "WHERE assignment.role = 'author' AND assignment.status = 'done' AND item.status = 'ready_to_send' "
-            "AND repo.runner_merge = 'auto' AND runner_run.released_at IS NOT NULL "
+            f"AND {writes.MERGE_SQL.format(t='repo')} = 'auto' AND runner_run.released_at IS NOT NULL "
             "AND runner_run.reviewed_head IS NOT NULL ORDER BY assignment.id").fetchall()
         for candidate in candidates:
             exists = connection.execute("SELECT 1 FROM assignment WHERE item = ? AND role = 'merge'", (candidate["item"],)).fetchone()
@@ -615,7 +634,7 @@ def delivery_candidates(connection) -> list[dict]:
         f"FROM item JOIN repo ON repo.path = item.repo WHERE item.status = 'ready_to_send' AND item.kind IN ({kinds}) "
         "AND NOT (item.source IS 'skill-request' AND json_extract(item.fields, '$.skill_review.action') IS 'review') "
         "AND item.branch IS NOT NULL AND NOT EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id "
-        "AND (status IN ('queued','running','ending') OR (role = 'merge' AND phase = 'merged')))")]
+        f"AND (status IN {OWNING} OR (role = 'merge' AND phase = 'merged')))")]
 
 
 def queue_reconciliation(connection, item: int, observation: dict) -> dict:

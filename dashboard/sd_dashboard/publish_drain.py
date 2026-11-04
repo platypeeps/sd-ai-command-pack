@@ -22,6 +22,12 @@ A trash request (an untick, sd:5489) adds two tools for that run only: Notion's 
 `update_drive_file`, both of which move one copy to the trash, recoverably. The prompt then names the contract's trash
 rule in place of "never trash". A drain with no trash request gets neither.
 
+A Drive update (sd:7252), a Drive request that names its `file`, adds Drive's `get_doc_as_markdown` and
+`update_drive_file`, the kit's `highlight` and Write to `sd-<run id>-*` names at the top of workspace-mcp's attachments
+folder: the contract has an update read the Doc back, mark what changed since that
+copy, and replace the body. The prompt names that step; its "never trash" still holds. A drain with no Drive update gets
+none of the three, except `update_drive_file` for a trash request.
+
 An image request (sd:6066), a Notion request whose `image` names the PNG of its Archify diagram, adds Notion's
 `notion-create-file-upload` and the kit's `upload`, which sends that PNG to the upload Notion opened; the prompt names the
 step that puts the image line `upload` prints in place of the request's marker. A drain with no image request gets
@@ -65,12 +71,14 @@ DRIVE = ("search_drive_files", "list_drive_items", "get_doc_content", "create_dr
          "create_doc", "batch_update_doc", "modify_doc_text", "insert_doc_elements")
 #: What a trash request adds, for that drain only (sd:5489): each moves one copy to the trash, where it can be restored.
 TRASH_TOOLS = ("mcp__notion__notion-delete-pages", "mcp__workspace-mcp__update_drive_file")
+#: What a Drive update adds, for that drain only (sd:7252): the read-back and the replace; the kit's `highlight` marks.
+UPDATE_TOOLS = ("mcp__workspace-mcp__get_doc_as_markdown", "mcp__workspace-mcp__update_drive_file")
 #: What an image request adds, for that drain only (sd:6066): an upload Notion opens; the kit's `upload` sends the PNG.
 IMAGE_TOOLS = ("mcp__notion__notion-create-file-upload",)
 #: `SHELL_ENV` (claude_env) sources ~/.config/shell/env.sh and maps its CUSTOM_ token (sd:5791).
 CLAUDE = (SHELL_ENV + 'ulimit -S -n 65536 2>/dev/null; '
           'exec "${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}" -p --model sonnet '
-          '--restricted --no-session-persistence --tools "Read,Edit,Bash" --add-dir "$1" "$2" "$3" --allowedTools "$4" '
+          '--restricted --no-session-persistence --tools "Read,Edit,Write,Bash" --add-dir "$1" "$2" "$3" "$6" --allowedTools "$4" '
           '--strict-mcp-config --mcp-config "$5"')
 STEP5_DOC = "write `page=` or `file=` into {conf}, on the entry the request names; change nothing else in it."
 #: A brief's designation is its item's `fields.publish`; step 6 records the URL on that item (`fields.published`), and the
@@ -87,7 +95,7 @@ Requests, one JSON file each:
 - Step 4: write the id into the request file above.
 - Step 5: {step5}
 - Step 6: run `{kit} delivered <request file name> <fingerprint> --url <url>`.
-{image}
+{image}{update}
 Write only in the container the request resolves to. {never} A request you cannot finish stays in the queue as it is.
 End with one line per request: `<request file name>: delivered <url>`, `<request file name>: trashed` or
 `<request file name>: left: <reason>`.
@@ -98,6 +106,12 @@ IMAGE = ("- Step 3, the image: a request with `image` follows the contract's \"A
          "`notion-create-file-upload`, run `{kit} upload <request file name> <upload_url> <authorization>` with the "
          "URL and the authorization header it returned, and write the content with the line `upload` printed in place "
          "of the line `{marker}`. An upload that fails leaves the request; never write the page with the marker in it.\n")
+#: For a drain that holds a Drive update (sd:7252): the contract's "An update marks what changed", with the kit spelled out.
+DRIVE_UPDATE_STEP = ("- Step 3, a Drive request that names its `file`: follow the contract's \"An update marks what changed\". Read "
+          "the Doc with `get_doc_as_markdown` (`comment_mode: \"none\"`) and Write it to `{work}previous.md`, Write the "
+          "request's `content` to `{work}content.md`, run `{kit} highlight --previous {work}previous.md --since "
+          "\"<time>\" {work}content.md {work}marked.html`, then replace the body with `update_drive_file`, `file_path` "
+          "`{work}marked.html` and `source_format: \"html\"`. A read or a highlight that fails leaves the request.\n")
 #: For a drain that holds a trash request: the contract's section, and nothing beyond the one copy.
 NEVER_BUT_TRASH = ("A request with `action: \"trash\"` follows the contract's section \"An unticked destination moves its copy "
                    "to the trash\" in place of steps 3 to 5, and step 6 without `--url`. Trash only the one copy each such "
@@ -119,14 +133,18 @@ def _write(path: Path, document: dict) -> None:
     os.replace(partial, path)
 
 
-def allowed(queue: Path, checkout: Path | None, sd_db: str, kit: str, trash: bool = False, image: bool = False) -> str:
-    """The `--allowedTools` value: the MCP allowlist (with `TRASH_TOOLS` when `trash`, `IMAGE_TOOLS` when `image`), Read,
-    Edit on the queue and the conf (None for a brief), and the two commands, with `upload` when `image`."""
+def allowed(queue: Path, checkout: Path | None, sd_db: str, kit: str, trash: bool = False, image: bool = False,
+            work: str | None = None) -> str:
+    """The `--allowedTools` value: the MCP allowlist (with `TRASH_TOOLS` when `trash`, `IMAGE_TOOLS` when `image`,
+    `UPDATE_TOOLS` and Write to names starting `work` for a Drive update), Read, Edit on the queue and the conf (None for a brief), and
+    the two commands, with `upload` when `image` and `highlight` for a Drive update."""
     tools = [f"mcp__notion__{name}" for name in NOTION] + [f"mcp__workspace-mcp__{name}" for name in DRIVE]
     tools += list(TRASH_TOOLS) if trash else []
     tools += list(IMAGE_TOOLS) if image else []
+    tools += [tool for tool in UPDATE_TOOLS if tool not in tools] if work else []
     tools += ["Read", f"Edit(/{queue}/**)", *([f"Edit(/{checkout / 'research.conf.py'})"] if checkout else []),
-              f"Bash({sd_db} repo channels *)", f"Bash({kit} delivered *)", *([f"Bash({kit} upload *)"] if image else [])]
+              f"Bash({sd_db} repo channels *)", f"Bash({kit} delivered *)", *([f"Bash({kit} upload *)"] if image else []),
+              *([f"Write(/{work}*)", f"Bash({kit} highlight *)"] if work else [])]
     # Comma-separated: a Bash rule holds spaces, and claude reads the list by commas as well as spaces.
     return ",".join(tools)
 
@@ -151,7 +169,10 @@ def _requests(queue: Path, checkout: Path, out: str) -> list[dict]:
         if record and publishing._same(record.get("repo"), checkout):
             found.append({"name": path.name, "path": str(path), "channel": channel,
                           "fingerprint": record.get("fingerprint"), "trash": record.get("action") == publishing.TRASH,
-                          "image": isinstance(record.get("image"), dict)})
+                          "image": isinstance(record.get("image"), dict),
+                          # A Drive request naming its file replaces that Doc's body (sd:7252); a trash request only trashes.
+                          "update": channel == "drive" and record.get("action") != publishing.TRASH
+                          and bool(str(record.get("file") or "").strip())})
     return found
 
 
@@ -159,7 +180,7 @@ def start(connection, checkout: Path, out: str, *, brief: bool = False, now: dat
           spawn=subprocess.Popen):
     """Steps 1 to 4 above: `(202, run)`, or `(409, {"error"})` while a drain holds the lock. `brief` drains a routine
     brief's requests, whose designation is no file (`STEP5_BRIEF`)."""
-    from . import pack_bin, publishing
+    from . import pack_bin, publishing, research_slides
 
     now = now or datetime.datetime.now(datetime.timezone.utc)
     kit = publishing.kit()
@@ -189,16 +210,24 @@ def start(connection, checkout: Path, out: str, *, brief: bool = False, now: dat
         prompt = runs / f"{run_id}.prompt.md"
         trash = any(r["trash"] for r in requests)
         image = any(r.get("image") for r in requests)
+        # A Drive update writes its read-back, content and marked copy where workspace-mcp reads a file_path: the top
+        # level of its attachments folder (a subfolder is unverified), each name prefixed with the run id.
+        folder = research_slides.attachments()
+        work = f"{folder}/sd-{run_id}-" if any(r.get("update") for r in requests) else None
+        if work:
+            folder.mkdir(parents=True, exist_ok=True)
         prompt.write_text(PROMPT.format(
             contract=contract,
             requests="\n".join(f"- {r['path']}" for r in requests), sd_db=sd_db, checkout=checkout, kit=script,
             step5=STEP5_BRIEF if brief else STEP5_DOC.format(conf=checkout / "research.conf.py"),
             never=NEVER_BUT_TRASH if trash else NEVER,
-            image=IMAGE.format(kit=script, marker=kit.IMAGE_MARKER) if image else ""), encoding="utf-8")
+            image=IMAGE.format(kit=script, marker=kit.IMAGE_MARKER) if image else "",
+            update=DRIVE_UPDATE_STEP.format(kit=script, work=work) if work else ""), encoding="utf-8")
         document = {"id": run_id, "state": "queued", "reason": None, "checkout": str(checkout), "out": out,
                     "queue": str(queue), "receipts": str(kit.receipts()), "references": str(contract.parent),
                     "requests": requests, "results": None, "prompt": str(prompt),
-                    "allowed": allowed(queue, None if brief else checkout, sd_db, script, trash, image),
+                    "allowed": allowed(queue, None if brief else checkout, sd_db, script, trash, image, work),
+                    "work": str(folder) if work else None,
                     "servers": servers(),
                     "timeout": DRAIN_SECONDS,
                     "started": _iso(now), "finished": None, "pid": None}
@@ -335,7 +364,10 @@ def run(record: Path, lock: int | None = None) -> int:
     log = record.with_suffix(".log")
     argv = ["sh", "-c", CLAUDE, "sh", document["queue"], document["checkout"], document["references"], document["allowed"],
             # A run queued before sd:5942 names no servers: it loads none and leaves its requests, as it did then.
-            document.get("servers", '{"mcpServers": {}}')]
+            document.get("servers", '{"mcpServers": {}}'),
+            # A Drive update's attachments folder (sd:7252), which Read already reaches; Write stays scoped to the run's
+            # prefix by its rule. Any other run names the references again, which adds nothing.
+            document.get("work") or document["references"]]
     with open(log, "w", encoding="utf-8") as sink, open(document["prompt"], encoding="utf-8") as prompt:
         child = subprocess.Popen(argv, stdin=prompt, stdout=sink, stderr=subprocess.STDOUT, cwd=document["checkout"],
                                  start_new_session=True, pass_fds=(lock,) if lock is not None else ())

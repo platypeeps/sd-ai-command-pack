@@ -640,6 +640,17 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
                 if set(values) != {"stage"}:
                     raise ValueError("A base row's stage move takes the stage only.")
                 return _edit_base_row(connection, number, revision, values)
+            # A Studio project's item (sd:6921) moves along its kind's strip; a writing piece never does, whatever names it.
+            row = workflow.item_state(connection, number)["item"]
+            if not (row["kind"] == "idea" and row["piece"]):
+                from . import studio
+
+                project = studio.naming(connection, number)
+                if project is not None:
+                    if set(values) != {"stage"} or not isinstance(values["stage"], str):
+                        raise ValueError("A Studio stage move takes the stage only.")
+                    return studio.move_stage(connection, number, project, values["stage"], who="dashboard",
+                                             expected_revision=revision)
             if values["stage"] == "published":
                 raise ValueError("Publication uses the reviewed publishing workflow.")
             return writing.change_stage(connection, number, values["stage"],
@@ -1333,7 +1344,8 @@ class Dashboard(BaseHTTPRequestHandler):
         self._send(200, body, kind, overrides=FONT_HEADERS if kind.startswith("font/") else ASSET_HEADERS)
 
     def _studio_file(self, context, connection, tail: str) -> None:
-        """sd:6920: one gallery file from a Studio project's root, under a sandbox; a seekable type answers a Range."""
+        """sd:6920: one gallery file from a Studio project's root, an image under a sandbox (`studio.policy`, sd:7513); a
+        seekable type answers a Range."""
         from . import studio
 
         if not self._session(context):
@@ -1354,11 +1366,11 @@ class Dashboard(BaseHTTPRequestHandler):
             overrides = {"Accept-Ranges": "bytes"} if ranged else {}
             if status == 416:
                 overrides["Content-Range"] = f"bytes */{size}"
-                return self._send(416, b"", kind, policy=studio.POLICY, overrides=overrides)
+                return self._send(416, b"", kind, policy=studio.policy(target), overrides=overrides)
             if status == 206:
                 overrides["Content-Range"] = f"bytes {start}-{start + length - 1}/{size}"
             self._started = True
-            self._policy, self._overrides = studio.POLICY, overrides
+            self._policy, self._overrides = studio.policy(target), overrides
             self.send_response(status)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(length))

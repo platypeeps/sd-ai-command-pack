@@ -17,6 +17,9 @@ keyed `today:item:<id>`, and the item shows again early when its status or due d
 Retry on a failed or interrupted job posts `/api/jobs/<job>/retry` with the job's revision from the same read, as
 Management does (sd:3386); a job that changed since is refused and Now is read again.
 After exit 127, command not found, Retry asks first and names the exit (sd:3392).
+A blocked lane entry's Retry and Approve post `/api/queue/move` as Queue's do. A refused or unanswered one reads
+Today again, then a line above Needs you says why until the next press: for a 409, that the queue changed, when it
+was read again, and that a press now acts on that read (pack sd:7315). Nothing retries by itself.
 A job row also has Show log, which opens the job on Management > Schedules, and Print, the `launchctl print` line to
 copy; Print is the row's act after exit 127. Both are the declarations Management and Activity use (sd:3449).
 
@@ -31,14 +34,26 @@ on the open repo closes it. The rows, in order:
 
 - working: the live items of `/api/now` (a worktree, a lane entry, a running `sd-*` command, a herdr agent or a Fix
   note, pack sd:3466), the open build runs of `GET /api/queue/builds?show=all` (`builds.panel`: working, waiting,
-  stalled or lost), a builder's gate in the lane, and the runner's queued and running assignments no run holds
+  stalled or lost), the lead's teammate runs with worktree, branch, due time and last beat (pack sd:7221),
+  a builder's gate in the lane, and the runner's queued and running assignments no run holds
   (`GET /api/queue/runner`, pack sd:7115 and sd:7217);
 - merging, next and blocked: the lane entries of `GET /api/queue` (`queue_screen.document`);
-- suggested: each repo's ready items from the `/api/now` queues rows, at most three (pack sd:7222);
+- suggested: what sd-next offers next, at most three per repo (pack sd:7222, sd:7314): `/api/now`'s
+  `queues.suggested`, ranked by `sd_db.today.suggested` (ready items in the backlog's order, then planned items
+  soonest first, then unscheduled ones highest priority first), less any item that is live, in the lane or held by a
+  build. Each row says why: `ready`, `planned for <date>` or `unscheduled P<n>`; one that is not ready shows its
+  status and offers its next status, not Build. Its task is its `/api/tasks` row, read while Suggested shows, so
+  that act is on before its Details are read (pack sd:7334);
 - ended: ended build runs, and the cancelled and landed lane entries.
 
 Each row's marker is its state glyph and its type in words; a repo's glyph is its worst row's.
-Suggested and Ended builds are off by default. On, a repo that has only those rows shows too, and `?show=` keeps them.
+A repo row's detail holds five boxes: working, then merging, next and blocked, as Queue's lane ledger drew them
+(pack sd:7272), then suggested (pack sd:7314). They count all the repo's rows of those types, so a filter hides no
+count. A box is lit only when its count is not zero; blocked lights the warning lamp; the cell's label says all five
+in words. A repo whose lane was not read says
+"lane not read" in place of the boxes, not 0.
+Suggested is on by default (pack sd:7314); All items and Ended builds are off. On, a repo that has only those rows
+shows too. `?show=` keeps the choice: no key is the default, and an empty `show=` keeps every filter off.
 The view reads its three documents when it first shows, on each Today read after, and every 30 s while it shows.
 A source that was not read is named under the table.
 
@@ -47,7 +62,7 @@ Up, down, top, hold, release and cancel, a blocked row's Retry and Approve, a ca
 row's Release post `/api/queue/move`, which runs `sd-ship lane move|hold|release|cancel|retry` and nothing else.
 Each write carries the revision, head or claim the view showed, and the verb checks it again under the queue's lock,
 so a stale write is refused (409). A failure that is not a refusal answers 502 with an unknown outcome, and the view
-reads the lane again. The full rules are in `queue_screen`'s docstring.
+reads the lane again. The line above the table says the outcome in the words Needs you uses (pack sd:7315). The full rules are in `queue_screen`'s docstring.
 A build run's Cancel asks first and posts `/api/assignments/<id>/cancel`; an ended blocked or cancelled bundle's Retry
 and Send to builder post `/api/queue/builds/retry` (pack sd:6020).
 Queue's Last 7 days moved to Metrics' Lane times view (pack sd:7233).

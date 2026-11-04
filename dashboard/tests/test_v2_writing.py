@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import places, server, v2, writing_screen
+from sd_dashboard.v2.pages import writing as writing_page
 from sd_db import upsert_repo, writing
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
@@ -128,6 +130,130 @@ class TheDocument(Pieces):
             pieces = writing_screen.document(self.connection, now=NOW)["pieces"]
         self.assertEqual([p["mirror"]["choice"] for p in pieces], [None, None])
         self.assertIn("no sd_research_publish", pieces[0]["mirror"]["unread"])
+
+    def test_each_piece_carries_its_whole_draft_up_to_a_bound(self):
+        """pack sd:7242: Show draft opens the whole `## Draft`, not its first 6 paragraphs; a draft past DRAFT_CHARS is cut
+        at a paragraph and says so, so one long file cannot swell /api/writing."""
+        index = self.root / "content" / "2026" / "fixture" / "index.md"
+        paragraphs = [f"Paragraph {n} of the fixture draft." for n in range(1, 10)]
+        index.write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\n" + "\n\n".join(paragraphs) + "\n")
+        piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
+        self.assertEqual((piece["draft"], piece["draft_cut"]), (paragraphs, False))
+        with mock.patch.object(writing_screen, "DRAFT_CHARS", 3 * len(paragraphs[0])):
+            piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
+        self.assertEqual((piece["draft"], piece["draft_cut"], piece["words"]), (paragraphs[:3], True, 54))
+
+    def test_a_first_paragraph_past_the_bound_keeps_an_excerpt_cut_at_a_word(self):
+        """pack sd:7242 review: a first paragraph longer than DRAFT_CHARS left no paragraph, so Show draft said "no
+        draft yet". Its excerpt, cut at the last word boundary within the bound, stands in, and the draft says cut."""
+        index = self.root / "content" / "2026" / "fixture" / "index.md"
+        words = [f"word{n:04}" for n in range(1000)]
+        index.write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\n" + " ".join(words) + "\n\nA second one.\n")
+        with mock.patch.object(writing_screen, "DRAFT_CHARS", 95):
+            piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
+        # 10 words of 8 characters and their 9 spaces take 89; an eleventh would take 98.
+        self.assertEqual((piece["draft"], piece["draft_cut"], piece["words"]), ([" ".join(words[:10])], True, 1003))
+        with mock.patch.object(writing_screen, "DRAFT_CHARS", 5):  # no word fits: the excerpt is cut mid-word
+            piece = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[self.ids["fixture"]]
+        self.assertEqual((piece["draft"], piece["draft_cut"]), (["word0"], True))
+
+    def test_the_ideas_are_the_inbox_blog_ideas_highest_score_first(self):
+        """pack sd:7244: the Ideas column reads the `sdw.blog-idea` rows through `records.list_rows`: inbox only, highest
+        score first, a link only for http, at most IDEAS of them beside the inbox count."""
+        from sd_db import create_item
+
+        made = {title: create_item(self.connection, kind="idea", title=title, status="planning", source="vault",
+                                   path=f"Blog Ideas/{title}.md", stage=stage,
+                                   fields={"kind": kind, "score": score, "url": url, "dateCreated": "2026-10-01"})
+                for title, kind, stage, score, url in (
+                    ("Low idea", "blog-idea", "inbox", "3", "https://example.test/low"),
+                    ("High idea", "blog-idea", "inbox", "9", "javascript:alert(1)"),
+                    ("Unscored idea", "blog-idea", "inbox", "", ""),
+                    ("Declined idea", "blog-idea", "declined", "10", ""),
+                    ("A tip", "tip", "inbox", "10", ""))}
+        ideas = writing_screen.document(self.connection, now=NOW)["ideas"]
+        def row(title, score, url, link):
+            return {"item": made[title], "title": title, "score": score, "url": url, "href": link, "created": "2026-10-01"}
+        self.assertEqual(ideas, {"state": "read", "reason": "", "count": 3, "rows": [
+            row("High idea", 9.0, "javascript:alert(1)", None), row("Low idea", 3.0, "https://example.test/low", "https://example.test/low"),
+            row("Unscored idea", None, "", None)]})
+        with mock.patch.object(writing_screen, "IDEAS", 1):
+            ideas = writing_screen.document(self.connection, now=NOW)["ideas"]
+        self.assertEqual((ideas["count"], [r["title"] for r in ideas["rows"]]), (3, ["High idea"]))
+
+    def test_an_ideas_score_or_date_that_is_no_finite_number_or_text_is_unset(self):
+        """pack sd:7244 review: the vault's fields are JSON that `json.loads` reads, so a score may be 'nan', 'inf',
+        '1e999', a NaN or Infinity literal, 10**400 or true; a date may be any of those or an object. A score that is no finite
+        number and a date that is no text read as unset, so one idea cannot put NaN in /api/writing and fail the page's
+        JSON parse for every piece."""
+        from sd_db import create_item
+
+        # 10**400 is a valid JSON integer that float() refuses with OverflowError.
+        bad = ("nan", "inf", "-inf", "1e999", float("nan"), float("inf"), True, [3], {"n": 3}, 10**400, -10**400)
+        for n, value in enumerate(bad):
+            create_item(self.connection, kind="idea", title=f"Odd idea {n:02}", status="planning", source="vault",
+                        path=f"Blog Ideas/Odd idea {n:02}.md", stage="inbox",
+                        fields={"kind": "blog-idea", "score": value, "dateCreated": value})
+        with mock.patch.object(writing_screen, "IDEAS", len(bad)):
+            doc = writing_screen.document(self.connection, now=NOW)
+        json.dumps(doc, allow_nan=False)  # raises ValueError on NaN or Infinity
+        self.assertEqual([(r["score"], r["created"]) for r in doc["ideas"]["rows"]],
+                         [(None, value if isinstance(value, str) else None) for value in bad])
+
+    def test_a_publication_url_that_is_no_text_is_no_publication(self):
+        """pack sd:7242 review, same class: a claim's state is JSON that `json.loads` reads, so its url may be a
+        number: the claim table's json_valid check refuses a NaN literal, but 1e999 passes it and reads as inf. Such a
+        claim is no live publication, and the document stays plain JSON."""
+        claim = "INSERT INTO publication_claim (id, item, payload, state, created_at, updated_at) VALUES (?, ?, '{}', ?, ?, ?)"
+        for n, url in enumerate(("1e999", "-1e999", "7")):
+            self.connection.execute(claim, (f"c{n}aim0000000", self.ids["fixture"], '{"phase": "published", "url": %s}' % url, NOW, NOW))
+        self.connection.commit()
+        doc = writing_screen.document(self.connection, now=NOW)
+        json.dumps(doc, allow_nan=False)
+        self.assertIsNone({p["id"]: p for p in doc["pieces"]}[self.ids["fixture"]]["publication"])
+
+    def test_a_claim_state_or_item_fields_with_an_int_past_the_digit_limit_leave_the_page_readable(self):
+        """pack sd:7329: json.loads refuses an integer literal past 4,300 digits with ValueError, and the claim
+        table's json_valid check accepts one. One such claim or one such field raised out of piece_state, so
+        /api/writing failed for every piece and the item page failed for that one. The number reads as unset."""
+        big = "9" * 5000
+        item = self.ids["fixture"]
+        self.connection.execute(
+            "INSERT INTO publication_claim (id, item, payload, state, created_at, updated_at) VALUES (?, ?, '{}', ?, ?, ?)",
+            ("c0aim0000000", item, '{"phase": %s, "url": %s}' % (big, big), NOW, NOW))
+        held = self.connection.execute("SELECT fields FROM item WHERE id = ?", (item,)).fetchone()[0]
+        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (held[:-1] + ', "weight": %s}' % big, item))
+        self.connection.commit()
+        doc = writing_screen.document(self.connection, now=NOW)
+        json.dumps(doc, allow_nan=False)
+        self.assertIsNone({p["id"]: p for p in doc["pieces"]}[item]["publication"])
+        # The item page's controls name the claim's phase as text, whatever the claim holds.
+        from sd_dashboard import controls
+
+        row = dict(self.connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone())
+        self.assertIn("Publication", str(controls.writing_controls(self.connection, row)))
+
+    def test_a_failed_ideas_read_is_unknown_with_its_reason_and_the_pieces_still_read(self):
+        with mock.patch.object(writing_screen, "read_ideas", side_effect=sqlite3.OperationalError("no such column: stage")):
+            doc = writing_screen.document(self.connection, now=NOW)
+        self.assertEqual(doc["ideas"], {"state": "unknown", "reason": "no such column: stage", "count": None, "rows": []})
+        self.assertEqual(len(doc["pieces"]), 2)
+
+    def test_a_report_reads_one_piece_file_read_only_up_to_a_bound(self):
+        """pack sd:7242: a gate's view icon reads its report through /api/writing/<id>/<gate>: the file beside the
+        piece's index.md, cut at REPORT_CHARS; a missing file or a non-piece is a 404 that says which."""
+        item, parked = self.ids["fixture"], self.ids["parked"]
+        before = self.snapshot()
+        self.assertEqual(writing_screen.report(self.connection, f"/api/writing/{item}/fact-check"),
+                         (200, {"item": item, "name": "fact-check.md", "text": "Fact-check fixture report\n", "cut": False}))
+        self.assertEqual(self.snapshot(), before)
+        with mock.patch.object(writing_screen, "REPORT_CHARS", 10):
+            self.assertEqual(writing_screen.report(self.connection, f"/api/writing/{item}/fact-check")[1]["text"], "Fact-check")
+            self.assertIs(writing_screen.report(self.connection, f"/api/writing/{item}/fact-check")[1]["cut"], True)
+        self.assertEqual(writing_screen.report(self.connection, f"/api/writing/{parked}/fact-check"),
+                         (404, {"error": f"#{parked} has no fact-check.md."}))
+        self.assertEqual(writing_screen.report(self.connection, "/api/writing/999999/research")[0], 404)
+        self.assertEqual(writing_page.REPORT, writing_screen.REPORT, "the route and the reader parse one path")
 
     def test_a_published_piece_carries_its_claims_url_and_a_link_only_for_http(self):
         # sd:3465: the writing claim URL becomes a link; an address in another scheme stays text.
@@ -243,7 +369,7 @@ def piece(id, title, stage, **fields):
              "owner": "row", "ready_recorded": False, "publication": None, "next": [], "corrections": [],
              "files": {"index.md": {"bytes": 4096, "mtime": "2026-09-20T10:00:00Z"}, "research.md": {"bytes": 2048, "mtime": "2026-09-19T10:00:00Z"},
                        "fact-check.md": {"bytes": 1024, "mtime": "2026-09-19T10:00:00Z"}, "adversarial.md": {"bytes": 1024, "mtime": "2026-09-19T10:00:00Z"}},
-             "draft": ["First paragraph.", "Second paragraph."], "words": 1200, "grill": {"open": [], "answered": 0},
+             "draft": ["First paragraph.", "Second paragraph."], "draft_cut": False, "words": 1200, "grill": {"open": [], "answered": 0},
              "adversarial": {"state": "stale", "detail": "reconciled with 0123456789ab, draft is now ba9876543210"}}
     entry.update(fields)
     return entry
@@ -262,6 +388,11 @@ DOC = {"read": NOW, "stages": list(writing.STAGES), "pieces": [
     piece(14, "File Owned", "review", owner="file", next=["ready"], gates_ok=True),
 ]}
 DOC["attention"] = writing_screen._attention(DOC["pieces"])
+#: pack sd:7244: the inbox ideas, highest score first, IDEAS of them beside the inbox count.
+DOC["ideas"] = {"state": "read", "reason": "", "count": 207, "rows": [
+    {"item": 501, "title": "Gates are cheaper than rework", "score": 9.0, "url": "https://example.test/gates",
+     "href": "https://example.test/gates", "created": "2026-10-01"},
+    {"item": 502, "title": "An idea with no source", "score": None, "url": "", "href": None, "created": "2026-09-30"}]}
 
 #: One piece per gate lamp the badge counts, beside the stories above (sd:3446).
 LAMPS = [
@@ -282,6 +413,7 @@ COMMANDS = [
     ["piece.revive", "Revive", "v", "undo", True],
     ["piece.readiness", "Readiness", "r", "safe", False],
     ["piece.publish", "Publish", "u", "confirm", False],
+    ["piece.draft", "Show draft", "d", "safe", False],
     ["piece.grill", "Grill", None, "safe", False],
     ["piece.apply-answers", "Apply answers", None, "safe", False],
     ["piece.review", "Refresh review", None, "safe", False],
@@ -549,21 +681,37 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         # Columns in stage order: Drafting holds #11, Review holds #12 and #14.
         self.assertEqual(re.findall(r'<article class="card[^"]*"[^>]*data-id="(\d+)"', board), ["11", "12", "14"])
         self.assertNotIn('data-id="13"', board, "a parked piece shows only with Parked on")
-        self.assertIn("Not read: the dashboard has no reader for the vault's blog ideas yet.", board)
         card = re.search(r'<article class="card"[^>]*data-id="11".*?</article>', board, re.S).group(0)
         self.assertEqual(re.findall(r'data-s="(\w+)"', card), ["ok", "ok", "queued", "unknown"])
         self.assertIn("<b>3</b> active", out["html"]["strip"])
-        self.assertIn("vault ideas not read", out["html"]["strip"])
         self.assertEqual(out["page_attention"], {"state": "ok", "n": 0, "what": "pieces need a gate"})
-        # sd:6701: Open | Parked | All, the shell's set-aside group, with each count.
+        # sd:6701: Open | Parked, the shell's set-aside group, with each count (pack sd:7263 dropped All).
         self.assertEqual(re.findall(r'data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>', out["html"]["parked-seg"]),
-                         [("open", "true", "3"), ("aside", "false", "1"), ("all", "false", "4")])
+                         [("open", "true", "3"), ("aside", "false", "1")])
 
-    def test_parked_shows_the_parked_pieces_alone_and_all_shows_every_piece(self):
+    def test_the_ideas_column_lists_the_inbox_ideas_and_the_strip_counts_them(self):
+        """pack sd:7244: each idea card has its score and its title, a link only where the read gave an http href; the
+        header and the strip carry the inbox count. A failed read keeps the column unknown with its reason."""
+        out = self.run_page("")
+        col = re.search(r'<div class="col vault".*?</div></div></div>', out["html"]["view-board"], re.S).group(0)
+        self.assertIn('<span class="n" title="inbox ideas in the vault">207</span>', col)
+        self.assertEqual(re.findall(r'<span class="tag">([^<]+)</span>', col), ["9/10", "no score"])
+        self.assertIn('<a class="ext" href="https://example.test/gates" target="_blank" rel="noopener noreferrer">Gates are cheaper than rework</a>', col)
+        self.assertIn('<div class="t">An idea with no source</div>', col)
+        self.assertIn("Highest 2 of 207 inbox ideas.", col)
+        self.assertNotIn("data-id=", col, "an idea card took a piece's selection")
+        self.assertIn("<b>207</b> ideas in the vault inbox", out["html"]["strip"])
+        self.assertNotIn("vault ideas not read", out["html"]["strip"])
+        unread = "DOC.ideas = { state: 'unknown', reason: 'no such column: stage', count: null, rows: [] };\n"
+        out = self.run_page("", prelude=unread)
+        self.assertIn("Not read: no such column: stage", out["html"]["view-board"])
+        self.assertIn("vault ideas not read", out["html"]["strip"])
+
+    def test_parked_shows_the_parked_pieces_alone_and_an_older_all_link_shows_open(self):
         def board(search):
             return re.findall(r'<article class="card[^"]*"[^>]*data-id="(\d+)"', self.run_page("", search=search)["html"]["view-board"])
         self.assertEqual(board("?parked=1"), ["13"])
-        self.assertEqual(sorted(board("?parked=all")), ["11", "12", "13", "14"])
+        self.assertEqual(sorted(board("?parked=all")), ["11", "12", "14"])
 
     def test_the_badge_rule_lights_what_the_cards_lamps_light(self):
         # sd:3446: the rail's rule is writing_screen's; each card's lamps stay the page's. They must agree, piece by piece.
@@ -595,6 +743,69 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         self.assertIn("writing-pack/content/2026/three-budgets/index.md", editor)
         self.assertIn("Read only", editor)
 
+    def test_show_draft_selects_the_piece_and_opens_its_whole_draft_in_the_editor(self):
+        """pack sd:7242: Show draft is a row and palette command; it selects the piece, opens the editor and says whether
+        the editor shows the whole draft. Details offer it through the command bar, not a button of their own."""
+        out = self.run_page("R.icon = cmd('piece.draft').icon; R.off = cmd('piece.draft').when(C.get('12'));"
+                            " shellRun(cmd('piece.draft'), C.get('12')); await flush();")
+        editor = out["html"]["view-editor"]
+        self.assertEqual((out["R"]["icon"], out["R"]["off"]), ("file-text", True))
+        self.assertIn("#12 Gated Review", editor)
+        self.assertIn("<p>First paragraph.</p><p>Second paragraph.</p>", editor)
+        self.assertIn("The whole draft, 1,200 words. Edit it in its file.", editor)
+        self.assertEqual(out["urls"][-1], {"view": "editor"})
+        self.assertFalse(any("Show draft" in t[0] for t in out["toasts"]), "Show draft toasted; the editor is its answer")
+        self.assertNotIn('id="open-ed"', out["html"]["details"])
+        cut = "DOC.pieces[1].draft_cut = true;\n"
+        out = self.run_page("shellRun(cmd('piece.draft'), C.get('12')); await flush();", prelude=cut)
+        self.assertIn("The first 2 paragraphs of 1,200 words; the rest stays in the file.", out["html"]["view-editor"])
+        out = self.run_page("R.off = cmd('piece.draft').when(C.get('11'));", prelude="DOC.pieces[0].draft = []; DOC.pieces[0].words = 0;\n")
+        self.assertEqual(out["R"]["off"], "no draft yet")
+
+    def test_each_gate_row_has_a_refresh_and_a_view_icon(self):
+        """pack sd:7242: Draft reads again and opens Show draft; Research and Fact-check copy the skill line, since no
+        route runs them; Adversarial runs Refresh review. Each report's view opens it in the editor's evidence pane,
+        read through /api/writing/<id>/<gate>; a missing file's view is off and says missing."""
+        report = "[200, { item: 11, name: 'adversarial.md', text: 'Adversarial report body', cut: false }]"
+        answer = ("(path) => path === '/api/writing' ? [200, DOC] : path === '/api/writing/11/adversarial' ? " + report
+                  + " : [200, {}]")
+        out = self.run_page("open('11'); await flush(); R.details = ELS.details.html;"
+                            " const view = { target: { closest: s => s === '[data-gate-view]' ? { dataset: { gateView: 'adversarial' } } : null } };"
+                            " ELS.details.listeners.click.forEach(f => f(view)); await flush(); await flush(); R.editor = ELS['view-editor'].html;",
+                            answer=answer)
+        gates = re.search(r'<ul class="gates">.*?</ul>', out["R"]["details"], re.S).group(0)
+        rows = re.findall(r"<li>.*?</li>", gates, re.S)
+        self.assertEqual(len(rows), 4)
+        draft, research, fact, adversarial = rows
+        self.assertIn('data-gate-again=""', draft)
+        self.assertIn('data-cmd="piece.draft" data-obj="11"', draft)
+        self.assertIn('data-copy="claude &quot;/sd-research piece=2026/three-budgets&quot;"', research)
+        self.assertIn('data-gate-view="research"', research)
+        self.assertIn('data-copy="claude &quot;/sd-fact-check input=content/2026/three-budgets/index.md&quot;"', fact)
+        self.assertIn("disabled", fact)
+        self.assertIn("Fact-check: missing", fact)
+        self.assertIn('data-cmd="piece.review" data-obj="11"', adversarial)
+        self.assertIn('data-gate-view="adversarial"', adversarial)
+        self.assertIn("Adversarial report body", out["R"]["editor"])
+        self.assertIn('aria-pressed="true">Adversarial</button>', out["R"]["editor"])
+        self.assertIn("/api/writing/11/adversarial", out["gets"])
+
+    def test_a_reread_drops_the_cached_reports_so_two_versions_in_one_second_differ(self):
+        """pack sd:7328: a report is cached per piece, file and whole-second change time. Two versions written in one
+        second share a key, so Draft's refresh kept the old text beside the new gate state. Every read of the pieces
+        drops the cache, so the open report reads again."""
+        answer = ("(path) => path === '/api/writing' ? [200, DOC] : path === '/api/writing/11/adversarial'"
+                  " ? [200, { item: 11, name: 'adversarial.md', text: BODY, cut: false }] : [200, {}]")
+        out = self.run_page("open('11'); await flush();"
+                            " const view = { target: { closest: s => s === '[data-gate-view]' ? { dataset: { gateView: 'adversarial' } } : null } };"
+                            " ELS.details.listeners.click.forEach(f => f(view)); await flush(); await flush(); R.first = ELS['view-editor'].html;"
+                            " BODY = 'Report version two';"
+                            " const again = { target: { closest: s => s === '[data-gate-again]' ? {} : null } };"
+                            " ELS.details.listeners.click.forEach(f => f(again)); await flush(); await flush(); R.second = ELS['view-editor'].html;",
+                            answer=answer, prelude="var BODY = 'Report version one';\n")
+        self.assertIn("Report version one", out["R"]["first"])
+        self.assertIn("Report version two", out["R"]["second"])
+
     def test_the_details_link_the_claims_url(self):
         # sd:3465: "Already published" named the claim only; the Details now link where it went, http and https only.
         claim = {"claim": "c1aim0000000", "url": "https://example.test/p", "phase": "published", "href": "https://example.test/p"}
@@ -624,7 +835,8 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
 
 
 class TheRegistration(Registers, unittest.TestCase):
-    page, section, route, api = "writing", "Writing", "/writing", ("/api/writing", "/api/writing/publish")
+    page, section, route, api = "writing", "Writing", "/writing", ("/api/writing", "/api/writing/1/research",
+                                                                  "/api/writing/publish")
 
 
 if __name__ == "__main__":
