@@ -1868,7 +1868,7 @@ def default_runner_merge(root: pathlib.Path) -> str:
         raise LaneError(str(imported.problem), code=RUNNER_MERGE_UNKNOWN)
     from sd_db.database import connect, default_path  # noqa: PLC0415
     from sd_db.protection import github_slug  # noqa: PLC0415
-    from sd_db.repos import registered_for  # noqa: PLC0415
+    from sd_db.repos import policy_merge, registered_for  # noqa: PLC0415
 
     origin = lane_git(root, "config", "--get", "remote.origin.url")
     try:
@@ -1878,7 +1878,7 @@ def default_runner_merge(root: pathlib.Path) -> str:
                         else RUNNER_MERGE_UNKNOWN) from None
     try:
         row = sd_lib.repo_row(connection, registered_for(connection, str(root.resolve()), origin))
-        value = row["runner_merge"] if row is not None and "runner_merge" in row.keys() else None
+        value = None if row is None else policy_merge(row["declarations"])  # pack sd:7366: `policy.merge`
         own = github_slug(origin) if origin else None
         if row is None or own is None or github_slug(row["remote"] or "") != own:
             why = f"no repo row has the remote {origin}"

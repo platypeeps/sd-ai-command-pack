@@ -1537,14 +1537,15 @@ class CiMode(unittest.TestCase):
         with mock.patch.object(sd_db.repos, "repo_ci", lambda connection, path: "local", create=True):
             self.assertEqual(sd_lib.repo_ci(self.connection, self.root), "local")
 
-    def test_without_the_reader_the_column_is_read_when_present(self) -> None:
-        import sd_db.repos
-
-        if "ci" not in self.columns():  # a library older than schema 16
-            self.connection.execute("ALTER TABLE repo ADD COLUMN ci TEXT NOT NULL DEFAULT 'github'")
+    def test_the_policy_is_read_and_the_column_is_not(self) -> None:
+        """pack sd:7366: `policy.ci.provider` is the setting; a column a raw write moved alone says nothing."""
         self.connection.execute("UPDATE repo SET ci = 'local'")
-        with mock.patch.object(sd_db.repos, "repo_ci", None, create=True):
-            self.assertEqual(sd_lib.repo_ci(self.connection, self.root), "local")
+        self.assertEqual(sd_lib.repo_ci(self.connection, self.root), "github")
+        self.connection.execute("""UPDATE repo SET declarations = '{"policy":{"ci":{"provider":"local"}}}'""")
+        self.assertEqual(sd_lib.repo_ci(self.connection, self.root), "local")
+        self.connection.execute("UPDATE repo SET declarations = ?", (
+            '{"policy":{"ci":{"provider":"jenkins","url":"https://ci.example.test","job":"j"}}}',))
+        self.assertEqual(sd_lib.repo_ci(self.connection, self.root), "github")
 
     def test_an_unknown_value_or_a_failing_read_answers_github(self) -> None:
         import sd_db.repos

@@ -2,6 +2,7 @@
 title: Fold repo.runner_merge and repo.ci into the policy declaration
 created: 2026-11-03
 item: sd:7366
+branch: feat/sd-7366-policy-merge-ci
 ---
 
 # Design — repo-policy-fold

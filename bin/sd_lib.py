@@ -1262,7 +1262,10 @@ def slot_bound_seconds(text: str) -> int:
 
 
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
-    """`repo.ci` for the repository `root` is a checkout of, else `github`.
+    """`policy.ci.provider` for the repository `root` is a checkout of, `github` or `local` (pack sd:7366).
+
+    `jenkins` reads `github` here, as its column did: `sd-ship` reads the
+    Jenkins job from the policy itself (`jenkins_ci`).
 
     Resolved through `registered_for`, as `sd-ship`'s runner-merge read is, so
     a worktree or a runner clone answers for its row. Every failure answers
@@ -1278,12 +1281,7 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
 
         origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
         path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
-        reader = getattr(repos, "repo_ci", None)
-        if reader is not None:
-            value = reader(connection, path)
-        else:
-            row = repo_row(connection, path)
-            value = row["ci"] if row is not None and "ci" in row.keys() else "github"
+        value = repos.repo_ci(connection, path)  # pack sd:7366: the row's `policy.ci.provider`
     except Exception:  # every fault is "not said"; see the docstring
         return "github"
     return value if value in CI_MODES else "github"
