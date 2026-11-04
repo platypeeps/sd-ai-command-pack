@@ -43,7 +43,7 @@ from .markup import join, tag
 # rather than in a child that the budget can kill.
 VIEWS = (("toolbox", "Toolbox"), ("vault", "Vault"), ("research", "Research"), ("queues", "Queues"))
 #: The views Operations > Resources still shows; each moves to its page in pack sd:7527 (`view`).
-RESOURCES = (("vault", "Vault"), ("queues", "Queues"))
+RESOURCES = (("queues", "Queues"),)
 # The child each view runs: one plugin tile, owned by this dashboard checkout
 # and never supplied by a page.
 TILE = Path(__file__).resolve().parents[1] / "sd_tile.py"

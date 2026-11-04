@@ -134,7 +134,8 @@ class OperationsActions(BrowserSession):
                              ("usage&month=soon", "/metrics#view=spend"),
                              # pack sd:7527: each Resources view moved to the page that holds it now.
                              ("resources&resource=toolbox", "/management#view=machine"),
-                             ("resources&resource=research", "/management?research=yes#view=repos")):
+                             ("resources&resource=research", "/management?research=yes#view=repos"),
+                             ("resources&resource=vault", "/notes")):
             with self.subTest(area=area):
                 connection = http.client.HTTPConnection(host, port, timeout=10)
                 try:
