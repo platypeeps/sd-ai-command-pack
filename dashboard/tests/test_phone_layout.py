@@ -6,7 +6,7 @@ tests pin: a folded pane kept the rail as a 216 px column beside the page on a n
 past the screen edge, and Today's band folds were 23 px tall. A second probe, on a fixture store with open builds, found
 the Build controls' faults: the Tasks board's lanes were 2 px wide, the Build dialog cut each item number to "#", a
 builder run's ETA sentence squeezed its title to one word a line on Today, and Queue's ended-builds fold was 19 px tall.
-The auto-pickup control is not built yet (system design step 7), so it has no layout to pin.
+The auto-pickup line (pack sd:6097) is a `.filtered` line with one `.btn.quiet.sm`, the Queue controls' own.
 """
 
 from __future__ import annotations

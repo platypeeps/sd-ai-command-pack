@@ -353,6 +353,102 @@ class TheStage(ScreenCase):
             studio.naming(self.connection, self.number, self.root)
 
 
+#: A stand-in tool: prints its argv after its own name, and exits 0.
+ECHO = "import sys\nprint(' '.join(sys.argv))\n"
+
+
+class TheActions(ScreenCase):
+    """Slice 4 (sd:6922): the `studio.*` rows of `run_actions.ACTIONS`. Each argv is fixed text, a project the server
+    found and a verb from its list; nothing the page sends enters it otherwise."""
+
+    def setUp(self):
+        super().setUp()
+        self.root, _ = fixture(Path(self.tmp.name))
+        self.art = self.root / "example" / "art"
+        register(self.connection, self.art)
+        (self.art / "Makefile").write_text("check:\n\t@echo checked\n", encoding="utf-8")
+        for folder, kind, tool in (("gang/episodes/door", "episode", "gang/tools/episode.py"),
+                                   ("songs/tune", "song", "songs/tools/song_pipeline.py")):
+            (self.art / folder).mkdir(parents=True)
+            (self.art / folder / "project.json").write_text(json.dumps({"kind": kind, "title": folder}), encoding="utf-8")
+            (self.art / tool).parent.mkdir(parents=True, exist_ok=True)
+            (self.art / tool).write_text(ECHO, encoding="utf-8")
+        patched = mock.patch.dict(os.environ, {"REPO_ROOT": str(self.root)})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def run_action(self, **values):
+        from sd_dashboard import run_actions
+
+        return run_actions.request(values)(self.connection)
+
+    def test_check_runs_make_check_in_the_projects_checkout(self):
+        status, answer = self.run_action(action="studio.check", project="art/shirts/cat")
+        self.assertEqual((status, answer["exit"], answer["line"]), (200, 0, f"cd {self.art.resolve()} && make check"))
+        self.assertEqual(answer["output"], "checked")
+
+    def test_an_unknown_project_or_an_extra_field_runs_nothing(self):
+        for values in ({"project": "art/shirts/dog"}, {"project": "art/shirts/cat", "argv": "rm -rf /"}, {}):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                self.run_action(action="studio.check", **values)
+
+    def test_episode_runs_the_tool_above_the_project_with_its_folder(self):
+        status, answer = self.run_action(action="studio.episode", project="art/gang/episodes/door", verb="check")
+        folder = (self.art / "gang" / "episodes" / "door").resolve()
+        self.assertEqual((status, answer["exit"]), (200, 0), answer)
+        self.assertEqual(answer["output"], f"{(self.art / 'gang' / 'tools' / 'episode.py').resolve()} check {folder}")
+
+    def test_song_runs_the_pipeline_with_the_song_alone(self):
+        status, answer = self.run_action(action="studio.song", project="art/songs/tune", verb="validate")
+        self.assertEqual((status, answer["output"].split()[1:]), (200, ["validate", "tune"]), answer)
+
+    def test_a_verb_off_the_list_or_a_project_of_another_kind_runs_nothing(self):
+        cases = [("studio.episode", "art/gang/episodes/door", "rm"), ("studio.song", "art/songs/tune", "import"),
+                 ("studio.episode", "art/shirts/cat", "check"), ("studio.song", "art/gang/episodes/door", "validate")]
+        for action, project, verb in cases:
+            with self.subTest(action=action, project=project, verb=verb), self.assertRaises(ValueError):
+                self.run_action(action=action, project=project, verb=verb)
+
+    def test_a_project_with_no_tool_above_it_runs_nothing(self):
+        (self.art / "songs" / "tools" / "song_pipeline.py").unlink()
+        with self.assertRaisesRegex(ValueError, "no songs/tools/song_pipeline.py|no tools/song_pipeline.py"):
+            self.run_action(action="studio.song", project="art/songs/tune", verb="validate")
+
+    def test_a_slow_action_answers_504_unknown(self):
+        (self.art / "Makefile").write_text("check:\n\t@sleep 5\n", encoding="utf-8")
+        with mock.patch.object(studio, "CHECK_SECONDS", 1):
+            status, answer = self.run_action(action="studio.check", project="art/shirts/cat")
+        self.assertEqual((status, answer["outcome"]), (504, "unknown"))
+
+    def test_session_starts_claude_in_herdr_and_notes_the_item(self):
+        from sd_dashboard import fix_session
+
+        number = self.item("Cat shirt")
+        name_item(self.root, number)
+        launched = []
+        with mock.patch.object(fix_session, "_launch", lambda d, label, text: launched.append((d, label, text)) or "pane-7"):
+            status, answer = self.run_action(action="studio.session", project="art/shirts/cat")
+        self.assertEqual((status, answer["exit"]), (200, 0), answer)
+        directory, label, text = launched[0]
+        self.assertEqual((directory, label), (self.art.resolve(), "studio-art-shirts-cat"))
+        self.assertIn("shirts/cat/project.json", text)
+        self.assertNotIn("A cat on a shirt", text, "the brief is read from the file, never typed from the page")
+        notes = self.connection.execute("SELECT body FROM note WHERE item = ?", (number,)).fetchall()
+        self.assertIn("pane pane-7", notes[-1]["body"])
+
+    def test_session_with_herdr_down_or_a_note_that_fails_says_so(self):
+        from sd_dashboard import fix_session
+
+        with mock.patch.object(fix_session, "_launch", lambda *_: (503, {"error": "Fix failed: herdr is not running"})):
+            status, answer = self.run_action(action="studio.session", project="art/shirts/cat")
+        self.assertEqual((status, answer["exit"], answer["output"]), (200, 1, "herdr is not running"))
+        name_item(self.root, 9999)
+        with mock.patch.object(fix_session, "_launch", lambda *_: "pane-8"):
+            status, answer = self.run_action(action="studio.session", project="art/shirts/cat")
+        self.assertEqual(answer["exit"], 1)
+        self.assertIn("claude started in herdr pane pane-8, but the note on sd:9999 was not recorded", answer["output"])
+
+
 class TheRange(unittest.TestCase):
     def test_each_header_shape_answers_its_status_and_bytes(self):
         cases = {
@@ -467,6 +563,16 @@ class TheServer(BrowserSession):
         self.assertEqual(out["R"]["does"], f"Moves #{number} from brief to candidates, with a note.")
         self.assertIn([f"/api/items/{number}/stage", {"revision": cat["revision"], "stage": "candidates"}, 64], out["posts"])
         self.assertIn("studio.stage", out["confirms"])
+
+    def test_the_project_commands_run_their_studio_action_and_a_tool_of_another_kind_is_off(self):
+        doc = json.loads(self.fetch("/api/studio")[2])
+        out = self.run_page(doc, "const ran = []; window.commands = { runAction: (o, a, ids) => { ran.push([a, ids]); return Promise.resolve('ok'); } };"
+                                 "const o = OBJ.get('art/shirts/cat'), c = id => REG.find(x => x.id === id);"
+                                 "R.off = ['studio.check', 'studio.song-validate', 'studio.episode-pack'].map(id => C.offWhy(c(id), o));"
+                                 "C.run(c('studio.check'), o); await flush(); C.run(c('studio.session'), o); await flush(); R.ran = ran;")
+        self.assertEqual(out["R"]["off"], ["", "it is a shirt, not a song", "it is a shirt, not an episode"])
+        self.assertEqual(out["R"]["ran"], [["studio.check", {"project": "art/shirts/cat"}], ["studio.session", {"project": "art/shirts/cat"}]])
+        self.assertIn("studio.session", out["confirms"])
 
     def test_a_pinned_file_leads_its_root_a_hidden_one_folds_and_pin_posts_the_view(self):
         self.post("/api/studio/view", {"file": "art/shirts/cat/media/take.wav", "pinned": True})

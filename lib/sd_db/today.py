@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from . import hub
+from .build import HEALTH
 from .reads import (
     IDEA_KINDS,
     REVIEW_BATCH,
@@ -421,7 +422,8 @@ FAILED_LANE = ("failed", "skipped")
 
 def push_due(connection: sqlite3.Connection, *, now: str | None = None) -> list[dict]:
     """Each failure the operator has not had a push for (pack sd:6946): a lane entry that failed or was
-    skipped, and a build run that ended blocked or failed in the last day. Each is `key`, `title` and `body`.
+    skipped, a build run that ended blocked or failed in the last day, and an item a failed health check
+    after an auto-pickup merge filed in the last day. Each is `key`, `title` and `body`.
 
     Success pushes nothing, and each key is pushed once: the caller records `PUSHED + key` after a send.
     """
@@ -440,6 +442,11 @@ def push_due(connection: sqlite3.Connection, *, now: str | None = None) -> list[
         """, (since, *FAILED_OUTCOMES)).fetchall()
     found += [{"key": f"build:{row['id']}", "title": f"Build {row['outcome']}: sd:{row['item']}",
                "body": f"{row['title']}: {_first_line(row['detail'])[:300]}"} for row in runs]
+    # The critical push of a failed health check after an auto-pickup merge (pack sd:6097, system sd:5997).
+    found += [{"key": f"health:{row['id']}", "title": f"Auto-pickup off: health failed, sd:{row['id']}",
+               "body": row["title"]} for row in connection.execute(
+        "SELECT id, title FROM item WHERE substr(title, 1, ?) = ? AND created_at >= ? ORDER BY id",
+        (len(HEALTH), HEALTH, since))]
     pushed = {row[0] for row in connection.execute(
         "SELECT key FROM state WHERE kind = 'watermark' AND substr(key, 1, ?) = ?", (len(PUSHED), PUSHED))}
     return [row for row in found if PUSHED + row["key"] not in pushed]

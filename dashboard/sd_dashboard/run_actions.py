@@ -34,6 +34,10 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | topic.restore      | a retired topic row                          | `records.edit_row`, stage candidate           |
 | topic.delete       | a topic row                                  | `sd-db item remove <id>`, preview then apply  |
 | learning.add       | books or videos, an http(s) URL, a title     | `sd store add sdw.learning <title> ...`       |
+| studio.check       | a Studio project the server finds again      | `make check` in its checkout                  |
+| studio.episode     | an episode project, a verb in its list       | `tools/episode.py <verb> <folder>`            |
+| studio.song        | a song project, a verb in its list           | `tools/song_pipeline.py <verb> <song>`        |
+| studio.session     | a Studio project                             | claude in herdr, a note on its item           |
 
 A step is bounded (`Step.seconds`), and its output is kept to its last `OUTPUT_CHARS` characters. The answer is
 `{action, line, exit, output, cut}` for a step that ran, whatever its exit. A refusal before the step ran is a
@@ -871,6 +875,15 @@ ACTIONS = {
     "topic.delete": ("Delete topic", _delete("topic")),
     "learning.add": ("Add", learning_add),
 }
+
+
+def _studio():
+    from . import studio
+
+    ACTIONS.update(studio.ACTIONS)
+
+
+_studio()
 
 
 def run(name: str, step: Step) -> tuple[int, dict]:
