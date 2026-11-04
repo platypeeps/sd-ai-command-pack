@@ -396,13 +396,16 @@ def row_steps(connection: Any, row: Any) -> list[Step]:
                 steps.append(Step("D4", "row", "copilot_review.automatic_deep", "change",
                                   "set false, the review object's other keys kept", deep, False,
                                   lambda: repos.set_declaration(connection, path, "review", merged)))
-    ci = row["ci"] if "ci" in row.keys() else None
-    steps.append(Step("D3", "row", "ci", "ok" if ci == "local" else "change", "local", ci, "local",
-                      None if ci == "local" else lambda: repos.set_ci(connection, path, "local")))
+    ci = repos.policy_ci(row["declarations"])  # pack sd:7366: `policy.ci.provider`
+    if ci == "jenkins":
+        steps.append(Step("D3", "row", "ci", "skip", "the policy declares jenkins checks"))
+    else:
+        steps.append(Step("D3", "row", "ci", "ok" if ci == "local" else "change", "local", ci, "local",
+                          None if ci == "local" else lambda: repos.set_ci(connection, path, "local")))
     managed = bool(row["managed"])
     steps.append(Step("D1", "row", "managed", "ok" if managed else "change", "yes", "yes" if managed else "no", "yes",
                       None if managed else lambda: repos.set_managed(connection, path, "yes")))
-    merge = row["runner_merge"]
+    merge = repos.policy_merge(row["declarations"])
     steps.append(Step("D2", "row", "runner_merge", "ok" if merge == "auto" else "change", "auto", merge, "auto",
                       None if merge == "auto" else lambda: repos.set_runner_merge(connection, path, "auto")))
     return steps

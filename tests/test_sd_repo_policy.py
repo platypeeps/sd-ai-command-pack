@@ -215,5 +215,98 @@ class JenkinsWait(unittest.TestCase):
         self.assertEqual(caught.exception.workflow["blocker"]["code"], "ci_pending")
 
 
+class MergeAndCiKeys(unittest.TestCase):
+    """pack sd:7366 slice 1: `policy.merge` (ask|auto) and `policy.ci.provider` (github|local|jenkins)."""
+
+    def test_the_two_keys_read_and_their_odd_values_are_refused(self):
+        for good in ({"merge": "ask"}, {"merge": "auto"}, {"ci": {"provider": "github"}}, {"ci": {"provider": "local"}},
+                     {"mode": "org", "merge": "ask", "ci": {"provider": "local"}},
+                     {"ci": {"provider": "jenkins", "url": "https://ci.example.test", "job": "j/PR-{pr}"}}):
+            with self.subTest(good=good):
+                self.assertEqual(sd_repo_policy.problems(good), [])
+        self.assertEqual(sd_repo_policy.problems({"mode": "external", "merge": "auto"}),
+                         ["the policy declaration: merge is ask in a external repository; auto is for managed ones "
+                          "only (note #34749)"])
+        self.assertEqual(sd_repo_policy.effective(None)["merge"], "ask")
+        self.assertEqual(sd_repo_policy.effective({"mode": "org"})["merge"], "ask")
+
+    def test_odd_inputs_are_refused_by_name_and_never_raise(self):
+        """Property: every odd value of either key, at any nesting, is a named problem, not an exception."""
+        odd = [None, "", "AUTO", "manual", "yes", 0, 1, True, -0.0, 1e308, float("inf"), [], ["auto"], {},
+               {"merge": "auto"}, "a" * 5000]
+        for value in odd:
+            for policy in ({"merge": value}, {"ci": {"provider": value}}, {"ci": value}):
+                with self.subTest(policy=policy):
+                    found = sd_repo_policy.problems(policy)
+                    if policy.get("ci") == {}:
+                        self.assertEqual(found, [])
+                    else:
+                        self.assertTrue(found, policy)
+        for junk in (None, [], "policy", 1, {"merge": {"merge": {"merge": "auto"}}}):
+            with self.subTest(junk=junk):
+                self.assertTrue(sd_repo_policy.problems(junk if not isinstance(junk, dict) else junk))
+
+    def test_a_policy_of_row_settings_only_prints_no_session_line(self):
+        """The backfill gives 27 rows a policy of `merge` and `ci` alone; the session line stays as it was."""
+        self.assertEqual(sd_repo_policy.summary({"merge": "auto", "ci": {"provider": "local"}}), "")
+        line = sd_repo_policy.summary({"issues": "read", "merge": "auto", "ci": {"provider": "local"}})
+        self.assertEqual(line, sd_repo_policy.summary({"issues": "read"}))
+        self.assertIn("ci=jenkins", sd_repo_policy.summary(
+            {"ci": {"provider": "jenkins", "url": "https://ci.example.test", "job": "j"}}))
+
+
+class NoColumnReaders(unittest.TestCase):
+    """pack sd:7366 failure table row "S1 readers switch": no code under `bin`,
+    `lib` or `dashboard` reads `repo.runner_merge` or `repo.ci`; each reads the
+    policy (`policy_merge`, `policy_ci`, `MERGE_SQL`, `CI_SQL`). Prose and
+    docstrings are slice 2's; this reads SQL strings and row reads only."""
+
+    ROOT = pathlib.Path(__file__).resolve().parents[1]
+    #: `repo.ci` in SQL, `runner_merge` in any SQL string, a row read of either column.
+    SQL = __import__("re").compile(r"\b(SELECT|WHERE|JOIN|UPDATE|INSERT)\b")
+    ROWISH = {"row", "registered", "repo", "own", "lender", "found", "result"}
+
+    def _sources(self):
+        for top in ("bin", "lib", "dashboard"):
+            for path in sorted((self.ROOT / top).rglob("*")):
+                if not path.is_file() or "tests" in path.relative_to(self.ROOT).parts or path.suffix not in ("", ".py"):
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if path.suffix == ".py" or text.startswith("#!") and "python" in text.partition("\n")[0]:
+                    yield path, text
+
+    def test_no_column_readers(self):
+        import ast
+        import re
+        found = []
+        for path, text in self._sources():
+            tree = ast.parse(text)
+            docstrings = {id(node.body[0].value) for node in ast.walk(tree)
+                          if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                          and node.body and isinstance(node.body[0], ast.Expr)
+                          and isinstance(node.body[0].value, ast.Constant)}
+            where = path.relative_to(self.ROOT)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+                    # A write is not a read: the dual write's SET names both columns until slice 2.
+                    sql = node.value.partition(" WHERE ")[2] if node.value.startswith("UPDATE repo SET") else node.value
+                    if self.SQL.search(node.value) and (re.search(r"\brunner_merge\b", sql)
+                                                        or re.search(r"\brepo\.ci\b", sql)
+                                                        or re.search(r"\bSELECT\b[^;]*\bci\b[^;]*\bFROM repo\b", sql)
+                                                        or re.search(r"\bci\s*(=|<>|!=|IN\b)", sql)):
+                        found.append(f"{where}:{node.lineno} SQL {node.value[:60]!r}")
+                if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+                    key = node.slice.value
+                    target = node.value.id if isinstance(node.value, ast.Name) else None
+                    if key == "runner_merge" or (key == "ci" and target in self.ROWISH):
+                        found.append(f"{where}:{node.lineno} row[{key!r}]")
+                if (isinstance(node, ast.Compare) and isinstance(node.left, ast.Constant)
+                        and node.left.value in ("runner_merge", "ci") and isinstance(node.ops[0], ast.In)
+                        and isinstance(node.comparators[0], ast.Call)
+                        and getattr(node.comparators[0].func, "attr", None) == "keys"):
+                    found.append(f"{where}:{node.lineno} {node.left.value!r} in ...")
+        self.assertEqual(found, [])
+
+
 if __name__ == "__main__":
     unittest.main()

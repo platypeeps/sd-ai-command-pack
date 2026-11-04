@@ -5,7 +5,7 @@ The `policy` declaration on the repo row (sd:5109) says whose rules a repository
     sd-db repo declare PATH policy "$(cat <config>/policy/<org>.json)"
 
 No declaration reads as `mode: managed` with today's defaults (`DEFAULTS`), so a repository without one changes
-nothing. An org or external repository never takes `auto` for `commit`, `push`, `pr` or `issues` (note #34749):
+nothing. An org or external repository never takes `auto` for `commit`, `push`, `pr`, `merge` or `issues` (note #34749):
 `problems` refuses it, so no reader has to. `commit_convention` is checked by `check_message` where sd moves a commit
 out: `sd-ship lane enqueue` checks each branch commit and the title before the push, and `sd-ship merge` rewrites
 an alias in the squash subject; never by a hook installed into the repository: an org repository owns its hooks.
@@ -23,6 +23,9 @@ from typing import Any
 MODES = ("managed", "org", "external")
 ACTS = ("commit", "push", "pr")
 ACT_VALUES = ("ask", "auto")
+#: `merge`: whether the runner merges without asking, the row setting `sd-db repo runner-merge` writes (pack sd:7366);
+#: a fourth act, `ask` when absent in every mode.
+MERGE = "merge"
 MERGE_METHODS = ("rebase", "squash", "merge")
 ISSUES = ("off", "read", "ask")
 REVIEW_FIELDS = {"human": None, "reviewers": None, "request_when": ("after-green", "on-open"),
@@ -30,8 +33,9 @@ REVIEW_FIELDS = {"human": None, "reviewers": None, "request_when": ("after-green
                  "after_approval": ("add-commits-only", "rebase-ok")}
 CONVENTION_FIELDS = ("types", "aliases", "body", "footer", "title_max", "line_max", "release_types")
 #: `ci`: the provider `sd-ship merge` waits on, its base URL and the job path; `{pr}` in the job is the PR number.
+#: `github` (absent too) and `local` are the row setting `sd-db repo ci` writes (pack sd:7366); `jenkins` needs both.
 CI_FIELDS = ("provider", "url", "job")
-CI_PROVIDERS = ("jenkins",)
+CI_PROVIDERS = ("github", "local", "jenkins")
 #: `test`: run `setup` before the checks and `teardown` after them; each name in `env` must be set.
 TEST_FIELDS = ("setup", "env", "teardown")
 #: `release`: the chain after a merge (sd:6881, sd:7014, `sd_release`); the deploy three are declared together.
@@ -42,7 +46,7 @@ ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 LATER = ("ci", "release", "test", "links")
 
 #: What a repository without a policy reads as: the operator's own rules.
-DEFAULTS: dict[str, Any] = {"mode": "managed", "commit": "auto", "push": "auto", "pr": "auto",
+DEFAULTS: dict[str, Any] = {"mode": "managed", "commit": "auto", "push": "auto", "pr": "auto", MERGE: "ask",
                             "merge_method": "squash", "issues": "off", "review": {"human": 0},
                             "commit_convention": {"title_max": 63, "line_max": 72, "body": "optional"}}
 
@@ -119,7 +123,7 @@ def _ci_problems(ci: Any, where: str) -> list[str]:
     extra = sorted(set(ci) - set(CI_FIELDS))
     found = [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
     found += _choice(ci, "provider", CI_PROVIDERS, where)
-    if "provider" in ci:
+    if ci.get("provider") == "jenkins":
         found += [f"{where}: {key} is a non-empty string" for key in ("url", "job")
                   if not (isinstance(ci.get(key), str) and ci[key].strip())]
         if isinstance(ci.get("url"), str) and not ci["url"].startswith(("http://", "https://")):
@@ -170,11 +174,11 @@ def problems(value: Any) -> list[str]:
     where = "the policy declaration"
     if not isinstance(value, dict):
         return [f"{where} is a JSON object, not {type(value).__name__}"]
-    known = {"mode", *ACTS, "merge_method", "issues", "review", "commit_convention", *LATER}
+    known = {"mode", *ACTS, MERGE, "merge_method", "issues", "review", "commit_convention", *LATER}
     extra = sorted(set(value) - known)
     found = [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
     found += _choice(value, "mode", MODES, where)
-    for act in ACTS:
+    for act in (*ACTS, MERGE):
         found += _choice(value, act, ACT_VALUES, where)
     found += _choice(value, "merge_method", MERGE_METHODS, where)
     if value.get("issues") == "auto":
@@ -183,7 +187,7 @@ def problems(value: Any) -> list[str]:
         found += _choice(value, "issues", ISSUES, where)
     mode = value.get("mode", "managed")
     found += [f"{where}: {act} is ask in a {mode} repository; auto is for managed ones only (note #34749)"
-              for act in ACTS if mode != "managed" and value.get(act) == "auto"]
+              for act in (*ACTS, MERGE) if mode != "managed" and value.get(act) == "auto"]
     if "review" in value:
         found += _review_problems(value["review"], f"{where}: review")
     if "commit_convention" in value:
@@ -210,7 +214,14 @@ def effective(value: dict | None) -> dict[str, Any]:
 
 
 def summary(value: dict | None) -> str:
-    """The session-start line: what an agent may do here, before it acts. Empty for no declaration."""
+    """The session-start line: what an agent may do here, before it acts. Empty for no declaration.
+
+    `merge` and a `github` or `local` provider are row settings (pack sd:7366), not rules an agent acts on, so a
+    policy of those alone prints nothing, as it did while they were columns.
+    """
+    value = {key: held for key, held in (value or {}).items() if key != MERGE}
+    if isinstance(value.get("ci"), dict) and value["ci"].get("provider") in ("github", "local"):
+        value.pop("ci")
     if not value:
         return ""
     held = effective(value)

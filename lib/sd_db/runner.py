@@ -77,7 +77,7 @@ def _item(connection, item: int, *, delivery=False) -> dict:
     if kind is not None and kind["kind"] not in RUNNABLE_KINDS:
         raise RunnerRefused(f"item {item} is a {kind['kind']} item; an agent runs only "
                             f"{', '.join(RUNNABLE_KINDS[:-1])} and {RUNNABLE_KINDS[-1]} items")
-    row = connection.execute("SELECT item.*, repo.remote, repo.runner_merge FROM item "
+    row = connection.execute("SELECT item.*, repo.remote FROM item "
                              "JOIN repo ON repo.path = item.repo WHERE item.id = ?", (item,)).fetchone()
     if row is None:
         raise RunnerRefused(f"item {item} needs a registered repository")
@@ -559,12 +559,13 @@ def merge_authority(connection, ident: str, expected_head: str, *, automatic=Tru
     repo = connection.execute("SELECT * FROM repo WHERE path = ?", (run["repo"],)).fetchone()
     if run["released_at"] or run["quarantine"] or request["role"] != "merge" or request["status"] != "running" or not lease or not lease["exclusive"]:
         raise RunnerRefused("automatic merge requires the live exclusive merge assignment")
-    if (automatic and repo["runner_merge"] != "auto") or run["authored_head"] != expected_head:
+    merge = writes.policy_merge(repo["declarations"])  # pack sd:7366: the policy, not the column
+    if (automatic and merge != "auto") or run["authored_head"] != expected_head:
         raise RunnerRefused("automatic merge policy or exact authored head does not match")
     if not automatic and request["scope"] != "reconcile":
         raise RunnerRefused("manual reconciliation requires an observation-only merge assignment")
     return {"assignment": request["id"], "item": request["item"], "repo": run["repo"], "branch": run["branch"],
-            "owner": run["owner"], "work_path": run["work_path"], "runner_merge": repo["runner_merge"]}
+            "owner": run["owner"], "work_path": run["work_path"], "runner_merge": merge}
 
 
 def record_merge(connection, item: int, *, evidence: dict, run_id: str | None = None) -> int:
@@ -604,7 +605,7 @@ def queue_automatic_merges(connection) -> list[dict]:
             "JOIN item ON item.id = assignment.item JOIN repo ON repo.path = item.repo "
             "JOIN runner_run ON runner_run.assignment = assignment.id "
             "WHERE assignment.role = 'author' AND assignment.status = 'done' AND item.status = 'ready_to_send' "
-            "AND repo.runner_merge = 'auto' AND runner_run.released_at IS NOT NULL "
+            f"AND {writes.MERGE_SQL.format(t='repo')} = 'auto' AND runner_run.released_at IS NOT NULL "
             "AND runner_run.reviewed_head IS NOT NULL ORDER BY assignment.id").fetchall()
         for candidate in candidates:
             exists = connection.execute("SELECT 1 FROM assignment WHERE item = ? AND role = 'merge'", (candidate["item"],)).fetchone()

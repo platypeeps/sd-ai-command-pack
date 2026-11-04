@@ -127,6 +127,7 @@ from urllib.parse import quote
 
 from . import paths as sdpaths
 from .database import transaction
+from .writes import policy_ci
 
 GAP_IDS = (
     "enforce_admins",
@@ -1903,7 +1904,7 @@ def sync(connection: sqlite3.Connection, *, client, observed_at: str) -> dict[st
             continue
         summary["attempted"] += 1
         seen: dict[str, Any] = {}
-        row = observe(client, str(registered["path"]), *slug, observed_at=observed_at, ci=registered["ci"],
+        row = observe(client, str(registered["path"]), *slug, observed_at=observed_at, ci=policy_ci(registered["declarations"]),
                       seen=seen)
         rows.append((slug, row, registered, seen.get("repo")))
     # Every repository has its basic observation before any bypass list is
@@ -1961,7 +1962,7 @@ def _sweep_order(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     None when there is none): managed first, then not reached before reached, then
     oldest observation first, then path."""
     return list(connection.execute(
-        "SELECT repo.path, repo.remote, repo.ci, repo.managed, p.observed_at AS kept_at, p.status AS kept_status, p.reason "
+        "SELECT repo.path, repo.remote, repo.declarations, repo.managed, p.observed_at AS kept_at, p.status AS kept_status, p.reason "
         "FROM repo LEFT JOIN repo_protection p ON p.repo = repo.path "
         "ORDER BY repo.managed DESC, "
         "(p.repo IS NULL OR COALESCE(p.reason, '') LIKE ? || '%') DESC, "
@@ -1987,7 +1988,7 @@ def rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     flags were judged against that. A checkout with a row of its own keeps it.
     """
     found = list(connection.execute(
-        "SELECT repo.path, repo.remote, repo.ci, repo.managed, p.repo AS observed, p.observed_at, p.status, "
+        "SELECT repo.path, repo.remote, repo.declarations, repo.managed, p.repo AS observed, p.observed_at, p.status, "
         "p.default_branch, p.reason, p.body FROM repo LEFT JOIN repo_protection p ON p.repo = repo.path "
         "ORDER BY repo.path"
     ))
@@ -2015,7 +2016,7 @@ def rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
             "repo": own["path"],
             "remote": own["remote"],
             # The screen names the baseline check from it: `baseline_check(ci)` (sd:2509).
-            "ci": row["ci"],
+            "ci": policy_ci(row["declarations"]),
             "slug": f"{slug[0]}/{slug[1]}" if slug else None,
             "borrowed_from": lender["path"] if lender else None,
             "status": status,

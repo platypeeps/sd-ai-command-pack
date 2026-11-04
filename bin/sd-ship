@@ -1822,12 +1822,13 @@ class Ship(SharedReview):
         grant.
         """
         try:
-            from sd_db.repos import registered_for
+            from sd_db.repos import policy_merge, registered_for
 
             origin = git(self.root, "config", "--get", "remote.origin.url")
             path = registered_for(self.connection, str(self.root.resolve()), origin)
             row = sd_lib.repo_row(self.connection, path)  # `~/...` or legacy (sd:1439)
-            if row is None or row["runner_merge"] != "auto":
+            # pack sd:7366: the setting is the row's `policy.merge`; anything but `auto` there is no grant.
+            if row is None or policy_merge(row["declarations"]) != "auto":
                 return False
             return slug(row["remote"] or "") == self.repository
         except (ImportError, LookupError, OSError, Refusal, sqlite3.Error, ValueError):
