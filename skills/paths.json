@@ -23,15 +23,12 @@
       ]
     },
     "development": {
-      "summary": "plan to build to ship",
+      "summary": "check to review to ship",
       "skills": [
         "sd-check",
         "sd-next",
-        "sd-plan",
-        "sd-receive-review",
         "sd-review",
         "sd-ship",
-        "sd-spec",
         "sd-status"
       ]
     },

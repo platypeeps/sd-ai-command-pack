@@ -402,11 +402,23 @@ class TheTrack(ReaderCase):
         self.assertEqual((out["R"]["key"], out["R"]["table"]), ("", True))
 
 
+HELP = {
+    "jobs": "Failed scheduled jobs. Press to list them in Needs you.",
+    "lane": "Lane entries blocked until someone acts; merging and next are counted under it. Press to list the blocked ones in Needs you.",
+    "reports": "Open job alerts and reports. Press to list them in Needs you.",
+    "pulls": "Pull requests waiting on you. Press to list them in Needs you.",
+    "mail": "Mail waiting for you. Press to list it in Needs you.",
+    "repos": "Checkouts to tidy: ahead of origin, dirty or pinned. Press to list them in Needs you.",
+    "sessions": "Work items with a live session; the small count is sessions. Press to open the Queue view.",
+    "gate": "Gate slots running of the cap, and runs waiting for one; load5 is the machine load. Press to open the Queue view.",
+}
+
+
 class TheLamps(ReaderCase):
     """sd:TBD: a fleet area the server's snapshot kept says when it was read; a stale one is unknown, never green."""
 
     CELLS = """const CELLS = ['repos', 'sessions'].map(src => { const c = El('div'), val = El('span');
-  c.dataset = { src }; c.querySelector = () => val; c.removeAttribute = k => { delete c[k]; }; c.val = val; return c; });
+  c.dataset = { src }; c.querySelector = () => val; c.val = val; return c; });
 document.querySelectorAll = sel => sel === '.cell[data-src]' ? CELLS : [];
 DOC0.observed = { repos: { at: '2026-09-06T11:31:00Z', stale: 'git did not answer' }, sessions: { at: '2026-09-06T11:58:00Z', stale: null } };
 refresh(); await flush();
@@ -414,8 +426,18 @@ R.cells = CELLS.map(c => [c.dataset.src, c.dataset.state, c.title || null]);"""
 
     def test_a_kept_fleet_area_shows_its_read_time_and_a_stale_one_is_unknown(self):
         out = self.run_page(self.CELLS)
-        self.assertEqual(out["R"]["cells"], [["repos", "unknown", "observed 11:31 UTC · stale: git did not answer"],
-                                            ["sessions", "ok", "observed 11:58 UTC"]])
+        self.assertEqual(out["R"]["cells"], [["repos", "unknown", HELP["repos"] + "\nobserved 11:31 UTC · stale: git did not answer"],
+                                            ["sessions", "ok", HELP["sessions"] + "\nobserved 11:58 UTC"]])
+
+    def test_every_lamp_says_what_it_counts_and_what_a_press_does_on_hover(self):
+        # Pack sd:7383: the six source cells and the Sessions and Gate links carry a native title; a lamp's own detail follows it.
+        out = self.run_page("""const CELLS = Object.keys(HELP0).filter(k => k !== 'sessions' && k !== 'gate').map(src => { const c = El('button'), val = El('span');
+  c.dataset = { src }; c.querySelector = () => val; return c; });
+document.querySelectorAll = sel => sel === '.cell[data-src]' ? CELLS : [];
+refresh(); await flush();
+R.titles = Object.fromEntries([...CELLS.map(c => [c.dataset.src, c.title]), ['sessions', ELS['lamp-sessions'].title], ['gate', ELS['lamp-gate'].title]]);""".replace(
+            "Object.keys(HELP0)", json.dumps(sorted(HELP))))
+        self.assertEqual(out["R"]["titles"], HELP)
 
 
 class TheUnreadLamps(ReaderCase):
@@ -436,9 +458,9 @@ document.querySelectorAll = sel => sel === '.cell[data-src]' ? [lane] : [];
 refresh(); await flush();
 R.lane = [lane.dataset.state, lane.title, val.html]; const ses = ELS['lamp-sessions']; R.ses = [ses.dataset.state, ses.title];""")
         state, title, text = out["R"]["lane"]
-        self.assertEqual((state, title), ("unknown", "pack: sd-ship gave no answer"))
+        self.assertEqual((state, title), ("unknown", HELP["lane"] + "\npack: sd-ship gave no answer"))
         self.assertIn("<b>1</b> blocked", text)
-        self.assertEqual(out["R"]["ses"], ["unknown", "herdr: herdr did not answer"])
+        self.assertEqual(out["R"]["ses"], ["unknown", HELP["sessions"] + "\nherdr: herdr did not answer"])
 
 
 class TheSnoozedDarkLamps(ReaderCase):

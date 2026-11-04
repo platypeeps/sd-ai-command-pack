@@ -98,7 +98,7 @@ HELD: frozenset[tuple[str, str]] = frozenset()
 #: unless this set is edited too, which is the point.
 HELD_BOUND = frozenset({
     ("bin/sd", "`.makemd`, `.trellis`), so the rule is the generalisation rather than the"),
-    ("skills/sd-plan/SKILL.md",
+    ("contrib/sd-plan/SKILL.md",
      "No unrelated rows, `.claude/`, `.trellis/`, hooks, labels, managed gitignore"),
 })
 

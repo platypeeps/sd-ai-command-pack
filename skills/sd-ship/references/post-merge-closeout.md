@@ -10,8 +10,8 @@ A closed PR is not necessarily merged.
 Read every inline thread and review-body finding, including all result pages and late Copilot comments.
 Before the merge, `sd-ship merge` refuses while a review thread is unresolved; a body-only finding has no thread, so read the body too (R14-D2).
 
-Apply the `sd-receive-review` disposition procedure to each finding.
-That skill remains local-only.
+Disposition each finding locally.
+That step remains local-only.
 Choose one supported result:
 
 - Fixed: name the landed commit and decisive verification evidence.

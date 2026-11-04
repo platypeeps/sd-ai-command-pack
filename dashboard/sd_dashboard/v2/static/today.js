@@ -185,14 +185,26 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
 
   // The lamps (sd:5921): each number counts the rows its filter shows; a source that was not read is unknown, never ok.
   // A snoozed dark row still names its lamp (sd:5954): the snooze hides the row, not the unread source.
+  // What each lamp counts and what a press does (pack sd:7383): its title, then the lamp's own detail on a second line.
+  const HELP = {
+    jobs: 'Failed scheduled jobs. Press to list them in Needs you.',
+    lane: 'Lane entries blocked until someone acts; merging and next are counted under it. Press to list the blocked ones in Needs you.',
+    reports: 'Open job alerts and reports. Press to list them in Needs you.',
+    pulls: 'Pull requests waiting on you. Press to list them in Needs you.',
+    mail: 'Mail waiting for you. Press to list it in Needs you.',
+    repos: 'Checkouts to tidy: ahead of origin, dirty or pinned. Press to list them in Needs you.',
+    sessions: 'Work items with a live session; the small count is sessions. Press to open the Queue view.',
+    gate: 'Gate slots running of the cap, and runs waiting for one; load5 is the machine load. Press to open the Queue view.',
+  };
+  const tip = (cell, key, detail) => { cell.title = detail ? `${HELP[key]}\n${detail}` : HELP[key]; };
   const darkOn = lamp => NEEDS.find(r => r.lamp === lamp && r.kind === 'dark') || SNOOZED.find(r => r.lamp === lamp && r.kind === 'dark');
   function lamps() {
     const L = DOC.lane || {}, gates = L.gates || {}, why = { ...DOC.sources, reports: DOC.problems_error, mail: DOC.mail_error }, unread = DOC.mail_unread || [];
     document.querySelectorAll('.cell[data-src]').forEach(cell => {
       const s = cell.dataset.src, rows = NEEDS.filter(r => r.lamp === s && r.kind !== 'dark'), val = cell.querySelector('.val');
       const dark = darkOn(s), seen = (DOC.observed || {})[s];
-      if ((dark && !dark.partial) || why[s]) { cell.dataset.state = 'unknown'; cell.title = dark?.detail || why[s]; put(val, html`<span class="ph">not read</span>`); return; }
-      if (seen) cell.title = `observed ${seen.at.slice(11, 16)} UTC${seen.stale ? ` · stale: ${seen.stale}` : ''}`; else cell.removeAttribute('title');
+      if ((dark && !dark.partial) || why[s]) { cell.dataset.state = 'unknown'; tip(cell, s, dark?.detail || why[s]); put(val, html`<span class="ph">not read</span>`); return; }
+      let note = seen ? `observed ${seen.at.slice(11, 16)} UTC${seen.stale ? ` · stale: ${seen.stale}` : ''}` : '';
       const st = rows.map(r => STATE[r.band]);
       cell.dataset.state = seen?.stale ? 'unknown' : st.includes('warning') ? 'warning' : st.includes('caution') ? 'caution' : st.length ? 'queued' : 'ok';
       const n = k => rows.filter(r => r.kind === k).length;
@@ -204,19 +216,20 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
         : s === 'pulls' ? html`<b>${rows.length}</b> for you`
         : s === 'mail' ? html`<b>${rows.length}</b> waiting${DOC.mail_more || unread.length ? html`<small>${DOC.mail_more ? `${DOC.mail_more} more in Gmail` : ''}${DOC.mail_more && unread.length ? ' · ' : ''}${unread.length ? `${plural(unread.length, 'repo')} not read` : ''}</small>` : ''}`
         : html`<b>${rows.length}</b> to tidy<small>${n('ahead')} ahead · ${n('dirty')} dirty${n('pinned') ? ` · ${n('pinned')} pinned` : ''}</small>`);
-      if (s === 'lane' && L.unread) cell.title = L.unread_why;
+      if (s === 'lane' && L.unread) note = L.unread_why;
       // A repo whose mail could not be read is unknown, never none: the lamp names each reason (sd:4191).
-      if (s === 'mail' && unread.length) cell.title = unread.map(u => `${u.repo}: mail not read: ${u.reason}`).join('\n');
+      if (s === 'mail' && unread.length) note = unread.map(u => `${u.repo}: mail not read: ${u.reason}`).join('\n');
       // A source read only in part (sd:5939) keeps its counts but reads unknown, never ok: its dark row says what is missing.
-      if (dark) { cell.dataset.state = 'unknown'; cell.title = cell.title || dark.detail; }
+      if (dark) { cell.dataset.state = 'unknown'; note = note || dark.detail; }
+      tip(cell, s, note);
     });
     const a = ACTIVE || {}, items = new Set((a.rows || []).map(r => r.item)), ses = $('lamp-sessions');
     const liveDark = darkOn('sessions');
-    ses.dataset.state = a.error || liveDark ? 'unknown' : 'ok'; ses.title = a.error || liveDark?.detail || '';
+    ses.dataset.state = a.error || liveDark ? 'unknown' : 'ok'; tip(ses, 'sessions', a.error || liveDark?.detail);
     put(ses.querySelector('.val'), a.error ? html`<span class="ph">not read</span>` : html`<b>${items.size}</b> live<small>${plural((a.rows || []).length, 'session')}</small>`);
     const gate = $('lamp-gate'), load = (L.load || {}).load5, off = DOC.sources.lane || gates.error;
     gate.dataset.state = off ? 'unknown' : gates.waiting ? 'caution' : 'ok';
-    gate.title = off || '';
+    tip(gate, 'gate', off);
     put(gate.querySelector('.val'), off ? html`<span class="ph">not read</span>`
       : html`<b>${gates.running}/${gates.cap}</b> ${gates.waiting} waiting${load != null ? html`<small>load5 ${load}</small>` : ''}`);
   }
@@ -461,12 +474,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // before them and suggested after (pack sd:7314), counted from all the repo's rows, so a filter hides no count. A box is
   // lit only when its count is not zero; blocked lights the warning lamp; the label says all five in words. A lane that
   // was not read counts nothing: the cell says so, not 0.
-  const pip = (n, on) => html`<span class="pip${n ? on : ''}">${String(n)}</span>`;
+  const pip = (n, on, means) => html`<span class="pip${n ? on : ''}" title="${`${n} ${means}`}">${String(n)}</span>`;
   function pips(g) {
     if (g.key && (!QV.lanes || QV.lanes.problems.some(p => repoKey(p.repo) === g.key)))
       return html`<td class="detail"><span class="g-unknown" aria-hidden="true">${GLYPH.unknown}</span> lane not read</td>`;
     const [w, m, n, b, s] = ['working', 'merging', 'next', 'blocked', 'suggested'].map(t => g.rows.filter(c => c.type === t).length);
-    return html`<td class="detail pipe" aria-label="${w} working, ${m} merging, ${n} next, ${b} blocked, ${s} suggested">${pip(w, ' on')}${pip(m, ' on')}${pip(n, ' on')}${pip(b, ' warn')}${pip(s, ' on')}</td>`;
+    // Each box says its count and what it counts, in its title (pack sd:7383); the label above says all five at once.
+    return html`<td class="detail pipe" aria-label="${w} working, ${m} merging, ${n} next, ${b} blocked, ${s} suggested">${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane until someone acts')}${pip(s, ' on', 'suggested: ready or planned items sd-next offers, up to 3')}</td>`;
   }
   function queueView() {
     const unread = [];
@@ -739,7 +753,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (DOC) return render();
     // Nothing from the last read stays on screen: rows, counts, lamps, the observed time, the selection and the badge.
     $('subhead').textContent = `Today could not be read: ${failed}. Read again tries again.`;
-    document.querySelectorAll('#annunciator .cell:not(.clock)').forEach(cell => { cell.dataset.state = 'unknown'; cell.title = 'Today could not be read'; put(cell.querySelector('.val'), html`<span class="ph">not read</span>`); });
+    document.querySelectorAll('#annunciator .cell:not(.clock)').forEach(cell => { cell.dataset.state = 'unknown'; tip(cell, cell.dataset.src || cell.id.replace('lamp-', ''), 'Today could not be read'); put(cell.querySelector('.val'), html`<span class="ph">not read</span>`); });
     put($('tally'), html``); put($('intents'), html``);
     put($('rows'), html`<tr class="empty"><td colspan="6">Needs you could not be read: ${failed}</td></tr>`);
     queueView();
