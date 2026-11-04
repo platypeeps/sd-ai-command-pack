@@ -37,4 +37,15 @@ Each gallery file has Pin and Hide, Documents' view state keyed
 `studio/<repo>/<path>` and written by `POST /api/studio/view`
 (`{"file", "pinned" | "hidden"}`). A pinned file leads its root; a
 hidden one folds under the root's Hidden. A file the gallery does not
-serve is refused. The `studio.*` actions are slice 4 (sd:6922).
+serve is refused.
+
+A project has Check, the episode or song tool verbs, and Brief session
+(slice 4, sd:6922). Each posts `/api/actions/run` with the project id;
+the server finds the project again and runs a fixed argv. Check runs
+`make check` in the repository. An episode runs `tools/episode.py
+check|pack <folder>`, a song `tools/song_pipeline.py
+validate|suno-export|assemble <song>`, from the nearest `tools/` above
+the project. A song verb that needs more than the song is not offered.
+Brief session starts claude in herdr in the repository, told to read
+the brief from `project.json`; a comment note on the project's item
+names the pane. Details shows each output.

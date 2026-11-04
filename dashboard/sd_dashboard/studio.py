@@ -1,7 +1,7 @@
 """Studio (sd:6920, sd:6921; slices 2 and 3 of sd:6919): creative projects, each a folder with a `project.json`.
 
 The shape is `docs/work/2026-10-31-studio/design.md`. Slice 2 reads and serves; slice 3 moves a project's stage on its
-sd item and pins or hides a file. Nothing else here writes.
+sd item and pins or hides a file; slice 4 (sd:6922) runs a project's tools and starts its brief session.
 
 **Which projects.** Every `project.json` in a registered repository that sits under `REPO_ROOT`, found by a walk a few
 folders deep that skips dot folders and build output. The page names no repository: a machine with no `project.json`
@@ -30,6 +30,12 @@ here. An item at a stage off its strip is refused, so a move never overwrites an
 **Pin and hide.** Documents' view state (`writes.set_view`), keyed `studio/<repo key>/<path in the repository>`: a
 rejected candidate hides without a delete. `view_request` refuses a file the gallery does not serve. A view store that
 does not read pins and hides nothing, and `store.reason` says why.
+
+**Actions.** `ACTIONS` here are rows of `run_actions.ACTIONS`, posted to `/api/actions/run` with a project id the
+server finds again: `studio.check` runs `make check` in its checkout, `studio.episode` and `studio.song` run the
+tool in the nearest `tools/` above the project with a verb from `EPISODE_VERBS` or `SONG_VERBS`, and
+`studio.session` starts claude in herdr in the checkout, told to read the brief from `project.json`, and notes the
+pane on the project's item. A song verb that needs more than the song (`import`, `runway`) is not offered.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -395,3 +402,109 @@ def byte_range(header: str | None, size: int) -> tuple[int, int, int]:
             return 416, 0, 0
         end = min(end, size - 1)
     return 206, start, min(end - start + 1, CHUNK)
+
+
+#: The tool verbs Studio runs; each takes the project alone (sd:6922).
+EPISODE_VERBS = ("check", "pack")
+SONG_VERBS = ("validate", "suno-export", "assemble")
+#: The bounds on `make check` and on one tool verb, in seconds.
+CHECK_SECONDS, TOOL_SECONDS = 600, 300
+
+
+def _found(connection, values: dict, names: set[str]) -> tuple[dict, Path, dict]:
+    """The project the page names, read again from disk, its checkout, and the action's fields."""
+    from .run_actions import _fields, _text
+
+    given = _fields(values, names)
+    ident = _text(given["project"], "project")
+    entries, _ = projects(connection, listing=False)
+    entry = next((e for e in entries if e["id"] == ident and not e["error"]), None)
+    if entry is None:
+        raise ValueError(f"{ident!r} is not a Studio project; nothing ran.")
+    return entry, repositories(connection)[0][entry["repo"]], given
+
+
+def _tool(entry: dict, checkout: Path, kind: str, name: str, verbs: tuple[str, ...], verb) -> Path:
+    if entry["kind"] != kind:
+        raise ValueError(f"{entry['id']} is a {entry['kind'] or 'project of no kind'}, not a {kind}; nothing ran.")
+    if verb not in verbs:
+        raise ValueError(f"Choose one of {', '.join(verbs)}; nothing ran.")
+    folder = checkout / entry["folder"]
+    for above in (folder, *folder.parents):
+        if (above / "tools" / name).is_file():
+            return above / "tools" / name
+        if above == checkout:
+            break
+    raise ValueError(f"There is no tools/{name} above {entry['folder']}; nothing ran.")
+
+
+def check_action(connection, values, jobs=None):
+    """`make check` in the project's checkout."""
+    from .run_actions import Step
+
+    _, checkout, _ = _found(connection, values, {"project"})
+    return Step(line=f"cd {checkout} && make check", argv=("make", "check"), cwd=str(checkout), seconds=CHECK_SECONDS)
+
+
+def episode_action(connection, values, jobs=None):
+    """`episode.py <verb> <episode folder>`."""
+    from .run_actions import Step
+
+    entry, checkout, given = _found(connection, values, {"project", "verb"})
+    tool = _tool(entry, checkout, "episode", "episode.py", EPISODE_VERBS, given["verb"])
+    argv = (sys.executable, str(tool), given["verb"], str(checkout / entry["folder"]))
+    return Step(line=" ".join(argv[1:]), argv=argv, cwd=str(checkout), seconds=TOOL_SECONDS)
+
+
+def song_action(connection, values, jobs=None):
+    """`song_pipeline.py <verb> <song>`, the song by its folder name."""
+    from .run_actions import Step
+
+    entry, checkout, given = _found(connection, values, {"project", "verb"})
+    tool = _tool(entry, checkout, "song", "song_pipeline.py", SONG_VERBS, given["verb"])
+    argv = (sys.executable, str(tool), given["verb"], Path(entry["folder"]).name)
+    return Step(line=" ".join(argv[1:]), argv=argv, cwd=str(tool.parent.parent), seconds=TOOL_SECONDS)
+
+
+def session_action(connection, values, jobs=None):
+    """claude in herdr in the project's checkout, told where the brief is; a note on the item names the pane."""
+    import sqlite3
+
+    from sd_db import workflow
+    from sd_db.errors import SdDbError
+
+    from . import fix_session
+    from .run_actions import Step
+
+    entry, checkout, _ = _found(connection, values, {"project"})
+    label = "studio-" + entry["id"].replace("/", "-")
+    manifest = PROJECT if entry["folder"] == "." else f"{entry['folder']}/{PROJECT}"
+    text = (f"You are a Studio session for the {entry['kind'] or 'unkinded'} project {entry['id']}, started from the "
+            f"dashboard. Read {manifest} for its brief and roots, then work on it with the operator. "
+            "Order, upload or buy nothing.")
+
+    def call():
+        pane = fix_session._launch(checkout, label, text)
+        if isinstance(pane, tuple):
+            status, said = pane
+            return (None if status == 504 else 1), said["error"].removeprefix("Fix failed: ")
+        started = f"claude started in herdr pane {pane}"
+        if entry["item"] is None:
+            return 0, f"{started}, workspace {label}, in {checkout}."
+        body = f"Studio: started a claude session in herdr workspace {label}, pane {pane}, for {entry['id']}."
+        try:
+            workflow.add_item_note(connection, entry["item"], kind="comment", who="dashboard", body=body)
+        except (SdDbError, sqlite3.Error) as problem:
+            return 1, f"{started}, but the note on sd:{entry['item']} was not recorded: {problem}"
+        return 0, f"{started}, workspace {label}; noted on sd:{entry['item']}."
+
+    return Step(line=f"cd {checkout} && claude {json.dumps(text)}", call=call, seconds=100)
+
+
+#: The rows `run_actions.ACTIONS` takes from here: name -> (label, check).
+ACTIONS = {
+    "studio.check": ("Check", check_action),
+    "studio.episode": ("Run episode tool", episode_action),
+    "studio.song": ("Run song tool", song_action),
+    "studio.session": ("Start session", session_action),
+}

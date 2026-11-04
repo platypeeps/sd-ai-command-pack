@@ -138,7 +138,26 @@
     when: o => o[field] === to ? already : storeOff(),
     cli: () => NO_CLI, sends: o => `POST /api/studio/view {file: ${o.file}, ${field}: ${to}}`,
     run: o => view(o, { [field]: to }).then(() => `${label} · ${o.label}`), undo: o => view(o, { [field]: !to }) });
+  // Slice 4 (sd:6922): each runs one fixed row of /api/actions/run for the project; the server finds it again.
+  const ran = (o, action, ids) => window.commands.runAction(o, action, { project: o.id, ...ids });
+  const tool = (kind, verb, risk) => ({ id: `studio.${kind}-${verb}`, on: 'project', label: `${kind === 'song' ? 'Song' : 'Episode'} ${verb}`,
+    icon: 'play', risk, executes: true, does: `Runs the ${kind} tool's ${verb} on this project and shows its output in Details.`,
+    when: o => o.kind === kind || `it is ${o.kind ? 'a ' + o.kind : 'a project of no kind'}, not ${kind === 'episode' ? 'an' : 'a'} ${kind}`,
+    cli: o => `${kind === 'song' ? 'tools/song_pipeline.py' : 'tools/episode.py'} ${verb} ${o.folder}`,
+    sends: o => `POST /api/actions/run {action: studio.${kind}, project: ${o.id}, verb: ${verb}}`,
+    consequence: o => `This runs ${verb} on ${o.title}; it may write files in the project.`,
+    run: o => ran(o, `studio.${kind}`, { verb }) });
   const register = () => window.shell.commands.register(
+    { id: 'studio.check', on: 'project', label: 'Check', key: 'c', icon: 'check', risk: 'safe', executes: true,
+      does: 'Runs make check in the project\'s repository and shows its output in Details.', when: () => true,
+      cli: () => 'make check', sends: o => `POST /api/actions/run {action: studio.check, project: ${o.id}}`, run: o => ran(o, 'studio.check') },
+    tool('episode', 'check', 'safe'), tool('episode', 'pack', 'confirm'),
+    tool('song', 'validate', 'safe'), tool('song', 'suno-export', 'confirm'), tool('song', 'assemble', 'confirm'),
+    { id: 'studio.session', on: 'project', label: 'Brief session', key: 'n', icon: 'terminal', risk: 'confirm', executes: true,
+      does: 'Starts claude in herdr in the project\'s repository, told to read its brief; a note on its item names the pane.',
+      when: () => true, consequence: o => `This starts a claude session for ${o.title}. It orders, uploads and buys nothing.`,
+      cli: () => 'no sd verb: the dashboard starts claude in herdr, as Run starts a skill',
+      sends: o => `POST /api/actions/run {action: studio.session, project: ${o.id}}`, run: o => ran(o, 'studio.session') },
     { id: 'studio.stage', on: 'project', label: 'Next stage', key: 's', icon: 'chevron-right', risk: 'confirm', executes: true, primary: () => true,
       does: o => o.next ? `Moves #${o.item} from ${o.stage || 'no stage'} to ${o.next}, with a note.` : 'Moves the project\'s item one stage along its strip.',
       when: o => !o.kind ? 'its project.json names no kind' : !o.item ? 'its project.json names no sd item'
