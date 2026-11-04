@@ -1236,7 +1236,7 @@ def delivered_url(receipt: Path, wanted: dict[str, Any], cfg: dict[str, Any]) ->
     if not isinstance(went, dict) or record.get("item") != cfg.get("item"):
         return ""
     # `wanted` lacks the folder for an entry that moves (`carried_identity`).
-    channel = BY_NAME.get(went.get("destination"))
+    channel = BY_NAME.get(str(went.get("destination")))
     if carried_identity(went, cfg, channel.where if channel else "") != wanted:
         return ""
     url = record.get("url")
@@ -2739,7 +2739,9 @@ def piece_docs(
         "SELECT * FROM item WHERE kind = 'idea' AND piece IS NOT NULL AND parked_at IS NULL "
         "AND repo IS NOT NULL ORDER BY id")
             if (items is None or row["id"] in items) and row["stage"] in PIECE_FOLDERS]
-    account = piece_accounts(connection) if rows else None
+    if not rows:  # no realm or account read for nothing to queue
+        return docs, problems
+    account = piece_accounts(connection)
     for row in rows:
         address, why = account(row["repo"])
         if not address:
