@@ -270,7 +270,7 @@ class OnTheWire(ScreenCase):
         self.listening.RequestHandlerClass.services_backend = services.ServiceBackend(
             user_agents=empty, system_daemons=empty, runner=lambda argv: self.fail(f"launchctl {argv}"))
         # Resources reads sd_tile in a child, which runs launchctl; it reads nothing here.
-        with patch.object(reports_screen, "collect", lambda area: ""):
+        with patch.object(reports_screen, "collect", lambda area: {"sections": [], "rows": []}):
             _, _, body = self.fetch("/operations")
             for href in set(re.findall(r'href="(/[^"]*)"', body)):
                 status, _, _ = self.fetch(href.replace("&amp;", "&"))

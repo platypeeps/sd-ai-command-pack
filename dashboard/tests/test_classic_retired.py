@@ -70,7 +70,7 @@ class TheRetiredScreens(ScreenCase):
 
     def test_the_kept_screens_still_answer(self):
         # Resources reads sd_tile in a child, which runs launchctl; the test reads a fixture instead.
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
         for area in KEPT_AREAS:
@@ -81,7 +81,7 @@ class TheRetiredScreens(ScreenCase):
 
     def test_every_kept_area_renders_inside_the_v2_shell_under_operations(self):
         """sd:3586 PR 5 drew every area inside the v2 shell; pack sd:7266 puts them all under Fleet's Operations."""
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
         for area in KEPT_AREAS:
@@ -110,7 +110,7 @@ class TheClassicStylesheetIsGone(ScreenCase):
         self.assertEqual(found, [])
 
     def test_every_server_drawn_screen_and_the_error_page_link_the_shell_stylesheets(self):
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.item("an item")
@@ -128,7 +128,7 @@ class EveryPickerAsksForAKnownScreen(ScreenCase):
     /api/palette answer 400, so the picker listed nothing."""
 
     def test_every_server_drawn_page_names_a_screen_runner_exec_knows(self):
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
         item = self.item("Picker fixture")

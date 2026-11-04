@@ -21,6 +21,8 @@ AREAS = (("resources", "Resources"), ("trackers", "Trackers"))
 #: The retired areas and the view that holds each now (pack sd:7517); `server` answers 301 there (`moved_to`) and
 #: `/ui/operations.js` sends an old `#view=` address there too.
 MOVED = {"services": "/management#view=deploys", "sessions": "/management#view=sessions", "usage": "/metrics#view=spend"}
+#: Resources' views that moved to a page of their own (pack sd:7527): `?area=resources&resource=<view>` answers 301 there.
+MOVED_RESOURCES = {"toolbox": "/management#view=machine"}
 #: Each area's Details note.
 NOTES = {
     "resources": "Resources shows what the local collectors read: Toolbox, Vault, Research and Queues.",
@@ -63,6 +65,8 @@ def moved_to(parameters):
     Usage's month rides along when it is one (pack sd:7524): Metrics reads `?month=YYYY-MM`.
     """
     area = (parameters.get("area") or [""])[0]
+    if area == "resources":
+        return MOVED_RESOURCES.get((parameters.get("resource") or [""])[0])
     target = MOVED.get(area)
     month = (parameters.get("month") or [""])[0]
     if target and area == "usage" and re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month):

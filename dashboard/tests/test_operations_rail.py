@@ -66,7 +66,7 @@ const PAGES = {}, CLASSIC = { Operations: '/operations' }, page = 'Today';
 class TheScreen(ScreenCase):
     def setUp(self):
         super().setUp()
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
 

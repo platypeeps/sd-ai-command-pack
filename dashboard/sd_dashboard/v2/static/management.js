@@ -1,11 +1,11 @@
 // Management (sd:2118): the design source's products/system/designs/v2/management.js at d82daa1, ported. Each change from the
 // reference is marked "build:". The rows are /api/management (management_screen.py), never sample data. A command that
 // executes posts to a route server.action_route answers, and its toast comes after the write lands, not before.
-const { html, put, plural, cells } = window.markup;
+const { html, put, plural, cells, tile } = window.markup;
 // sd:5080: the four areas are the shell's views (shell.js, view:start): the shell draws the tabs, keeps #view=<id> and the
 // last choice, and fires 'shell:view'. Each lamp shows its view. Set before shell.js reads it.
 window.PAGE_VIEWS = [{ id: 'repos', label: 'Repos' }, { id: 'sessions', label: 'Sessions' },
-  { id: 'deploys', label: 'Deploys' }, { id: 'schedules', label: 'Schedules', key: 'c' }];
+  { id: 'deploys', label: 'Deploys' }, { id: 'schedules', label: 'Schedules', key: 'c' }, { id: 'machine', label: 'Machine' }];
 // Chat scope = the selected repo. Set before shell.js reads it; a repo page is its own URL, so the scope is right on load.
 (() => { const r = new URLSearchParams(location.search).get('repo'); if (r) document.body.dataset.scope = r.replace(/^~\/(repos\/)?/, ''); })();
 
@@ -160,12 +160,13 @@ const unknown = (what, reason, read) => html`<div class="unknown"><span><span cl
 // ---------- Views (sd:5080: the shell's tabs) ----------
 function showView(v) {
   view = v;
+  if (v === 'machine' && !MACHINE) readMachine();
   const row = shell.row(); if (row && !document.querySelector(`#view-${v} tr[data-id="${CSS.escape(row)}"]`)) shell.row(null);
   applyText();
   defaultDetails();
 }
 // build: the four lamps count from the reading; a source that failed is unknown and says so. A lamp shows its view.
-const LOOK = { repos: 'folder-code', sessions: 'bot', deploys: 'rocket', schedules: 'calendar-clock' };
+const LOOK = { repos: 'folder-code', sessions: 'bot', deploys: 'rocket', schedules: 'calendar-clock', machine: 'monitor' };
 function lamps() {
   const L = {};
   const set = (v, state, val) => { L[v] = { state, val }; };
@@ -186,9 +187,23 @@ function lamps() {
   else set('deploys', 'unknown', html`▨ no deploy source`);
   if (DOC?.jobs) { const failed = CRON.filter(c => c.rank === 'warning').length; set('schedules', failed ? 'warning' : 'ok', html`<b>${failed}</b> failed ${failed ? '■ ' : ''}of ${CRON.length}`); }
   else set('schedules', 'unknown', html`▨ not read`);
+  if (MACHINE?.rows) set('machine', MACHINE.rows.length ? 'caution' : 'ok', MACHINE.rows.length ? html`<b>${MACHINE.rows.length}</b> ▲ ${MACHINE.rows.length === 1 ? 'wants' : 'want'} you` : html`nothing wants you`);
+  else set('machine', 'unknown', MACHINE ? html`▨ not read` : html`▨ read when shown`);
   put(document.getElementById('annunciator'), cells([...window.PAGE_VIEWS.map(v => ({ button: true, state: L[v.id].state, pressed: v.id === view,
     attrs: html` data-view="${v.id}"`, label: v.label, mark: I(LOOK[v.id]), val: L[v.id].val, sr: `state ${L[v.id].state} · shows ${v.label}` }))]));
 }
+
+// ---------- Machine (pack sd:7527): Operations > Resources > Toolbox, sd_tile.py toolbox, read when the view opens ----------
+// The launchd jobs, other agents, containers and machine-setup drift, as markup.tile draws them; a failed read says why.
+let MACHINE = null;
+function renderMachine() {
+  const el = document.getElementById('view-machine');
+  put(el, html`<div class="sec-head"><h2 id="machine-h">Machine</h2><p class="tally">launchd's record of the local-* jobs, other agents, containers and machine-setup drift</p></div>
+    ${!MACHINE ? html`<p class="why">Reading the machine…</p>` : MACHINE.rows ? tile(MACHINE)
+      : unknown('The machine was not read', MACHINE.error, '/api/management/machine')}`);
+}
+const readMachine = () => { MACHINE = null; renderMachine();
+  return shell.getJSON('/api/management/machine').then(d => { MACHINE = d; }, e => { MACHINE = { error: e.message }; }).then(() => { renderMachine(); lamps(); }); };
 
 // ---------- Lists: sort, filter, page (shell.list, sd:2682) ----------
 // build: a page from the URL or an older reading can pass the last page; shell.list clamps it before the slice, and the URL follows.
@@ -1147,7 +1162,7 @@ function selectRow(id, open) {
 
 // ---------- Filter: the shell's Shapeshift bar (sd:5539) ----------
 // Its text is this view's filter: free words and the managed:, merge: and state: chips. A chip control sets the bar's text.
-const RENDER = new Map([['repos', renderRepos], ['sessions', renderSessions], ['deploys', renderDeploys], ['schedules', renderSchedules]]);
+const RENDER = new Map([['repos', renderRepos], ['sessions', renderSessions], ['deploys', renderDeploys], ['schedules', renderSchedules], ['machine', renderMachine]]);
 function render() {
   const draw = RENDER.get(view);
   if (!draw) throw new Error(`no such view: ${view}`);
@@ -1178,7 +1193,7 @@ window.PAGE_COMMANDS = [
 let reading = null, FAILED = '';
 const load = () => reading.load();
 // Read again (sd:5638): the shell's head button reads the management document again.
-window.PAGE_AGAIN = { title: 'Read the management document again', run: load };
+window.PAGE_AGAIN = { title: 'Read the management document again', run: () => view === 'machine' ? readMachine() : load() };
 const reread = () => reading.reread();
 function adopt(doc) {
   absorb(doc);
@@ -1192,7 +1207,7 @@ function clear(err) {
 function draw() {
   lamps();
   pageAttention();
-  if (!DOC) { VIEWS.forEach(v => put(document.getElementById(`view-${v}`), unknown('Management was not read', FAILED, '/api/management'))); return; }
+  if (!DOC) { VIEWS.filter(v => v !== 'machine').forEach(v => put(document.getElementById(`view-${v}`), unknown('Management was not read', FAILED, '/api/management'))); return; }
   renderSessions(); renderDeploys(); renderSchedules(); renderRepos();
   document.getElementById('subhead').textContent = repoParam ? `Settings for ${repoParam}. Chat is scoped to this repo.`
     : `Every repo setting, sessions, services and schedules. Read ${hhmm(READ)} UTC.`;
@@ -1212,6 +1227,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const asked = repoParam ? 'repos' : VIEWS.includes(params.get('view')) && !/^#view=/.test(location.hash) ? params.get('view') : null;
   if (asked && shell.view.current() !== asked) shell.view.show(asked);
   view = VIEWS.includes(shell.view.current()) ? shell.view.current() : 'repos';
+  if (view === 'machine') readMachine();
   registerCommands();
   readURL();
   document.addEventListener('shell:view', e => { if (e.detail.id !== view) { showView(e.detail.id); lamps(); } });

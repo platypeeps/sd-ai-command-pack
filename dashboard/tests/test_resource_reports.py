@@ -39,7 +39,7 @@ class Patches:
 class Resources(unittest.TestCase):
     def test_a_stand_in_tile_outwaits_the_production_budget(self):
         """sd:7144: a five-second view budget refused a one-line tile on a loaded gate."""
-        tile, _ = self.tile("import sys\nsys.stdout.write('{\"html\": \"\"}')\n")
+        tile, _ = self.tile("import sys\nsys.stdout.write('{\"sections\": []}')\n")
         production = dict(reports_screen.VIEW_SECONDS)
         with tile:
             self.assertTrue(all(reports_screen.VIEW_SECONDS[area] > production[area] for area in production))
@@ -93,7 +93,7 @@ class Resources(unittest.TestCase):
             self.assertEqual(rows["literal"]["docs"][0]["title"], "Literal document")
             self.assertEqual(rows["literal"]["docs"][0]["words"], 5)
             with patch.dict(os.environ, {"REPO_ROOT": str(root)}):
-                html = str(reports_screen.collect("research"))
+                html = str(reports_screen._draw(reports_screen.collect("research")))
             self.assertIn("Literal document", html)
             self.assertIn("computed could not be fully observed", html)
             self.assertIn("run sd-research-kit render once to write docs/dashboard/research.json", html)
@@ -116,13 +116,13 @@ class Resources(unittest.TestCase):
         return Patches(patches), Path(directory.name)
 
     def test_resource_observations_are_visible_and_escaped_in_every_view(self):
-        payload = {"html": "<p>Healthy content</p>", "rows": [
+        payload = {"sections": [{"heading": "Healthy content"}], "rows": [
             {"what": "<script>repo alert</script>", "detail": '<img src=x onerror="bad()">'}]}
         tile, _ = self.tile("import os, sys\nsys.stdout.write(os.environ['TILE_PAYLOAD'])\n")
         with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps(payload)}):
             for area, _ in reports_screen.VIEWS:
                 with self.subTest(area=area):
-                    html = str(reports_screen.collect(area))
+                    html = str(reports_screen._draw(reports_screen.collect(area)))
                     self.assertIn("Healthy content", html)
                     self.assertIn("Needs attention", html)
                     self.assertIn("&lt;script&gt;repo alert&lt;/script&gt;", html)
@@ -131,19 +131,48 @@ class Resources(unittest.TestCase):
                     self.assertNotIn("<img", html)
             payload["rows"] = []
             with patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps(payload)}):
-                self.assertNotIn("Needs attention", reports_screen.collect("toolbox"))
+                self.assertEqual(reports_screen.collect("toolbox")["rows"], [])
+
+    def test_a_tile_sends_sections_of_text_and_markup_is_refused(self):
+        """pack sd:7527: a tile prints data that /ui/markup.js tile draws escaped; an html key, or any other shape, is refused."""
+        tile, _ = self.tile("import os, sys\nsys.stdout.write(os.environ['TILE_PAYLOAD'])\n")
+        good = [{"figures": [["jobs", "2"]]}, {"heading": "Cron jobs"}, {"listing": ["a line"]},
+                {"table": {"columns": [["Job", "text"], ["Exit", "num"]], "search": "filter jobs",
+                           "rows": [[{"text": "sync", "title": "t", "href": "https://example.test/"}, {"text": "7", "num": True}]]}}]
+        with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"title": "Toolbox", "sections": good, "rows": []})}):
+            self.assertEqual(reports_screen.collect("toolbox"), {"title": "Toolbox", "sections": good, "rows": []})
+        table = good[3]["table"]
+        for sections in (None, "<p>x</p>", [{"html": "<p>x</p>"}], [{"heading": 3}], [{"heading": "a", "listing": []}],
+                         [{"figures": [["jobs"]]}], [{"listing": [None]}],
+                         [{"table": dict(table, rows=[[{"text": "sync"}]])}],
+                         [{"table": dict(table, rows=[[{"text": "x", "href": "javascript:bad()"}, {"text": "7"}]])}],
+                         [{"table": dict(table, rows=[[{"text": "x", "onclick": "bad()"}, {"text": "7"}]])}]):
+            with self.subTest(sections=sections), tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"html": "<p>x</p>", "sections": sections})}):
+                with self.assertRaisesRegex(ValueError, "incomplete output"):
+                    reports_screen.collect("toolbox")
+
+    def test_every_tab_prints_sections_the_view_accepts(self):
+        """pack sd:7527: each sd_tile.py builder's helpers make the sections `collect` checks."""
+        spec = importlib.util.spec_from_file_location("sections_sd_tile", HERE / "sd_tile.py")
+        sd_tile = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sd_tile)
+        sections = [sd_tile.figures([("jobs", 2), ("drift", None)]), sd_tile.heading("Cron jobs"), sd_tile.listing(["x"]),
+                    sd_tile.table([("Job", "text"), ("Exit", "num")], [[{"text": "sync", "title": "t"}, sd_tile.num(None)]])]
+        self.assertTrue(reports_screen._sections(sections), sections)
+        self.assertEqual(sections[3]["table"]["rows"], [[{"text": "sync", "title": "t"}, {"text": "\u2014", "num": True}]])
+        self.assertEqual((sd_tile.table([("Job", "text")], []), sd_tile.listing([]), sd_tile.figures([])), (None, None, None))
 
     def test_resource_observations_refuse_incomplete_rows(self):
         tile, _ = self.tile("import os, sys\nsys.stdout.write(os.environ['TILE_PAYLOAD'])\n")
         for rows in (None, {}, ["warning"], [{"what": "warning"}], [{"what": "warning", "detail": 3}]):
-            with self.subTest(rows=rows), tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"html": "<p>Content</p>", "rows": rows})}):
+            with self.subTest(rows=rows), tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"sections": [], "rows": rows})}):
                 with self.assertRaisesRegex(ValueError, "incomplete observations"):
                     reports_screen.collect("research")
 
     def test_a_view_passes_its_start_and_the_tile_counts_its_deadline_from_it(self):
         # sd:2501: the tile counted from its own main(), so a slow interpreter start spent the margin and the view's kill won.
         tile, directory = self.tile("import json, sys\nopen(sys.argv[0] + '.argv', 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
-                                    "sys.stdout.write(json.dumps({'html': '', 'rows': []}))\n")
+                                    "sys.stdout.write(json.dumps({'sections': [], 'rows': []}))\n")
         with tile:
             before = time.clock_gettime(time.CLOCK_MONOTONIC)
             reports_screen.collect("toolbox")
@@ -167,7 +196,7 @@ class Resources(unittest.TestCase):
 
         since = time.clock_gettime(time.CLOCK_MONOTONIC) - 2.0
         with patch.object(sd_tile, "load_collectors", lambda: Collectors), \
-                patch.dict(sd_tile.TABS, {"toolbox": lambda collectors: {"html": ""}}), \
+                patch.dict(sd_tile.TABS, {"toolbox": lambda collectors: {"sections": []}}), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(sd_tile.main(["toolbox", f"{since:.6f}"]), 0)
         # Two seconds spent starting come off the deadline, never on top of it.
@@ -290,15 +319,6 @@ cat {str(root)!r}/"$3.json"
         self.assertIn("`sd store list sdw.tip --json` gave no rows to read", html)
         self.assertNotIn("<table", html)
 
-    def test_collector_markup_cannot_add_active_content(self):
-        parser = reports_screen.SafeFragment()
-        parser.feed('<p onclick="bad()">Text<script>alert(1)</script><a href="javascript:bad()">Link</a><img src=x onerror=bad()></p>')
-        result = "".join(parser.output)
-        self.assertNotIn("onclick", result)
-        self.assertNotIn("<script", result)
-        self.assertNotIn("javascript:", result)
-        self.assertNotIn("<img", result)
-        self.assertIn("Text", result)
 
 class CronJobFiles(unittest.TestCase):
     """Toolbox reads job files where cron-jobs.sh does, not from the checkout."""

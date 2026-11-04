@@ -105,7 +105,7 @@ class OperationsActions(BrowserSession):
         # old addresses answer 301 there.
         headings = {"resources": "<h2>Resources</h2>", "trackers": "<h2>Trackers</h2>"}
         # Resources reads sd_tile in a child, which runs launchctl; the test reads a fixture instead.
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
         for area, heading in headings.items():
@@ -131,7 +131,9 @@ class OperationsActions(BrowserSession):
         # pack sd:7524: Usage moved to Metrics' Spend view, and the month its picker named rides along.
         for area, target in (("services", "/management#view=deploys"), ("sessions", "/management#view=sessions"),
                              ("usage", "/metrics#view=spend"), ("usage&month=2026-08", "/metrics?month=2026-08#view=spend"),
-                             ("usage&month=soon", "/metrics#view=spend")):
+                             ("usage&month=soon", "/metrics#view=spend"),
+                             # pack sd:7527: each Resources view moved to the page that holds it now.
+                             ("resources&resource=toolbox", "/management#view=machine")):
             with self.subTest(area=area):
                 connection = http.client.HTTPConnection(host, port, timeout=10)
                 try:

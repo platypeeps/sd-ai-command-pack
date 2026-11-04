@@ -45,7 +45,7 @@ class TheDefault(BrowserSession):
         self.addCleanup(root.cleanup)
         self.backend = JobsBackend(root.name, jobs=[("nightly-sync", "failed", 7, None)])
         # No collector child runs in a test: the resources area reads a fixture.
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
         super().setUp()

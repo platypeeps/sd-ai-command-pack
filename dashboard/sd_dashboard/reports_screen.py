@@ -22,7 +22,6 @@ import subprocess
 import sys
 import time
 from datetime import date, datetime, timedelta
-from html.parser import HTMLParser
 from pathlib import Path
 
 from sd_db import operations, reads, reporting
@@ -32,7 +31,7 @@ from . import job_failures
 from .controls import form
 from .documents import _config_dir, pipe_lines
 from .management_screen import log_tail, unreadable
-from .markup import Markup, escape, join, tag
+from .markup import join, tag
 
 # Queues joined this tuple rather than taking a screen of its own (sd:719 step
 # 2). `collectors.py` has no `collect_queues` to call, but `sd_tile.py queues`
@@ -43,6 +42,8 @@ from .markup import Markup, escape, join, tag
 # in-process, as Ports does, and read the vault inside the server process
 # rather than in a child that the budget can kill.
 VIEWS = (("toolbox", "Toolbox"), ("vault", "Vault"), ("research", "Research"), ("queues", "Queues"))
+#: The views Operations > Resources still shows; each moves to its page in pack sd:7527 (`view`).
+RESOURCES = (("vault", "Vault"), ("research", "Research"), ("queues", "Queues"))
 # The child each view runs: one plugin tile, owned by this dashboard checkout
 # and never supplied by a page.
 TILE = Path(__file__).resolve().parents[1] / "sd_tile.py"
@@ -61,31 +62,6 @@ TILE = Path(__file__).resolve().parents[1] / "sd_tile.py"
 # refused with the reason, not waited on; file it as sd:756 was filed for Ports
 # rather than raise the number here.
 VIEW_SECONDS = {"toolbox": 5.0, "vault": 5.0, "research": 5.0, "queues": 5.0}
-
-
-class SafeFragment(HTMLParser):
-    """Keep structural text/table markup; never trust returned active content."""
-    allowed = frozenset({"h3", "p", "table", "thead", "tbody", "tr", "th", "td", "dl", "dt", "dd", "ul", "li", "a"})
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.output = []
-
-    def handle_starttag(self, name, attrs):
-        if name not in self.allowed:
-            return
-        attributes = dict(attrs)
-        extra = ' class="listing-table"' if name == "table" else ""
-        if name == "a" and str(attributes.get("href", "")).startswith(("https://", "http://")):
-            extra = f' href="{escape(attributes["href"])}" rel="noopener noreferrer"'
-        self.output.append(f"<{name}{extra}>")
-
-    def handle_endtag(self, name):
-        if name in self.allowed:
-            self.output.append(f"</{name}>")
-
-    def handle_data(self, data):
-        self.output.append(str(escape(data)))
 
 
 def _collectors():
@@ -116,30 +92,87 @@ def collect(area):
         raise ValueError(f"resource inspection was stopped at its budget: {error}") from None
     if process.returncode:
         raise ValueError(process.stderr.strip() or f"resource collector exited {process.returncode} without a reason")
-    raw = process.stdout
-    result = json.loads(raw)
-    if not isinstance(result, dict) or not isinstance(result.get("html"), str):
+    result = json.loads(process.stdout)
+    if not isinstance(result, dict) or not _sections(result.get("sections")):
         raise ValueError("resource collector returned incomplete output")  # noqa: TRY004 - external document validation
     rows = result.get("rows", [])
     if not isinstance(rows, list) or any(not isinstance(row, dict)
             or not isinstance(row.get("what"), str) or not isinstance(row.get("detail"), str) for row in rows):
         raise ValueError("resource collector returned incomplete observations")  # noqa: TRY004 - external document validation
-    parser = SafeFragment()
-    parser.feed(result["html"])
+    return {"title": str(result.get("title") or dict(VIEWS)[area]), "sections": result["sections"],
+            "rows": [{"what": row["what"], "detail": row["detail"]} for row in rows]}
+
+
+def _text(value):
+    return isinstance(value, str)
+
+
+def _cell(value):
+    return (isinstance(value, dict) and _text(value.get("text")) and set(value) <= {"text", "title", "href", "num"}
+            and all(_text(value[key]) for key in ("title", "href") if key in value)
+            and str(value.get("href", "https://")).startswith(("https://", "http://")))
+
+
+def _section(section):
+    """One of sd_tile.py's sections (its docstring): figures, a heading, a table or a listing, all text."""
+    if not isinstance(section, dict) or len(section) != 1:
+        return False
+    (kind, value), = section.items()
+    if kind == "heading":
+        return _text(value)
+    if kind == "listing":
+        return isinstance(value, list) and all(map(_text, value))
+    if kind == "figures":
+        return isinstance(value, list) and all(isinstance(pair, list) and len(pair) == 2 and all(map(_text, pair)) for pair in value)
+    if kind == "table":
+        return (isinstance(value, dict) and set(value) == {"columns", "rows", "search"} and _text(value["search"])
+                and isinstance(value["columns"], list) and isinstance(value["rows"], list)
+                and all(isinstance(column, list) and len(column) == 2 and all(map(_text, column)) for column in value["columns"])
+                and all(isinstance(row, list) and len(row) == len(value["columns"]) and all(map(_cell, row)) for row in value["rows"]))
+    return False
+
+
+def _sections(sections):
+    return isinstance(sections, list) and all(map(_section, sections))
+
+
+def view(area):
+    """A moved view's API document (pack sd:7527): the tile's `{title, sections, rows}`, or 503 with the reason it
+    could not be observed, never an empty view."""
+    try:
+        return collect(area)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        return 503, {"error": f"{dict(VIEWS)[area]} could not be observed: {error}"}
+
+
+def _draw(document):
+    """A tile's sections as classic markup, for the Resources views not moved yet."""
+    def part(section):
+        (kind, value), = section.items()
+        if kind == "heading":
+            return tag("h3", value)
+        if kind == "listing":
+            return tag("ul", join(tag("li", line) for line in value))
+        if kind == "figures":
+            return tag("dl", join(join((tag("dt", label), tag("dd", figure))) for label, figure in value))
+        return tag("table", tag("thead", tag("tr", join(tag("th", label) for label, _ in value["columns"]))),
+                   tag("tbody", join(tag("tr", join(tag("td", one["text"]) for one in row))
+                                     for row in value["rows"])), class_="listing-table")
+    rows = document["rows"]
     notices = tag("section", tag("h3", "Needs attention"),
         tag("dl", join(tag("div", tag("dt", row["what"]), tag("dd", row["detail"])) for row in rows)),
         class_="notice") if rows else ""
-    return join((Markup("".join(parser.output)), notices))
+    return join((join(part(section) for section in document["sections"]), notices))
 
 
 def resources(parameters, *, backend=None):
-    area = (parameters.get("resource") or ["toolbox"])[0]
-    if area not in dict(VIEWS):
-        area = "toolbox"
+    area = (parameters.get("resource") or [RESOURCES[0][0]])[0]
+    if area not in dict(RESOURCES):
+        area = RESOURCES[0][0]
     navigation = tag("nav", join(tag("a", label, href=f"/operations?area=resources&resource={key}",
-        aria_current="page" if key == area else None) for key, label in VIEWS), class_="view-toggle", aria_label="Resources")
+        aria_current="page" if key == area else None) for key, label in RESOURCES), class_="view-toggle", aria_label="Resources")
     try:
-        content = (backend or collect)(area)
+        content = _draw((backend or collect)(area))
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         content = tag("p", "This resource could not be observed: " + str(error), class_="notice")
     return tag("section", tag("h2", "Resources"), navigation,

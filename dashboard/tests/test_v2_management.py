@@ -2166,7 +2166,8 @@ class TheViews(PageScript):
         out = self.run_page("R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key || null]);")
         # pack sd:7115: the Ship lane view folded into Queue (its Overview since pack sd:7217).
         self.assertEqual(out["R"]["views"], [["repos", "Repos", None], ["sessions", "Sessions", None],
-                                             ["deploys", "Deploys", None], ["schedules", "Schedules", "c"]])
+                                             ["deploys", "Deploys", None], ["schedules", "Schedules", "c"],
+                                             ["machine", "Machine", None]])
         self.assertNotIn('id="view-lane"', page)
 
     def test_a_lamp_shows_its_view_and_says_its_state(self):
@@ -2175,7 +2176,8 @@ ELS.annunciator.listeners.click.forEach(f => f({ target: { closest: s => s === '
 await flush(); R.shown = OUT.shown.slice(); R.view = view; R.after = ELS.annunciator.html;""")
         self.assertEqual(re.findall(r'data-view="(\w+)" data-state="(\w+)" aria-pressed="(\w+)"', out["R"]["before"]),
                          [("repos", "ok", "true"), ("sessions", "caution", "false"),
-                          ("deploys", "unknown", "false"), ("schedules", "warning", "false")])
+                          ("deploys", "unknown", "false"), ("schedules", "warning", "false"),
+                          ("machine", "unknown", "false")])
         self.assertNotIn('id="refresh"', out["R"]["before"])
         self.assertEqual((out["R"]["shown"], out["R"]["view"]), (["schedules"], "schedules"))
         self.assertIn('data-view="schedules" data-state="warning" aria-pressed="true"', out["R"]["after"])
@@ -2186,6 +2188,54 @@ await flush(); R.shown = OUT.shown.slice(); R.view = view; R.after = ELS.annunci
         self.assertFalse(any("view=" in q for q in out["qs"]), out["qs"])
         out = self.run_page("R.view = view;", search="?view=deploys", hash="#view=sessions")
         self.assertEqual((out["R"]["view"], out["shown"]), ("sessions", []))
+
+
+#: A Machine read as `reports_screen.view("toolbox")` answers it: sd_tile.py's sections and the rows that want attention.
+MACHINE = {"title": "Toolbox", "rows": [{"what": "cron <script>x</script> exited 7", "detail": "daily · last log 02:15"}],
+           "sections": [{"figures": [["jobs", "2"], ["failing", "1"]]}, {"heading": "Cron jobs"},
+                        {"table": {"columns": [["Job", "text"], ["Exit", "num"]], "search": "filter jobs",
+                                   "rows": [[{"text": "nightly-sync", "title": "Sync the fleet"}, {"text": "7", "num": True}]]}},
+                        {"listing": ["<b>drift</b> in brew"]}]}
+
+
+class TheMachineView(PageScript):
+    """pack sd:7527: Operations > Resources > Toolbox is Management's Machine view, read when it opens."""
+
+    ANSWER = """(path) => path === '/api/management/machine' ? (OUT.machine = (OUT.machine || 0) + 1, MACHINE_ANSWER) : [200, {}]"""
+
+    def test_the_view_reads_the_toolbox_tile_once_and_draws_it_escaped(self):
+        out = self.run_page("""R.before = OUT.machine || 0;
+window.shell.view.show('machine'); await flush(); await flush();
+R.html = ELS['view-machine'].html; R.reads = OUT.machine; R.lamps = ELS.annunciator.html;
+window.shell.view.show('repos'); await flush(); window.shell.view.show('machine'); await flush(); R.again = OUT.machine;""",
+                            answer=self.ANSWER, extra=f"var MACHINE_ANSWER = [200, {json.dumps(MACHINE)}];\n")
+        html = out["R"]["html"]
+        self.assertEqual((out["R"]["before"], out["R"]["reads"], out["R"]["again"]), (0, 1, 1))
+        self.assertIn("<h3>Needs attention</h3>", html)
+        self.assertIn("cron &lt;script&gt;x&lt;/script&gt; exited 7", html)
+        self.assertNotIn("<script", html)
+        self.assertIn("<dt>failing</dt><dd>1</dd>", html)
+        self.assertIn('<th scope="col" class="n">Exit</th>', html)
+        self.assertIn('<td title="Sync the fleet">nightly-sync</td><td class="n">7</td>', html)
+        self.assertIn("<li>&lt;b&gt;drift&lt;/b&gt; in brew</li>", html)
+        self.assertIn('data-view="machine" data-state="caution"', out["R"]["lamps"])
+
+    def test_a_failed_read_says_why_and_the_address_opens_the_view(self):
+        failed = [503, {"error": "Toolbox could not be observed: resource inspection was stopped at its budget"}]
+        out = self.run_page("await flush(); R.html = ELS['view-machine'].html; R.lamps = ELS.annunciator.html;",
+                            answer=self.ANSWER, extra=f"var MACHINE_ANSWER = {json.dumps(failed)};\n", hash="#view=machine")
+        self.assertIn("The machine was not read", out["R"]["html"])
+        self.assertIn("stopped at its budget", out["R"]["html"])
+        self.assertIn('data-view="machine" data-state="unknown"', out["R"]["lamps"])
+
+    def test_the_route_answers_the_toolbox_tile_or_its_refusal(self):
+        page = next(entry for entry in v2.registry.PAGES if entry.section == "Management")
+        route = next(api for api in page.api if api.path == "/api/management/machine")
+        with patch("sd_dashboard.reports_screen.collect", return_value=MACHINE) as collect:
+            self.assertEqual(route.read(None), MACHINE)
+        collect.assert_called_once_with("toolbox")
+        with patch("sd_dashboard.reports_screen.collect", side_effect=ValueError("budget")):
+            self.assertEqual(route.read(None), (503, {"error": "Toolbox could not be observed: budget"}))
 
 
 class TheMinuteMarks(PageScript):
@@ -2532,5 +2582,5 @@ class TheSharedUpload(PageScript):
 
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route, api = ("management", "Management", "/management",
-                                 ("/api/management", "/api/repos/land/preview", "/api/repos/land",
+                                 ("/api/management", "/api/management/machine", "/api/repos/land/preview", "/api/repos/land",
                                   "/api/repos/standard/preview", "/api/repos/standard", "/api/claude-sessions/end"))
