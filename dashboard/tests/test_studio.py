@@ -210,6 +210,27 @@ class TheProjects(ScreenCase):
         found = studio.located(self.connection, "art/shirts/cat/media/Song%20Title%21.mp4", self.root)
         self.assertEqual(found, ((media / "Song Title!.mp4").resolve(), "video/mp4"))
 
+    def test_a_name_with_undecodable_bytes_is_skipped_and_the_scan_goes_on(self):
+        """sd:7406: os.walk yields 'bad\\udcff.png' on Linux; quote() raised and blanked the whole scan."""
+        walk = os.walk
+
+        def with_a_bad_name(*args, **kwargs):
+            for current, folders, names in walk(*args, **kwargs):
+                if current.endswith("media"):
+                    names.append("bad\udcff.png")
+                yield current, folders, names
+        with mock.patch.object(studio.os, "walk", with_a_bad_name):
+            doc = self.read()
+        self.assertEqual(doc["problems"], [])
+        listed = [f["name"] for r in doc["projects"][0]["roots"] for f in r["files"]]
+        self.assertEqual(sorted(listed), ["clip.mp4", "one.png", "take.wav"])
+
+    def test_a_view_request_for_an_undecodable_name_is_a_refusal_not_a_crash(self):
+        """sd:7406: JSON carries a lone surrogate ('\\udcff'); quote() raised UnicodeEncodeError, not ValueError."""
+        write = studio.view_request({"file": "art/shirts/cat/media/bad\udcff.png", "pinned": True})
+        with self.assertRaisesRegex(ValueError, "No studio file"):
+            write(self.connection)
+
     def test_a_dot_a_hidden_or_a_control_name_still_never_lists_or_resolves(self):
         """sd:7395: the looser last-segment rule still refuses '..', a leading dot, a control or format character."""
         media = self.root / "example" / "art" / "shirts" / "cat" / "media"
