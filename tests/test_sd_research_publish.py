@@ -3396,6 +3396,7 @@ class PieceTests(Fixture):
                                              lambda connection: lambda repo: self.account)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.patcher = patcher
 
     def stage(self, stage: str) -> None:
         self.connection.execute("UPDATE item SET stage = ? WHERE id = ?", (stage, self.item))
@@ -3413,6 +3414,19 @@ class PieceTests(Fixture):
     def deliver(self, stem: str) -> None:
         name = self.name(stem)
         self.assertEqual(PUBLISH.delivered_main([name, self.request(stem)["fingerprint"], "--url", self.URL]), 0)
+
+    def test_a_realm_list_read_in_part_queues_nothing_on_any_trigger(self) -> None:
+        # Lead review class: a malformed line that defined `work` sent work pieces to personal. Each trigger reaches
+        # the account through `enqueue_pieces`: the verbs, Stage and Park name the item; the tick sweep names none.
+        self.patcher.stop()
+        from sd_db import writes  # noqa: PLC0415 - after the path is set
+        writes.set_setting(self.connection, "dashboard.realms", "realm|work|%s" % self.repo.resolve())
+        writes.set_setting(self.connection, "google.accounts.work.email", self.WORK)
+        writes.set_setting(self.connection, "google.accounts.personal.email", self.PERSONAL)
+        for items in ({self.item}, None):
+            lines = PUBLISH.enqueue_pieces(self.connection, items)
+            self.assertEqual(self.queued(), [], items)
+            self.assertTrue(any("the realm list read in part (line 1:" in line for line in lines), lines)
 
     def test_a_piece_before_review_queues_nothing(self) -> None:
         for stage in ("accepted", "researching", "drafting", "declined"):
