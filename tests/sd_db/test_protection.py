@@ -1456,6 +1456,12 @@ def alert(number, severity):
     return {"number": number, "security_advisory": {"severity": severity}}
 
 
+def summary(number, severity):
+    """`alert`'s stored summary (pack sd:7515): its number and severity, every other field None."""
+    return {"number": number, "severity": severity, "package": None, "ecosystem": None, "manifest": None,
+            "summary": None, "ghsa": None, "cve": None, "patched": None, "url": None, "created_at": None}
+
+
 def setting(owner, name):
     """GitHub's Dependabot alerts setting: 204 when on, 404 when off."""
     return f"repos/{owner}/{name}/vulnerability-alerts"
@@ -1491,7 +1497,8 @@ class Alerts(SyncCase):
         client, transport = self.client(rows)
         protection.sync(self.db, client=client, observed_at=AT)
         self.assertEqual(self.alerts(mine), {
-            "dependabot": {"open": 3, "more": True, "severity": {"critical": 1, "low": 2}},
+            "dependabot": {"open": 3, "more": True, "severity": {"critical": 1, "low": 2},
+                           "summaries": [summary(1, "critical"), summary(2, "low"), summary(3, "low")]},
             "secret_scanning": {"visibility": "public", "setting": "enabled", "open": 1, "more": False}})
         self.assertIsNone(self.alerts(other), "an unmanaged repository's alerts were read")
         self.assertEqual(transport.calls[-2:], [protection.alert_path("platypeeps", "mine", "dependabot"),
@@ -1522,7 +1529,7 @@ class Alerts(SyncCase):
         self.assertEqual(self.alerts(private)["secret_scanning"], {"visibility": "private"})
         self.assertEqual(self.alerts(archived)["dependabot"], {"archived": True})
         self.assertEqual(self.alerts(hidden), {
-            "dependabot": {"open": 1, "more": False, "severity": {"unknown": 1}},
+            "dependabot": {"open": 1, "more": False, "severity": {"unknown": 1}, "summaries": [summary(1, "unknown")]},
             "secret_scanning": {"visibility": "public", "setting": None,
                                 "reason": "security_and_analysis not shown: the token does not administer the repository"}})
         self.assertEqual(self.alerts(off)["secret_scanning"], {"visibility": "public", "setting": "disabled"})
@@ -1592,6 +1599,36 @@ class Alerts(SyncCase):
         protection.sync(self.db, client=client, observed_at=AT)
         self.assertEqual(self.alerts(mine)["dependabot"], {"reason": "API HTTP 404; retry on a later collection"})
         self.assertNotIn(setting("platypeeps", "mine"), transport.calls)
+
+    def test_each_dependabot_alert_on_the_page_read_is_stored_as_a_summary(self):
+        """pack sd:7515: the GitHub page's Dependabot view lists each alert from the page the sync already read,
+        with no further GitHub call; an odd field is None, never a failed read, and only a github.com link is kept."""
+        mine = self.managed("mine")
+        full = {"number": 4, "html_url": "https://github.com/platypeeps/mine/security/dependabot/4",
+                "created_at": "2026-10-01T08:00:00Z",
+                "dependency": {"package": {"ecosystem": "pip", "name": "widgetlib"}, "manifest_path": "requirements.txt"},
+                "security_advisory": {"severity": "high", "summary": "Widgetlib reads past its buffer",
+                                      "ghsa_id": "GHSA-aaaa-bbbb-cccc", "cve_id": "CVE-2026-0001"},
+                "security_vulnerability": {"first_patched_version": {"identifier": "2.0.1"}}}
+        odd = {"number": 5, "html_url": "javascript:alert(1)", "dependency": "not an object",
+               "security_advisory": {"severity": None, "summary": "x" * 500, "cve_id": 7},
+               "security_vulnerability": {"first_patched_version": None}}
+        client, transport = self.client({**self.protected("mine"),
+                                         protection.alert_path("platypeeps", "mine", "dependabot"): [full, odd],
+                                         protection.alert_path("platypeeps", "mine", "secret-scanning"): []})
+        protection.sync(self.db, client=client, observed_at=AT)
+        dependabot = self.alerts(mine)["dependabot"]
+        self.assertEqual({k: dependabot[k] for k in ("open", "more", "severity")},
+                         {"open": 2, "more": False, "severity": {"high": 1, "unknown": 1}})
+        self.assertEqual(dependabot.get("summaries"), [
+            {"number": 4, "severity": "high", "package": "widgetlib", "ecosystem": "pip",
+             "manifest": "requirements.txt", "summary": "Widgetlib reads past its buffer",
+             "ghsa": "GHSA-aaaa-bbbb-cccc", "cve": "CVE-2026-0001", "patched": "2.0.1",
+             "url": "https://github.com/platypeeps/mine/security/dependabot/4", "created_at": "2026-10-01T08:00:00Z"},
+            {"number": 5, "severity": "unknown", "package": None, "ecosystem": None, "manifest": None,
+             "summary": "x" * 199 + "…", "ghsa": None, "cve": None, "patched": None,
+             "url": None, "created_at": None}])
+        self.assertEqual(sum(1 for call in transport.calls if "dependabot" in call), 1, "a summary cost a GitHub call")
 
     def test_the_reserve_holds_three_alert_reads_per_managed_repository(self):
         """Dependabot alerts, the setting probe a 403 costs, and secret-scanning alerts."""

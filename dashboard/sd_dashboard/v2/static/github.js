@@ -7,9 +7,10 @@
 // sync (issues.sync_job), and `synced`, when GitHub was last read. It is the shared Run now (commands.js, jobs.retry),
 // which posts /api/jobs/<name>/retry with the revision the read brought, as HOA's Refresh now does, and shows on all
 // three views. launchd runs it in the background: while it runs the page reads again every SYNC_POLL ms, and the read
-// after it ends draws every view from what it stored, Pull requests too (githubPulls.again).
+// after it ends draws every view from what it stored, Pull requests and Dependabot too (githubPulls.again,
+// githubDependabot.again; pack sd:7515: Dependabot is dependabot.js's own read, /api/github/dependabot).
 window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'issues', label: 'Your issues', key: 'y' },
-  { id: 'intake', label: 'Intake' }];
+  { id: 'intake', label: 'Intake' }, { id: 'dependabot', label: 'Dependabot' }];
 (() => {
   const SYNC_POLL = 15000, JOB = 'job:shadow-sync-nightly';
   let reads = 0, started = false, SYNC = null, SYNCED = null, polling = 0;
@@ -22,14 +23,14 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'issues', la
     document.dispatchEvent(new CustomEvent('intake:read', { detail: { intake: detail.intake || [], error: detail.intake_error || '', store: detail.store } }));
     const was = SYNC?.state === 'running';
     SYNC = detail.sync || null; SYNCED = detail.synced || null; drawSync();
-    if (SYNC?.state === 'running') poll(); else if (was) window.githubPulls?.again();
+    if (SYNC?.state === 'running') poll(); else if (was) { window.githubPulls?.again(); window.githubDependabot?.again(); }
   }
   function poll() { if (!polling) polling = setTimeout(() => { polling = 0; load(); }, SYNC_POLL); }
 
   // The job's facts in the shape jobs.retry reads; a job not installed or not read is off with its reason.
   const facts = () => ({ name: SYNC?.name || 'shadow-sync-nightly', service: SYNC?.service, failed: SYNC?.state === 'failed', exit: SYNC?.last_exit,
     capability: !SYNC ? { allowed: false, reason: 'the sync job was not read' } : SYNC.error ? { allowed: false, reason: SYNC.error } : SYNC.capabilities?.retry });
-  const LINES = ['pulls-sync', 'issues-sync', 'intake-sync'];
+  const LINES = ['pulls-sync', 'issues-sync', 'intake-sync', 'dependabot-sync'];
   const TIP = 'Runs sd shadow sync: reads pull request and issue state from GitHub, and writes only the local store.';
   function drawSync() {
     const { html, put } = window.markup;
@@ -51,9 +52,9 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'issues', la
         e => { load(); throw e; }) });
     window.shell.commands.register({ ...retry, label: 'Refresh from GitHub', does: TIP, primary: () => true });
   });
-  document.addEventListener('shell:view', e => { if (['pulls', 'issues', 'intake'].includes(e.detail && e.detail.id) && !started) load(); });
+  document.addEventListener('shell:view', e => { if (['pulls', 'issues', 'intake', 'dependabot'].includes(e.detail && e.detail.id) && !started) load(); });
   // Read again (sd:5638): every view that has been read reads again; Pull requests is today-github.js's own read.
-  window.PAGE_AGAIN = { title: 'Read GitHub again', run: () => Promise.all([window.githubPulls && window.githubPulls.again(), started && load()]) };
+  window.PAGE_AGAIN = { title: 'Read GitHub again', run: () => Promise.all([window.githubPulls && window.githubPulls.again(), window.githubDependabot?.again(), started && load()]) };
   // issues.js reads again after a Hide or Unhide (sd:6175).
   window.githubIssues = { again: () => load() };
 })();

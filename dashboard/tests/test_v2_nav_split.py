@@ -87,7 +87,7 @@ class TheRail(unittest.TestCase):
 
 class TheGitHubRegistration(Registers, unittest.TestCase):
     page, section, route = "github", "GitHub", "/github"
-    api = ("/api/today/github", "/api/github/issues", "/api/github/issues/view", "/api/today/github/copilot-review", "/api/today/github/merge/preview",
+    api = ("/api/today/github", "/api/github/issues", "/api/github/dependabot", "/api/github/issues/view", "/api/today/github/copilot-review", "/api/today/github/merge/preview",
            "/api/today/github/merge", "/api/today/github/close/preview", "/api/today/github/close")
 
 
@@ -120,11 +120,13 @@ class TheTabs(unittest.TestCase):
         found = {page.name: page for page in registry().PAGES}["decide"]
         self.assertEqual((found.section, found.routes, found.html), ("Decide", ("/decide", "/review"), "decide.html"))
 
-    def test_github_has_pull_requests_your_issues_and_intake(self):
-        self.assertEqual(views(js("github.js")), [("pulls", "Pull requests"), ("issues", "Your issues"), ("intake", "Intake")])
-        self.assertEqual(panels("github.html"), ["pulls", "issues", "intake"])
+    def test_github_has_pull_requests_your_issues_intake_and_dependabot(self):
+        # pack sd:7515 added Dependabot.
+        self.assertEqual(views(js("github.js")), [("pulls", "Pull requests"), ("issues", "Your issues"), ("intake", "Intake"),
+                                                  ("dependabot", "Dependabot")])
+        self.assertEqual(panels("github.html"), ["pulls", "issues", "intake", "dependabot"])
         page = (V2 / "github.html").read_text(encoding="utf-8")
-        for there in ('id="github-sections"', '<tbody id="issues">', '<tbody id="intake">', 'id="details"'):
+        for there in ('id="github-sections"', '<tbody id="issues">', '<tbody id="intake">', '<tbody id="dependabot">', 'id="details"'):
             with self.subTest(there=there):
                 self.assertIn(there, page)
         # The view keys differ: Your issues takes y, so i is Intake's.
