@@ -6043,9 +6043,10 @@ roles:
         state = self.operation().state
         # sd:2611: the execution watchdog also counts the gate-slot phase.
         self.assertEqual(stages, [(True, 3600), (False, 10800 + sd_review.sd_lib.GATE_SLOT_SECONDS)])
-        self.assertEqual(trace, ["provider", "check"])  # sd:2605: the reviewers run before the gate
+        # sd:2605: the reviewers run before the gate; sd:7519: two of them.
+        self.assertEqual(trace, ["provider", "provider", "check"])
         self.assertEqual(len(state["passes"]), 1)
-        self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 1)
+        self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 2)
 
     def test_planning_timeout_saves_diagnostics_without_dispatch_or_reservation(self):
         diagnostic = {"kind": "watchdog_expired", "allowed_seconds": 3600,
@@ -6129,7 +6130,7 @@ roles:
             def no_execution(*_args):
                 raise AssertionError("planning dispatched a check or provider")
             report = sd_review.review(root, args, no_execution, self.environment)
-            self.assertEqual(report["requested_reviews"], 2)  # every reviewing tier asks two (sd:7519)
+            self.assertEqual(report["requested_reviews"], 1)
             self.assertEqual(len(report["timing"]["candidates"]), count)
             return subprocess.CompletedProcess(argv, 0, json.dumps(report), "")
         operation = self.operation()
@@ -6145,8 +6146,17 @@ roles:
     def test_no_eligible_reviewers_refuse_before_reservation_or_execution(self):
         self.assert_insufficient_reviewers_refuse(0)
 
-    def test_one_eligible_reviewer_is_not_enough_for_two(self):
-        self.assert_insufficient_reviewers_refuse(1)  # sd:7519: two readers, or no pass
+    def test_one_eligible_reviewer_can_complete_the_local_pass(self):
+        import sd_registry
+        registry = sd_registry.read_file(self.database.parent / "providers.yaml")
+        consent = str(sd_registry.recipient(registry.providers["reviewer"]))
+        (self.root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\nmode: full\n"
+            f"reviewers: {consent}\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
+        result = self.prepare()
+        self.assertEqual(result["phase"], "ready_to_send")
+        report = self.operation().state["passes"][0]["report"]
+        self.assertEqual(report["completed_reviews"], 1)
 
     def test_planning_failure_diagnostics_are_bounded_and_hash_original_streams(self):
         stdout, stderr = "x" * 10000, "y" * 10000 + "prior evidence exceeds limit"

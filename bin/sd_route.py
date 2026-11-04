@@ -11,9 +11,9 @@ and which tier each category starts at are per-repository choices; the rules for
 combining them are not.
 
 **It does not say who reviews.** The registry names the ordered provider chain;
-the tier records the change's risk classification. Every reviewing tier requires
-two completed independent local reviews, the first two readers in the chain run
-at once (sd:7519); skip requires none.
+the tier records the change's risk classification. Every reviewing tier asks
+two independent local reviews, the first two readers in the chain run at once
+(sd:7519), cut to the eligible readers by `reader_depth`; skip requires none.
 
 Policy shape (every key optional unless noted)::
 
@@ -45,6 +45,27 @@ DEFAULT_LARGE_CHANGE_LINES = 800
 #: review rather than silently skipping it.
 TIER_DEPTH: dict[str, int] = {"skip": 0, "cheap": 2, "standard": 2, "deep": 2}
 DEFAULT_DEPTH = 2
+
+
+def reader_depth(asked: int, eligible: int) -> int:
+    """Readers to request: the asked depth cut to the eligible ones (#43332).
+
+    A machine with one eligible reader still reviews. Zero eligible keeps one
+    requested, so readiness refuses an empty chain as it did before sd:7519.
+    """
+    return min(asked, max(eligible, 1)) if asked else 0
+
+
+def review_shortfall(asked: int, eligible: int) -> dict[str, int] | None:
+    """The result's record of a chain shorter than the asked depth (#43332)."""
+    return {"requested": asked, "eligible": eligible} if eligible < asked else None
+
+
+def shortfall_line(shortfall: Mapping[str, int] | None) -> str:
+    """The text output's line for `review_shortfall`, empty when there is none."""
+    if not shortfall:
+        return ""
+    return f"  shortfall   requested {shortfall['requested']}, eligible {shortfall['eligible']}\n"
 
 
 class Plan(NamedTuple):

@@ -7,6 +7,7 @@ and the receipt keeps the registry's order whatever order the answers came in.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import pathlib
@@ -171,6 +172,27 @@ class TwoReadersAtOnce(ParallelFixture):
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual((result["requested_reviews"], result["completed_reviews"]), (2, 0))
         self.assertEqual(result["remaining"], ["codex", "second"])
+
+
+class AShortChainSaysSo(ParallelFixture):
+    """#43332: depth is min(2, eligible readers), and the result names the shortfall."""
+
+    def test_one_eligible_reader_still_reviews_and_names_the_shortfall(self) -> None:
+        root = self.prepare(THREE_READERS, "codex@codex")
+        result = self.review(root, FakeRunner())
+        self.assertEqual((result["requested_reviews"], result["completed_reviews"]), (1, 1), result.get("outcomes"))
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["review_shortfall"], {"requested": 2, "eligible": 1})
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        self.assertIn("requested 2, eligible 1", stream.getvalue())
+
+    def test_two_eligible_readers_name_no_shortfall(self) -> None:
+        result = self.review(self.prepare(), FakeRunner())
+        self.assertIsNone(result["review_shortfall"])
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        self.assertNotIn("eligible", stream.getvalue())
 
 
 class ClaudeGetsTheRankedPrompt(ParallelFixture):

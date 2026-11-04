@@ -2013,8 +2013,8 @@ def review(
     # month's total; a fault names itself the same way on every capped bill.
     ledger = open_ledger(env, getattr(args, "database", None), registry)
     # A lens, like the challenge stance, is a request to be read: docs_skip does not answer it.
-    depth = 1 if args.provider else review_depth(plan, args.challenge or bool(getattr(args, "lens", None)), args.scope)
-    meter_candidates, selection_refusal = ([], "") if not depth else sd_review_readiness.select_ready_candidates(
+    asked = 1 if args.provider else review_depth(plan, args.challenge or bool(getattr(args, "lens", None)), args.scope)
+    meter_candidates, selection_refusal = ([], "") if not asked else sd_review_readiness.select_ready_candidates(
         registry, args.provider, explain=args.explain, consent=consent, readers=READERS,
     )
     transport_overheads = {provider.name: overheads["url" if provider.url else provider.reader or "codex-json"]
@@ -2034,10 +2034,10 @@ def review(
                            else "the codex auth preflight refused, so no codex process started" if not auth["ok"]
                            else "no codex process started here; see --explain on a ready lane")
     local_ready = sd_review_readiness.review_readiness(
-        {"requested_reviews": depth, "codex_preflight": auth, "input_manifest": input_manifest, "repo": str(root)},
+        {"requested_reviews": sd_route.reader_depth(asked, len(meter_candidates)), "codex_preflight": auth, "input_manifest": input_manifest, "repo": str(root)},
         meter_candidates, env)["status"] == "ready"
     capped = capped_bills(registry, ledger, read_only=args.explain or args.dry_run or not local_ready)
-    meter_candidates, selection_refusal = ([], selection_refusal) if not depth else sd_review_readiness.select_ready_candidates(
+    meter_candidates, selection_refusal = ([], selection_refusal) if not asked else sd_review_readiness.select_ready_candidates(
         registry, args.provider, explain=args.explain, consent=consent, capped_bills=capped, readers=READERS,
     )
     # The meter beside the cap, into the same map, so the chain and the pick
@@ -2047,12 +2047,11 @@ def review(
                                         provider_names=[provider.name for provider in meter_candidates])
     for name, line in metered.items():
         capped.setdefault(name, line)
-    chain = sd_registry.reviewer_chain(
-        registry, consent=consent, capped_bills=capped, readers=READERS
-    )
-    chosen, selection_refusal = ([], selection_refusal) if not depth else sd_review_readiness.select_ready_candidates(
+    chain = sd_registry.reviewer_chain(registry, consent=consent, capped_bills=capped, readers=READERS)
+    chosen, selection_refusal = ([], selection_refusal) if not asked else sd_review_readiness.select_ready_candidates(
         registry, args.provider, explain=args.explain, consent=consent, capped_bills=capped, readers=READERS,
     )
+    depth = sd_route.reader_depth(asked, len(chosen))  # min(2, eligible) (#43332)
     providers = [provider.name for provider in chosen[:depth]]
     phase, check_seconds = phase_seconds(args), gate_seconds(args)
     timing: dict[str, Any] = {"setup_seconds": SETUP_TIMEOUT_SECONDS, "phase_seconds": phase,
@@ -2093,6 +2092,7 @@ def review(
         "timing": timing,
         "fallback_candidates": [provider.name for provider in chosen[depth:]],
         "requested_reviews": depth,
+        "review_shortfall": sd_route.review_shortfall(asked, len(chosen)),
         "completed_reviews": 0,
         "reviewed_by": [],
         "registry": str(registry.path),
@@ -2460,6 +2460,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
         measured = (outcome.get("diagnostic") or {}).get("skill_suppression") or {}
         if measured.get("state") in (SKILLS_UNSUPPRESSED, SKILLS_UNKNOWN):
             write(f"  warning: {outcome['backend']} skill instructions {measured['state']}; {measured['reason']}\n")
+    write(sd_route.shortfall_line(result.get("review_shortfall")))
     write(f"  completed   {result['completed_reviews']}/{result['requested_reviews']} reviews"
           f" ({', '.join(result['reviewed_by']) or 'none'})\n")
 
