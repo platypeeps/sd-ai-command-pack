@@ -523,6 +523,16 @@ class TheRepositoryFilter(TodayCase):
         self.assertEqual([row["note"] for row in today.decisions(self.connection, repos=[LIB])], [decision])
         self.assertEqual(today.sections(self.connection, repos=[LIB], now=NOW)["summary"]["decisions"], 1)
 
+    def test_followups_list_past_a_cap_of_a_reports_own(self):
+        """pack sd:7415: a report's own followups are no rows, so 200 of them fill no cap that hides one."""
+        report = self.item("Failing job", repo=APP, kind="report", fields={"attention": "look"})
+        for n in range(200):
+            add_note(self.connection, report, "followup", f"Chase {n}")
+        mine = self.item("Mine", repo=APP)
+        chase = add_note(self.connection, mine, "followup", "Chase the vendor")
+        self.assertEqual([row["note"] for row in today.followups(self.connection)], [chase])
+        self.assertEqual([row["note"] for row in today.followups(self.connection, repos=[APP])], [chase])
+
     def test_decisions_list_past_a_cap_of_plain_questions(self):
         """pack sd:7400: questions Decisions leaves out fill no cap that hides one it lists, as in #1663."""
         busy = self.item("Busy", repo=APP)

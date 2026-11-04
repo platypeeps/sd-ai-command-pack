@@ -25,7 +25,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from . import paths
 from .errors import SdDbError
@@ -318,7 +318,8 @@ def repo_in(column: str, keep: set[str | None] | None) -> tuple[str, list[Any]]:
 
 
 def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int | None = 200,
-               batches: bool = True, repos: set[str | None] | None = None) -> list[sqlite3.Row]:
+               batches: bool = True, repos: set[str | None] | None = None,
+               without: Iterable[int] = ()) -> list[sqlite3.Row]:
     """Unresolved `kind` notes on items that are not parked, oldest first (sd:3501).
 
     A followup on a done item is not owed, so only an open item's lists. A
@@ -332,9 +333,16 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int | None =
     them all: Decisions finds done items' questions here, and a cap filled by
     older open-item questions hid them (pack sd:6338). `repos` keeps those
     items' notes, as `repo_in` reads it, before `limit`: a busy repository's
-    older notes filled the cap and hid another's (pack sd:7400).
+    older notes filled the cap and hid another's (pack sd:7400). `without`
+    leaves out those items' notes in the query too, for the same reason: a
+    report's own followups filled the cap before the caller dropped them
+    (pack sd:7415).
     """
     where, values = repo_in("item.repo", repos)
+    skipped = sorted(set(without))
+    if skipped:
+        where += f" AND item.id NOT IN ({','.join('?' * len(skipped))})"
+        values = [*values, *skipped]
     return list(
         connection.execute(
             f"""
