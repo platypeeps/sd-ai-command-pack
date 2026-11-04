@@ -5,7 +5,9 @@ and issues: `/api/today/github` (`today_github`); a pull request's Copilot revie
 (sd:4628) and Intake (sd:4840) are `/api/github/issues` (`issues`); File as item posts `/api/items` with the ref.
 Their rows' Hide (sd:6175) is the view state that read carries; Refresh from GitHub, on all three views,
 posts `/api/jobs/shadow-sync-nightly/retry` (pack sd:6702).
-Your issues holds the operator's GitHub issues `today_github` reads too (sd:5899), so the Pull requests view lists none."""
+Your issues holds the operator's GitHub issues `today_github` reads too (sd:5899), so the Pull requests view lists none.
+Dependabot (pack sd:7515) is `/api/github/dependabot` (`health_screen.dependabot_document`): the alerts `sd shadow sync`
+stored in `repo_protection`, grouped by repository; a group's Fix is Health's (`/api/items` with its `dependabot:` ref)."""
 
 from __future__ import annotations
 
@@ -30,6 +32,14 @@ def _issues(read):
     return {**issues.with_views({**found, **issues.intake(read.connection)}, read.connection),
             "sync": issues.sync_job(read.connection, read.jobs or operations.LaunchdBackend()),
             "synced": github["collector"]}
+
+
+def _dependabot(read):
+    from sd_db import protection
+
+    from ... import health_screen
+
+    return health_screen.dependabot_document(protection.rows(read.connection))
 
 
 def _view(payload, principal):
@@ -74,6 +84,7 @@ PAGE = Page(
     html="github.html",
     item="sd:5781",
     api=(Api("/api/today/github", _github), Api("/api/github/issues", _issues),
+         Api("/api/github/dependabot", _dependabot),
          # Hide (sd:6175): the per-page view route Designs, Documents and Contributions have, on the same view store.
          Api("/api/github/issues/view", write=_view),
          Api("/api/today/github/copilot-review", write=_copilot),

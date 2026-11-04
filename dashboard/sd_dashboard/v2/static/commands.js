@@ -32,6 +32,24 @@
         err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) };
   }
 
+  // Fix on a repository's Dependabot alerts (sd:6685), on Health's Dependencies rows and GitHub's Dependabot groups
+  // (pack sd:7515): files the repo's item under dependabot:<slug>, or reuses the open one, then starts claude on it through
+  // fix(). The brief: land an open Dependabot PR through sd-ship, else bump the dependency in a worktree; never re-enable
+  // Actions. The object names slug, repo_path, grave and facts { Repository, Shown }, as both pages' rows carry them.
+  function dependabotFix() {
+    const inner = fix('dependabot alerts', { item: o => o.filed ?? '<filed>', report: () => false,
+      post: (o, path) => window.shell.post(path, { revision: o.filedRevision }) });
+    return { ...inner, when: o => !!o.slug || 'no github.com remote: there is no alerts page to fix from',
+      does: 'Asks first, files an sd item in this repo, then starts claude in herdr as a builder on it.',
+      sends: o => `POST /api/items {ref: dependabot:${o.slug}}, then POST /api/items/<id>/fix {revision}`,
+      consequence: o => `Files an sd item in ${o.facts.Repository} for ${o.slug}'s ${o.facts.Shown} open Dependabot alerts (reused while one is open), `
+        + 'then opens a herdr workspace there and starts claude as a builder on it: it lands an open Dependabot PR through sd-ship, or bumps the dependency in a worktree.',
+      run: o => window.shell.post('/api/items', { title: `Dependabot: ${o.facts.Shown} open alerts in ${o.slug}`, repo: o.repo_path, ref: `dependabot:${o.slug}`,
+        body: `${o.facts.Shown} open Dependabot alerts in ${o.slug}, ${o.grave} critical or high. Land an open Dependabot PR through sd-ship if one exists; `
+          + 'else bump the dependency in a worktree. Never re-enable Actions.' })
+        .then(filed => inner.run({ ...o, filed: filed.item.id, filedRevision: filed.revision })) };
+  }
+
   // Grill and Apply answers on a piece (pack sd:6700): Fix with grill: ask or apply. Ask starts claude to write the piece's
   // grill questions as question notes; apply starts claude to edit the draft to follow each ruling, uncommitted. `ready(o)`
   // is true or why not; `post(o, path, body)` answers the server's reply.
@@ -420,5 +438,5 @@
       ${state ? html`<p class="why">${state}</p>` : ''}</section>`;
   }
 
-  window.commands = { answered, fix, grill, applyReview, retry, runAction, showLog, logLine, printJob, showAssignment, kickText, build, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
+  window.commands = { answered, fix, dependabotFix, grill, applyReview, retry, runAction, showLog, logLine, printJob, showAssignment, kickText, build, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
 })();

@@ -654,6 +654,62 @@ def _dependency_rows(found: list[dict], *, now: str) -> tuple[list[dict], dict]:
     return rows, _alert_extra(managed)
 
 
+#: Dependabot's severities, worst first; a level GitHub adds later ranks after `unknown`.
+SEVERITIES = ("critical", "high", "medium", "low", "unknown")
+
+
+def _rank(level: object) -> int:
+    return SEVERITIES.index(level) if level in SEVERITIES else len(SEVERITIES)
+
+
+def dependabot_document(found: list[dict]) -> dict:
+    """GitHub > Dependabot (pack sd:7515): a group per managed repository with open alerts, from the same stored rows
+    `_dependency_rows` reads, so it makes no GitHub call.
+
+    A group carries what Health's Fix reads (`slug`, `repo_path`, `grave`, `facts`), so the one shared Fix serves both
+    pages, and `alerts`, the stored summaries critical first, newest first within a severity; None when the row predates
+    them (stored before pack sd:7515), so the page says the next sync stores them. Groups sort worst severity first,
+    then most alerts. Repositories with alerts off, not read or archived are names and counts, not groups.
+    """
+    try:
+        managed = _managed(found)
+    except ValueError as error:
+        return {"error": str(error), "groups": [], "off": [], "unread": [], "clean": 0, "archived": 0, "managed": 0,
+                "at": None}
+    groups, off, unread, clean, archived = [], [], [], 0, 0
+    for repo in managed:
+        part = (repo.get("alerts") or {}).get("dependabot")
+        name = repo.get("slug") or repo["repo"]
+        if isinstance(part, dict) and part.get("archived"):
+            archived += 1
+        elif isinstance(part, dict) and part.get("setting") == "disabled":
+            off.append(name)
+        elif not isinstance(part, dict) or not isinstance(part.get("open"), int):
+            unread.append(_unread_reason(repo, part))
+        elif not part["open"]:
+            clean += 1
+        else:
+            counted = part.get("severity")
+            severity: dict = counted if isinstance(counted, dict) else {}
+            stored = part.get("summaries")
+            alerts = None if not isinstance(stored, list) else sorted(
+                (alert for alert in stored if isinstance(alert, dict) and type(alert.get("number")) is int),
+                key=lambda alert: (_rank(alert.get("severity")), -alert["number"]))
+            levels = [level for level in severity if severity.get(level)] or [alert.get("severity") for alert in alerts or []]
+            shown = f"{part['open']}{'+' if part.get('more') else ''}"
+            groups.append({
+                "id": f"dep:{repo['repo']}", "type": "dependabot alerts", "name": name, "slug": repo.get("slug"),
+                "repo_path": repo["repo"], "open": part["open"], "more": bool(part.get("more")), "shown": shown,
+                "severity": {level: severity[level] for level in sorted(severity, key=_rank) if severity.get(level)},
+                "worst": min(levels, key=_rank) if levels else "unknown",
+                "grave": sum(severity.get(level, 0) for level in ("critical", "high")),
+                "observed_at": repo.get("observed_at"), "alerts": alerts,
+                "facts": {"Repository": repo["repo"], "Shown": shown}})
+    groups.sort(key=lambda group: (_rank(group["worst"]), -group["open"], group["name"]))
+    return {"groups": groups, "off": sorted(off), "unread": unread, "clean": clean, "archived": archived,
+            "managed": len(managed), "at": _alert_extra(managed)["at"]}
+
+
 def _security_rows(found: list[dict], *, now: str) -> tuple[list[dict], dict]:
     """Per public managed repository: open secret-scanning alerts, or scanning off; private ones are not scanned."""
     managed = _managed(found)
