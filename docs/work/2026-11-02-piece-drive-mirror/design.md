@@ -67,10 +67,12 @@ not a designation, says whether it mirrors.
    after their write (first build), now with `publication-reconcile`,
    which moves a piece to `published`. The dashboard's Stage and Park
    writes queue it after theirs, best effort, as the verbs do.
-6. **Hand edits (ruling 5): an open question.** No existing job or
-   watcher sees an uncommitted edit to a content file. A git hook sees
-   only commits, and the content repo keeps pieces untracked. See
-   "Open question".
+6. **Hand edits (ruling 5).** The operator chose option A of note
+   #43370. The dashboard service's tick (`service_actions`) starts
+   `_piece_sweep` in a thread every 5 minutes. It runs `enqueue_pieces`
+   over every piece, so only a changed file is queued. A sweep still
+   running starts no second one and logs that once; the tick never
+   waits on it.
 7. **Dashboard link (ruling 4).** `writing_screen.document` gives each
    piece a `mirror`: its account realm, its folder, and per file the
    copy entries `publishing.document_copies` builds from the queue, the
@@ -94,6 +96,9 @@ Each new mechanism, and what it replaces:
 - `account` on a Drive target: a new request field. It replaces the
   drain's guess of which account to use.
 - The `sd:<item>/<file>` source form: a new value of an existing field.
+- `_piece_sweep` on the service tick: a new duty of an existing tick,
+  ruled by the operator; it replaces nothing, as no trigger saw a hand
+  edit before.
 
 Rejected:
 
@@ -105,22 +110,12 @@ Rejected:
 - **Local open by `vscode://` or `file://`**: as in the first design;
   the sd:7242 view icon stays the local open.
 
-## Open question
+## Ruled question
 
-How should a hand edit with no verb after it reach Drive? Each option
-is a new duty or a lag; the brief says to ask before building one.
-
-- Option A (recommended): the dashboard service's existing
-  `service_actions` tick runs `enqueue_pieces` every 5 minutes in a
-  thread. It adds no command or job, runs where the queue is, and
-  writes only on a change.
-- Option B: brief add and render, which already queue briefs, also
-  queue pieces. No new mechanism; the lag is hours.
-- Option C: a hub cron job runs a new `sd writing mirror` verb every 15
-  minutes: one more verb and one more job.
-
-Until it is answered, a hand edit reaches Drive at the next verb or
-dashboard Stage or Park.
+How should a hand edit with no verb after it reach Drive? The operator
+chose option A (note #43370): the existing service tick sweeps every 5
+minutes. Rejected: option B, brief add and render, a lag of hours; and
+option C, a hub cron job with a new verb, one more verb and job.
 
 ## Non-goals
 
@@ -143,6 +138,7 @@ dashboard Stage or Park.
 | Drain: move | Drive file's parent changed | stop after the move, before the update | the request still names the file; the next drain finds it in the folder, skips the move, updates | contract text; drain is a session |
 | Drain: update, step 6 | Doc body, then receipt and item URL | contract's own table | as the contract's table; step 5 skipped for an `sd:` source | `delivered` on a piece request records the item URL |
 | Verb or page write, then enqueue | the write committed | enqueue raises, or the queue is unwritable | the write's exit and answer unchanged; stderr or the answer names it | enqueue raising leaves exit 0 and stdout unchanged |
+| Service tick: piece sweep | requests for changed files only | the database or a file read hangs or fails | the tick never waits; a hung sweep is logged once and blocks only later sweeps; a failed one is named and the next retries | tick test with a blocked sweep; sweep test with a failing connect |
 | Rollback | piece requests left in the queue | an older drain ignores `account` and `moves` | it writes with its default account; a move becomes a new copy in Published | not testable here; named in Risks |
 
 ## Acceptance criteria
@@ -159,12 +155,14 @@ dashboard Stage or Park.
 - [ ] `sd writing publication-reconcile` and the dashboard Stage write
   queue the piece.
 - [ ] Each Details gate row draws a Drive link to a delivered copy.
+- [ ] The service tick sweeps every piece each 5 minutes in a thread,
+  and an unchanged file queues nothing.
 - [ ] `sd-docs-lint` passes on this page; the focused suites pass.
 
 ## Risks
 
-- Until the open question is ruled on, a hand edit with no verb after
-  it leaves the Drive copy stale.
+- A hand edit reaches the queue within 5 minutes of the sweep, then
+  waits for the next drain.
 - After a rollback, an older drain ignores `account` and `moves`. It
   writes with the session's default account and creates a second copy
   in Published. Accepted: the branch has not shipped, so no queue holds

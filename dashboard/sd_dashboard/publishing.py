@@ -890,14 +890,15 @@ def piece_mirror(checkout: Path, piece: str, folder: str | None, fields: dict, *
     return {"folder": folder, "copies": copies}
 
 
-def queue_piece(connection, item: int) -> list[str]:
-    """The pack's `enqueue_pieces` for one piece after a dashboard write, best effort: the write is committed, so a
-    failure is named in the lines, never raised; the next write or `sd writing` verb queues it."""
+def queue_piece(connection, item: int | None) -> list[str]:
+    """The pack's `enqueue_pieces` for one piece after a dashboard write, or every piece (`item` None) for the service
+    tick's sweep, best effort: the write is committed, so a failure is named in the lines, never raised; the next
+    write, verb or sweep queues it."""
     try:
         queue = getattr(kit(), "enqueue_pieces", None)
         if queue is None:
             return ["mirror: the installed command pack has no enqueue_pieces (pack sd:7243); the piece was not queued"]
-        return queue(connection, {item})
+        return queue(connection, None if item is None else {item})
     except Exception as error:  # noqa: BLE001 - reported; the write stands
         return [f"mirror: piece not queued: {error or type(error).__name__}"]
 

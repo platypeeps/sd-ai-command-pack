@@ -245,8 +245,9 @@ is never carried: a piece whose realm changed gets a new copy there.
 A piece has no render, so the `sd writing` verbs that write one (`promote`,
 `register`, `stage`, `metadata`, `gate`, `park`, `adversarial`, `reconcile`,
 `publication-reconcile`) queue it after their write, and so do the dashboard's
-Stage and Park. Only a file whose text changed is queued again. The queueing
-never fails the write. Step 5 and the carried URL work as for a brief. A piece
+Stage and Park. The dashboard service also sweeps every piece each 5 minutes,
+so a hand edit reaches the queue with no verb after it. Only a file whose text
+changed is queued again. The queueing never fails the write. Step 5 and the carried URL work as for a brief. A piece
 never mirrors into the folder `sdw.drive_publishing_folder` names: that is the
 blog's publishing gate.
 

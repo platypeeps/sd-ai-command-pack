@@ -829,6 +829,13 @@ class PieceMirror(ScreenCase):
         enqueue.assert_called_once_with(self.connection, {self.piece})
         self.assertEqual(lines, enqueue.return_value)
 
+    def test_queue_piece_with_no_item_asks_the_pack_for_every_piece(self):
+        # The service tick's sweep (ruling on note #43370): None is every piece, as `enqueue_pieces` reads it.
+        enqueue = mock.Mock(return_value=[])
+        with mock.patch.object(publishing.kit(), "enqueue_pieces", enqueue):
+            publishing.queue_piece(self.connection, None)
+        enqueue.assert_called_once_with(self.connection, None)
+
     def test_queue_piece_names_a_failure_and_never_raises(self):
         # Failure table, "Verb or page write, then enqueue": the write stands; the lines say why nothing was queued.
         with mock.patch.object(publishing.kit(), "enqueue_pieces", side_effect=OSError("disk full")):
