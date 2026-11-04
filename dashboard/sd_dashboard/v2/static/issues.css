@@ -17,7 +17,7 @@
 .issues tbody tr { cursor: default; }
 .issues tbody tr:hover td { background: transparent; }
 .issues td { vertical-align: top; height: auto; padding-block: var(--space-xs); }
-.issues .ref, .issues .repo, .issues .why { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); }
+.issues .ref, .issues .repo, .issues .why, .issues .when { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); }
 .issues .ref a, .issues .what a { color: var(--color-ink); text-decoration: none; }
 .issues .ref a:hover, .issues .ref a:active, .issues .what a:hover, .issues .what a:active { text-decoration: underline; }
 .issues .ref a:focus-visible, .issues .what a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
@@ -28,6 +28,6 @@
   .issues thead { display: none; }
   .issues tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "ref why" "what what" "repo act"; row-gap: var(--space-3xs); border-bottom: var(--rule-hair) solid var(--color-rule-2); padding: var(--space-xs) 0; }
   .issues td { border: 0; padding: 0 var(--space-xs); }
-  .issues .ref { grid-area: ref; } .issues .why { grid-area: why; } .issues .what { grid-area: what; } .issues .repo { grid-area: repo; white-space: normal; } .issues .act { grid-area: act; align-self: end; }
+  .issues .ref { grid-area: ref; } .issues .why { grid-area: why; } .issues .what { grid-area: what; } .issues .repo { grid-area: repo; white-space: normal; } .issues .act { grid-area: act; align-self: end; } .issues .when { grid-area: act; align-self: end; text-align: right; }
   .issues tr.empty { display: block; }
 }
