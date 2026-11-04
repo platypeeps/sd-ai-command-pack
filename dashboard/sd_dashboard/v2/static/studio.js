@@ -6,7 +6,8 @@
 // /api/studio/view, Documents' view state: a pinned file leads its root, a hidden one folds under Hidden.
 // sd:7490: Updated is each project's newest mtime, as time.rel. A row's chevron expands it, one row at a time, into one
 // sub-row per unhidden file of a result root (studio.RESULTS), newest first: its time, Open (the file, in a new tab) and,
-// for a kind with a render verb (studio.RENDER), Re-render, the kind's tool row with that verb.
+// for a kind with a render verb (studio.RENDER), Re-render, the kind's tool row with that verb. A song's final-video.mp4
+// lists under the role final (studio.OUTPUTS).
 (() => {
   const { html, put, plural } = window.markup;
   const projects = n => plural(n, 'project', 'projects');
@@ -45,7 +46,7 @@
   function subs(r) {
     const list = results(r);
     if (list.length) return list.map(f => sub(r, f));
-    return html`<tr class="sub empty"><td class="g"></td><td colspan="5">No rendered file yet. Results list from a selected, print, stickers, previews or media root; a hidden one stays in Details.</td></tr>`;
+    return html`<tr class="sub empty"><td class="g"></td><td colspan="5">No rendered file yet. Results list from a selected, print, stickers, previews or media root, and a song's final-video.mp4; a hidden one stays in Details.</td></tr>`;
   }
   function row(r) {
     const [g, mark, word] = state(r), open = r.id === OPEN;
@@ -99,7 +100,7 @@
   function gallery(r, root) {
     const all = root.files.map(f => window.shell.commands.get(fileId(r, f)) || { ...f, media: f.type, id: fileId(r, f), file: `${r.repo}/${f.path}` });
     const open = all.filter(f => !f.hidden).sort((a, b) => b.pinned - a.pinned), aside = all.filter(f => f.hidden);
-    return html`<section class="root"><h3>${root.role} <span class="n">${root.path} · ${files(root.files.length)}${root.cut ? ', more on disk' : ''}</span></h3>
+    return html`<section class="root"><h3>${root.role} <span class="n">${root.only ? root.only.join(', ') : root.path} · ${files(root.files.length)}${root.cut ? ', more on disk' : ''}</span></h3>
       ${open.length ? html`<ul class="gallery">${open.map(tile)}</ul>` : html`<p class="why">${all.length ? 'Every file in this root is hidden.' : 'No image, audio or video file in this root yet.'}</p>`}
       ${aside.length ? html`<details class="aside"><summary>Hidden <span class="n">${aside.length}</span></summary><ul class="gallery">${aside.map(tile)}</ul></details>` : ''}</section>`;
   }
@@ -173,11 +174,13 @@
     run: o => view(o, { [field]: to }).then(() => `${label} · ${o.label}`), undo: o => view(o, { [field]: !to }) });
   // Slice 4 (sd:6922): each runs one fixed row of /api/actions/run for the project; the server finds it again.
   const TOOLS = { song: 'tools/song_pipeline.py', episode: 'tools/episode.py' };
+  // The fixed flags a verb runs with, as studio.SONG_FLAGS: assemble replaces the last render, which the tool backs up.
+  const verbLine = verb => verb === 'assemble' ? 'assemble --replace' : verb;
   const ran = (o, action, ids) => window.commands.runAction(o, action, { project: o.id, ...ids });
   const tool = (kind, verb, risk) => ({ id: `studio.${kind}-${verb}`, on: 'project', label: `${kind === 'song' ? 'Song' : 'Episode'} ${verb}`,
     icon: 'play', risk, executes: true, does: `Runs the ${kind} tool's ${verb} on this project and shows its output in Details.`,
     when: o => o.kind === kind || `it is ${o.kind ? 'a ' + o.kind : 'a project of no kind'}, not ${kind === 'episode' ? 'an' : 'a'} ${kind}`,
-    cli: o => `${TOOLS[kind]} ${verb} ${o.folder}`,
+    cli: o => `${TOOLS[kind]} ${verbLine(verb)} ${o.folder}`,
     sends: o => `POST /api/actions/run {action: studio.${kind}, project: ${o.id}, verb: ${verb}}`,
     consequence: o => `This runs ${verb} on ${o.title}; it may write files in the project.`,
     run: o => ran(o, `studio.${kind}`, { verb }) });
@@ -206,9 +209,9 @@
     { id: 'studio.rerender', on: 'studio file', label: 'Re-render', risk: 'confirm', executes: true,
       does: o => `Runs the ${o.kind} tool's ${o.render || 'render verb'} on ${o.title} again and shows its output in Details.`,
       when: o => !o.result ? `a ${o.role} file is no rendered result` : o.render ? true : `a ${o.kind || 'project of no kind'} has no render verb`,
-      cli: o => `${TOOLS[o.kind]} ${o.render} ${o.folder}`,
+      cli: o => `${TOOLS[o.kind]} ${verbLine(o.render)} ${o.folder}`,
       sends: o => `POST /api/actions/run {action: studio.${o.kind}, project: ${o.project}, verb: ${o.render}}`,
-      consequence: o => `This runs ${o.render} on ${o.title} again; it may write files in the project.`,
+      consequence: o => `This runs ${o.render} on ${o.title} again and replaces its last render; the tool keeps a backup.`,
       run: o => { const p = window.shell.commands.get(o.project) || { id: o.project }; show(o.project); return ran(p, `studio.${o.kind}`, { verb: o.render }); } },
     flag('studio.pin', 'Pin', 'pin', 'p', 'pinned', true, 'Pins the file to the front of its root; Undo unpins it.', 'already pinned'),
     flag('studio.unpin', 'Unpin', 'pin-off', 'p', 'pinned', false, 'Unpins the file; Undo pins it again.', 'not pinned'),

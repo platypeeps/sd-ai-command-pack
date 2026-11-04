@@ -138,6 +138,34 @@ class TheProjects(ScreenCase):
         self.assertIn(studio.RENDER["song"], studio.SONG_VERBS)
         self.assertEqual(set(studio.RENDER), {"song"})
 
+    def test_a_songs_final_video_lists_as_a_result_and_nothing_else_in_its_folder_does(self):
+        # pack sd:7490 (decision #43036): song_pipeline.py assemble writes final-video.mp4 in the song folder, in no
+        # root; it lists under the role "final", counts toward updated, and is the only file of the folder that does.
+        song = self.root / "example" / "art" / "songs" / "tune"
+        song.mkdir(parents=True)
+        (song / "project.json").write_text(json.dumps({"kind": "song", "title": "Tune"}), encoding="utf-8")
+        (song / "final-video.mp4").write_bytes(MEDIA)
+        (song / "other.mp4").write_bytes(MEDIA)
+        for path, stamp in (("project.json", 1_700_000_000), ("final-video.mp4", 1_790_000_000), ("other.mp4", 1_800_000_000)):
+            os.utime(song / path, (stamp, stamp))
+        tune = self.read()["projects"][2]
+        self.assertEqual([(r["role"], r["result"], [f["path"] for f in r["files"]]) for r in tune["roots"]],
+                         [("final", True, ["songs/tune/final-video.mp4"])])
+        self.assertEqual(tune["updated"], "2026-09-21T14:13:20Z")
+        self.assertEqual([r["role"] for r in self.read()["projects"][0]["roots"]], ["candidates", "media"], "a shirt has none")
+        located = studio.located(self.connection, "art/songs/tune/final-video.mp4", self.root)
+        self.assertEqual(located[0] if located else None, (song / "final-video.mp4").resolve())
+        self.assertIsNone(studio.located(self.connection, "art/songs/tune/other.mp4", self.root))
+
+    def test_a_final_video_that_links_out_of_its_folder_is_not_listed_or_served(self):
+        song = self.root / "example" / "art" / "songs" / "tune"
+        song.mkdir(parents=True)
+        (song / "project.json").write_text(json.dumps({"kind": "song", "title": "Tune"}), encoding="utf-8")
+        (self.outside / "film.mp4").write_bytes(MEDIA)
+        (song / "final-video.mp4").symlink_to(self.outside / "film.mp4")
+        self.assertEqual(self.read()["projects"][2]["roots"], [])
+        self.assertIsNone(studio.located(self.connection, "art/songs/tune/final-video.mp4", self.root))
+
     def test_a_root_with_more_than_files_lists_the_first_and_says_it_was_cut(self):
         with mock.patch.object(studio, "FILES", 1):
             roots = {r["role"]: r for r in self.read()["projects"][0]["roots"]}
@@ -428,6 +456,12 @@ class TheActions(ScreenCase):
         status, answer = self.run_action(action="studio.song", project="art/songs/tune", verb="validate")
         self.assertEqual((status, answer["output"].split()[1:]), (200, ["validate", "tune"]), answer)
 
+    def test_song_assemble_replaces_the_last_render_and_the_tool_keeps_its_backup(self):
+        # pack sd:7490 (decision #43036): assemble refuses while final-video.mp4 exists unless --replace, which keeps
+        # the old render in media/final-backups; Re-render and Song assemble both pass it.
+        status, answer = self.run_action(action="studio.song", project="art/songs/tune", verb="assemble")
+        self.assertEqual((status, answer["output"].split()[1:]), (200, ["assemble", "--replace", "tune"]), answer)
+
     def test_a_verb_off_the_list_or_a_project_of_another_kind_runs_nothing(self):
         cases = [("studio.episode", "art/gang/episodes/door", "rm"), ("studio.song", "art/songs/tune", "import"),
                  ("studio.episode", "art/shirts/cat", "check"), ("studio.song", "art/gang/episodes/door", "validate")]
@@ -679,6 +713,7 @@ class TheServer(BrowserSession):
             "expand('art/shirts/cat'); R.cat = ELS.rows.html; expand('art/songs/tune'); R.tune = ELS.rows.html;"
             "const c = REG.find(x => x.id === 'studio.rerender');"
             "R.off = C.offWhy(c, OBJ.get('file:art/shirts/cat/print/front.png'));"
+            "R.cli = c.cli(OBJ.get('file:art/songs/tune/media/new.mp4'));"
             "C.run(c, OBJ.get('file:art/songs/tune/media/new.mp4')); await flush(); R.ran = ran; R.confirms = OUT.confirms;")
         cat, tune = out["cat"], out["tune"]
         self.assertIn('<a class="btn quiet sm" href="/studio/files/art/shirts/cat/print/front.png" target="_blank" rel="noopener">Open</a>', cat)
@@ -694,6 +729,7 @@ class TheServer(BrowserSession):
         self.assertEqual(out["off"], "a shirt has no render verb")
         self.assertEqual(out["ran"], [["art/songs/tune", "studio.song", {"project": "art/songs/tune", "verb": "assemble"}]])
         self.assertIn("studio.rerender", out["confirms"])
+        self.assertEqual(out["cli"], "tools/song_pipeline.py assemble --replace songs/tune")
 
     def test_scan_problems_show_before_the_page_says_no_project_json_exists(self):
         """sd:7151: a scan that could not read a folder found nothing it can vouch for, so the page names the problem."""
@@ -803,6 +839,16 @@ class TheServer(BrowserSession):
     def test_an_image_ignores_a_range(self):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/candidates/one.png", Range="bytes=0-1")
         self.assertEqual((status, body, headers.get("Accept-Ranges")), (200, b"\x89PNG one", None))
+
+    def test_a_songs_final_video_is_served_and_another_file_of_its_folder_is_404(self):
+        song = self.root / "example" / "art" / "songs" / "tune"
+        song.mkdir(parents=True)
+        (song / "project.json").write_text(json.dumps({"kind": "song", "title": "Tune"}), encoding="utf-8")
+        (song / "final-video.mp4").write_bytes(MEDIA)
+        (song / "other.mp4").write_bytes(MEDIA)
+        status, headers, body = self.fetch("/studio/files/art/songs/tune/final-video.mp4", Range="bytes=0-9")
+        self.assertEqual((status, body, headers["Content-Security-Policy"]), (206, MEDIA[:10], studio.POLICY))
+        self.assertEqual(self.fetch("/studio/files/art/songs/tune/other.mp4")[0], 404)
 
     def test_a_path_outside_its_roots_answers_404(self):
         for tail in ("art/shirts/cat/stray.png", "art/shirts/cat/previews/secret.png", "art/shirts/cat/candidates/.hidden.png",
