@@ -839,7 +839,7 @@ async function standardRepo(o, manage) {
   await reread();
   const ran = out.steps.filter(s => s.result), bad = ran.filter(s => s.result !== 'changed');
   const again = await window.shell.ask({ title: `${bad.length ? 'Standard partly applied' : 'Standard applied'} · ${o.label}`, ok: 'Check again', keep: 'Close', danger: false,
-    body: stdBody(out, 'Health shows it after the next sd shadow sync. The nightly machine-setup installs the leak guard on a public repo.') });
+    body: stdBody(out, 'Health shows it after the next GitHub sync. The nightly setup run installs the leak guard on a public repo.') });
   if (again.yes) return standardRepo(o, false);
   return { text: `${bad.length ? 'Standard partly applied' : 'Standard applied'} · ${o.label}: ${stdCount(ran, s => s.result.split(':')[0])}` };
 }
@@ -1035,9 +1035,9 @@ function defaultDetails() {
     const r = repoParam && REPOS.find(x => x.path === repoParam);
     put(details, html`<p class="kind">${I('settings')} ${r ? 'Repo settings' : 'Repos'}</p><h2>${r ? r.name : 'How an edit lands'}</h2>
       <ul class="legend">
-        <li><span class="route">${I('terminal')}sd-db · local</span>runner_merge, managed, dependabot and github_issues. The proposal shows the sd-db command; Run applies it here, with Undo.</li>
-        <li><span class="route">${I('terminal')}sd-db declare · copy</span>The review declaration on the row. The proposal shows the diff and the sd-db line to copy.</li>
-        <li><span class="route">${I('shield-check')}GitHub · API</span>Protection as the nightly collector read it. The dashboard does not change it.</li>
+        <li><span class="route">${I('terminal')}Applied here</span>Merge automatically, Managed, Auto-merge dependency updates and GitHub issues. Run applies the change here, with Undo.</li>
+        <li><span class="route">${I('terminal')}You copy</span>Review rules. The proposal shows the change and the line to copy.</li>
+        <li><span class="route">${I('shield-check')}GitHub</span>Branch protection, as of last night's check. The dashboard does not change it.</li>
       </ul>
       ${r ? html`<h3>Act</h3>${shell.commands.bar('repo:' + r.path)}` : ''}`);
     if (r) shell.commands.select('repo:' + r.path);
