@@ -4,6 +4,9 @@
 // /studio/files/<repo>/<path>, served sandboxed; audio and video seek through a Range. Details draws the kind's stage strip;
 // Next stage posts /api/items/<n>/stage with the revision the page read, as Watches' moves do. Each file's Pin and Hide post
 // /api/studio/view, Documents' view state: a pinned file leads its root, a hidden one folds under Hidden.
+// sd:7490: Updated is each project's newest mtime, as time.rel. A row's chevron expands it, one row at a time, into one
+// sub-row per unhidden file of a result root (studio.RESULTS), newest first: its time, Open (the file, in a new tab) and,
+// for a kind with a render verb (studio.RENDER), Re-render, the kind's tool row with that verb.
 (() => {
   const { html, put, plural } = window.markup;
   const projects = n => plural(n, 'project', 'projects');
@@ -11,8 +14,8 @@
   const $ = id => document.getElementById(id);
   const KINDS = [['shirt', 'shirt'], ['song', 'song'], ['episode', 'episode']];
   const COLS = [[null, html`<span class="sr">State</span>`, 'g'], ['title', 'Project'], ['kind', 'Kind', 'repo'], ['repo', 'Repository', 'kind'],
-    ['files', 'Files', 'num']];
-  let DOC = null, ROWS = [], SELECTED = null;
+    ['files', 'Files', 'num'], ['updated', 'Updated', 'when']];
+  let DOC = null, ROWS = [], SELECTED = null, OPEN = null;
   const F = { kind: '', q: '' }, L = { sort: 'title', dir: 1, page: 1, size: 50 };
   const url = f => `/studio/files/${f.file.split('/').map(encodeURIComponent).join('/')}`;
   const count = r => r.roots.reduce((n, root) => n + root.files.length, 0);
@@ -21,19 +24,44 @@
   const storeOff = () => DOC && DOC.store && !DOC.store.available ? `the view store was not read: ${DOC.store.reason}` : true;
   const state = r => r.error || r.problems.length ? ['caution', '▲', r.error || r.problems[0]] : ['ok', '●', 'reads clean'];
   function shown() {
-    const key = { title: r => r.title.toLowerCase(), files: r => count(r) }[L.sort] || (r => String(r[L.sort] || '').toLowerCase());
+    const key = { title: r => r.title.toLowerCase(), files: r => count(r), updated: r => r.updated || '' }[L.sort] || (r => String(r[L.sort] || '').toLowerCase());
     const q = F.q.toLowerCase().split(/\s+/).filter(Boolean);
     return ROWS.filter(r => (!F.kind || r.kind === F.kind) && q.every(w => `${r.title} ${r.kind} ${r.repo} ${r.folder} ${r.brief}`.toLowerCase().includes(w)))
       .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * L.dir);
   }
+  // A project's rendered results: the unhidden files of its result roots, newest first, as the command objects hold them.
+  const results = r => r.roots.filter(root => root.result).flatMap(root => root.files.map(f => ({ ...f, role: root.role })))
+    .filter(f => !f.hidden).sort((a, b) => (a.modified < b.modified ? 1 : a.modified > b.modified ? -1 : 0))
+    .map(f => ({ ...(window.shell.commands.get(fileId(r, f)) || {}), ...f, id: fileId(r, f), file: `${r.repo}/${f.path}` }));
+  const stamp = iso => html`<td class="when">${iso ? html`<time class="rel" datetime="${iso}"></time>` : html`<span class="ph">not read</span>`}</td>`;
+  function sub(r, f) {
+    return html`<tr class="sub">
+      <td class="g"></td>
+      <td class="what" colspan="3"><span class="name">${f.name}</span><span class="file">${f.role} · ${r.folder === '.' ? f.path : f.path.slice(r.folder.length + 1)}</span></td>
+      <td class="acts"><a class="btn quiet sm" href="${url(f)}" target="_blank" rel="noopener">Open</a>${r.render
+        ? html`<button class="btn quiet sm" type="button" data-cmd="studio.rerender" data-obj="${f.id}">Re-render</button>` : ''}</td>
+      ${stamp(f.modified)}</tr>`;
+  }
+  function subs(r) {
+    const list = results(r);
+    if (list.length) return list.map(f => sub(r, f));
+    return html`<tr class="sub empty"><td class="g"></td><td colspan="5">No rendered file yet. Results list from a selected, print, stickers, previews or media root; a hidden one stays in Details.</td></tr>`;
+  }
   function row(r) {
-    const [g, mark, word] = state(r);
+    const [g, mark, word] = state(r), open = r.id === OPEN;
     return html`<tr data-id="${r.id}" aria-selected="${String(r.id === SELECTED)}">
       <td class="g g-${g}" title="${word}"><span aria-hidden="true">${mark}</span><span class="sr">${word}</span></td>
-      <td class="what"><button type="button">${r.title}</button><span class="file">${r.folder}</span></td>
+      <td class="what"><button class="expand" type="button" data-expand="${r.id}" aria-expanded="${String(open)}" aria-label="${`Rendered files: ${r.title}`}"><svg class="i" aria-hidden="true"><use href="#i-chevron-right"/></svg></button><button type="button">${r.title}</button><span class="file">${r.folder}</span></td>
       <td class="repo" data-meta="${` · ${r.repo} · ${files(count(r))}`}">${r.kind || '—'}</td>
       <td class="kind">${r.repo}</td>
-      <td class="num">${count(r)}</td></tr>`;
+      <td class="num">${count(r)}</td>
+      ${stamp(r.updated)}</tr>${open ? subs(r) : ''}`;
+  }
+  // One row expanded at a time (sd:7490): opening one closes the other, a second press closes it; focus stays on its button.
+  function expand(key) {
+    OPEN = OPEN === key ? null : key;
+    draw();
+    [...$('rows').querySelectorAll('[data-expand]')].find(b => b.dataset.expand === key)?.focus();
   }
   function draw() {
     const L_ = window.shell.list, list = shown(), slice = L_.pageOf(list, L), n = k => ROWS.filter(r => r.kind === k).length;
@@ -106,7 +134,8 @@
       document.body.dataset.observed = doc.read;
       ROWS = (doc.projects || []).map(r => ({ ...r, type: 'project', label: r.title }));
       const FILES = ROWS.flatMap(r => r.roots.flatMap(root => root.files.map(f => ({ ...f, media: f.type, id: fileId(r, f), type: 'studio file',
-        label: f.name, file: `${r.repo}/${f.path}`, pinned: !!f.pinned, hidden: !!f.hidden }))));
+        label: f.name, file: `${r.repo}/${f.path}`, pinned: !!f.pinned, hidden: !!f.hidden,
+        project: r.id, folder: r.folder, kind: r.kind, title: r.title, role: root.role, result: !!root.result, render: r.render || '' }))));
       // sd:7151: a scan that could not read a folder says so first; only a clean scan with no project says there is none.
       // sd:7392: with no project, the banner says how many repositories the scan read, so a problem beside them is not "nothing read".
       const problems = doc.problems || [], read = doc.repositories || 0;
@@ -132,6 +161,7 @@
   $('rows-head').addEventListener('click', e => { if (window.shell.list.sortBy(e, L)) window.shell.list.keepFocus(e, draw); });
   $('pager').addEventListener('click', e => { if (window.shell.list.paging(e, L)) window.shell.list.keepFocus(e, draw); });
   $('rows').addEventListener('click', e => {
+    const x = e.target.closest('[data-expand]'); if (x) { expand(x.dataset.expand); return; }
     if (e.target.closest('a')) return;
     const tr = e.target.closest('tr[data-id]'); if (tr) { show(tr.dataset.id); window.shell.openPane('tab-details'); }
   });
@@ -142,11 +172,12 @@
     cli: () => NO_CLI, sends: o => `POST /api/studio/view {file: ${o.file}, ${field}: ${to}}`,
     run: o => view(o, { [field]: to }).then(() => `${label} · ${o.label}`), undo: o => view(o, { [field]: !to }) });
   // Slice 4 (sd:6922): each runs one fixed row of /api/actions/run for the project; the server finds it again.
+  const TOOLS = { song: 'tools/song_pipeline.py', episode: 'tools/episode.py' };
   const ran = (o, action, ids) => window.commands.runAction(o, action, { project: o.id, ...ids });
   const tool = (kind, verb, risk) => ({ id: `studio.${kind}-${verb}`, on: 'project', label: `${kind === 'song' ? 'Song' : 'Episode'} ${verb}`,
     icon: 'play', risk, executes: true, does: `Runs the ${kind} tool's ${verb} on this project and shows its output in Details.`,
     when: o => o.kind === kind || `it is ${o.kind ? 'a ' + o.kind : 'a project of no kind'}, not ${kind === 'episode' ? 'an' : 'a'} ${kind}`,
-    cli: o => `${kind === 'song' ? 'tools/song_pipeline.py' : 'tools/episode.py'} ${verb} ${o.folder}`,
+    cli: o => `${TOOLS[kind]} ${verb} ${o.folder}`,
     sends: o => `POST /api/actions/run {action: studio.${kind}, project: ${o.id}, verb: ${verb}}`,
     consequence: o => `This runs ${verb} on ${o.title}; it may write files in the project.`,
     run: o => ran(o, `studio.${kind}`, { verb }) });
@@ -171,6 +202,14 @@
       run: o => window.shell.post(`/api/items/${o.item}/stage`, { revision: o.revision, stage: o.next })
         .then(out => reader.reread().then(() => `${o.title} · stage ${out.item.stage}`),
           e => { if (e.stale) reader.reread(); throw e; }) },
+    // sd:7490: a result file's Re-render runs its kind's render verb on the project; its output shows in that project's Details.
+    { id: 'studio.rerender', on: 'studio file', label: 'Re-render', risk: 'confirm', executes: true,
+      does: o => `Runs the ${o.kind} tool's ${o.render || 'render verb'} on ${o.title} again and shows its output in Details.`,
+      when: o => !o.result ? `a ${o.role} file is no rendered result` : o.render ? true : `a ${o.kind || 'project of no kind'} has no render verb`,
+      cli: o => `${TOOLS[o.kind]} ${o.render} ${o.folder}`,
+      sends: o => `POST /api/actions/run {action: studio.${o.kind}, project: ${o.project}, verb: ${o.render}}`,
+      consequence: o => `This runs ${o.render} on ${o.title} again; it may write files in the project.`,
+      run: o => { const p = window.shell.commands.get(o.project) || { id: o.project }; show(o.project); return ran(p, `studio.${o.kind}`, { verb: o.render }); } },
     flag('studio.pin', 'Pin', 'pin', 'p', 'pinned', true, 'Pins the file to the front of its root; Undo unpins it.', 'already pinned'),
     flag('studio.unpin', 'Unpin', 'pin-off', 'p', 'pinned', false, 'Unpins the file; Undo pins it again.', 'not pinned'),
     flag('studio.hide', 'Hide', 'eye-off', 'h', 'hidden', true, 'Hides the file under its root\'s Hidden fold; no file moves. Undo shows it.', 'already hidden'),

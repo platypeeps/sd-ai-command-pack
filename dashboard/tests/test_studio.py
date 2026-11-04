@@ -112,6 +112,32 @@ class TheProjects(ScreenCase):
         self.assertEqual([(f["name"], f["type"], f["ranged"], f["bytes"]) for f in roots["media"]["files"]],
                          [("clip.mp4", "video", True, 1000), ("take.wav", "audio", True, 1000)])
 
+    def test_each_file_and_project_says_when_it_last_changed(self):
+        # pack sd:7490: a file carries its mtime, and a project the newest of its files' and its project.json's.
+        art = self.root / "example" / "art"
+        for path, stamp in (("shirts/cat/project.json", 1_700_000_000), ("shirts/cat/candidates/one.png", 1_760_000_000),
+                            ("shirts/cat/media/clip.mp4", 1_790_000_000), ("shirts/cat/media/take.wav", 1_710_000_000),
+                            ("shirts/cat/stray.png", 1_800_000_000), ("songs/broken/project.json", 1_720_000_000)):
+            os.utime(art / path, (stamp, stamp))
+        cat, broken = self.read()["projects"]
+        self.assertEqual({f["name"]: f["modified"] for r in cat["roots"] for f in r["files"]},
+                         {"one.png": "2025-10-09T08:53:20Z", "clip.mp4": "2026-09-21T14:13:20Z", "take.wav": "2024-03-09T16:00:00Z"})
+        # stray.png is newer, but in no root: the gallery does not serve it, so it does not count.
+        self.assertEqual(cat["updated"], "2026-09-21T14:13:20Z")
+        self.assertEqual(broken["updated"], "2024-07-03T09:46:40Z")
+
+    def test_a_root_says_whether_it_holds_rendered_results_and_a_kind_names_its_render_verb(self):
+        # pack sd:7490: reference and candidates are inputs and options; the other roles hold what was rendered.
+        song = self.root / "example" / "art" / "songs" / "tune"
+        (song / "media").mkdir(parents=True)
+        (song / "project.json").write_text(json.dumps({"kind": "song", "title": "Tune", "roots": {"media": "media"}}), encoding="utf-8")
+        cat, _, tune = self.read()["projects"]
+        self.assertEqual([(r["role"], r["result"]) for r in cat["roots"]], [("candidates", False), ("media", True)])
+        self.assertEqual((cat["render"], tune["render"]), ("", "assemble"))
+        self.assertEqual(studio.RESULTS, ("selected", "print", "stickers", "previews", "media"))
+        self.assertIn(studio.RENDER["song"], studio.SONG_VERBS)
+        self.assertEqual(set(studio.RENDER), {"song"})
+
     def test_a_root_with_more_than_files_lists_the_first_and_says_it_was_cut(self):
         with mock.patch.object(studio, "FILES", 1):
             roots = {r["role"]: r for r in self.read()["projects"][0]["roots"]}
@@ -591,6 +617,83 @@ class TheServer(BrowserSession):
         self.assertIn('<summary>Hidden <span class="n">1</span></summary>', candidates)
         self.assertEqual(out["R"]["off"], ["", "not pinned", "", "not hidden"])
         self.assertIn(["/api/studio/view", {"file": "art/shirts/cat/media/clip.mp4", "pinned": True}, 64], out["posts"])
+
+    def rendered(self, body):
+        """studio.js on a shirt (no render verb) and a song (assemble), each with an input root and a result root."""
+        def file(path, modified, hidden=False):
+            return {"path": path, "name": path.rsplit("/", 1)[1], "bytes": 1, "type": "image", "ranged": False,
+                    "modified": modified, "pinned": False, "hidden": hidden}
+
+        def project(ident, kind, render, updated, roots):
+            return {"id": f"art/{ident}", "repo": "art", "folder": ident, "kind": kind, "title": ident.rsplit("/", 1)[1],
+                    "brief": "", "item": None, "problems": [], "error": "", "strip": list(studio.STAGES[kind]), "stage": "",
+                    "next": "", "revision": "", "updated": updated, "render": render,
+                    "roots": [{"role": role, "path": role, "result": role != "candidates", "cut": False, "files": files}
+                              for role, files in roots]}
+
+        doc = {"read": "2026-11-04T07:00:00Z", "root": "/repos", "problems": [], "repositories": 1,
+               "store": {"available": True, "reason": ""}, "attention": {"state": "ok", "n": 0, "what": ""},
+               "projects": [
+                   project("shirts/cat", "shirt", "", "2026-11-02T09:00:00Z", [
+                       ("candidates", [file("shirts/cat/candidates/one.png", "2026-11-02T09:00:00Z")]),
+                       ("print", [file("shirts/cat/print/front.png", "2026-11-01T08:00:00Z")])]),
+                   project("songs/tune", "song", "assemble", "2026-11-03T10:00:00Z", [
+                       ("media", [file("songs/tune/media/old.mp4", "2026-11-01T10:00:00Z"),
+                                  file("songs/tune/media/new.mp4", "2026-11-03T10:00:00Z"),
+                                  file("songs/tune/media/gone.mp4", "2026-11-03T11:00:00Z", hidden=True)])])]}
+        click = ("const expand = id => ELS.rows.listeners.click.forEach(f => f({ target: { closest: s => "
+                 "s === '[data-expand]' ? { dataset: { expand: id } } : null } }));\n")
+        return self.run_page(doc, click + body)["R"]
+
+    def test_each_project_row_says_when_its_files_last_changed(self):
+        # pack sd:7490: an Updated column, the project's newest mtime through the shell's time.rel renderer.
+        out = self.rendered("R.rows = ELS.rows.html; R.head = ELS['rows-head'].html;")
+        self.assertIn('<td class="when"><time class="rel" datetime="2026-11-02T09:00:00Z"></time></td>', out["rows"])
+        self.assertIn('<td class="when"><time class="rel" datetime="2026-11-03T10:00:00Z"></time></td>', out["rows"])
+        self.assertIn('data-sort="updated"', out["head"])
+        self.assertIn(">Updated<", out["head"])
+
+    def test_a_project_row_expands_and_only_one_is_expanded_at_a_time(self):
+        # pack sd:7490: a disclosure button per row; opening one closes the other, a second press closes it.
+        out = self.rendered("R.none = ELS.rows.html; expand('art/shirts/cat'); R.cat = ELS.rows.html;"
+                            "expand('art/songs/tune'); R.tune = ELS.rows.html; expand('art/songs/tune'); R.shut = ELS.rows.html;")
+        def toggle(ident, state):
+            return f'data-expand="art/{ident}" aria-expanded="{state}"'
+
+        self.assertIn(toggle("shirts/cat", "false"), out["none"])
+        self.assertNotIn('<tr class="sub"', out["none"])
+        self.assertIn(toggle("shirts/cat", "true"), out["cat"])
+        self.assertIn("front.png", out["cat"])
+        self.assertIn(toggle("shirts/cat", "false"), out["tune"])
+        self.assertIn(toggle("songs/tune", "true"), out["tune"])
+        self.assertNotIn("front.png", out["tune"])
+        self.assertIn("new.mp4", out["tune"])
+        self.assertNotIn('<tr class="sub"', out["shut"])
+        self.assertNotIn('aria-expanded="true"', out["shut"])
+
+    def test_a_sub_row_per_rendered_file_opens_it_and_re_renders_it_with_its_kinds_verb(self):
+        # pack sd:7490: one sub-row per unhidden file of a result root, newest first, each with its time, Open and,
+        # for a kind with a render verb, Re-render; a shirt has none, so its row shows no Re-render.
+        out = self.rendered(
+            "const ran = []; window.commands = { runAction: (o, a, ids) => { ran.push([o.id, a, ids]); return Promise.resolve('ok'); } };"
+            "expand('art/shirts/cat'); R.cat = ELS.rows.html; expand('art/songs/tune'); R.tune = ELS.rows.html;"
+            "const c = REG.find(x => x.id === 'studio.rerender');"
+            "R.off = C.offWhy(c, OBJ.get('file:art/shirts/cat/print/front.png'));"
+            "C.run(c, OBJ.get('file:art/songs/tune/media/new.mp4')); await flush(); R.ran = ran; R.confirms = OUT.confirms;")
+        cat, tune = out["cat"], out["tune"]
+        self.assertIn('<a class="btn quiet sm" href="/studio/files/art/shirts/cat/print/front.png" target="_blank" rel="noopener">Open</a>', cat)
+        self.assertNotIn("one.png", cat, "a candidate is no rendered result")
+        self.assertNotIn("Re-render", cat)
+        self.assertNotIn("gone.mp4", tune, "a hidden file is no sub-row")
+        self.assertLess(tune.index("new.mp4"), tune.index("old.mp4"))
+        for name, when in (("new.mp4", "2026-11-03T10:00:00Z"), ("old.mp4", "2026-11-01T10:00:00Z")):
+            with self.subTest(name=name):
+                self.assertIn(f'href="/studio/files/art/songs/tune/media/{name}" target="_blank" rel="noopener">Open</a>', tune)
+                self.assertIn(f'<button class="btn quiet sm" type="button" data-cmd="studio.rerender" data-obj="file:art/songs/tune/media/{name}">Re-render</button>', tune)
+                self.assertIn(f'<td class="when"><time class="rel" datetime="{when}"></time></td>', tune)
+        self.assertEqual(out["off"], "a shirt has no render verb")
+        self.assertEqual(out["ran"], [["art/songs/tune", "studio.song", {"project": "art/songs/tune", "verb": "assemble"}]])
+        self.assertIn("studio.rerender", out["confirms"])
 
     def test_scan_problems_show_before_the_page_says_no_project_json_exists(self):
         """sd:7151: a scan that could not read a folder found nothing it can vouch for, so the page names the problem."""
