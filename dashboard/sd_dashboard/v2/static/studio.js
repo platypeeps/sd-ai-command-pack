@@ -1,7 +1,8 @@
 // Studio (sd:6920, sd:6921; slices 2 and 3 of sd:6919): the creative projects, each a folder with a project.json
 // (studio.py). The page reads /api/studio through the shell's reader and draws the Documents list grammar: a filter bar, a
 // sorted and paged ledger and the one Details pane, where each root's files show as a gallery. Each file is
-// /studio/files/<repo>/<path>, served sandboxed; audio and video seek through a Range. Details draws the kind's stage strip;
+// /studio/files/<repo>/<path>, an image served sandboxed; audio and video, unsandboxed so they play (sd:7513), seek
+// through a Range. Details draws the kind's stage strip;
 // Next stage posts /api/items/<n>/stage with the revision the page read, as Watches' moves do. Each file's Pin and Hide post
 // /api/studio/view, Documents' view state: a pinned file leads its root, a hidden one folds under Hidden.
 // sd:7490: Updated is each project's newest mtime, as time.rel. A row's chevron expands it, one row at a time, into one

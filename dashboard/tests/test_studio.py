@@ -564,7 +564,7 @@ class TheServer(BrowserSession):
         self.assertEqual(status, 200)
         self.assertEqual([p["id"] for p in json.loads(body)["projects"]], ["art/shirts/cat", "art/songs/broken"])
 
-    def test_every_gallery_file_the_api_lists_answers_200_under_a_sandbox(self):
+    def test_every_gallery_file_the_api_lists_answers_200_under_its_policy(self):
         doc = json.loads(self.fetch("/api/studio")[2])
         paths = [f["path"] for p in doc["projects"] for r in p["roots"] for f in r["files"]]
         self.assertEqual(len(paths), 3)
@@ -572,7 +572,7 @@ class TheServer(BrowserSession):
             with self.subTest(path=path):
                 status, headers, _ = self.fetch(f"/studio/files/art/{path}")
                 self.assertEqual(status, 200)
-                self.assertEqual(headers["Content-Security-Policy"], studio.POLICY)
+                self.assertEqual(headers["Content-Security-Policy"], studio.policy(Path(path)))
         self.assertEqual(self.fetch("/studio/files/art/shirts/cat/candidates/one.png")[1]["Content-Type"], "image/png")
 
     def run_page(self, doc, body):
@@ -836,6 +836,30 @@ class TheServer(BrowserSession):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=0-1,5-9")
         self.assertEqual((status, headers["Content-Length"], body), (200, "1000", MEDIA))
 
+    def test_audio_and_video_answer_without_a_sandbox_and_an_image_keeps_it(self):
+        """pack sd:7513: Open loads a file as a top-level document. Under `sandbox` a media document has origin null,
+        and Chrome blocks its own load (CORS, ERR_FAILED), so nothing plays; an image, and above all an SVG, keeps it."""
+        cat = self.root / "example" / "art" / "shirts" / "cat"
+        (cat / "media" / "now.mp3").write_bytes(MEDIA)
+        (cat / "candidates" / "mark.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"/>', encoding="utf-8")
+        for tail, status, headers in (("media/now.mp3", 200, {}), ("media/clip.mp4", 200, {}),
+                                      ("media/clip.mp4", 206, {"Range": "bytes=0-9"}),
+                                      ("media/take.wav", 416, {"Range": "bytes=1000-"})):
+            with self.subTest(tail=tail, **headers):
+                got, answer, _ = self.fetch(f"/studio/files/art/shirts/cat/{tail}", **headers)
+                policy = answer["Content-Security-Policy"]
+                self.assertEqual(got, status)
+                self.assertNotIn("sandbox", policy)
+                self.assertIn("default-src 'none'", policy)
+                self.assertIn("media-src 'self'", policy)
+                self.assertEqual(answer["X-Content-Type-Options"], "nosniff")
+        for tail in ("candidates/mark.svg", "candidates/one.png"):
+            with self.subTest(tail=tail):
+                got, answer, _ = self.fetch(f"/studio/files/art/shirts/cat/{tail}")
+                self.assertEqual((got, answer["Content-Security-Policy"], answer["X-Content-Type-Options"]),
+                                 (200, studio.POLICY, "nosniff"))
+                self.assertTrue(studio.POLICY.startswith("sandbox;"))
+
     def test_an_image_ignores_a_range(self):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/candidates/one.png", Range="bytes=0-1")
         self.assertEqual((status, body, headers.get("Accept-Ranges")), (200, b"\x89PNG one", None))
@@ -847,7 +871,7 @@ class TheServer(BrowserSession):
         (song / "final-video.mp4").write_bytes(MEDIA)
         (song / "other.mp4").write_bytes(MEDIA)
         status, headers, body = self.fetch("/studio/files/art/songs/tune/final-video.mp4", Range="bytes=0-9")
-        self.assertEqual((status, body, headers["Content-Security-Policy"]), (206, MEDIA[:10], studio.POLICY))
+        self.assertEqual((status, body, headers["Content-Security-Policy"]), (206, MEDIA[:10], studio.MEDIA_POLICY))
         self.assertEqual(self.fetch("/studio/files/art/songs/tune/other.mp4")[0], 404)
 
     def test_a_path_outside_its_roots_answers_404(self):

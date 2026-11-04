@@ -18,8 +18,9 @@ with its error; a root that leaves the project folder, or names an unknown role,
 `/studio/files/<repo key>/<path in the repository>`, each segment percent-encoded, by `designs.resolve`'s rules with
 `TYPES` here: every folder a name, the file's own name a `file_name` (a title with spaces and `!` is one, sd:7395),
 the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
-file answers under `POLICY`, a sandbox, so an opened SVG runs nothing. Each file carries its mtime (`modified`), each
-root whether its role is in `RESULTS`, a rendered end result, and each project `updated`, the newest mtime of its
+image answers under `POLICY`, a sandbox, so an opened SVG runs nothing; audio and video under `MEDIA_POLICY`, the
+same without the sandbox, whose null origin Chrome refuses to play (sd:7513). Each file carries its mtime
+(`modified`), each root whether its role is in `RESULTS`, a rendered end result, and each project `updated`, the newest mtime of its
 `project.json` and the files it lists (sd:7490). A kind's `OUTPUTS`, the files its tool renders in the project folder
 itself (a song's `final-video.mp4`), list under the role `FINAL`, a result; each is served by its name alone, so no
 other file of that folder is.
@@ -103,6 +104,9 @@ FILES = 500
 
 #: A served file's policy, replacing the dashboard's for that response: nothing runs, nothing loads but itself.
 POLICY = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
+#: The `RANGED` types' policy (sd:7513): under `sandbox` a media document has origin null, and Chrome blocks its own
+#: load (CORS, ERR_FAILED), so nothing plays. Audio and video run no script; `default-src 'none'` and nosniff stay.
+MEDIA_POLICY = POLICY.removeprefix("sandbox; ")
 
 #: The file route's prefix.
 FILES_PREFIX = "/studio/files/"
@@ -468,6 +472,11 @@ def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path,
             elif target.is_relative_to(base):
                 return found
     return None
+
+
+def policy(target: Path) -> str:
+    """The Content-Security-Policy a served file answers under: `MEDIA_POLICY` for a `RANGED` type, else `POLICY`."""
+    return MEDIA_POLICY if target.suffix.lower() in RANGED else POLICY
 
 
 def byte_range(header: str | None, size: int) -> tuple[int, int, int]:
