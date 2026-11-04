@@ -367,6 +367,17 @@ class TheOperations(TodayCase):
         self.assertEqual((mine["operations"]["gate"], mine["summary"]["operations"]), (found["gate"], 1))
         self.assertEqual(sorted(row["id"] for row in loose["operations"]["findings"]), sorted([exited, folded, unread]))
 
+    def test_a_failed_runs_finding_keeps_its_exit_code(self):
+        """pack sd:7399: `ingest_log` writes `job exited N on <host>`, graded or not, with the job's lines."""
+        bare = self.report("backup-nightly", "job exited 3 on alpha: backup on alpha: the NAS is gone")
+        graded = self.report("sync-nightly", "job exited 4 on alpha (data safe, one step failed: push): sync lagged")
+        self.report("other-nightly", "job exited 5 on alphabet: not this machine")
+        found = today.operations(self.connection, host="alpha", gate=None)["findings"]
+        self.assertEqual(sorted((row["id"], row["finding"]) for row in found), sorted([
+            (bare, "job exited 3: backup on alpha: the NAS is gone"),
+            (graded, "job exited 4 (data safe, one step failed: push): sync lagged"),
+        ]))
+
 
 class TheHubRequests(TodayCase):
     """pack sd:7358 (system sd:7324 S3): an open `hub:` item is Attention on the fence holder, not elsewhere."""
@@ -498,6 +509,28 @@ class TheRepositoryFilter(TodayCase):
         both = today.sections(self.connection, repos=[APP, LIB], now=NOW)
         self.assertEqual({row["repo"] for row in both["unscheduled"]}, {APP, LIB})
         self.assertEqual(len(today.sections(self.connection, now=NOW)["followups"]), 3)
+
+    def test_a_repositorys_rows_list_past_the_fleets_note_cap(self):
+        """pack sd:7400: the filter runs before `open_notes`' 200-row cap, so 200 older rows elsewhere hide none."""
+        busy = self.item("Busy", repo=APP)
+        for n in range(200):
+            add_note(self.connection, busy, "followup", f"Chase {n}")
+            add_note(self.connection, busy, "question", f"Pick {n}\nOption: A (Recommended)\nOption: B")
+        mine = self.item("Mine", repo=LIB)
+        chase = add_note(self.connection, mine, "followup", "Chase the vendor")
+        decision = add_note(self.connection, mine, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
+        self.assertEqual([row["note"] for row in today.followups(self.connection, repos=[LIB])], [chase])
+        self.assertEqual([row["note"] for row in today.decisions(self.connection, repos=[LIB])], [decision])
+        self.assertEqual(today.sections(self.connection, repos=[LIB], now=NOW)["summary"]["decisions"], 1)
+
+    def test_decisions_list_past_a_cap_of_plain_questions(self):
+        """pack sd:7400: questions Decisions leaves out fill no cap that hides one it lists, as in #1663."""
+        busy = self.item("Busy", repo=APP)
+        self.connection.executemany("INSERT INTO note (item, timestamp, kind, body) VALUES (?, ?, 'question', ?)",
+                                    [(busy, f"2026-09-01T00:00:{n % 60:02d}+00:00", f"Plain {n}") for n in range(200)])
+        asked = self.item("Asked", repo=APP)
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
+        self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision])
 
     def test_delivered_and_attention_follow_the_filter(self):
         for repo in (APP, LIB):
