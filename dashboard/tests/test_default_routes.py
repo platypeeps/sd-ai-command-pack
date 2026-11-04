@@ -108,7 +108,7 @@ class TheDefault(BrowserSession):
             status, _, _ = self.raw(href)
             self.assertEqual(status, 200, (name, href))
 
-    def test_the_rail_map_is_served_once_and_reaches_the_operations_screens(self):
+    def test_the_rail_map_is_served_once_and_reaches_the_old_screens(self):
         status, headers, body = self.raw("/ui/sections.js")
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "text/javascript; charset=utf-8")
@@ -117,9 +117,10 @@ class TheDefault(BrowserSession):
                          {"SHELL_PAGES": v2.SECTIONS, "SHELL_CLASSIC": v2.CLASSIC, "SHELL_SCREENS": v2.SCREENS,
                           "SHELL_COUNTS": {"pages": {}}, "SHELL_REALMS": []})
         reachable = set(v2.CLASSIC.values()) | set(v2.SCREENS.values())
-        # The Operations areas are the views of the rail's Operations entry (pack sd:7266).
-        for required in ("/operations", "/protection", "/classic/contributions"):
+        # Operations left the rail when its last area moved (pack sd:7517); the other old screens stay reachable.
+        for required in ("/protection", "/classic/contributions"):
             self.assertIn(required, reachable)
+        self.assertNotIn("/operations", reachable)
         # A ported section is never also classic, and no page script names a section's address.
         self.assertEqual(set(v2.SECTIONS) & set(v2.CLASSIC), set())
         for script in (V2 / "static").glob("*.js"):

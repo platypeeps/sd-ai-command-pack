@@ -9,7 +9,7 @@ the operator's config from `<config>/project-dashboard/` (`<config>` is
 tools of the system checkout, `$SYSTEM_TOOLS_ROOT`, default `~/repos/system`.
 
 **The workflow dashboard** (`sd_dashboard/`) opens on the new design's Today, and keeps
-the classic Contributions, Operations (Trackers), Protection, and
+the classic Contributions, Protection, and
 individual Item pages. sd:3402 retired the other classic screens; their controls are on the new pages.
 A `/backlog` address opens Tasks with the same filters (sd:2356); the classic
 Backlog was deleted in sd:2622. Its production launcher uses the
@@ -30,8 +30,8 @@ worktrees, and open pull requests waiting on you. The ranking is the pack
 dashboard's `dashboard/now.py`, carried across with its rank numbers, in
 `sd_dashboard/now_screen.py`; the band a row wears (`broken`, `look`,
 `queued`) is derived from the rank alone, never from the kind. The four
-sources are the ones Management, Health and Trackers show in full: repos and sessions
-through the fleet child, Trackers' PRs through `sd_db.shadow` (`needs_you`
+sources are the ones Management, Health and GitHub show in full: repos and sessions
+through the fleet child, pull requests through `sd_db.shadow` (`needs_you`
 rows only; the days a stale row shows count from the sync's first sighting,
 because the shadow table carries no `updated_at`), and Jobs through
 `sd_db.operations.inventory`. A failed job ranks 1, after a dark collector and
@@ -131,8 +131,8 @@ is the one left under `/classic/`, and the other kept screens keep their paths.
 A `/v2/` address that names a page or an asset answers 301 with its new one (`/v2/today` to
 `/today`, `/v2/static/<file>` to `/ui/<file>`); any other `/v2/` path is a 404.
 One map, built from the page registry and served as `/ui/sections.js`, says
-where each rail section goes: `SECTIONS` for ported pages, `CLASSIC` for the
-server-drawn screen a section opens (Operations, drawn as any other section), and
+where each rail section goes: `SECTIONS` for ported pages, `CLASSIC` for a
+server-drawn screen a section opens (none since Operations went, pack sd:7517), and
 `SCREENS` for old screens without a section, which the palette lists under
 Classic screens. `./dashboard.sh pages` prints that map, one line per section
 or screen; a section in none of the three, such as Notes or HOA, has no old
@@ -274,9 +274,10 @@ post the routes the classic screen posted; Re-import and Evaluate run
 Rollback swaps back to the copy the last install replaced (system sd:5779); Run,
 Schedule, Adopt and Scan are copy only. The classic screen was retired in sd:3402; [`docs/pages/skills.md`](docs/pages/skills.md) has the detail.
 
-**Operations** sits in the rail's Fleet group (pack sd:7266), its areas
-(`operations_screen.AREAS`) the shell's views, listed under it as the other pages' are.
-Trackers is its one area left; the shown area travels in the URL, `/operations?area=trackers`.
+**Operations** is gone (pack sd:7517): each area moved to the page that holds its subject, and the
+rail's Fleet group no longer lists it. `/operations?area=<area>` answers 301 to the area's new home
+(`operations_screen.MOVED`); the bare `/operations` lists those homes, and `/ui/operations.js` follows
+the one an old `#view=<area>` names, since only the browser sees that hash, or Trackers' when there is none.
 Services and Sessions moved to Management in pack sd:7517: Deploys lists each service with its
 last request in Details, and Sessions lists each worktree, abandoned first, and the sd-* processes.
 `/operations?area=services` and `?area=sessions`, and their old `#view=` addresses, open those views.
@@ -294,15 +295,15 @@ Resources' four views moved in pack sd:7527, each read through `/api/<page>/<vie
 Toolbox is Management's Machine view, Research the Repos filter `?research=yes|no`, Vault a section
 on Notes and Queues a folded section on Tasks. `/operations?area=resources&resource=<view>` answers
 301 to each, and a bare `?area=resources` or `#view=resources` opens Machine.
+Trackers moved to GitHub's Tracked view in pack sd:7525 (`/github#view=tracked`, `/api/github/tracked`,
+`trackers_screen.document`): every open pull request and issue `sd shadow sync` keeps, of every tracker,
+watched rows and Jira's too, with each tracker's sync health under the table. A row's reference is the
+last path segment of its URL: `LOG-23818` for a Jira ticket, `owner/repo#4321` on GitHub. Read-only.
 sd:3402 retired the other six, and each one's controls live on a new page:
 Jobs on Management and Activity, a queued assignment's cancel on its Item page,
 Ports on Health, Progress's age buckets as Tasks' `age` filter
 and its observed activity on Metrics, Reports on Reports, Repos on Management,
 and Commands on Activity. Any other `area=` is a 404.
-
-| Tab | Scope and controls |
-| --- | --- |
-| **Trackers** | PRs and Issues as `sd shadow sync` last saw them, read from `sd_db.shadow` through `progress.tracker_items`, with each tracker's sync health. A row's reference is the last path segment of its URL — `LOG-23818` for a Jira ticket, `owner/repo#4321` on GitHub. Open rows only; read-only. |
 
 Every job or service control rechecks the observed state and revision. The last
 request's acceptance is shown separately from the current state; acceptance is

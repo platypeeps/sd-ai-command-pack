@@ -1,10 +1,9 @@
 /* Hallmark · genre: modern-minimal · macrostructure: rail + annunciator + ledger + pane · design-system: design.md · designed-as-app
  * Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 · The classic screens inside the v2 shell (sd:3586), first the item page:
  * screens.item's server-drawn forms, status history, artifact, notes and assignments, on foundation tokens. Every number is the
- * item's own rows. Then Operations > Trackers: its view toggles, sync health and tracker ledger; Protection: its status
- * markers and gap matrix; Resources: the collectors' fact lists; and Contributions (classic): its cards. The last of them
- * retired v1's stylesheet: every server-drawn screen reads this file. Usage, Services and Sessions moved to v2 pages
- * (pack sd:7517, sd:7524), and their rules went with them.
+ * item's own rows. Then Protection: its status markers and gap matrix; a section's bare fact list; and Contributions
+ * (classic): its cards. The last of them retired v1's stylesheet: every server-drawn screen reads this file. Operations'
+ * areas moved to v2 pages (pack sd:7517, sd:7524, sd:7525, sd:7527), and their rules went with them.
  */
 
 .classic .head > div { min-width: 0; }
@@ -114,8 +113,6 @@
 .classic .shadow dt { color: var(--color-muted); }
 .classic .shadow dd { margin: 0; font-family: var(--font-data); overflow-wrap: anywhere; }
 
-/* Sessions: what a terminal prints (branch, path, PID, elapsed time, command line) reads in the data face. */
-.classic .listing-table :is(.worktree-branch, .worktree-path, .process-pid, .process-elapsed, .process-command) { font-family: var(--font-data); font-size: var(--text-xs); }
 
 /* Protection: sixteen columns scroll inside their own box, never the page. A status carries its state glyph beside its
  * colour; unknown is its own state, never the ok one, and a GAP opens to its sentence. */
@@ -138,7 +135,7 @@
 
 .classic .operation-card { overflow-wrap: anywhere; }
 
-/* Resources: each collector's facts are a bare dl, read as a two-column fact list; a notice's dl wraps each pair in a div. */
+/* A section's bare dl reads as a two-column fact list; a notice's dl wraps each pair in a div. */
 .classic section > dl:not([class]) {
   display: grid; grid-template-columns: fit-content(45%) minmax(0, 1fr); gap: var(--space-3xs) var(--space-md); margin: var(--space-sm) 0;
   font-size: var(--text-sm);

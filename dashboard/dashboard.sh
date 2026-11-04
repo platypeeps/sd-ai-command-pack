@@ -1,5 +1,5 @@
 #!/bin/sh
-# The command pack owns the workflow dashboard (sd:5987): Today, Backlog, Writing, Operations,
+# The command pack owns the workflow dashboard (sd:5987): Today, Backlog, Writing
 # and item controls share sd_db. The <prefix>.sd-dashboard LaunchAgent
 # (prefix from SYSTEM_TOOLS_LABEL_PREFIX, default local.system-tools) manages its loopback
 # server and optional authenticated Tailscale IP listener.
@@ -254,7 +254,7 @@ usage: dashboard.sh tile <tab> | serve | preflight | install | health | grants |
                    collect_ports in-process. Exits 1 with the reason on
                    stderr when a collector fails and 2 when the tab name is
                    not one of those
-  serve            Today, Backlog, Writing, Operations and item controls.
+  serve            Today, Backlog, Writing and item controls.
                    All reads/writes use `sd_db`. Binds loopback; optional ip_origin
                    adds a listener on this node's Tailscale IP with peer authentication.
                    --config, --port and --database select explicit settings

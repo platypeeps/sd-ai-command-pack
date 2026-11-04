@@ -53,7 +53,7 @@ def shell_page(title: str, section: str, *body: object, subtitle: str, note: str
     `section` is the rail entry the screen belongs to; `note` fills the Details pane; `screen` names the palette scope,
     one of `runner_exec.SCREENS` (sd:4002).
     `cli_equivalents=False` leaves out the folded list of the body's commands.
-    `script` names a `/ui/` page script that loads before shell.js, as a v2 page's does: Operations declares its views.
+    `script` names a `/ui/` page script that loads before shell.js, as a v2 page's does: Operations moved follows an old view.
     The body keeps its server-drawn forms, which `/static/dashboard.js` submits as before; it leaves the keys to the
     shell but `p`. `/ui/classic.css` styles that markup.
     A body with a table or a list gets row 1 marked for the shell's one bar (sd:5539), which filters its tables and sets

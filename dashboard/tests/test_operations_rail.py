@@ -1,8 +1,8 @@
-"""Operations under Fleet (pack sd:7266), and where its areas went (pack sd:7517).
+"""Where Operations' areas went (pack sd:7517): the page left the rail once its last area, Trackers, moved (pack sd:7525).
 
-The rail's Fleet group holds Operations, which opens `/operations`. Every area moved, Trackers last (pack sd:7525), so
-the bare address lists each area's new home, and `operations.js` follows the one an old `#view=<area>` names: only the
-browser sees it. The palette lists no area on its own.
+The rail and the palette no longer open `/operations`. An old `?area=` address answers 301 (`test_operations_actions`);
+the bare address lists each area's new home, and `operations.js` follows the one an old `#view=<area>` names, since only
+the browser sees it.
 """
 
 from __future__ import annotations
@@ -15,47 +15,22 @@ from pathlib import Path
 
 from sd_dashboard import operations_screen, server, v2
 from support import ScreenCase
-from test_v2_today import MARKUP_JS, OSASCRIPT
-from test_v2_today import STAND_IN as MARKUP_STAND_IN
+from test_v2_today import OSASCRIPT
 
 STATIC = Path(v2.__file__).resolve().parent / "static"
 SHELL_JS = (STATIC / "shell.js").read_text(encoding="utf-8")
-ICONS_JS = (STATIC / "icons.js").read_text(encoding="utf-8")
 GROUPS = re.search(r"^  const GROUPS = \[\n(.*?)^  \];$", SHELL_JS, re.S | re.M).group(1)
 
 
 class TheRail(unittest.TestCase):
-    def test_fleet_holds_operations_which_opens_the_screen(self):
+    def test_the_rail_and_the_palette_no_longer_open_operations(self):
+        """pack sd:7517: every area moved, so the page left the rail's Fleet group and the classic map."""
         fleet = re.search(r"\['Fleet', +\[(.*)\]\],", GROUPS).group(1)
-        entry = re.search(r"\['Operations', '([a-z0-9-]+)', '([a-z])'\]", fleet)
-        self.assertIsNotNone(entry, "the Fleet group has no Operations entry")
-        icon, key = entry.groups()
-        self.assertIn(f'<symbol id="i-{icon}"', ICONS_JS)
-        keys = re.findall(r"\['[A-Za-z ]+', '[a-z0-9-]+', '([a-z])'\]", GROUPS)
-        self.assertEqual(keys.count(key), 1, f"g {key} is another section's key")
-        self.assertEqual(v2.CLASSIC.get("Operations") or v2.SECTIONS.get("Operations"), "/operations")
-
-    def test_the_operations_entry_is_drawn_as_a_standard_section(self):
-        """The operator asked for the standard setup: no "classic" tag, and its g u hint shows, on every page."""
-        maps = "\n".join(re.findall(r"^  const (?:hrefOf|classic) = .*;$", SHELL_JS, re.M))
-        item = re.search(r"\$\{items\.map\((\(\[name, icon, key\]\) => \{\n.*?\n      \})\)\}</ul>", SHELL_JS, re.S)
-        self.assertIsNotNone(item, "shell.js has no rail item template")
-        script = (MARKUP_STAND_IN + MARKUP_JS + """
-const { html } = window.markup;
-const ICON = n => html`<svg class="i"><use href="#i-${n}"/></svg>`, badge = () => html``, counts = {};
-const PAGES = {}, CLASSIC = { Operations: '/operations' }, page = 'Today';
-""" + maps + "\nconst draw = " + item.group(1) + ";\nJSON.stringify(String(draw(['Operations', 'gauge', 'u'])))")
-        result = subprocess.run([OSASCRIPT, "-l", "JavaScript", "-e", script], capture_output=True, text=True, timeout=60,
-                                check=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        drawn = json.loads(result.stdout)
-        self.assertIn('<a href="/operations" data-section="Operations">', drawn)
-        self.assertIn("<kbd>g u</kbd>", drawn)
-        self.assertNotIn("classic", drawn)
-        self.assertNotIn("[data-classic]", (STATIC / "shell.css").read_text(encoding="utf-8"))
-
-    def test_the_palette_no_longer_lists_the_areas_on_their_own(self):
-        self.assertEqual([href for href in v2.SCREENS.values() if href.startswith("/operations")], [])
+        self.assertNotIn("'Operations'", fleet)
+        self.assertNotIn("Operations", v2.CLASSIC)
+        self.assertNotIn("Operations", v2.SECTIONS)
+        self.assertEqual([href for href in (*v2.CLASSIC.values(), *v2.SCREENS.values()) if href.startswith("/operations")],
+                         [])
 
 
 class TheMovedPage(ScreenCase):
