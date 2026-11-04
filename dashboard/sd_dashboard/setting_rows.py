@@ -22,16 +22,19 @@ __all__ = ["LISTS", "current", "digest", "text"]
 
 #: Each list's row: its old file's name and what Settings says it holds.
 LISTS = {
-    "dashboard.realms": ("realms.conf", "Tasks' and Writing's realm views, one realm|<id>|<label>|<glob> line each. "
-                         "A task is in the first realm whose glob matches its repo path (* crosses folders, ~ is home); "
+    "dashboard.realms": ("realms.conf", "Groups tasks and pieces into realms on Tasks and Writing. One realm|<id>|<label>|<glob> "
+                         "line each. A task is in the first realm whose glob matches its repo path (* crosses folders, ~ is home); "
                          "no match is Personal. Ids are lower case with hyphens, not personal, hoa, home or all."),
-    "dashboard.report_families": ("report-families.conf", "Reports' job families, one "
-                                  "family|<key>|<label>|<icon>|<job>,<job>,... line each, in the order the page draws "
-                                  "them. Families hoa and home are the HOA and Home pages' Reports and Briefs."),
-    "dashboard.hoa_thresholds": ("hoa-thresholds.conf", "HOA's trend levels, one <series>|below|<number> or "
-                                 "<series>|above|<number> line each; series is tank, runtime or aquifer."),
-    "dashboard.disk_storage": ("disk.conf", "Health's storage folders, one storage|<path> line each (~ and $HOME "
-                               "expand): Disk sizes the folders inside each, the place for large uncommitted data."),
+    "dashboard.report_families": ("report-families.conf", "Groups jobs into families on Reports, in this "
+                                  "order; a family with a realm's id gives that realm a page. One "
+                                  "family|<key>|<label>|<icon>|<job>,<job>,... line each. Families hoa and home feed the "
+                                  "HOA and Home pages."),
+    "dashboard.hoa_thresholds": ("hoa-thresholds.conf", "The problem lines on HOA's trend charts. One "
+                                 "<series>|below|<number> or <series>|above|<number> line each; series is tank, runtime "
+                                 "or aquifer."),
+    "dashboard.disk_storage": ("disk.conf", "The storage folders Health's Disk view sizes, "
+                               "folder by folder: the place for large uncommitted data. One storage|<path> line each "
+                               "(~ and $HOME expand)."),
 }
 
 

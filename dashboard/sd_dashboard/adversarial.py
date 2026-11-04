@@ -161,8 +161,8 @@ def state_dir() -> Path:
 
 #: The setting rows (sd:5109) and what Settings says each holds; a key with no row, or a cleared one, is the default.
 SETTINGS = {
-    "adversarial.model": f"The codex model the adversarial review runs, passed as codex exec -m. Unset is {MODEL}.",
-    "adversarial.effort": f"Its reasoning effort, one lower-case word such as low, medium or high. Unset is {EFFORT}.",
+    "adversarial.model": f"The Codex model the background review uses. Unset is {MODEL}.",
+    "adversarial.effort": f"How hard the background review thinks: one lower-case word such as low, medium or high. Unset is {EFFORT}.",
 }
 #: What a value may hold: it reaches codex's argv as one word.
 PATTERNS = {"adversarial.model": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", "adversarial.effort": r"[a-z]{1,20}"}
