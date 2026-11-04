@@ -154,7 +154,7 @@
     tool('episode', 'check', 'safe'), tool('episode', 'pack', 'confirm'),
     tool('song', 'validate', 'safe'), tool('song', 'suno-export', 'confirm'), tool('song', 'assemble', 'confirm'),
     { id: 'studio.session', on: 'project', label: 'Brief session', key: 'n', icon: 'terminal', risk: 'confirm', executes: true,
-      does: 'Starts claude in herdr in the project\'s repository, told to read its brief; a note on its item names the pane.',
+      does: 'Starts claude in herdr on this project\'s brief; notes the pane on its item.',
       when: () => true, consequence: o => `This starts a claude session for ${o.title}. It orders, uploads and buys nothing.`,
       cli: () => 'no sd verb: the dashboard starts claude in herdr, as Run starts a skill',
       sends: o => `POST /api/actions/run {action: studio.session, project: ${o.id}}`, run: o => ran(o, 'studio.session') },
