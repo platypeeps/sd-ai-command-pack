@@ -1,9 +1,7 @@
 """HTTP operations proof using an in-memory observer; no launchctl calls."""
 
 import http.client
-import re
 import subprocess
-from unittest.mock import patch
 
 from sd_db import operations, record_state, workflow
 from sd_db.workflow import WorkflowError
@@ -99,28 +97,14 @@ class OperationsActions(BrowserSession):
         self.assertTrue(reloaded["capabilities"]["retry"]["allowed"])
         self.assertEqual(self.backend.calls, [("cancel", "fixture/running-fixture")])
 
-    def test_operations_draws_trackers_its_one_kept_area(self):
+    def test_operations_keeps_no_area_and_lists_where_each_went(self):
         # sd:3402 retired Jobs, Ports, Progress, Repos, Reports and Commands; pack sd:7517 moved Services and
-        # Sessions to Management (test_v2_management), pack sd:7524 Usage to Metrics (test_v2_metrics) and pack sd:7527
-        # Resources' views to Management, Notes and Tasks, and their old addresses answer 301 there.
-        headings = {"trackers": "<h2>Trackers</h2>"}
-        # Resources reads sd_tile in a child, which runs launchctl; the test reads a fixture instead.
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        for area, heading in headings.items():
-            with self.subTest(area=area):
-                status, _, page = self.request(f"/operations?area={area}")
-                self.assertEqual(status, 200)
-                # pack sd:7266: the five areas are the shell's views; only the one asked for is drawn and shown.
-                panels = re.findall(r'<div id="view-(\w+)"( hidden)?>', page)
-                self.assertEqual([key for key, _ in panels], ["trackers"])
-                self.assertEqual([key for key, hidden in panels if not hidden], [area])
-                self.assertIn(heading, page)
-                for other in headings.values():
-                    if other != heading:
-                        self.assertNotIn(other, page)
-        self.assertIn(headings["trackers"], self.request("/operations")[2])
+        # Sessions to Management (test_v2_management), pack sd:7524 Usage to Metrics (test_v2_metrics), pack sd:7527
+        # Resources' views to Management, Notes and Tasks, and pack sd:7525 Trackers to GitHub (test_trackers_screen).
+        status, _, page = self.request("/operations")
+        self.assertEqual(status, 200)
+        self.assertIn('<a href="/github#view=tracked" data-view="trackers">', page)
+        self.assertNotIn('id="view-', page)
         for area in ("unknown", "jobs", "progress", "ports"):
             self.assertEqual(self.request(f"/operations?area={area}")[0], 404, area)
         self.assertEqual(self.backend.calls, [])
@@ -136,7 +120,9 @@ class OperationsActions(BrowserSession):
                              ("resources&resource=toolbox", "/management#view=machine"),
                              ("resources&resource=research", "/management?research=yes#view=repos"),
                              ("resources&resource=vault", "/notes"), ("resources&resource=queues", "/tasks?queues=open"),
-                             ("resources", "/management#view=machine"), ("resources&resource=ports", "/management#view=machine")):
+                             ("resources", "/management#view=machine"), ("resources&resource=ports", "/management#view=machine"),
+                             # pack sd:7525: Trackers moved to GitHub's Tracked view.
+                             ("trackers", "/github#view=tracked"), ("trackers&view=issues", "/github#view=tracked")):
             with self.subTest(area=area):
                 connection = http.client.HTTPConnection(host, port, timeout=10)
                 try:

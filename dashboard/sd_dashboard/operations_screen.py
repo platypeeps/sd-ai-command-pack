@@ -1,12 +1,12 @@
-"""Operations: the classic areas whose data no v2 page shows yet, and the helpers other screens import.
+"""Operations moved (pack sd:7517): where each of its areas went, and the helpers other screens import.
 
-Trackers keeps the tracker issues. The Jobs, Ports, Progress, Reports,
-Repos and Commands areas were retired in sd:3402, once Management, Health, Metrics, Reports and Activity carried
-their controls; an address naming one is a 404. Services and Sessions moved to Management in pack sd:7517 and Usage to
-Metrics in pack sd:7524, and Resources' four views to Management, Notes and Tasks in pack sd:7527 (`MOVED`,
-`MOVED_RESOURCES`): an address naming one answers 301 to the view that holds it. Every area draws
-inside the v2 shell (sd:3586), under Fleet's Operations rail section, as one of its views (pack sd:7266):
-`/ui/operations.js` declares them, and the server draws only the area `?area=` names.
+Every area moved to the page that holds its subject. The Jobs, Ports, Progress, Reports, Repos and Commands areas were
+retired in sd:3402, once Management, Health, Metrics, Reports and Activity carried their controls; an address naming
+one is a 404. Services and Sessions moved to Management in pack sd:7517, Usage to Metrics in pack sd:7524, Resources'
+four views to Management, Notes and Tasks in pack sd:7527, and Trackers to GitHub's Tracked view in pack sd:7525
+(`MOVED`, `MOVED_RESOURCES`): `server` answers an address naming one with a 301 to the view that holds it now
+(`moved_to`). The bare address draws `moved_page`, a list of those homes, since only the browser sees an old
+`#view=<area>`: `/ui/operations.js` follows the link that names it, and Trackers' with none, the area it opened on.
 """
 
 import contextlib
@@ -19,28 +19,17 @@ from .controls import form
 from .markup import join, tag
 from .pages import shell_page
 
-AREAS = (("trackers", "Trackers"),)
-#: The retired areas and the view that holds each now (pack sd:7517); `server` answers 301 there (`moved_to`) and
-#: `/ui/operations.js` sends an old `#view=` address there too.
-MOVED = {"services": "/management#view=deploys", "sessions": "/management#view=sessions", "usage": "/metrics#view=spend",
-         "resources": "/management#view=machine"}
+#: Each retired area, the view that holds it now and what the moved page says of it (pack sd:7517).
+MOVED = {"services": ("/management#view=deploys", "Services: Management, Deploys"),
+         "sessions": ("/management#view=sessions", "Sessions: Management, Sessions"),
+         "usage": ("/metrics#view=spend", "Usage: Metrics, Spend"),
+         "resources": ("/management#view=machine", "Resources: Management, Machine; research, vault and queues on "
+                                                   "Repos, Notes and Tasks"),
+         "trackers": ("/github#view=tracked", "Trackers: GitHub, Tracked")}
 #: Resources' views and the page that holds each now (pack sd:7527): `?area=resources&resource=<view>` answers 301
 #: there, and a bare or unknown one to Toolbox's, the view Resources opened on.
 MOVED_RESOURCES = {"toolbox": "/management#view=machine", "research": "/management?research=yes#view=repos",
                    "vault": "/notes", "queues": "/tasks?queues=open"}
-#: Each area's Details note.
-NOTES = {
-    "trackers": "Trackers lists the open pull requests and issues that sd shadow sync last saw.",
-}
-
-
-def _views(area, content):
-    """One `view-<key>` panel per area, the shell's views (pack sd:7266); only `area`'s holds its content.
-
-    The shell shows one panel and hides the rest; `/ui/operations.js` loads the address of a view that is not drawn.
-    """
-    return join(tag("div", content if key == area else tag("p", f"Opening {label}…", class_="hint"),
-                    id=f"view-{key}", hidden=key != area) for key, label in AREAS)
 
 
 def assignment_cancel(connection, identity: int):
@@ -81,34 +70,24 @@ def _one_snapshot(connection):
 
 
 def moved_to(parameters):
-    """The address a retired area's bookmark answers 301 to, or None for an area still here.
+    """The address a retired area's bookmark answers 301 to, or None for no area or one that never moved.
 
     Usage's month rides along when it is one (pack sd:7524): Metrics reads `?month=YYYY-MM`.
     """
     area = (parameters.get("area") or [""])[0]
     if area == "resources":
-        return MOVED_RESOURCES.get((parameters.get("resource") or [""])[0], MOVED["resources"])
-    target = MOVED.get(area)
+        return MOVED_RESOURCES.get((parameters.get("resource") or [""])[0], MOVED["resources"][0])
+    target = MOVED[area][0] if area in MOVED else None
     month = (parameters.get("month") or [""])[0]
     if target and area == "usage" and re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month):
         return target.replace("#", f"?month={month}#")
     return target
 
 
-def operations_page(connection, *, parameters, now):
-    """The area `?area=` names, the first by default; None for an area that is not one, so the server answers 404."""
-    area = (parameters.get("area") or [AREAS[0][0]])[0]
-    if area not in dict(AREAS):
-        return None
-    from .trackers_screen import trackers_panel
-
-    content = trackers_panel(connection, parameters, now=now)
-    return shell_page("Operations", "Operations", _views(area, content), subtitle=_subtitle(), screen="operations",
-                      note=NOTES[area], script="operations.js")
-
-
-def _subtitle():
-    """The areas, from `AREAS`, so the summary names every view the rail lists."""
-    words = [label.lower() for _, label in AREAS]
-    words[0] = words[0].capitalize()
-    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+def moved_page():
+    """`/operations` with no area: a link to each area's new home, which `/ui/operations.js` follows for an old
+    `#view=<area>` (Trackers' for none), so a bookmark the server cannot read still lands where its area went."""
+    return shell_page("Operations moved", "Today", tag("ul", join(
+        tag("li", tag("a", words, href=href, data_view=area)) for area, (href, words) in MOVED.items())),
+        subtitle="Each area moved to the page that holds its subject.", screen="today", cli_equivalents=False,
+        note="Operations' areas moved to Management, Metrics, Notes, Tasks and GitHub.", script="operations.js")

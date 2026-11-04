@@ -30,7 +30,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   const STATE = { broken: 'warning', look: 'caution', queued: 'queued' };
   const GLYPH = { warning: '■', caution: '▲', queued: '◌', ok: '●', unknown: '▨' };
   // Each source's label, icon, and the page that shows it in full, with that page's name (sd:3402).
-  const SRC = { jobs: ['Jobs', 'activity', '/management', 'Management'], prs: ['Pull requests', 'git-pull-request', '/operations?area=trackers', 'Trackers'], sessions: ['Sessions', 'bot', '/management#view=sessions', 'Management'], repos: ['Repos', 'hard-drive-download', '/management', 'Management'],
+  const SRC = { jobs: ['Jobs', 'activity', '/management', 'Management'], prs: ['Pull requests', 'git-pull-request', '/github', 'GitHub'], sessions: ['Sessions', 'bot', '/management#view=sessions', 'Management'], repos: ['Repos', 'hard-drive-download', '/management', 'Management'],
     lane: ['Lane', 'git-merge', '/today#view=queue', 'Queue'], reports: ['Reports', 'file-text', '/reports', 'Reports'], mail: ['Mail', 'mail', '', ''], tasks: ['Tasks', 'list-checks', '/tasks', 'Tasks'], briefs: ['Briefs', 'book-open', '/briefs', 'Briefs'] };
   const TYPE = { job: 'job', pr: 'pull request', ahead: 'repo', dirty: 'repo', pinned: 'repo', worktree: 'sessions', dark: 'collector', item: 'work item',
     report: 'report', mail: 'mail thread', lane: 'lane entry', brief: 'brief', group: 'group' };

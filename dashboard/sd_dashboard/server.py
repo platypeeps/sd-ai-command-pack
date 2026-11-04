@@ -165,12 +165,13 @@ def route(connection: sqlite3.Connection, path: str, parameters, *, now: str) ->
 
         return render(connection, parameters=parameters)
     if path == "/operations":
-        from .operations_screen import operations_page
+        # pack sd:7517: every area moved; the handler answers a moved one with a 301 before this, and the bare address
+        # lists their homes. Any other area, such as one sd:3402 retired, is a 404.
+        if parameters.get("area"):
+            raise NotFound("/operations?area=" + parameters["area"][0])
+        from .operations_screen import moved_page
 
-        rendered = operations_page(connection, parameters=parameters, now=now)
-        if rendered is None:
-            raise NotFound("/operations?area=" + (parameters.get("area") or [""])[0])
-        return rendered
+        return moved_page()
     if path.startswith("/item/"):
         tail = path[len("/item/") :].strip("/")
         if not tail.isdigit():

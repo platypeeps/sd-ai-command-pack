@@ -59,3 +59,16 @@
   .dependabot .sev { grid-area: sev; } .dependabot .pkg { grid-area: pkg; } .dependabot .adv { grid-area: adv; }
   .dependabot .when { grid-area: when; text-align: left; } .dependabot .acts { grid-area: act; align-self: start; }
 }
+/* GitHub > Tracked (pack sd:7525, Operations > Trackers until then): the issue ledger, one row per open tracker row;
+ * kind and author take the ledger's data face, and each tracker's sync health is the line under the table.
+ * Hallmark · component: tracker row · genre: modern-minimal · theme: design.md instrument panel
+ * states: default · hover (the reference link) · focus (link ring) · active · empty (no open row) · error (a failed
+ * read is a row naming it).
+ * pre-emit critique: P4 H4 E4 S4 R5 V4 */
+.tracked .who { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); }
+.tracked .ph { color: var(--color-muted); }
+#tracked-health:empty { display: none; }
+@media (max-width: 899px) {
+  .tracked tbody tr:not(.empty) { grid-template-areas: "ref why" "what what" "repo when" "who who"; }
+  .tracked .who { grid-area: who; } .tracked .when { grid-area: when; }
+}
