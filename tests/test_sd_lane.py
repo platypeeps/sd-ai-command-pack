@@ -5493,7 +5493,8 @@ class FailureNotes(SharedQueue):
         row = {"status": "failed", "step": "prepare", "item": 1, "expected_head": "a" * 40,
                "reason": "a blocking finding", "prepare_log": "/logs/prepare-1-x.log", "log_host": "hub"}
         notes: list[str] = []
-        sd_lane.note_ended(row, self.repo, lambda item, body, main: notes.append(body) or "written")
+        sd_lane.note_ended(row, self.repo, lambda item, body, main, kind: notes.append(body) or "written",
+                           queue=self.store())
         self.assertEqual(notes, [f"Lane failed in prepare at {'a' * 12}: a blocking finding; full text: "
                                  "/logs/prepare-1-x.log"])
 
@@ -5510,7 +5511,7 @@ class FailureNotes(SharedQueue):
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
 
-        def broken(item: int, body: str, main: pathlib.Path) -> str:
+        def broken(item: int, body: str, main: pathlib.Path, kind: str) -> str:
             raise RuntimeError("the hub refused the note")
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship, note=broken)
         [entry] = self.entries()
@@ -5577,6 +5578,124 @@ class FailureNotes(SharedQueue):
         self.make_dead()
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((self.entries()[0]["status"], len(self.lane_notes())), ("failed", 1))
+
+    def as_satellite(self) -> None:
+        """This machine hosts the lane and is not the hub: a hub serves its database (sd:7357)."""
+        self.repo_row(sd_lane.this_host())
+        patcher = mock.patch("sd_db.database.served_by", lambda target, home=None: "hub.example.test:8765",
+                             create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def failing_prepare(self) -> str:
+        head = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver",
+                                     closes=(2,))["expected_head"]
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        return head
+
+    def test_a_satellite_hosted_failure_writes_an_open_followup_on_each_item(self) -> None:
+        """pack sd:7357, failure table S2 lane ends failed: the lane host's sessions see it in `sd today`."""
+        self.as_satellite()
+        self.failing_prepare()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual(([item for item, _ in self.lane_notes()], self.note_kinds), ([1, 2], ["followup", "followup"]))
+        self.assertEqual((entry["status"], entry["note"]), ("failed", {"sd:1": "written", "sd:2": "written"}))
+
+    def test_a_hub_hosted_failure_writes_a_comment(self) -> None:
+        """Failure table S2 hub lane fails: NULL or this hub's own name; neither gets a followup."""
+        for host in (None, sd_lane.this_host()):
+            with self.subTest(host=host):
+                self.notes.clear()
+                self.note_kinds.clear()
+                self.repo_row(host)
+                row = {"status": "failed", "step": "prepare", "item": 1, "head": "a" * 40, "reason": "no"}
+                self.assertEqual(sd_lane.note_ended(row, self.repo, queue=self.store()), {"sd:1": "written"})
+                self.assertEqual(self.note_kinds, ["comment"])
+
+    def test_another_machines_lane_writes_a_followup_from_the_hub(self) -> None:
+        """A cancel on the hub of a satellite lane's entry: the satellite's sessions must still see it."""
+        self.repo_row("build-2")
+        row = {"status": "failed", "step": "merge", "item": 1, "head": "a" * 40, "reason": "released"}
+        sd_lane.note_ended(row, self.repo, queue=self.store())
+        self.assertEqual(self.note_kinds, ["followup"])
+
+    def test_a_lane_host_that_does_not_read_writes_a_followup(self) -> None:
+        """Failures: an unread host is unknown, not the hub's; the failure stays open rather than lost."""
+        row = {"status": "failed", "step": "prepare", "item": 1, "head": "a" * 40, "reason": "no"}
+        with mock.patch.object(sd_lane.sd_lib, "lane_host", side_effect=sqlite3.OperationalError("the hub went away")):
+            self.assertEqual(sd_lane.note_ended(row, self.repo, queue=self.store()), {"sd:1": "written"})
+        self.assertEqual(self.note_kinds, ["followup"])
+
+    def test_a_followup_that_fails_to_write_is_named_and_the_entry_still_fails(self) -> None:
+        """Failure table S2 lane ends failed, the note write fails: the entry stays failed; the answer names it."""
+        self.as_satellite()
+        self.failing_prepare()
+        kinds: list[str] = []
+
+        def broken(item: int, body: str, main: pathlib.Path, kind: str) -> str:
+            kinds.append(kind)
+            raise RuntimeError("the hub refused the note")
+        sd_lane.run_lane(self.repo, self.environ, self.ship, note=broken)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["reason"], kinds), ("failed", "a blocking finding", ["followup"] * 2))
+        self.assertEqual(entry["note"], {"sd:1": "failed: RuntimeError: the hub refused the note",
+                                         "sd:2": "failed: RuntimeError: the hub refused the note"})
+
+    def followups(self) -> tuple[list[int], dict[int, str | None]]:
+        """Items 1 and 2, each with a lane followup from an earlier failed run and one another session wrote."""
+        import sd_db
+        items = self.register_items(2)
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            notes = [sd_db.add_note(connection, item, "followup", body) for item in items
+                     for body in ("Lane failed in prepare at aaaaaaaaaaaa: a blocking finding", "Chase the vendor")]
+        finally:
+            connection.close()
+        return items, dict.fromkeys(notes)
+
+    def resolved(self, notes: dict[int, str | None]) -> dict[int, bool]:
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            return {number: connection.execute("SELECT resolved_at FROM note WHERE id = ?",
+                                               (number,)).fetchone()[0] is not None for number in notes}
+        finally:
+            connection.close()
+
+    def test_a_passing_run_resolves_only_the_lanes_open_followups(self) -> None:
+        """Failure table S2 session resolves: a later pass closes the lane's followups on each item it carries."""
+        items, notes = self.followups()
+        lane, other, lane_2, other_2 = notes
+        sd_lane.enqueue_entry(self.feature, items[0], "fix: one", self.body, self.environ, claim="deliver",
+                              closes=(items[1],))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertIn(entry["status"], sd_lane.GATE_PASSED)
+        self.assertEqual(self.resolved(notes), {lane: True, other: False, lane_2: True, other_2: False})
+        self.assertEqual(entry["resolved"], {f"sd:{items[0]}": f"resolved #{lane}", f"sd:{items[1]}": f"resolved #{lane_2}"})
+        self.assertEqual(answer["ran"][0]["resolved"], entry["resolved"])
+
+    def test_a_resolve_that_fails_leaves_the_followups_open_and_the_entry_passed(self) -> None:
+        """Failures: the resolve write fails; the followup stays open on every machine, and the answer names it."""
+        items, notes = self.followups()
+        sd_lane.enqueue_entry(self.feature, items[0], "fix: one", self.body, self.environ, claim="deliver")
+        import sd_db.writes
+        with mock.patch.object(sd_db.writes, "resolve_note", side_effect=sqlite3.OperationalError("the hub went away")):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertIn(entry["status"], sd_lane.GATE_PASSED)
+        self.assertEqual(entry["resolved"], {f"sd:{items[0]}": "failed: OperationalError: the hub went away"})
+        self.assertFalse(any(self.resolved(notes).values()))
+
+    def test_a_failed_run_resolves_nothing(self) -> None:
+        """A failure after a failure keeps the earlier followup open beside the new note."""
+        items, notes = self.followups()
+        sd_lane.enqueue_entry(self.feature, items[0], "fix: one", self.body, self.environ, claim="deliver")
+        self.answers[(items[0], "prepare")] = {"ok": False, "phase": "review_blocked", "error": "again"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[0]["status"], "resolved" in self.entries()[0]), ("failed", False))
+        self.assertFalse(any(self.resolved(notes).values()))
 
     def test_a_failure_an_older_version_recorded_is_noted_when_applied(self) -> None:
         """Older state: a hub-stop record from before sd:5963 holds a failure no note was written for."""

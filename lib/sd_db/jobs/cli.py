@@ -159,11 +159,8 @@ def command_fence(argv: list[str]) -> int:
     if argv:
         print("sd-db fence: takes no arguments", file=sys.stderr)
         return 1
-    from ..hub import Role, read, role_at
-    satellite = read(_home())
-    # A satellite holds no database and no role, whatever the hub's setting says.
-    found = (Role("elsewhere", satellite.host, f"this machine is a satellite of {satellite.host} (hub.json)")
-             if satellite is not None else role_at(default_path(_home())))
+    from ..hub import role_at, satellite_role
+    found = satellite_role(_home()) or role_at(default_path(_home()))
     print(f"sd-db: fence: {found.state}: {found.reason}")
     return 1 if found.refuses else 0
 
