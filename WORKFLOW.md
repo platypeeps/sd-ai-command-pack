@@ -515,9 +515,12 @@ sentence.
 The provider registry maps roles to providers.
 Reusable skill procedures name roles; operator policy owns preferred entries.
 
-Cheap, standard, and deep changes require one completed independent local review.
-Skip requires none; planning and challenged reviews retain their minimum of one.
-Tier selection still follows repository policy, without adding automatic local reviewers.
+Cheap, standard, and deep changes require two completed independent local reviews (sd:7519).
+The first two readers on the reviewer order run at once: with the shipped order, codex and Claude.
+A reader that fails gives its slot to the next entry; the receipt keeps the registry order.
+Claude's reader also gets the ranked addition: trace callers and config readers, rank by production impact.
+Skip requires none; planning, lensed and challenged reviews keep a floor of two, so a research brief gets both.
+Tier selection still follows repository policy; the tier never adds a third reader.
 Complete local review before any Copilot request; [Standing authorization](#standing-authorization) holds the policy.
 A completed Copilot review must cover the merge head, or an ancestor whose diff to it touches only skippable `docs/` paths.
 
@@ -571,7 +574,8 @@ Only entries on the reviewer order participate in automatic fallback.
 Enabled reviewer-capable entries outside that order require an explicit `--provider` selection.
 With a database, the order in force is its rows: `sd providers configure` sets it, `sd providers list` shows it, and `sd-review --explain` names it on its `order from` line; the file's `roles:` lists only seed those rows. The shipped seed contains Codex, then Claude, then opencode; other providers remain explicit-only until an order names them.
 Existing provider files and database orders remain unchanged until the operator migrates them.
-The chain continues until the required count completes or eligible entries run out. A completed
+The chain continues until the required count completes or eligible entries run out; the
+required readers run at once, and a failed one's slot takes the next entry. A completed
 review with findings counts; it does not trigger a replacement. Consent, author
 exclusions and spending limits apply to every fallback, and earlier findings remain.
 `vendor` is the
