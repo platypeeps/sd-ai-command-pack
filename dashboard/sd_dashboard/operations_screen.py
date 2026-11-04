@@ -1,9 +1,10 @@
 """Operations: the classic areas whose data no v2 page shows yet, and the helpers other screens import.
 
-Resources keeps Toolbox, Vault and Queues, and Trackers keeps the tracker issues. The Jobs, Ports, Progress, Reports,
+Trackers keeps the tracker issues. The Jobs, Ports, Progress, Reports,
 Repos and Commands areas were retired in sd:3402, once Management, Health, Metrics, Reports and Activity carried
 their controls; an address naming one is a 404. Services and Sessions moved to Management in pack sd:7517 and Usage to
-Metrics in pack sd:7524 (`MOVED`): an address naming one answers 301 to the view that holds it. Every area draws
+Metrics in pack sd:7524, and Resources' four views to Management, Notes and Tasks in pack sd:7527 (`MOVED`,
+`MOVED_RESOURCES`): an address naming one answers 301 to the view that holds it. Every area draws
 inside the v2 shell (sd:3586), under Fleet's Operations rail section, as one of its views (pack sd:7266):
 `/ui/operations.js` declares them, and the server draws only the area `?area=` names.
 """
@@ -18,16 +19,17 @@ from .controls import form
 from .markup import join, tag
 from .pages import shell_page
 
-AREAS = (("resources", "Resources"), ("trackers", "Trackers"))
+AREAS = (("trackers", "Trackers"),)
 #: The retired areas and the view that holds each now (pack sd:7517); `server` answers 301 there (`moved_to`) and
 #: `/ui/operations.js` sends an old `#view=` address there too.
-MOVED = {"services": "/management#view=deploys", "sessions": "/management#view=sessions", "usage": "/metrics#view=spend"}
-#: Resources' views that moved to a page of their own (pack sd:7527): `?area=resources&resource=<view>` answers 301 there.
+MOVED = {"services": "/management#view=deploys", "sessions": "/management#view=sessions", "usage": "/metrics#view=spend",
+         "resources": "/management#view=machine"}
+#: Resources' views and the page that holds each now (pack sd:7527): `?area=resources&resource=<view>` answers 301
+#: there, and a bare or unknown one to Toolbox's, the view Resources opened on.
 MOVED_RESOURCES = {"toolbox": "/management#view=machine", "research": "/management?research=yes#view=repos",
-                   "vault": "/notes"}
+                   "vault": "/notes", "queues": "/tasks?queues=open"}
 #: Each area's Details note.
 NOTES = {
-    "resources": "Resources shows what the local collectors read: Toolbox, Vault, Research and Queues.",
     "trackers": "Trackers lists the open pull requests and issues that sd shadow sync last saw.",
 }
 
@@ -85,7 +87,7 @@ def moved_to(parameters):
     """
     area = (parameters.get("area") or [""])[0]
     if area == "resources":
-        return MOVED_RESOURCES.get((parameters.get("resource") or [""])[0])
+        return MOVED_RESOURCES.get((parameters.get("resource") or [""])[0], MOVED["resources"])
     target = MOVED.get(area)
     month = (parameters.get("month") or [""])[0]
     if target and area == "usage" and re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month):
@@ -98,14 +100,9 @@ def operations_page(connection, *, parameters, now):
     area = (parameters.get("area") or [AREAS[0][0]])[0]
     if area not in dict(AREAS):
         return None
-    if area == "resources":
-        from .reports_screen import resources
+    from .trackers_screen import trackers_panel
 
-        content = resources(parameters)
-    else:
-        from .trackers_screen import trackers_panel
-
-        content = trackers_panel(connection, parameters, now=now)
+    content = trackers_panel(connection, parameters, now=now)
     return shell_page("Operations", "Operations", _views(area, content), subtitle=_subtitle(), screen="operations",
                       note=NOTES[area], script="operations.js")
 
@@ -114,4 +111,4 @@ def _subtitle():
     """The areas, from `AREAS`, so the summary names every view the rail lists."""
     words = [label.lower() for _, label in AREAS]
     words[0] = words[0].capitalize()
-    return ", ".join(words[:-1]) + " and " + words[-1]
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]

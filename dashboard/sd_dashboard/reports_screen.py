@@ -1,4 +1,8 @@
-"""Database reports and bounded, read-only legacy resource views.
+"""Database reports, and the bounded, read-only machine and vault views other pages show.
+
+The views (`VIEWS`) are `sd_tile.py` tabs, each run as a child under its budget by `collect` and served by `view`:
+Toolbox as Management's Machine view, Research as its Repos filter, Vault on Notes and Queues on Tasks (pack sd:7527).
+They were Operations > Resources until then.
 
 Since sd:2121 it also builds the documents behind the default UI's Reports
 page (`v2/reports.html`, at `/reports`); the page holds no rows:
@@ -42,8 +46,6 @@ from .markup import join, tag
 # in-process, as Ports does, and read the vault inside the server process
 # rather than in a child that the budget can kill.
 VIEWS = (("toolbox", "Toolbox"), ("vault", "Vault"), ("research", "Research"), ("queues", "Queues"))
-#: The views Operations > Resources still shows; each moves to its page in pack sd:7527 (`view`).
-RESOURCES = (("queues", "Queues"),)
 # The child each view runs: one plugin tile, owned by this dashboard checkout
 # and never supplied by a page.
 TILE = Path(__file__).resolve().parents[1] / "sd_tile.py"
@@ -146,40 +148,6 @@ def view(area):
         return collect(area)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         return 503, {"error": f"{dict(VIEWS)[area]} could not be observed: {error}"}
-
-
-def _draw(document):
-    """A tile's sections as classic markup, for the Resources views not moved yet."""
-    def part(section):
-        (kind, value), = section.items()
-        if kind == "heading":
-            return tag("h3", value)
-        if kind == "listing":
-            return tag("ul", join(tag("li", line) for line in value))
-        if kind == "figures":
-            return tag("dl", join(join((tag("dt", label), tag("dd", figure))) for label, figure in value))
-        return tag("table", tag("thead", tag("tr", join(tag("th", label) for label, _ in value["columns"]))),
-                   tag("tbody", join(tag("tr", join(tag("td", one["text"]) for one in row))
-                                     for row in value["rows"])), class_="listing-table")
-    rows = document["rows"]
-    notices = tag("section", tag("h3", "Needs attention"),
-        tag("dl", join(tag("div", tag("dt", row["what"]), tag("dd", row["detail"])) for row in rows)),
-        class_="notice") if rows else ""
-    return join((join(part(section) for section in document["sections"]), notices))
-
-
-def resources(parameters, *, backend=None):
-    area = (parameters.get("resource") or [RESOURCES[0][0]])[0]
-    if area not in dict(RESOURCES):
-        area = RESOURCES[0][0]
-    navigation = tag("nav", join(tag("a", label, href=f"/operations?area=resources&resource={key}",
-        aria_current="page" if key == area else None) for key, label in RESOURCES), class_="view-toggle", aria_label="Resources")
-    try:
-        content = _draw((backend or collect)(area))
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
-        content = tag("p", "This resource could not be observed: " + str(error), class_="notice")
-    return tag("section", tag("h2", "Resources"), navigation,
-        tag("p", "Read-only observations from the existing local collectors. Nothing here starts jobs or edits vault notes.", class_="hint"), content)
 
 
 def report_controls(connection, row, revision):

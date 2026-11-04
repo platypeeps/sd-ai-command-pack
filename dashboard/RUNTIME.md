@@ -214,7 +214,7 @@ into its view's panel; `/ui/operations.js` declares the views and loads the addr
 a legacy row cap on a `start` bill is no cap there (sd:234 slice 12h) -- on the request's read-only
 connection and write nothing; the orphan sweep that `sd-db usage` runs is the verb's alone. Metrics'
 Configure saves provider enabled flags and both role orders together, after the
-complete proposal passes the author/reviewer guard. Resources reuse bounded
+complete proposal passes the author/reviewer guard. The machine and vault views (pack sd:7527) reuse bounded
 read-only collectors; research configuration is parsed as data, never executed.
 The obsolete Obsidian Skill Proposals action is replaced by the Skills workflow.
 Re-run collector on Contributions and Health runs `sd_db.sync_shadow` for each tracker in a server thread (sd:2207, sd:2894, `shadow_run`).

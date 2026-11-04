@@ -99,11 +99,11 @@ class OperationsActions(BrowserSession):
         self.assertTrue(reloaded["capabilities"]["retry"]["allowed"])
         self.assertEqual(self.backend.calls, [("cancel", "fixture/running-fixture")])
 
-    def test_operations_tabs_select_one_kept_area_and_default_to_resources(self):
+    def test_operations_draws_trackers_its_one_kept_area(self):
         # sd:3402 retired Jobs, Ports, Progress, Repos, Reports and Commands; pack sd:7517 moved Services and
-        # Sessions to Management (test_v2_management) and pack sd:7524 Usage to Metrics (test_v2_metrics), and their
-        # old addresses answer 301 there.
-        headings = {"resources": "<h2>Resources</h2>", "trackers": "<h2>Trackers</h2>"}
+        # Sessions to Management (test_v2_management), pack sd:7524 Usage to Metrics (test_v2_metrics) and pack sd:7527
+        # Resources' views to Management, Notes and Tasks, and their old addresses answer 301 there.
+        headings = {"trackers": "<h2>Trackers</h2>"}
         # Resources reads sd_tile in a child, which runs launchctl; the test reads a fixture instead.
         patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
@@ -114,13 +114,13 @@ class OperationsActions(BrowserSession):
                 self.assertEqual(status, 200)
                 # pack sd:7266: the five areas are the shell's views; only the one asked for is drawn and shown.
                 panels = re.findall(r'<div id="view-(\w+)"( hidden)?>', page)
-                self.assertEqual([key for key, _ in panels], ["resources", "trackers"])
+                self.assertEqual([key for key, _ in panels], ["trackers"])
                 self.assertEqual([key for key, hidden in panels if not hidden], [area])
                 self.assertIn(heading, page)
                 for other in headings.values():
                     if other != heading:
                         self.assertNotIn(other, page)
-        self.assertIn(headings["resources"], self.request("/operations")[2])
+        self.assertIn(headings["trackers"], self.request("/operations")[2])
         for area in ("unknown", "jobs", "progress", "ports"):
             self.assertEqual(self.request(f"/operations?area={area}")[0], 404, area)
         self.assertEqual(self.backend.calls, [])
@@ -135,7 +135,8 @@ class OperationsActions(BrowserSession):
                              # pack sd:7527: each Resources view moved to the page that holds it now.
                              ("resources&resource=toolbox", "/management#view=machine"),
                              ("resources&resource=research", "/management?research=yes#view=repos"),
-                             ("resources&resource=vault", "/notes")):
+                             ("resources&resource=vault", "/notes"), ("resources&resource=queues", "/tasks?queues=open"),
+                             ("resources", "/management#view=machine"), ("resources&resource=ports", "/management#view=machine")):
             with self.subTest(area=area):
                 connection = http.client.HTTPConnection(host, port, timeout=10)
                 try:

@@ -3,9 +3,9 @@
 # and item controls share sd_db. The <prefix>.sd-dashboard LaunchAgent
 # (prefix from SYSTEM_TOOLS_LABEL_PREFIX, default local.system-tools) manages its loopback
 # server and optional authenticated Tailscale IP listener.
-# The legacy collectors back two Operations areas: Resources runs sd_tile.py
-# for Toolbox, Briefs, Vault, Research and Queues, and Ports calls one of
-# them, `collectors.collect_ports`, in-process -- not the whole tile set.
+# The legacy collectors back the machine and vault views: Management, Notes and
+# Tasks run sd_tile.py for Toolbox, Research, Vault and Queues (pack sd:7527),
+# and Health's Ports calls `collectors.collect_ports` in-process.
 # `tile` runs one view from a shell.
 # Usage: dashboard.sh tile <tab> | serve | preflight | install | health | shots | pages | test
 set -e
@@ -248,7 +248,7 @@ case "${1:-}" in
 usage: dashboard.sh tile <tab> | serve | preflight | install | health | grants | shots | docs | pages | test
 
   tile <tab>       one tab as JSON on stdout — toolbox, vault, research,
-                   ports or queues. The Resources views are
+                   ports or queues. The machine and vault views are
                    toolbox, vault, research and queues, and each
                    reads its tab this way; Ports has no view and reads
                    collect_ports in-process. Exits 1 with the reason on

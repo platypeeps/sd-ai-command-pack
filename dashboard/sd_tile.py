@@ -8,9 +8,10 @@ instead of being ported into it -- the collectors below are `collectors.py`'s
 own, imported rather than copied, and this file is only the part that turns
 them into a tab. The pack dashboard is no longer served and its plugin loader
 is gone (sd:719). The workflow dashboard in `sd_dashboard/` renders the views
-now: under Operations, Resources, `reports_screen.collect` runs this file as a
-child for Toolbox, Vault, Research and Queues, and the Ports area
-calls `collect_ports` in-process (`ports_screen.py`).
+now: `reports_screen.collect` runs this file as a child for Toolbox
+(Management's Machine view), Research (its Repos filter), Vault (Notes) and
+Queues (Tasks), pack sd:7527, and Health calls `collect_ports` in-process
+(`ports_screen.py`).
 
 Five when this file was written; Queues joined at 6b-6, and the count is now
 `TABS` rather than a number in a sentence. A new view is a builder and its

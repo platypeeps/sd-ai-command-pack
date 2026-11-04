@@ -93,7 +93,7 @@ class Resources(unittest.TestCase):
             self.assertEqual(rows["literal"]["docs"][0]["title"], "Literal document")
             self.assertEqual(rows["literal"]["docs"][0]["words"], 5)
             with patch.dict(os.environ, {"REPO_ROOT": str(root)}):
-                html = str(reports_screen._draw(reports_screen.collect("research")))
+                html = json.dumps(reports_screen.collect("research"))
             self.assertIn("Literal document", html)
             self.assertIn("computed could not be fully observed", html)
             self.assertIn("run sd-research-kit render once to write docs/dashboard/research.json", html)
@@ -115,20 +115,16 @@ class Resources(unittest.TestCase):
             patches.append(patch.dict(reports_screen.VIEW_SECONDS, dict.fromkeys(reports_screen.VIEW_SECONDS, seconds)))
         return Patches(patches), Path(directory.name)
 
-    def test_resource_observations_are_visible_and_escaped_in_every_view(self):
+    def test_resource_observations_are_kept_as_data_in_every_view(self):
         payload = {"sections": [{"heading": "Healthy content"}], "rows": [
             {"what": "<script>repo alert</script>", "detail": '<img src=x onerror="bad()">'}]}
         tile, _ = self.tile("import os, sys\nsys.stdout.write(os.environ['TILE_PAYLOAD'])\n")
         with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps(payload)}):
             for area, _ in reports_screen.VIEWS:
                 with self.subTest(area=area):
-                    html = str(reports_screen._draw(reports_screen.collect(area)))
-                    self.assertIn("Healthy content", html)
-                    self.assertIn("Needs attention", html)
-                    self.assertIn("&lt;script&gt;repo alert&lt;/script&gt;", html)
-                    self.assertIn("&lt;img", html)
-                    self.assertNotIn("<script", html)
-                    self.assertNotIn("<img", html)
+                    # Data, not markup: the page's markup.tile escapes it (test_v2_management, _notes, _tasks).
+                    self.assertEqual(reports_screen.collect(area), {"title": dict(reports_screen.VIEWS)[area],
+                                     "sections": payload["sections"], "rows": payload["rows"]})
             payload["rows"] = []
             with patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps(payload)}):
                 self.assertEqual(reports_screen.collect("toolbox")["rows"], [])
@@ -251,9 +247,11 @@ class Resources(unittest.TestCase):
             reports_screen.collect("vault")
         self.assertFalse((directory / "tile.py.finished").exists(), "the view waited for the tile instead of killing it")
         self.assertGone(directory / "tile.py.pids")
-        # The page shows the refusal and its reason rather than an empty view.
-        html = str(reports_screen.resources({"resource": ["vault"]}, backend=Mock(side_effect=refused.exception)))
-        self.assertIn("This resource could not be observed: resource inspection was stopped at its budget", html)
+        # The page's route answers the refusal and its reason rather than an empty view.
+        with patch.object(reports_screen, "collect", Mock(side_effect=refused.exception)):
+            status, answer = reports_screen.view("vault")
+        self.assertEqual(status, 503)
+        self.assertIn("Vault could not be observed: resource inspection was stopped at its budget", answer["error"])
 
     def test_every_view_declares_a_ceiling_inside_the_tile_contract(self):
         self.assertEqual(set(reports_screen.VIEW_SECONDS), {area for area, _ in reports_screen.VIEWS})
@@ -299,30 +297,34 @@ cat {str(root)!r}/"$3.json"
             "sd_tile.TILE_SECONDS = 60.0\nsys.exit(sd_tile.main(sys.argv[1:]))\n")
         with tile, \
                 patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}", "OBSIDIAN_VAULT": str(stub / "vault")}):
-            html = str(reports_screen.resources({"resource": ["queues"]}))
-        return html, (stub / "calls").read_text().splitlines()
+            answer = reports_screen.view("queues")
+        return answer, (stub / "calls").read_text().splitlines()
+
+    @staticmethod
+    def cells(doc):
+        """Each table row's cell texts, in order."""
+        return [[one["text"] for one in row] for section in doc["sections"] if "table" in section
+                for row in section["table"]["rows"]]
 
     def test_queues_view_renders_the_base_rows_from_the_database(self):
         # The real tile, through the page's own path, reading `sd store list` for each queue.
-        html, calls = self.queues(self.LISTED)
-        self.assertIn('aria-current="page">Queues</a>', html)
-        self.assertNotIn("could not be observed", html)
+        doc, calls = self.queues(self.LISTED)
         self.assertEqual(sorted(calls), sorted(f"store list {kind} --json" for kind in self.LISTED))
-        self.assertIn("<td>Blog Ideas</td><td>2</td><td>3</td>", html)
-        self.assertIn("<td>Topics</td><td>0</td><td>1</td>", html)
-        self.assertIn("<td>Old idea</td><td>Blog Ideas</td>", html)
-        self.assertIn("<td>New idea</td><td>Blog Ideas</td>", html)
-        self.assertNotIn("Declined idea", html)
-        self.assertNotIn("Vault note", html)
-        self.assertIn("<dt>2 in Blog Ideas to decide</dt>", html)
+        cells = self.cells(doc)
+        self.assertIn(["Blog Ideas", "2", "3"], [row[:3] for row in cells])
+        self.assertIn(["Topics", "0", "1"], [row[:3] for row in cells])
+        self.assertIn(["Old idea", "Blog Ideas"], [row[:2] for row in cells])
+        self.assertIn(["New idea", "Blog Ideas"], [row[:2] for row in cells])
+        self.assertNotIn("Declined idea", json.dumps(doc))
+        self.assertNotIn("Vault note", json.dumps(doc))
+        self.assertIn("2 in Blog Ideas to decide", [row["what"] for row in doc["rows"]])
 
     def test_queues_collector_failure_surfaces_on_the_screen(self):
         # A read that fails is an error the page states, never a calm table of zero queues.
-        html, _ = self.queues({kind: rows for kind, rows in self.LISTED.items() if kind != "sdw.tip"})
-        self.assertIn('aria-current="page">Queues</a>', html)
-        self.assertIn("This resource could not be observed: queues: ", html)
-        self.assertIn("`sd store list sdw.tip --json` gave no rows to read", html)
-        self.assertNotIn("<table", html)
+        (status, answer), _ = self.queues({kind: rows for kind, rows in self.LISTED.items() if kind != "sdw.tip"})
+        self.assertEqual(status, 503)
+        self.assertIn("Queues could not be observed: queues: ", answer["error"])
+        self.assertIn("`sd store list sdw.tip --json` gave no rows to read", answer["error"])
 
 
 class CronJobFiles(unittest.TestCase):

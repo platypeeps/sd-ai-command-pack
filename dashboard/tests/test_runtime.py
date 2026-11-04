@@ -572,7 +572,7 @@ class RuntimeSafety(unittest.TestCase):
         help_text = subprocess.run(
             [str(runtime.HERE / "dashboard.sh"), "--help"],
             capture_output=True, text=True).stdout
-        line = [b for b in help_text.split("\n\n") if "Resources views" in b]
+        line = [b for b in help_text.split("\n\n") if "machine and vault views" in b]
         self.assertTrue(line, help_text)
         sentence = " ".join(line[0].split())
         for name in views:

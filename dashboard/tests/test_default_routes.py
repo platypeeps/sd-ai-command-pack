@@ -29,7 +29,7 @@ V2 = Path(v2.__file__).resolve().parent
 
 #: Every old screen that stays, and where it lives now. An old screen whose path a page took is where that page's module says.
 OLD_SCREENS = ("/protection", "/operations",
-               *(f"/operations?area={key}" for key in ("resources", "trackers")),
+               "/operations?area=trackers",
                *(entry.path for page in v2.registry.PAGES for entry in page.takes))
 
 

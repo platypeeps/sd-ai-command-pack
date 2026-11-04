@@ -9,7 +9,7 @@ the operator's config from `<config>/project-dashboard/` (`<config>` is
 tools of the system checkout, `$SYSTEM_TOOLS_ROOT`, default `~/repos/system`.
 
 **The workflow dashboard** (`sd_dashboard/`) opens on the new design's Today, and keeps
-the classic Contributions, Operations (Resources and Trackers), Protection, and
+the classic Contributions, Operations (Trackers), Protection, and
 individual Item pages. sd:3402 retired the other classic screens; their controls are on the new pages.
 A `/backlog` address opens Tasks with the same filters (sd:2356); the classic
 Backlog was deleted in sd:2622. Its production launcher uses the
@@ -276,7 +276,7 @@ Schedule, Adopt and Scan are copy only. The classic screen was retired in sd:340
 
 **Operations** sits in the rail's Fleet group (pack sd:7266), its areas
 (`operations_screen.AREAS`) the shell's views, listed under it as the other pages' are.
-Resources is the default; the shown area travels in the URL, for example `/operations?area=trackers`.
+Trackers is its one area left; the shown area travels in the URL, `/operations?area=trackers`.
 Services and Sessions moved to Management in pack sd:7517: Deploys lists each service with its
 last request in Details, and Sessions lists each worktree, abandoned first, and the sd-* processes.
 `/operations?area=services` and `?area=sessions`, and their old `#view=` addresses, open those views.
@@ -290,6 +290,10 @@ the provider scorecard and the cap and configure controls were already there.
 month the served dashboard answers its kept reading: one past 45 seconds starts a refresh, one past 300
 seconds waits for it. Read-only: the sweep is the verb's, so a dead owner's hold shows until the next
 reservation or `sd-db usage` binds it.
+Resources' four views moved in pack sd:7527, each read through `/api/<page>/<view>` when shown:
+Toolbox is Management's Machine view, Research the Repos filter `?research=yes|no`, Vault a section
+on Notes and Queues a folded section on Tasks. `/operations?area=resources&resource=<view>` answers
+301 to each, and a bare `?area=resources` or `#view=resources` opens Machine.
 sd:3402 retired the other six, and each one's controls live on a new page:
 Jobs on Management and Activity, a queued assignment's cancel on its Item page,
 Ports on Health, Progress's age buckets as Tasks' `age` filter
@@ -298,7 +302,6 @@ and Commands on Activity. Any other `area=` is a 404.
 
 | Tab | Scope and controls |
 | --- | --- |
-| **Resources** | The four legacy vault and machine views — Toolbox, Vault, Research and Queues — each rendered by running `sd_tile.py` as a child. Read-only observations; nothing here starts a job or edits a note. |
 | **Trackers** | PRs and Issues as `sd shadow sync` last saw them, read from `sd_db.shadow` through `progress.tracker_items`, with each tracker's sync health. A row's reference is the last path segment of its URL — `LOG-23818` for a Jira ticket, `owner/repo#4321` on GitHub. Open rows only; read-only. |
 
 Every job or service control rechecks the observed state and revision. The last
@@ -321,7 +324,7 @@ owners and addresses are retained, and unavailable or incomplete inspection is
 reported. A listening socket does not prove application health or identify the
 intended service; inspection is limited to what this user can see and performs
 no network scan. A collector runs only when its page reads: Health runs the
-listener inspection, a Resources view runs its tile, and Management and Health
+listener inspection, a machine or vault view runs its tile, and Management and Health
 run the fleet reader. Today's Now runs the fleet reader too, for both
 areas, reads the shadow table, and reads the launchd
 jobs' last-run state as Management does. None of them
@@ -410,7 +413,7 @@ that order, with the filter applied before the paging.
 **The five legacy collectors** cover the vault, the launchd job table, research
 builds and the service port map. Their CLI commands remain available, and the
 workflow dashboard renders all five itself: Toolbox, Vault, Research and
-Queues as Resources views through `sd_tile.py`, and Ports in-process on Health. The
+Queues through `sd_tile.py` on Management, Notes and Tasks, and Ports in-process on Health. The
 manifest no longer declares them as plugin tabs (sd:719 step 3). Retaining the
 collectors does not imply feature parity with the old dashboard.
 
@@ -681,7 +684,7 @@ their source since pack sd:4627, and reads no vault note (sd:5134).
 
 ## How it works
 
-- **One invocation per view.** Each Resources view runs `sd_tile.py <name> <since>` as
+- **One invocation per view.** Each machine or vault view runs `sd_tile.py <name> <since>` as
   a child (`<since>` is the view's start on `CLOCK_MONOTONIC`, so the tile's
   deadline counts from it), under five seconds and 64 KB (`reports_screen.collect`, reading
   through `collectors.Budget`), as the pack's loader once ran
@@ -690,17 +693,13 @@ their source since pack sd:4627, and reads no vault note (sd:5134).
   on every load, permanently, while each of them fits the budget several times
   over.
 - **Exit codes follow the retired plugin contract** — 1 when a collector
-  failed, with the reason on stderr, 2 when the tab name is wrong. A Resources
-  view shows that reason in place of the view. Nothing but the payload may
+  failed, with the reason on stderr, 2 when the tab name is wrong. The view's
+  route answers 503 with that reason, and the page shows it in place of the view. Nothing but the payload may
   reach stdout, so `cmd_tile` execs.
-- **Markup is a table and nothing else.** A tile cannot send script: the
-  Resources view keeps only headings, paragraphs, tables, lists and links, and
-  drops every other tag. No attribute a tile sent survives: the filter writes
-  the two it needs itself, `class="listing-table"` on a table and an escaped
-  `href` plus `rel="noopener noreferrer"` on an http(s) link
-  (`SafeFragment` in `sd_dashboard/reports_screen.py`). The tables still carry
-  `data-sd-search` and `data-sd-sort`, which asked the pack's page for a filter
-  box and click-to-sort; that filter drops them.
+- **Data, not markup** (pack sd:7527). A tile prints sections: figures, a
+  heading, a table or a listing, each cell text with an optional title, http(s)
+  link or numeric flag. `reports_screen.collect` refuses any other shape, and
+  the page draws it with `markup.tile`, which escapes every value.
 - `run()` gives every child its own process group and kills the group on
   timeout. `subprocess.run()` kills the direct child only, so a grandchild
   holding the inherited stdout pipe — `machine-setup.sh`'s nested `python3`,
@@ -723,14 +722,14 @@ first two learned the hard way on 2026-08-28 when the page sat on
   still gets `Operation not permitted` (2026-08-29). The price of Homebrew is
   that `brew upgrade python` moves the Cellar path and drops the grant.
 - **Two interpreters run `sd_tile.py`, so two binaries can need the grant.** A
-  Resources view runs the tile as a child of the server, under the server's own
+  machine or vault view runs the tile as a child of the server, under the server's own
   `sys.executable` — `SD_DASHBOARD_PYTHON`, the command pack's
   `.venv/bin/python`, which is Homebrew python@3.13 and execs that framework's
   `Python.app/Contents/MacOS/Python`. `dashboard.sh tile` runs
   it under `DASHBOARD_PYTHON` from `<config>/project-dashboard/.env`, today
   `/opt/homebrew/bin/python3`, which is Homebrew python@3.15 and execs a
   different `Python.app`. `DASHBOARD_PYTHON` therefore does not govern what the
-  dashboard's own pages read. The Resources path is the one the dashboard
+  dashboard's own pages read. The server's path is the one the dashboard
   exercises, and it works: on 2026-09-14 its Briefs view rendered 96 rows from
   the launchd server with no refusal, so the python@3.13 binary holds the
   grant. Whether the python@3.15 binary holds it under launchd has not been
@@ -772,7 +771,7 @@ first two learned the hard way on 2026-08-28 when the page sat on
 | `SYSTEM_TOOLS_CONFIG` | `${XDG_CONFIG_HOME:-~/.config}/system` — config root: `project-dashboard/.env`, `project-dashboard/documents.conf`, and the cron job files Toolbox reads from `cron-jobs/jobs` |
 | `CRON_JOBS_EXTRA_DIRS` | none — further job directories Toolbox reads, as `cron-jobs.sh` does |
 | `DASHBOARD_PYTHON` | PATH `python3` (set to Homebrew in `<config>/project-dashboard/.env`); the interpreter for `tile`, and one of the two paths `grants` probes |
-| `SD_DASHBOARD_PYTHON` | command pack `.venv/bin/python`; runs `serve`, `preflight`, `install`, `health` and `grants`, and so the tiles a Resources view renders |
+| `SD_DASHBOARD_PYTHON` | command pack `.venv/bin/python`; runs `serve`, `preflight`, `install`, `health` and `grants`, and so the tiles a machine or vault view renders |
 | `OBSIDIAN_VAULT` | `~/Documents/Obsidian Vault` — read by `collectors.py` itself; kept once in `<config>/shared.env` |
 | `REPO_ROOT` | `~/repos` — read by `collectors.py` itself; set it in `<config>/project-dashboard/.env` |
 | `SYSTEM_TOOLS_LABEL_PREFIX` | `local.system-tools` — launchd label prefix, kept once in `<config>/shared.env`; the dashboard's LaunchAgent is `<prefix>.sd-dashboard`, and Toolbox reads cron jobs as `<prefix>.cron.<job>` |

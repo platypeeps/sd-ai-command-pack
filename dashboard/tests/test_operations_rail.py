@@ -1,7 +1,7 @@
 """Operations under Fleet (pack sd:7266): the rail's Operations section, its areas the shell's views.
 
 What this slice promises: the rail's Fleet group holds Operations, which opens `/operations`; the screen declares
-Resources and Trackers as `window.PAGE_VIEWS`, the shell's sub-entries, in `operations_screen.AREAS` order;
+Trackers as `window.PAGE_VIEWS`, the shell's sub-entries, in `operations_screen.AREAS` order;
 and an old `/operations?area=<key>` address opens that view. The server draws only the area the address names, so a
 view the reader shows that is not drawn loads its own address. The area link bar and the palette's Services, Trackers
 and Sessions entries are gone, and pack sd:7517 sent an old Services, Sessions or Usage view address to the page
@@ -155,25 +155,18 @@ function run() { OUT.R = R; return JSON.stringify(OUT); }
         self.assertEqual(out["R"]["links"], [f"/operations#view={key}" for key in AREAS])
         self.assertEqual((out["replaced"], out["events"], out["opened"]), (["#view=trackers"], ["trackers"], []))
 
-    def test_the_bare_address_opens_resources(self):
+    def test_the_bare_address_opens_trackers(self):
         out = self.run_page("")
-        self.assertEqual((out["R"]["cur"], out["replaced"], out["opened"]), ("resources", ["#view=resources"], []))
+        self.assertEqual((out["R"]["cur"], out["replaced"], out["opened"]), ("trackers", ["#view=trackers"], []))
 
-    def test_showing_a_view_that_is_not_drawn_loads_its_area(self):
-        out = self.run_page("view.show('resources');", search="?area=trackers")
-        self.assertEqual(out["opened"], ["/operations?area=resources#view=resources"])
-
-    def test_a_view_address_for_another_area_loads_that_area(self):
-        # A rail sub-entry opened in a new tab is /operations#view=<id>: the server drew Resources.
+    def test_a_view_address_for_the_drawn_area_loads_nothing(self):
         out = self.run_page("", hash="#view=trackers")
-        self.assertEqual((out["replaced"], out["opened"]), ([], ["/operations?area=trackers#view=trackers"]))
-        out = self.run_page("", search="?area=trackers", hash="#view=trackers")
         self.assertEqual((out["replaced"], out["opened"]), ([], []))
 
     def test_a_moved_view_address_opens_its_management_view(self):
         """pack sd:7517: an old rail sub-entry, /operations#view=services or #view=sessions, lands on Management."""
         for was, target in (("services", "/management#view=deploys"), ("sessions", "/management#view=sessions"),
-                            ("usage", "/metrics#view=spend")):
+                            ("usage", "/metrics#view=spend"), ("resources", "/management#view=machine")):
             with self.subTest(was=was):
                 out = self.run_page("", hash=f"#view={was}")
                 self.assertEqual(out["opened"], [target])
