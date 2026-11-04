@@ -616,7 +616,7 @@ function objects() {
   const out = ALL.map(r => ({ id: `repo:${r.path}`, type: 'repo', label: r.name, path: r.path, row: r }));
   (CLAUDE?.sessions || []).forEach(r => out.push({ id: `cs:${r.id}`, type: 'claude session', label: r.name || r.id, sid: r.id, pid: r.pid, row: r }));
   if (SESS) out.push({ id: 'wt:abandoned', type: 'worktrees', label: `${SESS.abandoned} abandoned worktrees`, n: SESS.abandoned },
-    { id: 'wt:live', type: 'live worktrees', label: `${SESS.registered - SESS.abandoned} live worktrees` },
+    { id: 'wt:live', type: 'live worktrees', label: `${liveTrees()} live worktrees` },
     ...SESS.processes.map((p, i) => ({ id: `proc:${i}`, type: 'process', label: p.command })),
     ...(SESS.worktrees || []).map((t, i) => ({ id: `tree:${i}`, type: 'worktree', label: t.name })));
   SERVICES.forEach(s => out.push({ id: `svc:${s.label}`, type: 'service', label: s.name, name: s.label, running: s.state === 'running', revision: s.revision, caps: s.capabilities || {} }));
@@ -906,18 +906,22 @@ function renderSessions() {
     <div class="sec-head"><h2 id="claude-h">Claude sessions <button class="help" type="button" aria-label="Help: Claude sessions" data-help="<b>This Mac's Claude sessions.</b> From claude agents --json, each session's transcripts, ps and git. Safe to exit means idle, no agent or lane watch under it, and no unpushed work in its checkouts. A stalled or unread agent counts as running until it gives a final answer.">${I('circle-help')}</button></h2><p class="tally">${CLAUDE ? html`<span>${plural(CLAUDE.sessions.length, 'session')}</span><span>${CLAUDE.builders.running == null ? html`<span class="g-unknown" aria-hidden="true">▨</span> builders not counted` : plural(CLAUDE.builders.running, 'builder') + ' running'}</span><span>claude agents · ${hhmm(CLAUDE.read)} UTC</span>` : ''}</p></div>
     ${renderClaude()}
 
-    <div class="sec-head"><h2 id="agents-h">sd-* processes <button class="help" type="button" aria-label="Help: processes" data-help="<b>The fleet's process read.</b> The sd-* commands running on this Mac, from the process table at this read. Claude sessions are listed above; codex processes are not read.">${I('circle-help')}</button></h2><p class="tally">${SESS ? html`<span>${SESS.processes.length} running</span><span>fleet · ${seen(SESS)}</span>` : ''}</p></div>
+    <div class="sec-head"><h2 id="agents-h">sd-* processes <button class="help" type="button" aria-label="Help: processes" data-help="<b>The fleet's process read.</b> The sd-* commands running on this Mac, from the process table at this read. Claude sessions are listed above; codex processes are not read.">${I('circle-help')}</button></h2><p class="tally">${SESS ? html`<span>${SESS.processes_truncated ? '≥ ' : ''}${SESS.processes.length} running</span><span>fleet · ${seen(SESS)}</span>` : ''}</p></div>
     ${!SESS ? unknown('Sessions were not read', why('sessions'), 'fleet sessions')
       : SESS.processes.length ? html`<table class="ledger" aria-labelledby="agents-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Command</th><th scope="col">Running for</th><th scope="col">PID</th></tr></thead>
-      <tbody>${SESS.processes.map((p, i) => html`<tr data-id="proc:${i}"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${p.command}</button></td><td class="d mono" data-k="up">${p.elapsed}</td><td class="d num">${p.pid}</td></tr>`)}</tbody></table>`
-      : html`<p class="empty">${SESS.processes_error ? html`<span class="g-unknown" aria-hidden="true">▨</span> ${SESS.processes_error}` : 'No sd-* command is running.'}</p>`}
+      <tbody>${SESS.processes.map((p, i) => html`<tr data-id="proc:${i}"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${p.command}</button></td><td class="d mono" data-k="up">${p.elapsed}</td><td class="d num">${p.pid}</td></tr>`)}</tbody></table>${SESS.processes_truncated ? html`<p class="why">The table was cut at ${SESS.processes_ceiling}, so these are a floor.</p>` : ''}`
+      : html`<p class="empty">${SESS.processes_error ? html`<span class="g-unknown" aria-hidden="true">▨</span> ${SESS.processes_error}`
+        : SESS.processes_truncated ? html`<span class="g-unknown" aria-hidden="true">▨</span> The table was cut at ${SESS.processes_ceiling}, so no command below the cut was read.` : 'No sd-* command is running.'}</p>`}
 
     <div class="sec-head"><h2 id="wt-h">Worktrees</h2><p class="tally">fleet sessions · ${SESS ? seen(SESS) : `${hhmm(READ)} UTC`}</p></div>
-    ${SESS ? html`<table class="ledger" aria-labelledby="wt-h"><tbody>
+    ${SESS && !SESS.root_exists ? html`<p class="empty"><span class="g-unknown" aria-hidden="true">▨</span> The checkout root ${SESS.root} does not exist. REPO_ROOT names it; ~/repos is the default.</p>`
+      : SESS ? html`<table class="ledger" aria-labelledby="wt-h"><tbody>
       <tr data-id="wt:abandoned"><td class="g g-${SESS.abandoned ? 'caution' : 'ok'}">${SESS.abandoned ? '▲' : '●'}<span class="sr">${SESS.abandoned ? 'caution' : 'ok'}</span></td><td class="what"><button type="button">${SESS.abandoned} abandoned worktrees</button></td><td class="d mono">registered, directory gone</td>${ACT('wt:abandoned')}</tr>
-      <tr data-id="wt:live"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${SESS.registered - SESS.abandoned} live worktrees</button></td><td class="d mono">of ${SESS.registered} registered</td><td class="act end"></td></tr>
+      <tr data-id="wt:live"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${liveTrees()} live worktrees</button></td><td class="d mono">of ${SESS.registered} registered${SESS.unreadable ? ` · ${SESS.unreadable} unreadable` : ''}</td><td class="act end"></td></tr>
     </tbody></table>${treeTable()}` : unknown('Worktrees were not read', why('sessions'))}`);
 }
+// pack sd:7517: an unreadable registration is neither abandoned nor live.
+const liveTrees = () => SESS.registered - SESS.abandoned - (SESS.unreadable || 0);
 // pack sd:7517: each registered worktree, abandoned first, as Operations > Sessions listed them before it was retired.
 const TREESTATE = { abandoned: 'caution', unknown: 'unknown', live: 'ok' };
 const treeTable = () => !(SESS.worktrees || []).length ? '' : html`<div class="sec-head"><h2 id="wts-h">Each worktree</h2><p class="tally"><span>${plural(SESS.worktrees.length, 'worktree')}</span><span>abandoned first</span></p></div>
@@ -1109,7 +1113,7 @@ function selectRow(id, open) {
   } else if (kind === 'wt') {
     h = key === 'abandoned'
       ? html`<p class="kind"><span class="g-caution">▲</span> Worktrees · abandoned</p><h2>${SESS.abandoned} abandoned worktrees</h2><dl><dt>What</dt><dd>registered, directory gone</dd><dt>Source</dt><dd>fleet sessions</dd></dl>${act}`
-      : html`<p class="kind"><span class="g-ok">●</span> Worktrees · live</p><h2>${SESS.registered - SESS.abandoned} live worktrees</h2><dl><dt>Registered</dt><dd>${SESS.registered}</dd></dl>`;
+      : html`<p class="kind"><span class="g-ok">●</span> Worktrees · live</p><h2>${liveTrees()} live worktrees</h2><dl><dt>Registered</dt><dd>${SESS.registered}</dd></dl>`;
   } else if (kind === 'sats') {
     const q = SATS?.request;
     h = html`<p class="kind">${I('rotate-ccw')} Refresh satellites</p><h2>Refresh satellites</h2><dl><dt>Last request</dt><dd>${q ? q.id : 'none sent'}</dd><dt>Sent</dt><dd><time class="rel" datetime="${q?.at || ''}" data-long data-empty="never"></time></dd></dl>

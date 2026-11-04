@@ -78,7 +78,7 @@ The generated launch environment includes the standard system tool directories
 needed for listener inspection. It also carries the
 installing shell's `sd` directory and `OBSIDIAN_VAULT`, which Notes' quick
 notes (sd:2549) and daily note (sd:3426) need; `install` prints one line for each it cannot find, and
-still installs. Service controls on Management, Operations > Services and Health's
+still installs. Service controls on Management and Health's
 Services rows (sd:3707) act only on eligible user LaunchAgents; system daemons and
 dashboard/access services remain read-only. Health's dashboard row shows the
 kickstart line to copy when the served commit is not the checkout's. See [README.md](README.md) for the Operations views, one per entry of

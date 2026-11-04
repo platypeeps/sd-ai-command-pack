@@ -1,5 +1,6 @@
 """HTTP operations proof using an in-memory observer; no launchctl calls."""
 
+import http.client
 import re
 import subprocess
 from unittest.mock import patch
@@ -99,8 +100,8 @@ class OperationsActions(BrowserSession):
         self.assertEqual(self.backend.calls, [("cancel", "fixture/running-fixture")])
 
     def test_operations_tabs_select_one_kept_area_and_default_to_usage(self):
-        # sd:3402 retired Jobs, Ports, Progress, Repos, Reports and Commands. Services and Sessions stay; their
-        # reads are tested in test_services_actions and test_sessions_screen, with fixture backends.
+        # sd:3402 retired Jobs, Ports, Progress, Repos, Reports and Commands; pack sd:7517 moved Services and
+        # Sessions to Management (test_v2_management), and their old addresses answer 301 there.
         headings = {"usage": "Week, cost and provider details", "resources": "<h2>Resources</h2>", "trackers": "<h2>Trackers</h2>"}
         # Resources reads sd_tile in a child, which runs launchctl; the test reads a fixture instead.
         patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
@@ -112,7 +113,7 @@ class OperationsActions(BrowserSession):
                 self.assertEqual(status, 200)
                 # pack sd:7266: the five areas are the shell's views; only the one asked for is drawn and shown.
                 panels = re.findall(r'<div id="view-(\w+)"( hidden)?>', page)
-                self.assertEqual([key for key, _ in panels], ["usage", "services", "resources", "trackers", "sessions"])
+                self.assertEqual([key for key, _ in panels], ["usage", "resources", "trackers"])
                 self.assertEqual([key for key, hidden in panels if not hidden], [area])
                 self.assertIn(heading, page)
                 for other in headings.values():
@@ -121,6 +122,21 @@ class OperationsActions(BrowserSession):
         self.assertIn(headings["usage"], self.request("/operations")[2])
         for area in ("unknown", "jobs", "progress", "ports"):
             self.assertEqual(self.request(f"/operations?area={area}")[0], 404, area)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_moved_area_address_answers_301_to_its_management_view(self):
+        """pack sd:7517: Services and Sessions moved to Management; a bookmark lands on the view that holds them."""
+        host, port = self.listening.server_address[:2]
+        for area, target in (("services", "/management#view=deploys"), ("sessions", "/management#view=sessions")):
+            with self.subTest(area=area):
+                connection = http.client.HTTPConnection(host, port, timeout=10)
+                try:
+                    connection.request("GET", f"/operations?area={area}", headers={"Cookie": self.cookie})
+                    answer = connection.getresponse()
+                    answer.read()
+                finally:
+                    connection.close()
+                self.assertEqual((answer.status, answer.headers["Location"]), (301, target))
         self.assertEqual(self.backend.calls, [])
 
     def test_retry_acceptance_is_distinct_from_observed_job_state(self):

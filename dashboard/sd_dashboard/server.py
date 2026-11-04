@@ -142,7 +142,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def route(connection: sqlite3.Connection, path: str, parameters, *, now: str, services_backend=None) -> str:
+def route(connection: sqlite3.Connection, path: str, parameters, *, now: str) -> str:
     """One request, one page. The router is a function so a test can call it.
 
     A test that has to start a socket to assert a page is a test that runs
@@ -167,7 +167,7 @@ def route(connection: sqlite3.Connection, path: str, parameters, *, now: str, se
     if path == "/operations":
         from .operations_screen import operations_page
 
-        rendered = operations_page(connection, parameters=parameters, now=now, services_backend=services_backend)
+        rendered = operations_page(connection, parameters=parameters, now=now)
         if rendered is None:
             raise NotFound("/operations?area=" + (parameters.get("area") or [""])[0])
         return rendered
@@ -993,6 +993,13 @@ class Dashboard(BaseHTTPRequestHandler):
                              for key in ("id", "title", "kind", "status", "repo", "parked_at")},
                     "revision": state["revision"],
                 })
+            if path == "/operations":
+                from .operations_screen import MOVED
+
+                # pack sd:7517: Services and Sessions moved to Management; a bookmark opens the view that holds them.
+                moved = MOVED.get((parameters.get("area") or [""])[0])
+                if moved:
+                    return self._send(301, b"", "text/plain; charset=utf-8", overrides={"Location": moved})
             if path == "/queue":
                 # pack sd:7234: Queue became Today's Queue view; its Show All is that view's Ended builds filter.
                 shown = "?show=ended" if (parameters.get("show") or [""])[0] == "all" else ""
@@ -1005,7 +1012,7 @@ class Dashboard(BaseHTTPRequestHandler):
 
                 location = from_backlog(connection, parameters, now=self.clock())
                 return self._send(301, b"", "text/plain; charset=utf-8", overrides={"Location": location})
-            body = route(connection, path, parameters, now=self.clock(), services_backend=self.services_backend)
+            body = route(connection, path, parameters, now=self.clock())
         except workflow.MissingItem:
             return self._error(404, "The related item no longer exists. Choose another item.", path)
         except NotFound as missing:

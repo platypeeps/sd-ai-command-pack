@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_dashboard import health_collectors, health_screen, runtime
+from sd_dashboard import health_collectors, health_screen, management_screen, runtime
 from sd_dashboard.runtime import LABEL as DASHBOARD_LABEL
 from sd_db import services
 
@@ -101,52 +101,42 @@ class ServicesActions(BrowserSession):
     def state(self, label=None):
         return services.service_state(self.connection, label or self.label, backend=self.services_backend)
 
+    def listed(self):
+        """What Management's page reads (`management_screen._services`), by label and scope (pack sd:7517)."""
+        return {(row["label"], row["scope"]): row for row in management_screen._services(self.connection, self.services_backend)}
+
     def test_services_show_safe_state_scope_and_only_supported_controls(self):
         before = self.snapshot()
-        status, _, page = self.request("/operations?area=services")
-        self.assertEqual(status, 200)
-        for text in ("Launchd services", "User LaunchAgent", "System daemon", "Running", "PID 111",
-                     "Stop unloads", "next login", f"sd services stop {self.label}"):
-            self.assertIn(text, page)
-        self.assertEqual(page.count(f'action="/api/services/{self.label}/stop"'), 1)
-        self.assertNotIn(f'action="/api/services/{DASHBOARD_LABEL}/', page)
-        self.assertNotIn('action="/api/services/com.example.scheduled/', page)
+        rows = self.listed()
+        self.assertEqual(set(rows), {(self.label, "user"), (self.label, "system"), (DASHBOARD_LABEL, "user"),
+                                     ("com.example.scheduled", "user")})
+        user = rows[(self.label, "user")]
+        self.assertEqual((user["state"], user["pid"]), ("running", 111))
+        allowed = {key: [action for action, capability in row["capabilities"].items() if capability["allowed"]]
+                   for key, row in rows.items()}
+        self.assertEqual(allowed[(self.label, "user")], ["stop", "restart"])
+        # System daemons, the dashboard itself and a scheduled job are read-only.
+        for key in ((self.label, "system"), (DASHBOARD_LABEL, "user"), ("com.example.scheduled", "user")):
+            self.assertEqual(allowed[key], [], key)
+        text = json.dumps(list(rows.values()))
         for secret in ("SECRET", "HIDDEN", "--secret", "ProgramArguments"):
-            self.assertNotIn(secret, page)
-        # sd:5539: the shell's bar sets ?q= on the address, which keeps area=services; no Filter form of the list's own.
-        self.assertIn('data-listing="services" data-listing-q="q"', page)
-        self.assertIn('<div class="toolbar" id="toolbar" data-shift></div>', page)
-        self.assertNotIn('role="search"', page)
-        self.assertNotIn("Age in status", page)
+            self.assertNotIn(secret, text)
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.actions(), [])
-        filtered = self.request("/operations?area=services&q=daemon")[2]
-        self.assertIn("System daemon", filtered)
-        self.assertNotIn("User LaunchAgent ·", filtered)
-        self.assertNotIn('action="/api/services/', filtered)
 
     def test_signal_ended_service_renders_its_signal_and_keeps_controls(self):
-        """A SIGTERM'd, restarted service has no exit code; the card names the
-        signal and the service stays controllable instead of reading unknown (sd:1331)."""
+        """A SIGTERM'd, restarted service has no exit code; it carries the
+        signal and stays controllable instead of reading unknown (sd:1331)."""
         self.observations[self.domain + "/" + self.label] = ["running", 31900, None, 6, "Terminated: 15"]
-        status, _, page = self.request("/operations?area=services")
-        self.assertEqual(status, 200)
-        card = page[page.index(self.label):]
-        self.assertIn("Last signal SIGTERM (15)", card)
-        self.assertIn("PID 31900", card)
-        self.assertNotIn("Last exit", card[:card.index("</article>")])
-        self.assertNotIn("Unknown", card[:card.index("</article>")])
-        self.assertEqual(page.count(f'action="/api/services/{self.label}/stop"'), 1)
-        # A stopped service that died of a crash signal is Failed on the card,
-        # named by signal, and still startable.
+        row = self.listed()[(self.label, "user")]
+        self.assertEqual((row["state"], row["pid"], row["last_signal"], row["last_exit"]), ("running", 31900, 15, None))
+        self.assertTrue(row["capabilities"]["stop"]["allowed"])
+        # A stopped service that died of a crash signal is failed, named by
+        # signal, and still startable.
         self.observations[self.domain + "/" + self.label] = ["not running", None, None, 7, "Segmentation fault: 11"]
-        page = self.request("/operations?area=services")[2]
-        card = page[page.index(self.label):]
-        card = card[:card.index("</article>")]
-        self.assertIn("Failed", card)
-        self.assertIn("Last signal SIGSEGV (11)", card)
-        self.assertNotIn("Last exit", card)
-        self.assertEqual(page.count(f'action="/api/services/{self.label}/start"'), 1)
+        row = self.listed()[(self.label, "user")]
+        self.assertEqual((row["state"], row["last_signal"], row["last_exit"]), ("failed", 11, None))
+        self.assertTrue(row["capabilities"]["start"]["allowed"])
         self.assertEqual(self.actions(), [])
 
     def test_stop_start_and_restart_use_exact_installed_service_and_revision(self):
@@ -171,10 +161,8 @@ class ServicesActions(BrowserSession):
         self.assertEqual(restarted["request"]["status"], "accepted")
         self.assertEqual([argv[1:] for argv in self.actions()][3:],
                          [["bootout", self.domain + "/" + self.label], *expected_start])
-        page = self.request("/operations?area=services")[2]
-        self.assertIn("Last request: ", page)
-        self.assertIn("accepted", page)
-        self.assertIn("not proof of application health", page)
+        request = self.listed()[(self.label, "user")]["last_request"]
+        self.assertEqual((request["action"], request["status"]), ("restart", "accepted"))
         self.assertEqual(files, {path: path.read_bytes() for path in self.root.rglob("*.plist")})
 
     def test_auth_forgery_and_unsupported_targets_have_no_side_effects(self):

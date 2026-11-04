@@ -386,14 +386,19 @@ def _sessions(read) -> dict:
     if not isinstance(trees, list) or not isinstance(procs, list) or any(
             not isinstance(tree, dict) or not isinstance(tree.get("live"), bool) for tree in trees):
         raise ValueError("fleet collector returned an incomplete sessions document")
-    abandoned = sum(1 for tree in trees if not tree["live"])
+    # By state, as fleet.collect_sessions counts: an unreadable registration is not known to be abandoned.
+    abandoned = sum(1 for tree in trees if tree.get("state") == "abandoned")
+    unreadable = sum(1 for tree in trees if tree.get("state") == "unknown")
     # Each worktree's row, abandoned first, as Operations > Sessions listed them (pack sd:7517).
     rank = {state: number for number, state in enumerate(fleet_module.STATES)}
     rows = sorted(({key: tree.get(key) or "" for key in ("repo", "name", "branch", "path", "state")} for tree in trees),
                   key=lambda row: (rank.get(row["state"], len(fleet_module.STATES)), row["repo"], row["name"]))
-    return {"registered": len(trees), "abandoned": abandoned, "worktrees": rows,
+    # A cut ps table is a floor and a missing root is no count, as Operations > Sessions said (pack sd:7517).
+    return {"registered": len(trees), "abandoned": abandoned, "unreadable": unreadable, "worktrees": rows,
             "processes": [{key: proc.get(key) for key in ("pid", "elapsed", "command")} for proc in procs if isinstance(proc, dict)],
-            "processes_error": document.get("processes_error") or ""} | _seen(document)
+            "processes_error": document.get("processes_error") or "",
+            "processes_truncated": document.get("processes_truncated") is True, "processes_ceiling": fleet_module.CEILING,
+            "root": str(document.get("root") or ""), "root_exists": document.get("rootExists") is True} | _seen(document)
 
 
 def _services(connection, backend) -> list[dict]:

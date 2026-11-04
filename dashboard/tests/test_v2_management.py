@@ -348,6 +348,20 @@ class TheDocument(ScreenCase):
                          [("gone", "abandoned"), ("odd", "unknown"), ("here", "live")])
         self.assertEqual(rows[0], {"repo": "system", "name": "gone", "branch": "gone", "path": "/wt/gone",
                                    "state": "abandoned"})
+        # An unreadable registration is not known to be abandoned (fleet.STATES): Prune would not clear it.
+        self.assertEqual((doc["sessions"]["registered"], doc["sessions"]["abandoned"], doc["sessions"]["unreadable"]),
+                         (3, 1, 1))
+
+    def test_sessions_say_a_cut_process_table_and_a_missing_root(self):
+        """pack sd:7517: the guards Operations > Sessions kept: a cut ps table is a floor; a missing root is no count."""
+        def read(area):
+            if area == "repos":
+                return fleet(area)
+            return dict(fleet_document(area, trees=[]), processes_truncated=True, rootExists=False, root="/nowhere")
+        sess = self.document(read=read)["sessions"]
+        self.assertEqual((sess["processes_truncated"], sess["root_exists"], sess["root"]), (True, False, "/nowhere"))
+        self.assertEqual((self.document()["sessions"]["processes_truncated"], self.document()["sessions"]["root_exists"]),
+                         (False, True))
 
     def test_a_service_carries_its_last_request(self):
         """pack sd:7517: Operations > Services showed each service's last request; Management's Details now does."""
@@ -2353,6 +2367,33 @@ class TheOperationsRows(PageScript):
         self.assertIn("abandoned", rows[0][1])
         self.assertIn("system", rows[0][1])
         self.assertIn('<td class="d mono">gone</td>', rows[0][1])
+
+    def test_a_cut_process_table_is_a_floor_and_never_says_nothing_runs(self):
+        """The guard sessions_screen held (Codex review of PR #500): a cut table cannot support an absence."""
+        cases = [([], "≥ 0 running", "The table was cut at 64 KB, so no command below the cut was read."),
+                 ([{"pid": "4242", "elapsed": "01:02", "command": "sd-review --json"}], "≥ 1 running", "sd-review --json")]
+        for procs, tally, said in cases:
+            with self.subTest(rows=len(procs)):
+                doc = json.loads(json.dumps(self.doc))
+                doc["sessions"].update(processes=list(procs), processes_truncated=True)
+                sess = self.run_page("R.sess = ELS['view-sessions'].html;", doc=doc, search="?view=sessions")["R"]["sess"]
+                self.assertIn(tally, sess)
+                self.assertIn(said, sess)
+                self.assertNotIn("No sd-* command is running.", sess)
+
+    def test_a_missing_root_is_said_and_counts_no_worktrees(self):
+        doc = json.loads(json.dumps(self.doc))
+        doc["sessions"].update(root_exists=False, root="/nowhere", registered=0, abandoned=0, unreadable=0, worktrees=[])
+        sess = self.run_page("R.sess = ELS['view-sessions'].html;", doc=doc, search="?view=sessions")["R"]["sess"]
+        self.assertIn("The checkout root /nowhere does not exist", sess)
+        self.assertNotIn("0 live worktrees", sess)
+
+    def test_an_unreadable_worktree_is_neither_abandoned_nor_live(self):
+        doc = json.loads(json.dumps(self.doc))
+        doc["sessions"].update(registered=3, abandoned=1, unreadable=1)
+        sess = self.run_page("R.sess = ELS['view-sessions'].html;", doc=doc, search="?view=sessions")["R"]["sess"]
+        self.assertIn("1 live worktrees", sess)
+        self.assertIn("1 unreadable", sess)
 
     def test_a_worktree_with_no_readable_path_says_so(self):
         doc = json.loads(json.dumps(self.doc))
