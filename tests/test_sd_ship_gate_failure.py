@@ -514,5 +514,82 @@ class ReviewTimeoutReachesTheGate(unittest.TestCase):
                     ship.parser().parse_args([*args, "--review-timeout", "0"])
 
 
+#: A gate whose slot wait ran out at the lane's bound after a cleared review: no check ran (pack sd:7412).
+SLOT_RAN_OUT = {**CLEARED, "check": {**CLEARED["check"], "detail": "no gate slot came free within 600s",
+                                     "slot_ran_out": True}}
+SLOT_CHECK = {"status": "fail", "exit_code": 1, "detail": "no gate slot came free within 600s", "checks": None,
+              "summary": "sd-check fail", "slot_ran_out": True}
+
+
+class ASlotWaitThatRanOut(unittest.TestCase):
+    """pack sd:7412. The lane bounds the gate's slot wait by its run budget; a wait that ran out ran no gate, so the
+    lane puts the entry back rather than fail it, and the kept review serves its next prepare."""
+
+    context = provider_tests.ProviderSelection.context
+
+    def refused(self, review, head=HEAD):
+        with self.assertRaises(ship.Refusal) as caught:
+            review.review(head)
+        blocker = caught.exception.workflow["blocker"]
+        self.assertEqual((blocker["code"], blocker["retryable"]), ("gate_slot_wait", True))
+        return str(caught.exception)
+
+    def test_it_keeps_the_cleared_review_and_names_its_own_code(self):
+        review, _process = self.context(report_changes=SLOT_RAN_OUT)
+        self.assertIn("the review pass is kept", self.refused(review))
+        self.assertEqual([entry["report"]["status"] for entry in review.state["passes"]], ["gate_failed"])
+
+    def test_the_kept_reviews_gate_that_waits_again_names_it_too(self):
+        review, process = self.context(state=AClearedReviewOutlivesItsGate.kept(self))
+        with unittest.mock.patch.object(sd_ship_review, "adjudicated_check", return_value=SLOT_CHECK) as gate:
+            self.assertIn("its review pass stays kept", self.refused(review))
+        self.assertEqual(process.call_count, 0)
+        self.assertEqual(gate.call_args.kwargs["slot_timeout"], ship.sd_lib.GATE_SLOT_SECONDS)
+
+    def test_a_gate_that_failed_its_checks_keeps_the_gate_failed_code(self):
+        review, _process = self.context(state=AClearedReviewOutlivesItsGate.kept(self))
+        failed = {**SLOT_CHECK, "slot_ran_out": False, "detail": "a test failed"}
+        with unittest.mock.patch.object(sd_ship_review, "adjudicated_check", return_value=failed), \
+                self.assertRaises(ship.Refusal) as caught:
+            review.review(HEAD)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "gate_failed")
+
+    def test_prepare_forwards_the_slot_bound_to_sd_review_and_its_own_gate(self):
+        review, process = self.context(state=AClearedReviewOutlivesItsGate.kept(self))
+        review.args.slot_timeout = 600
+        with unittest.mock.patch.object(sd_ship_review, "adjudicated_check", return_value=SLOT_CHECK) as gate:
+            self.refused(review)
+        self.assertEqual(gate.call_args.kwargs["slot_timeout"], 600)
+        review, process = self.context()
+        review.args.slot_timeout = 600
+        review.review(HEAD)
+        for call in process.call_args_list:
+            argv = call.args[1]
+            self.assertEqual(argv[argv.index("--slot-timeout") + 1], "600")
+
+    def test_the_parser_takes_a_slot_bound_up_to_the_gates_own(self):
+        cap = ship.sd_lib.GATE_SLOT_SECONDS
+        for args in (["prepare", "--item", "42"], ["prepare", "--no-item", "--review-id", "record"],
+                     ["review", "--no-item", "--review-id", "record"]):
+            with self.subTest(args=args):
+                self.assertIsNone(ship.parser().parse_args(args).slot_timeout)
+                self.assertEqual(ship.parser().parse_args([*args, "--slot-timeout", str(cap)]).slot_timeout, cap)
+                for bad in ("0", "-1", str(cap + 1), "soon"):
+                    with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                        ship.parser().parse_args([*args, "--slot-timeout", bad])
+
+    def test_the_adjudicated_gate_queues_on_the_bound_and_says_when_it_ran_out(self):
+        gate_run = importlib.import_module("sd_gate_run")
+        ran_out = {"status": "failure", "exit_code": 1, "head": HEAD, "stderr": "",
+                   "report": {"checks": [], "gate_slot": {"timed_out": True}}}
+        with unittest.mock.patch.object(gate_run, "check_in_worktree", return_value=ran_out) as gate:
+            check = sd_ship_review.adjudicated_check(pathlib.Path("."), HEAD, None, None, 60, slot_timeout=600)
+        self.assertEqual((gate.call_args.kwargs["slot_timeout"], check["status"], check.get("slot_ran_out")),
+                         (600, "fail", True))
+        with unittest.mock.patch.object(gate_run, "check_in_worktree", return_value={**ran_out, "report": {}}):
+            check = sd_ship_review.adjudicated_check(pathlib.Path("."), HEAD, None, None, 60)
+        self.assertNotIn("slot_ran_out", check)
+
+
 if __name__ == "__main__":
     unittest.main()

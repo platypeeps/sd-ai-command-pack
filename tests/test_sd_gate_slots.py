@@ -233,6 +233,7 @@ class ConcurrentGates(GateSlotFixture):
         self.assertEqual(budgets, [4])
         self.assertEqual(result["gate_slot"]["waited_seconds"], 9.0)
         self.assertEqual(result["gate_slot"]["bound_seconds"], 120)
+        self.assertIs(result["gate_slot"]["timed_out"], False)
         slot.release.assert_called_once_with()
 
     def test_a_slot_bound_ends_the_queue_on_its_own_clock(self):
@@ -246,6 +247,8 @@ class ConcurrentGates(GateSlotFixture):
             elapsed = time.monotonic() - started
         self.assertEqual(code, 1, err)
         self.assertEqual(report["checks"][0]["reason"], "no gate slot came free within 2s")
+        # pack sd:7412: the lane puts back an entry whose wait ran out, so the report says it, not only the text.
+        self.assertIs(report["gate_slot"]["timed_out"], True)
         self.assertLess(elapsed, 60)
         for bad in ("0", "-1", "soon"):
             with self.subTest(slot_timeout=bad):

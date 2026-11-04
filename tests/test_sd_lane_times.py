@@ -1,8 +1,8 @@
 """Lane wait and gate times (pack sd:6006): what the Queue page shows per repository, and the question they file.
 
 Each entry's history rows in the hub database say when it was enqueued, claimed, gated and ended. Over 7 days the page
-shows the median wait and gate time and the slowest entry; a median wait past an hour files the parallel-lanes
-question once (operator ruling, grill Q27).
+shows the median wait and gate time and the slowest entry; a median wait past the 30 min target files the
+parallel-lanes question once a week (operator ruling, grill Q27; target, pack sd:7412 Q3).
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ class Times(unittest.TestCase):
 
 
 class TheQuestion(Times):
-    """A median wait past an hour files the parallel-lanes question once (grill Q27)."""
+    """A median wait past the 30 min target files the parallel-lanes question once a week (grill Q27, pack sd:7412)."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -148,10 +148,48 @@ class TheQuestion(Times):
         self.connection.execute("UPDATE note SET resolved_at = timestamp WHERE kind = 'question'")
         self.assertIsNone(sd_lane.wait_question(self.connection, REPOSITORY, "/repos/pack", now=NOW + 3600))
 
-    def test_a_done_item_files_nothing(self):
+    def test_a_median_wait_past_the_30_minute_target_files_the_question(self):
+        """pack sd:7412 Q3: the operator set a 30 min median wait as the target; the hour let a 59 min week pass."""
+        self.entry("e1", 1, enqueued=45, claimed=10, merge=5, ended=4)
+        self.assertIsNotNone(sd_lane.wait_question(self.connection, REPOSITORY, "/repos/pack", now=NOW))
+        [found] = self.questions()
+        self.assertIn("was 35 min", found["body"])
+        self.assertIn("past the 30 min target", found["body"])
+
+    def closed(self, days: float) -> int:
+        """The question asked and answered long ago, and its item done `days` before NOW."""
+        import sd_db
+        self.slow()
+        sd_lane.wait_question(self.connection, REPOSITORY, "/repos/pack", now=NOW)
+        [item] = [row["id"] for row in self.connection.execute("SELECT id FROM item")]
+        sd_db.transition(self.connection, item, "done", who="test")
+        self.connection.execute("UPDATE note SET resolved_at = '2000-01-01T00:00:00+00:00', "
+                                "timestamp = '2000-01-01T00:00:00+00:00' WHERE kind = 'question'")
+        self.connection.execute("UPDATE note SET timestamp = ? WHERE kind = 'status_change'",
+                                (time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(NOW - days * 86400)),))
+        return item
+
+    def test_a_done_item_files_nothing_in_the_week_it_measures(self):
+        """The week after a fix lands reads waits from before it; that week is the measurement, not a miss."""
+        item = self.closed(days=6.9)
+        self.assertIsNone(sd_lane.wait_question(self.connection, REPOSITORY, "/repos/pack", now=NOW))
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id = ?", (item,)).fetchone()[0], "done")
+
+    def test_a_done_item_a_week_on_reopens_with_the_question(self):
+        """pack sd:7412 Q3: a miss files an item; a done item stayed silent, so the target was never read again."""
+        item = self.closed(days=7.1)
+        note = sd_lane.wait_question(self.connection, REPOSITORY, "/repos/pack", now=NOW)
+        self.assertIsNotNone(note)
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id = ?", (item,)).fetchone()[0],
+                         "planning")
+        self.assertEqual(len(self.questions()), 2)
+
+    def test_a_done_item_with_no_status_change_files_nothing(self):
+        """When it closed is unknown, so the operator's settle stands: unknown is not a week ago."""
         self.slow()
         sd_lane.wait_question(self.connection, REPOSITORY, "/repos/pack", now=NOW)
         self.connection.execute("UPDATE item SET status = 'done'")
+        self.connection.execute("DELETE FROM note WHERE kind = 'status_change'")
         self.connection.execute("UPDATE note SET resolved_at = '2000-01-01T00:00:00+00:00', "
                                 "timestamp = '2000-01-01T00:00:00+00:00' WHERE kind = 'question'")
         self.assertIsNone(sd_lane.wait_question(self.connection, REPOSITORY, "/repos/pack", now=NOW))

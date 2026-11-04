@@ -28,6 +28,9 @@ def review_argv(bin_dir: pathlib.Path, database: pathlib.Path, args: Any, base: 
     if getattr(args, "review_timeout", None):
         # sd:1475. sd-review sizes its timing plan, and so this watchdog, from it.
         argv += ["--timeout", str(args.review_timeout)]
+    if getattr(args, "slot_timeout", None):
+        # pack sd:7412. The lane's run budget left bounds the gate's slot wait.
+        argv += ["--slot-timeout", str(args.slot_timeout)]
     if base:
         argv += ["--base", base]
     return argv

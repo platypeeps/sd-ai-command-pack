@@ -2,7 +2,7 @@
 title: Cut the pack lane wait by letting the lane claim under load
 created: 2026-11-03
 item: sd:7412
-branch: docs/sd-7412-parallel-lanes
+branch: feat/sd-7412-lane-waits
 ---
 
 # Design — parallel-lanes
@@ -86,8 +86,8 @@ the median wait stays above 30 min. Do not run parallel prepares.
 - A slot wait that hits that bound is a retryable refusal that spent no gate. The runner
   puts the entry back as pending, without spending a reclaim. It counts `slot_waits` on the
   entry for the Queue page. The kept review pass (sd:3478) serves the next prepare.
-- The speculative gate's ticket takes the same bound. At the run's deadline it is cancelled
-  through the existing `CANCEL_SECONDS` path.
+- The speculative gate's wait ends at the run's deadline: the runner waits for it only until
+  then, and cancels it through the existing `CANCEL_SECONDS` path.
 - The module docstring loses the `load_stop` clause in `run`; sd:3479's reason moves to
   the gate queue's admission, which now covers it alone.
 
@@ -111,8 +111,10 @@ Evidence binding is unchanged: a gate receipt still names the head and tree it g
 
 ## Slices
 
-One PR: option A with the table's tests. It leaves every machine's lanes claiming under
-load and waiting in the gate queue in order.
+Slice 1: option A with the table's tests, and the 30 min weekly check. It leaves every
+machine's lanes claiming under load and waiting in the gate queue in order.
+
+Slice 2: option B, speculation depth 2, in its own PR (ruling 1).
 
 ## Acceptance criteria
 
@@ -135,8 +137,12 @@ load and waiting in the gate queue in order.
 
 ## Open questions
 
-1. Build A alone, then measure a week before B? Option: A, then measure (Recommended).
-   Option: A and B together.
-2. Lane gates in plain FIFO with builders? Option: FIFO (Recommended). Option: lane first,
-   as sd:5078 did before it starved builders for 1.5 to 2 h.
-3. Target median wait? Option: 30 min (Recommended). Option: keep the 60 min question threshold only.
+Answered by the operator on 2026-11-03 (notes #42427 to #42429):
+
+1. Build A alone, then measure a week before B? Ruling: build A and B together.
+   B is about 400 lines with its tests, so it lands as the second slice of this item;
+   the first slice is A and the weekly check.
+2. Lane gates in plain FIFO with builders? Ruling: FIFO, no priority (sd:5078 starved builders).
+3. Target median wait? Ruling: 30 min, measured weekly; a miss files an item.
+   `wait_question` already reads the week after each hosted run; its threshold drops to 30 min,
+   and a done `lane-wait:` item a week past its close reopens with the question.

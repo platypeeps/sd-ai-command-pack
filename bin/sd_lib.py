@@ -1250,6 +1250,29 @@ GATE_CHECK_SECONDS = 3600
 GATE_SLOT_SECONDS = 4 * 3600
 
 
+def slot_bound_seconds(text: str) -> int:
+    """`--slot-timeout` of `sd-ship` and `sd-review`: whole seconds above 0, at most `GATE_SLOT_SECONDS`.
+
+    The lane passes its run budget left, so a gate queued under load ends its
+    wait before the job's TERM (pack sd:7412).
+    """
+    if not text.isascii() or not text.isdigit() or not 0 < int(text) <= GATE_SLOT_SECONDS:
+        raise argparse.ArgumentTypeError(f"takes whole seconds from 1 to {GATE_SLOT_SECONDS} (got '{text}')")
+    return int(text)
+
+
+def gate_slot_bound(args: argparse.Namespace) -> int:
+    """The gate's slot-wait bound: `--slot-timeout` when given, the lane's run budget left (pack sd:7412), else
+    `GATE_SLOT_SECONDS` (sd:2611). Here, not in `sd-review`, so the review lane's line cap stays put."""
+    return getattr(args, "slot_timeout", None) or GATE_SLOT_SECONDS
+
+
+def slot_ran_out(gate: Mapping[str, Any]) -> bool:
+    """Whether `sd_gate_run.check_in_worktree`'s gate waited out its slot bound and ran no check (`sd-check`'s
+    `gate_slot.timed_out`, pack sd:7412); a reused receipt or an unread report did not."""
+    return ((gate.get("report") or {}).get("gate_slot") or {}).get("timed_out") is True
+
+
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
     """`policy.ci.provider` for the repository `root` is a checkout of, `github` or `local` (pack sd:7366).
 

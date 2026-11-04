@@ -195,11 +195,11 @@ CONFLICT = "merging origin/main into b1 conflicts; the branch is unchanged"
 
 
 def lane_run(connection, entry, status, finished, *, repository="example/alpha", item=1, head=None, expected=None,
-             reason=None, step="prepare", enqueued=None):
+             reason=None, step="prepare", enqueued=None, code=None):
     """One lane entry's latest checkpoint, as sd-ship's lane writes it: a failed entry names no `head`."""
     body = {"id": entry, "item": item, "title": f"Item {item}", "repository": repository, "status": status, "step": step,
             "expected_head": expected or head or "e" * 40, "head": head, "finished_at": finished, "reason": reason,
-            "enqueued_at": enqueued}
+            "enqueued_at": enqueued, **({"code": code} if code else {})}
     connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
                        (f"lane:v1:{repository}:{entry}", finished or NOW, json.dumps(body)))
     connection.commit()
@@ -390,8 +390,17 @@ class TheGateRuns(Fixture):
         self.assertIn('LOCAL_GATE_CONTEXT = "sd/local-gate"', source)
         for phrase in ("the repository gate failed", "sd/local-gate is failure on"):
             self.assertRegex(phrase, metrics_screen.GATE_FAILED)
-        for code in metrics_screen.GATE_CODES:
-            self.assertIn(f'code="{code}"', source)
+        # pack sd:7412: a code is a refusal's literal `code="..."` or a named constant, as `gate_failed` now is.
+        for code in (*metrics_screen.GATE_CODES, metrics_screen.SLOT_WAIT):
+            self.assertRegex(source, rf'(?m)code="{code}"|^[A-Z_]+ = "{code}"$')
+
+    def test_a_slot_wait_that_ran_out_ran_no_gate(self):
+        """pack sd:7412: a lane before it fails a `gate_slot_wait` entry with the gate's refusal text, but no check
+        ran, so it is no gate run: it does not lower the pass rate."""
+        lane_run(self.connection, "a1", "merged", "2026-09-06T10:00:00Z", head="a" * 40)
+        lane_run(self.connection, "a2", "failed", "2026-09-05T10:00:00Z", reason=GATE, code="gate_slot_wait")
+        alpha = self.doc()["ci"]["repos"][0]
+        self.assertEqual((alpha["gate"], alpha["other"], alpha["rate"]), (0, 1, 1.0))
 
 
 class TheSixMonths(Fixture):
