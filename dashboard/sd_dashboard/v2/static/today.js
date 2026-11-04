@@ -478,9 +478,10 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   function pips(g) {
     if (g.key && (!QV.lanes || QV.lanes.problems.some(p => repoKey(p.repo) === g.key)))
       return html`<td class="detail"><span class="g-unknown" aria-hidden="true">${GLYPH.unknown}</span> lane not read</td>`;
+    // pack sd:7470: merging is the leftmost box.
     const [w, m, n, b, s] = ['working', 'merging', 'next', 'blocked', 'suggested'].map(t => g.rows.filter(c => c.type === t).length);
     // Each box says its count and what it counts, in its title (pack sd:7383); the label above says all five at once.
-    return html`<td class="detail pipe" aria-label="${w} working, ${m} merging, ${n} next, ${b} blocked, ${s} suggested">${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane until someone acts')}${pip(s, ' on', 'suggested: ready or planned items sd-next offers, up to 3')}</td>`;
+    return html`<td class="detail pipe" aria-label="${m} merging, ${w} working, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane until someone acts')}${pip(s, ' on', 'suggested: ready or planned items sd-next offers, up to 3')}</td>`;
   }
   function queueView() {
     const unread = [];
