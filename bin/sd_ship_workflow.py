@@ -25,6 +25,10 @@ HUB_FAULTS = frozenset({"HubUnreachable", "TransactionLost", "BuildMismatch", "H
 BUILD_FAULTS = frozenset({"BuildMismatch", "SchemaTooNew"})
 #: The blocker code of a hub fault; the lane puts such an entry back for its next run.
 HUB_UNAVAILABLE = "hub_unavailable"
+#: A gate whose slot wait ran out at its bound: no check ran, so the lane puts its entry back (pack sd:7412).
+GATE_SLOT_WAIT = "gate_slot_wait"
+#: A gate that ran and failed: the lane does not put its entry back. The metrics page pins this line.
+GATE_FAILED = "gate_failed"
 #: The blocker code of a verb off its repository's lane host (sd:3003), also when the ship lock refuses it.
 LANE_ELSEWHERE = "lane_elsewhere"
 

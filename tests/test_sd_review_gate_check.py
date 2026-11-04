@@ -6,11 +6,14 @@ Also the gate's bound: with no `--timeout`, the repository gate gets
 
 from __future__ import annotations
 
+import contextlib
 import importlib
+import io
 import json
 import pathlib
 import subprocess
 import sys
+from unittest import mock
 
 from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
 
@@ -53,6 +56,44 @@ class GateBound(ReviewFixture):
         # sd:2611: it queues on its own bound, and the runner's limit adds that bound to the check's.
         self.assertEqual(call["argv"][call["argv"].index("--slot-timeout") + 1], str(sd_review.sd_lib.GATE_SLOT_SECONDS))
         self.assertEqual(call["timeout"], sd_review.sd_lib.GATE_CHECK_SECONDS + sd_review.sd_lib.GATE_SLOT_SECONDS)
+
+
+    def test_a_slot_bound_reaches_the_plan_and_the_check(self) -> None:
+        """pack sd:7412: the lane gives prepare its run budget as the slot wait's bound; plan and check both use it."""
+        root = self.make_repo()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        report = sd_review.review(root, namespace(explain=True, timeout=None, slot_timeout=600), FakeRunner(),
+                                  self.environment(), self.chatgpt_home())
+        self.assertEqual(report["timing"]["slot_seconds"], 600)
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, '{"checks": []}', "")})
+        sd_review.review(root, namespace(timeout=None, slot_timeout=600), runner, self.environment(), self.chatgpt_home())
+        [call] = [call for call in runner.calls if any("sd-check" in word for word in call["argv"])]
+        self.assertEqual(call["argv"][call["argv"].index("--slot-timeout") + 1], "600")
+        self.assertEqual(call["timeout"], sd_review.sd_lib.GATE_CHECK_SECONDS + 600)
+
+    def test_the_parser_takes_a_slot_bound_up_to_the_gates_own(self) -> None:
+        cap = sd_review.sd_lib.GATE_SLOT_SECONDS
+        self.assertEqual(sd_review.build_parser().parse_args(["--slot-timeout", "600"]).slot_timeout, 600)
+        self.assertIsNone(sd_review.build_parser().parse_args([]).slot_timeout)
+        for bad in ("0", str(cap + 1)):
+            with self.subTest(bad=bad), self.assertRaises(SystemExit), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                sd_review.build_parser().parse_args(["--slot-timeout", bad])
+
+    def test_a_gate_check_whose_slot_wait_ran_out_says_so(self) -> None:
+        """pack sd:7412: sd-ship reads this mark to refuse with `gate_slot_wait`, which the lane puts back."""
+        gate_run = importlib.import_module("sd_gate_run")
+        ran_out = {"status": "failure", "exit_code": 1, "head": "a" * 40, "stderr": "",
+                   "report": {"checks": [], "gate_slot": {"timed_out": True}}}
+        with mock.patch.object(gate_run, "check_in_worktree", return_value=ran_out) as gate:
+            report = sd_review.run_gate_check(pathlib.Path("."), sd_review.subprocess_runner, {}, 120, "main",
+                                              namespace(database=None, slot_timeout=600), "a" * 40)
+        self.assertEqual((gate.call_args.kwargs["slot_timeout"], report["status"], report.get("slot_ran_out")),
+                         (600, "fail", True))
+        with mock.patch.object(gate_run, "check_in_worktree", return_value={**ran_out, "report": {"checks": []}}):
+            report = sd_review.run_gate_check(pathlib.Path("."), sd_review.subprocess_runner, {}, 120, "main",
+                                              namespace(database=None), "a" * 40)
+        self.assertNotIn("slot_ran_out", report)
 
 
 class GateRepo(ReviewFixture):

@@ -1681,7 +1681,7 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
 
     try:
         gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch), database=database,
-                                             run=through_runner, environ=env, slot_timeout=sd_lib.GATE_SLOT_SECONDS)
+                                             run=through_runner, environ=env, slot_timeout=sd_lib.gate_slot_bound(args))
     except sd_gate_run.GateError as error:
         gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
     checks = (gate.get("report") or {}).get("checks")
@@ -1692,7 +1692,7 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
         "checks": checks,
         "source": "gate-receipt" if gate.get("reused") else "gate" if branch else "worktree",
         "head": gate["head"],
-        "summary": gate.get("summary"),
+        "summary": gate.get("summary"), **({"slot_ran_out": True} if sd_lib.slot_ran_out(gate) else {}),  # pack sd:7412
     }
     report.update({key: gate[key] for key in ("reused", "reuse_miss") if gate.get(key)})  # sd:2772: a miss names its fields
     if report["status"] == "fail":
@@ -1700,10 +1700,10 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
     return report
 
 
-def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
+def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, slot: int = sd_lib.GATE_SLOT_SECONDS) -> dict[str, Any]:
     """The gate step, after a review that does not block (sd:2605): sd-check, held to the planned phase budget (sd:1475)."""
-    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--slot-timeout", str(sd_lib.GATE_SLOT_SECONDS), "--json"]
-    result = runner(argv, env, root, timeout + sd_lib.GATE_SLOT_SECONDS)  # sd:2611: the slot wait is its own plan phase
+    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--slot-timeout", str(slot), "--json"]
+    result = runner(argv, env, root, timeout + slot)  # sd:2611: the slot wait is its own plan phase
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -2052,7 +2052,7 @@ def review(
     providers = [provider.name for provider in chosen[:depth]]
     phase, check_seconds = phase_seconds(args), gate_seconds(args)
     timing: dict[str, Any] = {"setup_seconds": SETUP_TIMEOUT_SECONDS, "phase_seconds": phase,
-              "check_seconds": check_seconds, "slot_seconds": sd_lib.GATE_SLOT_SECONDS,
+              "check_seconds": check_seconds, "slot_seconds": sd_lib.gate_slot_bound(args),
               "candidates": [{"name": provider.name, "recipient": str(sd_registry.recipient(provider))}
                              for provider in chosen]}
     timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + timing["slot_seconds"] + check_seconds + phase * len(chosen)
@@ -2191,7 +2191,7 @@ def review(
         return result
     gate_branch = getattr(args, "gate_check", None)
     result["check"] = (run_gate_check(root, runner, env, check_seconds, gate_branch, args, subject.head)
-                       if gate_branch or args.scope in ("branch", "pr") else run_check(root, runner, env, check_seconds))
+                       if gate_branch or args.scope in ("branch", "pr") else run_check(root, runner, env, check_seconds, sd_lib.gate_slot_bound(args)))
     return after_gate(result, root, args, previous, env, (subject, prompt, _material, checklist), transport_overheads, chosen)
 
 
@@ -2532,6 +2532,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help=f"per phase (default: gate {sd_lib.GATE_CHECK_SECONDS}, provider {DEFAULT_TIMEOUT_SECONDS})",
     )
+    parser.add_argument("--slot-timeout", type=sd_lib.slot_bound_seconds, metavar="SECONDS", help="the gate's slot wait")
     return parser
 
 
