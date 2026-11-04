@@ -445,7 +445,7 @@ def _found(connection, values: dict, names: set[str]) -> tuple[dict, Path, dict]
 
     given = _fields(values, names)
     ident = _text(given["project"], "project")
-    entries, _ = projects(connection, listing=False)
+    entries = projects(connection, listing=False)[0]
     entry = next((e for e in entries if e["id"] == ident and not e["error"]), None)
     if entry is None:
         raise ValueError(f"{ident!r} is not a Studio project; nothing ran.")
