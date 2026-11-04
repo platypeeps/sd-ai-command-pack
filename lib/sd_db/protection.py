@@ -95,8 +95,9 @@ there; it gates every need (`_gated_needs`).
 
 **Alerts ride along (sd:2205, sd:2206).** For a managed repository the
 sweep also stores, in the same row's `body.alerts`, its open Dependabot
-alerts (one page, by severity; `more` when GitHub has a next page) and its
-secret-scanning facts: visibility, the `security_and_analysis` setting, and,
+alerts (one page, by severity, with each alert's summary for the GitHub
+page's Dependabot view, pack sd:7515; `more` when GitHub has a next page)
+and its secret-scanning facts: visibility, the `security_and_analysis` setting, and,
 when scanning is on in a public repository, its open alerts. The setting
 comes with the repository read the basic observation already made; the
 alert pages are read last, from what the observations and bypass reads
@@ -202,6 +203,9 @@ ALERT_REQUESTS_PER_MANAGED = 3
 ALERTS_FORBIDDEN = "API HTTP 403; retry on a later collection"
 #: One page of alerts, GitHub's largest; past it the count is "100+".
 ALERT_PAGE_SIZE = 100
+#: The longest advisory summary a stored alert summary keeps (pack sd:7515):
+#: 100 alerts a repository stay a few kilobytes of the row's body.
+ALERT_SUMMARY_CHARS = 200
 
 #: The `source` marker on protection synthesized from rulesets; a classic
 #: object carries none. The pack's `sd_protection.RULESET_SOURCE`.
@@ -1798,7 +1802,8 @@ def alert_path(owner: str, name: str, kind: str) -> str:
 
 
 def _open_alerts(client, path: str, *, severity: bool = False) -> dict[str, Any]:
-    """`{open, more}` from one page, with `severity` counts when asked, or `{reason}`."""
+    """`{open, more}` from one page, with `severity` counts and each alert's summary (`_alert_summary`) when asked,
+    or `{reason}`."""
     from .contribution_github import Unavailable
 
     spent = _exhausted(client)
@@ -1819,11 +1824,40 @@ def _open_alerts(client, path: str, *, severity: bool = False) -> dict[str, Any]
                 level = level if isinstance(level, str) else "unknown"
                 counts[level] = counts.get(level, 0) + 1
             found["severity"] = counts
+            found["summaries"] = [_alert_summary(alert) for alert in page]
     except Unavailable as error:
         return {"reason": _spent_reason(client, error)}
     except MALFORMED as error:
         return {"reason": _malformed(error)}
     return found
+
+
+def _alert_text(value: Any, *keys: str) -> str | None:
+    """The non-empty string at `keys` under `value`, or None for any other shape."""
+    for key in keys:
+        value = value.get(key) if isinstance(value, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def _alert_summary(alert: dict[str, Any]) -> dict[str, Any]:
+    """What the GitHub page's Dependabot view shows of one alert (pack sd:7515), from the page already read.
+
+    A field the alert lacks or holds in another shape is None, so one odd alert never fails the read; the severity is
+    the count's. Only a github.com link is kept: the page opens it in a new tab.
+    """
+    level = _alert_text(alert, "security_advisory", "severity") or "unknown"
+    summary = _alert_text(alert, "security_advisory", "summary")
+    if summary is not None and len(summary) > ALERT_SUMMARY_CHARS:
+        summary = summary[:ALERT_SUMMARY_CHARS - 1] + "…"
+    url = _alert_text(alert, "html_url")
+    return {"number": alert["number"], "severity": level,
+            "package": _alert_text(alert, "dependency", "package", "name"),
+            "ecosystem": _alert_text(alert, "dependency", "package", "ecosystem"),
+            "manifest": _alert_text(alert, "dependency", "manifest_path"), "summary": summary,
+            "ghsa": _alert_text(alert, "security_advisory", "ghsa_id"), "cve": _alert_text(alert, "security_advisory", "cve_id"),
+            "patched": _alert_text(alert, "security_vulnerability", "first_patched_version", "identifier"),
+            "url": url if url is not None and url.startswith("https://github.com/") else None,
+            "created_at": _alert_text(alert, "created_at")}
 
 
 def _dependabot(client, owner: str, name: str, repo: dict[str, Any]) -> dict[str, Any]:
