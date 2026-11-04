@@ -2681,8 +2681,8 @@ def piece_accounts(connection: Any) -> Callable[[str], tuple[str, str]]:
     The realm is the dashboard's `places.realm_of`, the rule the Writing page
     and Tasks use; the address is `realm_sweep.account` of `work` for the work
     realm and of `personal` for any other. Both are read once, here. A realm
-    list or a setting that did not read is unknown: the piece is held, never
-    sent to the personal Drive by default.
+    list that did not read whole, unset, or a setting that did not read is
+    unknown: the piece is held, never sent to the personal Drive by default.
     """
     import importlib  # noqa: PLC0415
     dashboard = str(Path(__file__).resolve().parent.parent / "dashboard")
@@ -2695,11 +2695,15 @@ def piece_accounts(connection: Any) -> Callable[[str], tuple[str, str]]:
     from sd_db import writes  # noqa: PLC0415 - the checkout's `lib/`
 
     found = places.realms(connection)
-    rules = found["list"] if found["state"] in ("read", "partial") else None
-    # No list set is unknown too: which realm is work is the operator's to say.
+    # Only a list read whole picks an account: a skipped line may be the one
+    # that defines `work`, and `realm_of` would send its repos to personal
+    # (lead review). No list set is unknown too: which realm is work is the
+    # operator's to say.
+    rules = found["list"] if found["state"] == "read" else None
     unread = "" if rules is not None else "no realm list is set (dashboard.realms)" \
-        if found["state"] == "missing" else "the realm list did not read (%s)" % (
-            "; ".join(found["problems"]) or found["state"])
+        if found["state"] == "missing" else "the realm list read in part (%s)" % (
+            "; ".join(found["problems"])) if found["state"] == "partial" \
+        else "the realm list did not read (%s)" % ("; ".join(found["problems"]) or found["state"])
     try:
         rows = writes.read_settings(connection, [sweep.ACCOUNT.format(realm=realm)
                                                  for realm in (WORK_REALM, "personal")])

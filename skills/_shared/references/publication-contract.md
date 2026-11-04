@@ -231,8 +231,8 @@ item as `item`, and `sd:<item>/<file>` as its `source`. It names no vault copy.
 **The realm picks the account.** The request names `account`, the Google
 address of the piece's realm: the work realm's `google.accounts.work.email`,
 any other realm's `google.accounts.personal.email`. Write it with that
-account, as `user_google_email`, and never another. A realm or an account that
-cannot be read holds the piece, named.
+account, as `user_google_email`, and never another. A realm list not read
+whole, a realm or an account that cannot be read holds the piece, named.
 
 **A published piece moves.** The request says `moves: true`, and the file id
 delivered to Drafts is carried to the Published request. Where the request

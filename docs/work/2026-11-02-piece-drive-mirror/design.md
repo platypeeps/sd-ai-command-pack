@@ -139,6 +139,10 @@ option C, a hub cron job with a new verb, one more verb and job.
 | Drain: update, step 6 | Doc body, then receipt and item URL | contract's own table | as the contract's table; step 5 skipped for an `sd:` source | `delivered` on a piece request records the item URL |
 | Verb or page write, then enqueue | the write committed | enqueue raises, or the queue is unwritable | the write's exit and answer unchanged; stderr or the answer names it | enqueue raising leaves exit 0 and stdout unchanged |
 | Service tick: piece sweep | requests for changed files only | the database or a file read hangs or fails | the tick never waits; a hung sweep is logged once and blocks only later sweeps; a failed one is named and the next retries | tick test with a blocked sweep; sweep test with a failing connect |
+| Account by realm: piece producer (`piece_accounts`; every verb, Stage, Park, reconcile and the sweep reach it) | none | realm list read in part: a skipped line may define `work`, and its repos would fall to personal | only a list read whole picks an account; partial, unset or unread holds every piece, named with the skipped line; the next trigger after the list is fixed queues it | a partial list holds work, other and unmatched repos and names line 1; unread and unset hold |
+| Account: briefs (`brief_docs`) | none | none of this class: a brief names no account | the drain's own account, as before | a brief request has no `account` with a realm list set |
+| Account: publication claim (`sd_db.publication`) | none | none of this class: the account is the connector's profile readback, checked against the explicit configuration | another account is refused; nothing claimed | a profile with another address is refused |
+| Account: realm sweep, research slides, mail draft, HOA attach | none | none of this class: each names its realm or reads its own account key, with no realm list | as each tool's own tests | `test_realm_sweep`, `test_research_slides` account tests |
 | Rollback | piece requests left in the queue | an older drain ignores `account` and `moves` | it writes with its default account; a move becomes a new copy in Published | not testable here; named in Risks |
 
 ## Acceptance criteria
@@ -150,8 +154,8 @@ option C, a hub cron job with a new verb, one more verb and job.
   Drafts.
 - [ ] A work piece's request names the work account; any other
   realm's the personal account.
-- [ ] An unread realm list or account queues nothing for that piece and
-  names why.
+- [ ] A realm list not read whole (partial, unset, unread) or an unread
+  account queues nothing for that piece and names why.
 - [ ] `sd writing publication-reconcile` and the dashboard Stage write
   queue the piece.
 - [ ] Each Details gate row draws a Drive link to a delivered copy.

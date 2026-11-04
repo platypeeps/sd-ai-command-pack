@@ -3260,6 +3260,15 @@ class BriefTests(Fixture):
                          (self.TEXT, self.brief, "sd:%d" % self.brief, ""))
         self.assertEqual((request["document"], request["title"], request["space_id"]), (self.STEM, self.STEM, PRIVATE_FOLDER))
 
+    def test_a_brief_picks_no_account_from_the_realm_list(self) -> None:
+        # Lead review class (pack sd:7243): only a piece picks an account by realm. A brief's request names none, so
+        # a realm list read in part cannot send it to the wrong Drive.
+        from sd_db import writes  # noqa: PLC0415 - after the path is set
+        writes.set_setting(self.connection, "dashboard.realms", "realm|work|%s" % (self.root / "*"))
+        self.fields({"publish": {"drive": {}}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertNotIn("account", self.request("drive"))
+
     def test_the_same_text_again_is_already_queued(self) -> None:
         self.fields({"publish": {"drive": {}}})
         PUBLISH.enqueue_briefs(self.connection)
@@ -3567,6 +3576,18 @@ class PieceAccountTests(Fixture):
                 "state": "missing", "source": "row", "problems": [], "list": []}):
             account = PUBLISH.piece_accounts(self.connection)
         self.assertEqual(account(str(self.root / "elsewhere")), ("", "no realm list is set (dashboard.realms)"))
+
+    def test_a_realm_list_read_in_part_holds_every_piece_and_names_the_line(self) -> None:
+        # Lead review: a skipped line that defined `work` sent work pieces to the personal Drive.
+        from sd_db import writes  # noqa: PLC0415 - after the path is set
+        writes.set_setting(self.connection, "dashboard.realms",
+                           "realm|work|%s\nrealm|side|Side|%s" % (self.root / "work-*", self.root / "side-*"))
+        account = PUBLISH.piece_accounts(self.connection)
+        for repo in ("work-blog", "side-news", "elsewhere"):
+            address, why = account(str(self.root / repo))
+            self.assertEqual(address, "", repo)
+            self.assertIn("the realm list read in part", why)
+            self.assertIn("line 1", why)
 
 
 #: An Archify diagram as the 05-architecture template holds it: the SVG in
