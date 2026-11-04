@@ -770,8 +770,10 @@ def cpu_share(slots: int, cores: int | None = None) -> int:
 
 def thread_cap(value: str | None, share: int) -> str:
     """`value` when it is a positive integer no higher than `share`, else `share`: a lower value wins (sd:2726)."""
-    ok = bool(value) and value.isascii() and value.isdigit() and len(value.lstrip("0")) <= MAX_DIGITS
-    return value if ok and 0 < int(value.lstrip("0") or "0") <= share else str(share)
+    if not value or not value.isascii() or not value.isdigit():
+        return str(share)
+    digits = value.lstrip("0")
+    return value if 0 < len(digits) <= MAX_DIGITS and int(digits) <= share else str(share)
 
 
 def holder_environment(environ: Mapping[str, str], slots: int) -> dict[str, str]:
