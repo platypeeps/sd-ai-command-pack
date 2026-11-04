@@ -8,186 +8,169 @@ branch: feat/sd-7243-piece-drive
 # Design — piece-drive-mirror
 
 The item's row holds status, progress and decisions; this page holds the shape.
-Written against origin/main `72cba5043`.
+Revised 2026-11-04 for the operator's scope change (note #40909), against
+origin/main `0e5859c90`.
 
 ## Problem
 
-The operator asked on 2026-11-02 for two icons on each file of a writing
-piece in the Writing page's Details gate rows: one opens the local file,
-one opens its Google Drive copy. The files are `index.md` (the draft),
-`research.md`, `fact-check.md` and `adversarial.md`. The Drive copy is a
-mirror kept current.
+The operator wants each writing piece's files in Google Drive, kept
+current, with a link from the Writing page to each copy. The files are
+`index.md` (the draft), `research.md`, `fact-check.md` and
+`adversarial.md`.
 
-Today no piece reaches Drive. The publication contract
-(`skills/_shared/references/publication-contract.md`) has two producers:
-`research.conf.py` entries, and routine briefs
-(`source:bin/sd_research_publish.py::brief_docs`), designated on their item's
-`fields.publish` and queued again on each brief render. A piece has no
-`research.conf.py` entry and no render, so nothing queues it, and nothing
-would queue it again after an edit (note #40798).
+The operator ruled on 2026-11-02 (note #40909):
 
-Pages open local files today only through `obsidian://open` links, for
-vault copies (`published()` in `commands.js`, `markup._obsidian_reads`). The pack
-sd:7242 bundle adds a view icon to each gate row: it reads the report
-through `GET /api/writing/<item>/<gate>` and shows it read only in the
-editor's evidence pane; Draft's opens the whole draft.
+1. The review stage creates or updates the Drive copy. No one designates.
+2. Work pieces go to the work Drive. Pieces of every other realm go to the
+   personal Drive. The account values stay in config.
+3. Both Drives hold the same folders, Drafts and Published. A published
+   piece moves to Published.
+4. A dashboard link opens each Drive copy.
+5. A copy updates when its source file changes, hand edits included.
+
+The first build (three commits on this branch) mirrored a piece only
+after a manual designation, `fields.publish.drive`, into `Briefs/<repo>`,
+in one account. Rulings 1 to 3 replace that.
 
 ## Approach
 
-Reuse the brief path end to end: the same designation key, queue,
-request, fingerprint, receipt and drain. Add one producer beside
-`brief_docs`, one trigger, one dashboard control and the icons.
+Reuse the brief path end to end: the same queue, request, fingerprint,
+receipt and drain. A piece is a producer beside `brief_docs`; its stage,
+not a designation, says whether it mirrors.
 
-1. **Designation.** A piece is designated on its item, as a brief is:
-   `fields.publish.drive` (and `notion`, which the producer reads for free
-   but the page does not offer). One designation covers all four files.
-   Nothing is inferred: an undesignated piece queues nothing.
-2. **Producer.** `piece_docs(connection, items)` beside `brief_docs`
-   reads every `kind = 'idea'` row with a `piece` and a `fields.publish`,
-   and gives one DOCS entry per file present:
-   - `out`: `<year>-<slug>-<stem>`, with stem `draft`, `research`,
-     `fact-check` or `adversarial`. The request is
-     `<key>.<out>.drive.json`, as for any document.
-   - `title`: `<piece title> · <stem>`.
-   - `content`: the file's text, read from the registered checkout,
-     never a linked worktree's. A file outside the repository is skipped
-     and named, as `piece_files` does.
-   - `source`: `sd:<item>/<file>`, such as `sd:7001/research.md`.
-   - `item`: the piece's item, so drain step 6 records each URL there as
-     `fields.published["<repo>::<out>"]`.
+1. **Stage decides (ruling 1).** `piece_docs` reads each piece that is
+   not parked, at stage `review`, `ready` or `published`. Each gives one
+   Drive entry per file present. Earlier stages, `declined` and parked
+   pieces queue nothing, and a copy they already have stays.
+2. **Folder by stage (ruling 3).** `review` and `ready` go to
+   `Writing/Drafts`; `published` goes to `Writing/Published`. Both paths
+   sit under My Drive in each account, and the drain creates a missing
+   one, as it creates `Briefs/<repo>`.
+3. **A move keeps the file (ruling 3).** A piece entry carries
+   `moves: true`. `enqueue` then carries the file id across the two
+   folders: `recorded` and `delivered_url` compare the identity without
+   its `folder`. The request names the file and the new folder. The
+   contract tells the drain to move a file that sits in another folder
+   (`update_drive_file`, `add_parents` and `remove_parents`), then update
+   it. Every other document keeps today's rule: a new folder drops the
+   id. The account stays in the identity, so a piece that changes realm
+   creates a new copy in the other Drive.
+4. **Account by realm (ruling 2).** The realm is `places.realm_of` of
+   the piece's repo, the rule the Writing page and Tasks already use.
+   Realm `work` takes the `google.accounts.work.email` account; every
+   other realm takes `google.accounts.personal.email`. Both are read by
+   `realm_sweep.account`: the setting row, else the pack's machine
+   config. The request carries the address as `account`; the drain
+   passes it as `user_google_email`. An unread realm list or an unread
+   account holds that piece, named, and queues nothing for it.
+5. **Triggers.** The `sd writing` verbs that write a piece queue it
+   after their write (first build), now with `publication-reconcile`,
+   which moves a piece to `published`. The dashboard's Stage and Park
+   writes queue it after theirs, best effort, as the verbs do.
+6. **Hand edits (ruling 5): an open question.** No existing job or
+   watcher sees an uncommitted edit to a content file. A git hook sees
+   only commits, and the content repo keeps pieces untracked. See
+   "Open question".
+7. **Dashboard link (ruling 4).** `writing_screen.document` gives each
+   piece a `mirror`: its account realm, its folder, and per file the
+   copy entries `publishing.document_copies` builds from the queue, the
+   receipt and `fields.published`. Each gate row gets a Drive icon: a
+   link to the copy, or off with the reason (queued, not mirrored at
+   this stage, unknown).
+8. **Contract.** The piece section says the above: stage, folders,
+   account, move.
 
-   An entry carrying `content` already takes the brief's route through
-   `mirror_request` and `delivered_url`: no `rendered` path, the URL
-   carried from the receipt in the same container, no step 5.
-   `mirror_request` takes `source` from the entry when it names one, and
-   writes no vault path for it. `enqueue_pieces(connection, items)` is
-   `enqueue_briefs`' loop over `piece_docs`, sharing its read of each
-   repo's channels setting. Through `enqueue`, it keeps every rule a
-   render has: the main checkout on its default branch only, the
-   `already_queued` digest check, the queue lock and `SD_MIRROR_DRY_RUN`.
-3. **Re-queue trigger: the `sd writing` verbs.** After a write verb
-   on a piece succeeds (`promote`, `register`, `stage`, `metadata`,
-   `gate`, `park`, `adversarial`, `reconcile`), `bin/sd_writing.py`
-   calls `enqueue_pieces(connection, {item})` and prints its lines on
-   stderr. It never fails the verb, as `sd_controls._mirror_briefs`
-   never fails a brief add. The digest check queues only the files whose
-   text changed. An undesignated piece costs one row read.
-4. **Dashboard control.** One Writing command, `piece.mirror`, "Mirror to
-   Drive", posts `POST /api/writing/publish` `{item, channel}`. It runs
-   `designate_brief`'s three steps for a piece: the channels setting
-   must allow Drive, `fields.publish.drive` becomes `{}` in one
-   transaction unless it is there, then `enqueue_pieces(connection,
-   {item})`. It is idempotent, so on a designated piece it reads
-   "Mirror again" and queues whatever changed since: the manual answer
-   for a hand edit that no verb followed.
-5. **Icons.** `writing_screen.document` gives each piece a `mirror`:
-   the designation, and per file the copy entry
-   `publishing.document_copies` already builds from the queue, the
-   receipt and `fields.published`. Each gate row gets a Drive icon,
-   drawn as the Documents and Briefs rows draw theirs (`published()` in
-   `commands.js`): a link to the copy, `queued`, `missing` or `off`.
-6. **Local open: the sd:7242 view icon, unchanged.** It opens the file
-   read only through an existing route, works from any device, and sends
-   no local path to the page. `writing_screen` holds that rule: "the
-   repository goes out by its folder name only, so no local path
-   leaves."
-7. **Contract.** A section "A writing piece is designated on its item"
-   beside the brief's. Step 5 changes from "a routine brief's request
-   (`source` `sd:<item>`)" to "a request whose `source` is an item
-   (`sd:<item>` or `sd:<item>/<file>`)". It also states that a piece
-   never mirrors into `sdw.drive_publishing_folder`, the blog's gate.
+Deleted from the first build, since ruling 1 made it unneeded: the
+designation on `fields.publish`, `designate_piece`, `piece_request`,
+`POST /api/writing/publish`, the `_designate` split of
+`designate_brief`, and the Notion copy of a piece.
 
 Each new mechanism, and what it replaces:
 
-- `piece_docs` and `enqueue_pieces`: no producer covers a row whose text
-  lives in files. They reuse `enqueue`; nothing new is stored.
+- `piece_docs` and `enqueue_pieces`: no producer covers a row whose
+  text lives in files. They reuse `enqueue`; nothing new is stored.
+- `moves` on an entry: a new key on an existing request; it replaces
+  "a new folder creates a second copy" for pieces only.
+- `account` on a Drive target: a new request field. It replaces the
+  drain's guess of which account to use.
 - The `sd:<item>/<file>` source form: a new value of an existing field.
-  The drain needs it to skip step 5, since no `research.conf.py` exists.
-- The verb trigger: no new command, five lines in an existing one.
-- `POST /api/writing/publish`: the Writing page's write. It mirrors
-  `/api/briefs/publish`, whose checks refuse a non-brief. Reusing that
-  route would put a Writing control behind a Briefs refusal.
-- `piece.mirror` and the `mirror` field: one command and one read field.
 
 Rejected:
 
-- **Re-queue in the drain's own digest check.** It is smaller (one call
-  in the drain's first step, as `sd-research-kit project` runs there),
-  but a drain runs only when the queue already holds a request
-  (`mirror-sync-pending`, Publish now). With the queue empty, an edited
-  piece would never trigger it, and the copy stays stale for good. The
-  verbs follow every step of the writing skills.
-- **Local open by `vscode://file/<path>`.** It opens the file editable,
-  but only in a browser on the machine whose disk holds that path. It
-  also sends the absolute path to the page against `writing_screen`'s
-  rule. `file://` fails: Chrome refuses a `file://` link from an http
-  page. `obsidian://open` opens only a file inside the vault, and
-  content repos are not.
-- **A Drive folder per piece.** The drain resolves only `Briefs/<repo>`
-  or one named folder. The four docs land flat in `Briefs/<repo>`,
-  grouped by their title prefix. A repo's channels setting can name
-  another folder for the whole repo.
+- **A designation per piece** (the first build): ruling 1 removed it.
+- **Folders per repo, `Briefs/<repo>`**: ruling 3 names two folders,
+  the same in both Drives.
+- **An account per realm id** (`google.accounts.<realm>.email`): ruling 2
+  sends every non-work realm to the personal Drive.
+- **Local open by `vscode://` or `file://`**: as in the first design;
+  the sd:7242 view icon stays the local open.
+
+## Open question
+
+How should a hand edit with no verb after it reach Drive? Each option
+is a new duty or a lag; the brief says to ask before building one.
+
+- Option A (recommended): the dashboard service's existing
+  `service_actions` tick runs `enqueue_pieces` every 5 minutes in a
+  thread. It adds no command or job, runs where the queue is, and
+  writes only on a change.
+- Option B: brief add and render, which already queue briefs, also
+  queue pieces. No new mechanism; the lag is hours.
+- Option C: a hub cron job runs a new `sd writing mirror` verb every 15
+  minutes: one more verb and one more job.
+
+Until it is answered, a hand edit reaches Drive at the next verb or
+dashboard Stage or Park.
 
 ## Non-goals
 
-- Untick. Dropping a piece's designation and trashing its four copies
-  is a follow-up item. Until then no control drops it: `sd task edit`
-  writes no `fields`.
-- Publish now for a piece (`publish_drain`). Pieces drain with every
+- Trashing a copy: a declined, parked or deleted piece keeps its copy.
+- A Notion copy of a piece.
+- Publish now (`publish_drain`) for a piece: pieces drain with every
   other request, when a session sees `mirror-sync-pending`.
-- A Notion choice on the page. The producer queues `notion` when the
-  item names it.
-- A re-queue on the dashboard's Stage and Park writes. Stage changes a
-  file only in a `file`-owned repo; Park moves the folder, and `source`
-  does not change with it. The next verb or "Mirror again" catches both.
-- Trashing the copy of a deleted report. Its request and copy stay.
+- A piece sent back from `review` to `drafting`: its copy stays.
 - Editing a piece from the page.
 
 ## Failure table
 
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
-| Mirror: designate | `fields.publish.drive` set in one transaction | the enqueue after it raises or the pack lacks `enqueue_pieces` | the designation stays; the answer says nothing was queued; the next verb or a second click queues | designation kept and `queued: false`, then a second call queues |
-| Mirror: designate | none | channels setting unread, or Drive left out | refused before the write; nothing designated | refusal names the cause; `fields` unchanged |
-| Enqueue: per file | one request and its receipt per file, under the queue lock | stop after two of four files | the next enqueue finds those two `already queued` and writes the other two | stop after file two; rerun writes two, skips two |
-| Enqueue: read | none | a file unreadable, or a symlink out of the repo | that file is skipped and named; the others queue | unreadable `research.md`: three requests and one reason |
-| Enqueue: refusal | none | linked worktree, or the main checkout off its default branch | nothing queued; the line says why; the next verb on the default branch queues | worktree verb queues nothing and prints the refusal |
-| Enqueue: setting | none | that repo's channels setting unread | that repo's pieces held, named; others queue | unread setting holds the repo |
-| Verb, then enqueue | the verb's write committed | enqueue raises, or the queue is unwritable | the verb's exit and JSON are unchanged; stderr names it; the next verb queues | enqueue raising leaves exit 0 and stdout unchanged |
-| Drain step 3 to 6 | Drive doc, then receipt and item URL | contract's own table | as the contract's table; step 5 skipped for an `sd:` source | `delivered` on a piece request records the item URL |
-| Next generation | request rewritten with the carried `file` id | receipt from another container or item | `delivered_url` carries nothing; the drain adopts by its pointer | changed draft carries `file=` from a receipt in the same container only |
-| Rollback | piece requests left in the queue | an older drain reads the old step 5 and tries `research.conf.py` | step 5 fails, so the old contract says report and stop; the request stays with its id | not testable here; named in Risks |
+| Enqueue: read realm and account | none | realm list or account unread | that piece held and named; others queue; the next trigger queues it | unread realms hold the piece; unread account holds it |
+| Enqueue: per file | one request and its receipt per file, under the queue lock | stop after two of four files | the next enqueue finds two `already queued` and writes two | stop after file two; rerun writes two, skips two |
+| Enqueue: read file | none | a file unreadable or outside the repo | that file skipped and named; others queue | symlink out of the repo: three requests, one reason |
+| Enqueue: refusal | none | linked worktree, or main off its branch | nothing queued; the line says why | files come from the registered checkout |
+| Stage to published | request rewritten to `Writing/Published` with the carried file id | receipt from another account or item | no id carried; the drain adopts by its pointer, else creates | published piece carries `file`; another account carries none |
+| Drain: move | Drive file's parent changed | stop after the move, before the update | the request still names the file; the next drain finds it in the folder, skips the move, updates | contract text; drain is a session |
+| Drain: update, step 6 | Doc body, then receipt and item URL | contract's own table | as the contract's table; step 5 skipped for an `sd:` source | `delivered` on a piece request records the item URL |
+| Verb or page write, then enqueue | the write committed | enqueue raises, or the queue is unwritable | the write's exit and answer unchanged; stderr or the answer names it | enqueue raising leaves exit 0 and stdout unchanged |
+| Rollback | piece requests left in the queue | an older drain ignores `account` and `moves` | it writes with its default account; a move becomes a new copy in Published | not testable here; named in Risks |
 
 ## Acceptance criteria
 
-- [ ] `piece_docs` gives four entries for a designated piece with four
-  files, three without `adversarial.md`, and none undesignated.
-- [ ] `enqueue_pieces` writes `<key>.<year>-<slug>-draft.drive.json`
-  carrying the file's text, `source` `sd:<n>/index.md`, `item` `<n>`,
-  and no `rendered` or vault path.
-- [ ] A second `enqueue_pieces` with no edit queues nothing; one after a
-  draft edit queues only the draft.
-- [ ] `sd writing gate` on a designated piece queues its changed files;
-  on an undesignated piece it writes nothing to the queue.
-- [ ] `POST /api/writing/publish` designates and queues; a second post
-  writes no second designation.
-- [ ] `/api/writing` gives each piece's `mirror`; each Details gate row
-  draws a Drive icon that links to the copy when one is delivered.
+- [ ] `piece_docs` gives four Drive entries for a piece at `review`,
+  none at `drafting`, none for a parked piece.
+- [ ] A `review` piece's request names `Writing/Drafts`; a `published`
+  one names `Writing/Published` and carries the file id delivered to
+  Drafts.
+- [ ] A work piece's request names the work account; any other
+  realm's the personal account.
+- [ ] An unread realm list or account queues nothing for that piece and
+  names why.
+- [ ] `sd writing publication-reconcile` and the dashboard Stage write
+  queue the piece.
+- [ ] Each Details gate row draws a Drive link to a delivered copy.
 - [ ] `sd-docs-lint` passes on this page; the focused suites pass.
 
 ## Risks
 
-- A hand edit with no verb after it leaves the Drive copy stale until
-  the next verb or "Mirror again". The page shows the copy as current,
-  since it reads the receipt, not the file. Accepted: a digest per poll
-  of every piece is more than the page should do.
-- After a rollback to a pack without this change, a drain session on the
-  old contract may try step 5 on a piece request. Step 5's failure rule
-  leaves the request with its id, so no copy is lost or doubled.
-- A research document named `<year>-<slug>-<stem>` in a writing repo
-  would share a request slot. `mirror_identity` compares the document
-  name and repo, so the two would overwrite each other's request.
-  Accepted: no writing repo has a `research.conf.py`.
+- Until the open question is ruled on, a hand edit with no verb after
+  it leaves the Drive copy stale.
+- After a rollback, an older drain ignores `account` and `moves`. It
+  writes with the session's default account and creates a second copy
+  in Published. Accepted: the branch has not shipped, so no queue holds
+  a piece request yet.
+- A realm moved in Settings moves a piece to the other Drive at its next
+  trigger; the old copy stays.
 - Evidence: a delivered URL is tied to its file by the receipt's request
-  name, `item` and `delivered_to` container. A receipt for another item
-  or container carries nothing.
+  name, `item` and `delivered_to` identity, which holds the account. A
+  receipt for another item or account carries nothing.
