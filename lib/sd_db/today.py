@@ -233,7 +233,7 @@ def followups(connection: sqlite3.Connection, *, repos: Iterable[str | None] | N
     `note`, `title` (the followup's first line), `item_title`, `at`."""
     keep = _keep(repos)
     reports = {row["id"] for row, _ in _attention_rows(connection, keep)}
-    return [_note_row(note) for note in open_notes(connection, "followup", repos=keep) if note["item"] not in reports]
+    return [_note_row(note) for note in open_notes(connection, "followup", repos=keep, without=reports)]
 
 
 def _closed(connection: sqlite3.Connection, repos: Iterable[str | None] | None, now: str | None,
