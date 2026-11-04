@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from unittest import mock
+from urllib.parse import quote
 
 from sd_dashboard import studio, v2
 from sd_db.testing import patience
@@ -69,6 +70,26 @@ def fixture(base: Path) -> tuple[Path, Path]:
     (art / "node_modules" / "dep").mkdir(parents=True)
     (art / "node_modules" / "dep" / "project.json").write_text("{}", encoding="utf-8")
     return root, outside
+
+
+def song_with_renders(root: Path, outside: Path) -> Path:
+    """A song as fun-ai-stuff keeps one (pack sd:7514): its films in illustrated-film/renders/<Title>.mp4, beside a
+    deeper draft, a subtitles folder, a note, a hidden partial, a link out and a link to a sibling."""
+    song = root / "example" / "art" / "songs" / "tune"
+    renders = song / "illustrated-film" / "renders"
+    (renders / "drafts").mkdir(parents=True)
+    (song / "illustrated-film" / "subtitles").mkdir()
+    (song / "project.json").write_text(json.dumps({"kind": "song", "title": "Tune"}), encoding="utf-8")
+    for name in ("Who Pays?.mp4", "All Rise! (Subtitled).mp4", "Don't Stop.mp4"):
+        (renders / name).write_bytes(MEDIA)
+    (renders / "notes.md").write_text("not media", encoding="utf-8")
+    (renders / ".partial.mp4").write_bytes(MEDIA)
+    (renders / "drafts" / "deeper.mp4").write_bytes(MEDIA)
+    (song / "illustrated-film" / "subtitles" / "Who Pays.mp4").write_bytes(MEDIA)
+    (outside / "film.mp4").write_bytes(MEDIA)
+    (renders / "linked.mp4").symlink_to(outside / "film.mp4")
+    (renders / "inside.mp4").symlink_to(renders / "Who Pays?.mp4")
+    return song
 
 
 class TheProjects(ScreenCase):
@@ -165,6 +186,40 @@ class TheProjects(ScreenCase):
         (song / "final-video.mp4").symlink_to(self.outside / "film.mp4")
         self.assertEqual(self.read()["projects"][2]["roots"], [])
         self.assertIsNone(studio.located(self.connection, "art/songs/tune/final-video.mp4", self.root))
+
+    def test_a_songs_films_in_its_renders_folder_list_as_results_and_nothing_deeper(self):
+        # pack sd:7514: no song has final-video.mp4; its films land in illustrated-film/renders/<Title>.mp4.
+        song = song_with_renders(self.root, self.outside)
+        tune = self.read()["projects"][2]
+        films = ["songs/tune/illustrated-film/renders/" + name for name in ("All Rise! (Subtitled).mp4", "Don't Stop.mp4", "Who Pays?.mp4")]
+        self.assertEqual([(r["role"], r["result"], [f["path"] for f in r["files"]]) for r in tune["roots"]],
+                         [("final", True, films)])
+        for film in films:
+            located = studio.located(self.connection, quote(f"art/{film}"), self.root)
+            self.assertEqual(located[0] if located else None, (self.root / "example" / "art" / film).resolve(), film)
+        for tail in ("renders/drafts/deeper.mp4", "subtitles/Who%20Pays.mp4", "renders/notes.md", "renders/.partial.mp4",
+                     "renders/linked.mp4", "renders/inside.mp4", "renders"):
+            with self.subTest(tail=tail):
+                self.assertIsNone(studio.located(self.connection, f"art/songs/tune/illustrated-film/{tail}", self.root))
+        self.assertIsNone(studio.located(self.connection, "art/songs/tune/Who%20Pays%3F.mp4", self.root))
+        self.assertTrue((song / "illustrated-film" / "renders" / "Who Pays?.mp4").is_file())
+        with mock.patch.object(studio, "FILES", 1):
+            final = self.read()["projects"][2]["roots"][0]
+        self.assertEqual(([f["name"] for f in final["files"]], final["cut"]), (["All Rise! (Subtitled).mp4"], True))
+
+    def test_a_renders_folder_that_does_not_list_is_a_problem_not_an_empty_list(self):
+        # pack sd:7514: a failed read is unknown, not "no film"; a missing folder is no film.
+        song_with_renders(self.root, self.outside)
+        real = os.listdir
+
+        def refuse(path):
+            if Path(path).name == "renders":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real(path)
+        with mock.patch.object(studio.os, "listdir", refuse):
+            tune = self.read()["projects"][2]
+        self.assertEqual((tune["roots"], tune["problems"]),
+                         ([], ["final illustrated-film/renders/ could not be read: Permission denied"]))
 
     def test_a_root_with_more_than_files_lists_the_first_and_says_it_was_cut(self):
         with mock.patch.object(studio, "FILES", 1):
@@ -564,7 +619,7 @@ class TheServer(BrowserSession):
         self.assertEqual(status, 200)
         self.assertEqual([p["id"] for p in json.loads(body)["projects"]], ["art/shirts/cat", "art/songs/broken"])
 
-    def test_every_gallery_file_the_api_lists_answers_200_under_a_sandbox(self):
+    def test_every_gallery_file_the_api_lists_answers_200_under_its_policy(self):
         doc = json.loads(self.fetch("/api/studio")[2])
         paths = [f["path"] for p in doc["projects"] for r in p["roots"] for f in r["files"]]
         self.assertEqual(len(paths), 3)
@@ -572,7 +627,7 @@ class TheServer(BrowserSession):
             with self.subTest(path=path):
                 status, headers, _ = self.fetch(f"/studio/files/art/{path}")
                 self.assertEqual(status, 200)
-                self.assertEqual(headers["Content-Security-Policy"], studio.POLICY)
+                self.assertEqual(headers["Content-Security-Policy"], studio.policy(Path(path)))
         self.assertEqual(self.fetch("/studio/files/art/shirts/cat/candidates/one.png")[1]["Content-Type"], "image/png")
 
     def run_page(self, doc, body):
@@ -836,6 +891,30 @@ class TheServer(BrowserSession):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/media/clip.mp4", Range="bytes=0-1,5-9")
         self.assertEqual((status, headers["Content-Length"], body), (200, "1000", MEDIA))
 
+    def test_audio_and_video_answer_without_a_sandbox_and_an_image_keeps_it(self):
+        """pack sd:7513: Open loads a file as a top-level document. Under `sandbox` a media document has origin null,
+        and Chrome blocks its own load (CORS, ERR_FAILED), so nothing plays; an image, and above all an SVG, keeps it."""
+        cat = self.root / "example" / "art" / "shirts" / "cat"
+        (cat / "media" / "now.mp3").write_bytes(MEDIA)
+        (cat / "candidates" / "mark.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"/>', encoding="utf-8")
+        for tail, status, headers in (("media/now.mp3", 200, {}), ("media/clip.mp4", 200, {}),
+                                      ("media/clip.mp4", 206, {"Range": "bytes=0-9"}),
+                                      ("media/take.wav", 416, {"Range": "bytes=1000-"})):
+            with self.subTest(tail=tail, **headers):
+                got, answer, _ = self.fetch(f"/studio/files/art/shirts/cat/{tail}", **headers)
+                policy = answer["Content-Security-Policy"]
+                self.assertEqual(got, status)
+                self.assertNotIn("sandbox", policy)
+                self.assertIn("default-src 'none'", policy)
+                self.assertIn("media-src 'self'", policy)
+                self.assertEqual(answer["X-Content-Type-Options"], "nosniff")
+        for tail in ("candidates/mark.svg", "candidates/one.png"):
+            with self.subTest(tail=tail):
+                got, answer, _ = self.fetch(f"/studio/files/art/shirts/cat/{tail}")
+                self.assertEqual((got, answer["Content-Security-Policy"], answer["X-Content-Type-Options"]),
+                                 (200, studio.POLICY, "nosniff"))
+                self.assertTrue(studio.POLICY.startswith("sandbox;"))
+
     def test_an_image_ignores_a_range(self):
         status, headers, body = self.fetch("/studio/files/art/shirts/cat/candidates/one.png", Range="bytes=0-1")
         self.assertEqual((status, body, headers.get("Accept-Ranges")), (200, b"\x89PNG one", None))
@@ -847,8 +926,22 @@ class TheServer(BrowserSession):
         (song / "final-video.mp4").write_bytes(MEDIA)
         (song / "other.mp4").write_bytes(MEDIA)
         status, headers, body = self.fetch("/studio/files/art/songs/tune/final-video.mp4", Range="bytes=0-9")
-        self.assertEqual((status, body, headers["Content-Security-Policy"]), (206, MEDIA[:10], studio.POLICY))
+        self.assertEqual((status, body, headers["Content-Security-Policy"]), (206, MEDIA[:10], studio.MEDIA_POLICY))
         self.assertEqual(self.fetch("/studio/files/art/songs/tune/other.mp4")[0], 404)
+
+    def test_a_songs_render_with_a_question_mark_is_linked_encoded_and_served_with_a_range(self):
+        """pack sd:7514: studio.js links renders/'Who Pays?.mp4' with %3F, so the "?" is no query; the server finds it."""
+        song_with_renders(self.root, self.outside)
+        doc = json.loads(self.fetch("/api/studio")[2])
+        details = self.run_page(doc, "window.PAGE_LIST.select('art/songs/tune'); R.details = ELS.details.html;")["R"]["details"]
+        self.assertIn('src="/studio/files/art/songs/tune/illustrated-film/renders/Who%20Pays%3F.mp4"', details)
+        status, headers, body = self.fetch("/studio/files/art/songs/tune/illustrated-film/renders/Who%20Pays%3F.mp4", Range="bytes=0-9")
+        self.assertEqual((status, headers["Content-Range"], body, headers["Content-Security-Policy"]),
+                         (206, "bytes 0-9/1000", MEDIA[:10], studio.MEDIA_POLICY))
+        self.assertEqual(self.fetch("/studio/files/art/songs/tune/illustrated-film/renders/Who%20Pays?.mp4")[0], 404)
+        for tail in ("renders/drafts/deeper.mp4", "subtitles/Who%20Pays.mp4", "renders/linked.mp4"):
+            with self.subTest(tail=tail):
+                self.assertEqual(self.fetch(f"/studio/files/art/songs/tune/illustrated-film/{tail}")[0], 404)
 
     def test_a_path_outside_its_roots_answers_404(self):
         for tail in ("art/shirts/cat/stray.png", "art/shirts/cat/previews/secret.png", "art/shirts/cat/candidates/.hidden.png",
