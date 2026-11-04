@@ -510,6 +510,28 @@ class TheRepositoryFilter(TodayCase):
         self.assertEqual({row["repo"] for row in both["unscheduled"]}, {APP, LIB})
         self.assertEqual(len(today.sections(self.connection, now=NOW)["followups"]), 3)
 
+    def test_a_repositorys_rows_list_past_the_fleets_note_cap(self):
+        """pack sd:7400: the filter runs before `open_notes`' 200-row cap, so 200 older rows elsewhere hide none."""
+        busy = self.item("Busy", repo=APP)
+        for n in range(200):
+            add_note(self.connection, busy, "followup", f"Chase {n}")
+            add_note(self.connection, busy, "question", f"Pick {n}\nOption: A (Recommended)\nOption: B")
+        mine = self.item("Mine", repo=LIB)
+        chase = add_note(self.connection, mine, "followup", "Chase the vendor")
+        decision = add_note(self.connection, mine, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
+        self.assertEqual([row["note"] for row in today.followups(self.connection, repos=[LIB])], [chase])
+        self.assertEqual([row["note"] for row in today.decisions(self.connection, repos=[LIB])], [decision])
+        self.assertEqual(today.sections(self.connection, repos=[LIB], now=NOW)["summary"]["decisions"], 1)
+
+    def test_decisions_list_past_a_cap_of_plain_questions(self):
+        """pack sd:7400: questions Decisions leaves out fill no cap that hides one it lists, as in #1663."""
+        busy = self.item("Busy", repo=APP)
+        self.connection.executemany("INSERT INTO note (item, timestamp, kind, body) VALUES (?, ?, 'question', ?)",
+                                    [(busy, f"2026-09-01T00:00:{n % 60:02d}+00:00", f"Plain {n}") for n in range(200)])
+        asked = self.item("Asked", repo=APP)
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
+        self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision])
+
     def test_delivered_and_attention_follow_the_filter(self):
         for repo in (APP, LIB):
             shipped = self.item(f"Shipped {repo}", repo=repo, status="in_progress")
