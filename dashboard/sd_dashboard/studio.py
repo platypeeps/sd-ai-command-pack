@@ -18,7 +18,11 @@ with its error; a root that leaves the project folder, or names an unknown role,
 `/studio/files/<repo key>/<path in the repository>`, each segment percent-encoded, by `designs.resolve`'s rules with
 `TYPES` here: every folder a name, the file's own name a `file_name` (a title with spaces and `!` is one, sd:7395),
 the resolved file inside the repository, and inside a root a project names now. A symlink out is a 404. Each
-file answers under `POLICY`, a sandbox, so an opened SVG runs nothing.
+file answers under `POLICY`, a sandbox, so an opened SVG runs nothing. Each file carries its mtime (`modified`), each
+root whether its role is in `RESULTS`, a rendered end result, and each project `updated`, the newest mtime of its
+`project.json` and the files it lists (sd:7490). A kind's `OUTPUTS`, the files its tool renders in the project folder
+itself (a song's `final-video.mp4`), list under the role `FINAL`, a result; each is served by its name alone, so no
+other file of that folder is.
 
 **Seeking.** `.mp4`, `.mp3` and `.wav` answer `Range: bytes=` with 206 and `Content-Range` (`byte_range`): past the end
 is 416, and a header that does not parse, or asks for several ranges, gets the whole file (200).
@@ -38,6 +42,9 @@ server finds again: `studio.check` runs `make check` in its checkout, `studio.ep
 tool in the nearest `tools/` above the project with a verb from `EPISODE_VERBS` or `SONG_VERBS`, and
 `studio.session` starts claude in herdr in the checkout, told to read the brief from `project.json`, and notes the
 pane on the project's item. A song verb that needs more than the song (`import`, `runway`) is not offered.
+A file of a result root re-renders with `RENDER`, its kind's verb, posted as that kind's tool row; a kind with no
+verb there offers no Re-render. A song's `assemble` runs with `--replace` (`SONG_FLAGS`): the tool keeps the last
+render in `media/final-backups`.
 """
 
 from __future__ import annotations
@@ -61,6 +68,12 @@ PROJECT = "project.json"
 
 KINDS = ("shirt", "song", "episode")
 ROLES = ("reference", "candidates", "selected", "print", "stickers", "previews", "media")
+#: The roles that hold a rendered end result (sd:7490): `reference` and `candidates` are inputs and options.
+RESULTS = ("selected", "print", "stickers", "previews", "media")
+#: The files a kind's tool renders in the project folder itself, outside any root (decision #43036): song_pipeline.py
+#: assemble writes final-video.mp4 there. Each lists under the role `FINAL`, a result, and is served alone, by name.
+OUTPUTS = {"song": ("final-video.mp4",)}
+FINAL = "final"
 
 #: The media the gallery serves, each with its type. Anything else is a 404: no page, script or Markdown.
 TYPES = {
@@ -178,6 +191,11 @@ def _address(file: str) -> str | None:
         return None
 
 
+def _stamp(seconds: float) -> str:
+    """An mtime as the page's `time.rel` reads it: UTC, to the second."""
+    return datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
     """A root's servable files, as the gallery links them, and whether the list was cut at `FILES`."""
     out, cut = [], False
@@ -191,13 +209,36 @@ def _files(checkout: Path, root: Path) -> tuple[list[dict], bool]:
                 continue
             if len(out) >= FILES:
                 return out, True
-            target, kind = found
-            try:
-                size = target.stat().st_size
-            except OSError:
-                continue
-            out.append({"path": relative, "name": name, "bytes": size, "type": kind.split("/")[0], "ranged": target.suffix.lower() in RANGED})
+            listed = _listed(found, relative, name)
+            if listed is not None:
+                out.append(listed)
     return out, cut
+
+
+def _listed(found: tuple[Path, str], relative: str, name: str) -> dict | None:
+    """A served file as the gallery lists it, or None when it does not stat."""
+    target, kind = found
+    try:
+        stat = target.stat()
+    except OSError:
+        return None
+    return {"path": relative, "name": name, "bytes": stat.st_size, "type": kind.split("/")[0], "ranged": target.suffix.lower() in RANGED,
+            "modified": _stamp(stat.st_mtime)}
+
+
+def _outputs(checkout: Path, base: Path, names: tuple[str, ...]) -> list[dict]:
+    """The `OUTPUTS` named in the project folder `base` that are there: each passing `designs.resolve` and resolving to
+    itself, so one that links elsewhere is not listed."""
+    out = []
+    for name in names:
+        relative = (base / name).relative_to(checkout).as_posix()
+        address = _address(relative)
+        found = None if address is None else designs.resolve(address, checkout, TYPES, file_name)
+        if found is not None and found[0] == base / name:
+            listed = _listed(found, relative, name)
+            if listed is not None:
+                out.append(listed)
+    return out
 
 
 def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) -> dict | None:
@@ -210,7 +251,11 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
     folder = manifest.parent
     relative = folder.relative_to(checkout).as_posix()
     entry = {"id": key if relative == "." else f"{key}/{relative}", "repo": key, "folder": relative, "kind": "", "title": folder.name, "brief": "", "item": None,
-             "roots": [], "problems": [], "error": ""}
+             "roots": [], "problems": [], "error": "", "updated": "", "render": ""}
+    try:
+        entry["updated"] = _stamp(manifest.stat().st_mtime)
+    except OSError:
+        pass
     try:
         data = json.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as problem:
@@ -226,6 +271,7 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
         entry["problems"].append(f"kind {kind!r} is not one of {', '.join(KINDS)}")
     else:
         entry["kind"] = kind
+        entry["render"] = RENDER.get(kind, "")
     for name in ("title", "brief"):
         if isinstance(data.get(name), str) and data[name].strip():
             entry[name] = data[name].strip()
@@ -260,8 +306,14 @@ def _project(key: str, checkout: Path, manifest: Path, *, listing: bool = True) 
             entry["problems"].append(f"root {role} {value} leaves the project folder")
             continue
         files, cut = _files(checkout, target) if listing else ([], False)
-        entry["roots"].append({"role": role, "path": value, "files": files, "cut": cut})
+        entry["roots"].append({"role": role, "path": value, "files": files, "cut": cut, "result": role in RESULTS})
     entry["roots"].sort(key=lambda r: ROLES.index(r["role"]))
+    if entry["kind"] in OUTPUTS:
+        files = _outputs(checkout, base, OUTPUTS[entry["kind"]]) if listing else []
+        if files or not listing:
+            entry["roots"].append({"role": FINAL, "path": ".", "files": files, "cut": False, "result": True,
+                                   "only": list(OUTPUTS[entry["kind"]])})
+    entry["updated"] = max([entry["updated"], *(f["modified"] for r in entry["roots"] for f in r["files"])])
     return entry
 
 
@@ -410,7 +462,10 @@ def located(connection, tail: str, repo_root: Path | None = None) -> tuple[Path,
         entry = _project(key, checkout, manifest, listing=False)
         for root in entry["roots"] if entry else ():
             base = (manifest.parent / root["path"]).resolve()
-            if target.is_relative_to(base):
+            if "only" in root:
+                if any(target == base / name for name in root["only"]):
+                    return found
+            elif target.is_relative_to(base):
                 return found
     return None
 
@@ -446,6 +501,12 @@ def byte_range(header: str | None, size: int) -> tuple[int, int, int]:
 #: The tool verbs Studio runs; each takes the project alone (sd:6922).
 EPISODE_VERBS = ("check", "pack")
 SONG_VERBS = ("validate", "suno-export", "assemble")
+#: The verb that renders a kind's result again, a sub-row's Re-render (sd:7490). A shirt has no tool, and an episode's
+#: `pack` writes Markdown the gallery does not serve, so neither has one.
+RENDER = {"song": "assemble"}
+#: Fixed flags a song verb runs with: assemble replaces the last render, and the tool keeps it in media/final-backups
+#: (decision #43036); without it, assemble refuses while final-video.mp4 exists.
+SONG_FLAGS = {"assemble": ("--replace",)}
 #: The bounds on `make check` and on one tool verb, in seconds.
 CHECK_SECONDS, TOOL_SECONDS = 600, 300
 
@@ -496,12 +557,12 @@ def episode_action(connection, values, jobs=None):
 
 
 def song_action(connection, values, jobs=None):
-    """`song_pipeline.py <verb> <song>`, the song by its folder name."""
+    """`song_pipeline.py <verb> [SONG_FLAGS] <song>`, the song by its folder name."""
     from .run_actions import Step
 
     entry, checkout, given = _found(connection, values, {"project", "verb"})
     tool = _tool(entry, checkout, "song", "song_pipeline.py", SONG_VERBS, given["verb"])
-    argv = (sys.executable, str(tool), given["verb"], Path(entry["folder"]).name)
+    argv = (sys.executable, str(tool), given["verb"], *SONG_FLAGS.get(given["verb"], ()), Path(entry["folder"]).name)
     return Step(line=" ".join(argv[1:]), argv=argv, cwd=str(tool.parent.parent), seconds=TOOL_SECONDS)
 
 
