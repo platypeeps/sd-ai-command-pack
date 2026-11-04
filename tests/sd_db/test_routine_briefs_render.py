@@ -108,6 +108,24 @@ class TheCopies(Copies):
         self.assertEqual(self.copy(), edited)
         self.assertEqual((self.beat()["state"], self.beat()["refused"]), ("failed", [DAILY]))
 
+    def test_a_hand_edit_imported_with_replace_takes_a_fresh_hash(self):
+        """sd:7488: the copy keeps its stale hash, but its text is the row's, so nothing is lost."""
+        self.add()
+        self.render()
+        edited = self.copy().replace("Three", "Four")
+        (self.folder / f"{DAILY}.md").write_text(edited, encoding="utf-8")
+        imported = routine_briefs.import_folder(self.db, self.folder, repo=str(self.checkout), who="operator",
+                                                replace=[DAILY])
+        self.assertEqual(imported["replaced"], [DAILY])
+        copies = self.render()
+        self.assertEqual((copies["written"], copies["refused"]), ([DAILY], []))
+        self.assertEqual(self.copy(), hashed(TEXT.replace("Three", "Four")))
+        again = self.copy().replace("Four", "Five")  # a later hand edit is still kept
+        (self.folder / f"{DAILY}.md").write_text(again, encoding="utf-8")
+        self.add(TEXT.replace("Three", "Four") + "more\n", mode="extend")
+        self.assertIn("a hand edit, kept", self.render()["refused"][0][1])
+        self.assertEqual(self.copy(), again)
+
     def test_a_note_with_no_hash_that_differs_from_its_row_is_kept_and_refused(self):
         self.folder.mkdir(parents=True)
         (self.folder / f"{DAILY}.md").write_text(TEXT + "an edit\n", encoding="utf-8")
