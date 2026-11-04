@@ -10,7 +10,7 @@
   const dueText = o => o.due_days == null ? 'no due date' : o.due_days < 0 ? `overdue ${plural(-o.due_days, 'day')}` : o.due_days === 0 ? 'due today' : `in ${plural(o.due_days, 'day')}`;
   const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   let DOC = null, M = null, ASSETS = [], LOTS = [], OB = [], AL = [], CELLS = [];
-  let selected = null, range = 7, selDay = null, zoom = 1, center = null, P = null;
+  let selected = null, range = 7, selDay = null, zoom = 1, center = null, P = null, ringsDrawn = false;
   // sd:4967, sd:5286: the Alarms view shows the open events, the acknowledged ones or all (alView); ACKS is why Acknowledge
   // is off, or ''.
   let alView = 'open', ACKS = '';
@@ -150,11 +150,14 @@ let polling = 0;
     const extent = l => { const xs = l.rings[0].map(p => P.x(p[0])), ys = l.rings[0].map(p => P.y(p[1])); return Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)); };
     const marks = LOTS.filter(l => owned(l) && extent(l) / u < TRACT_MIN_PX).map(l => { const [x, y] = mid(l.rings[0].slice(0, -1));
       return html`<circle class="hoa-mark" data-tract="${l.ain || l.label}" cx="${P.x(x).toFixed(1)}" cy="${P.y(y).toFixed(1)}" r="${(8 * u).toFixed(2)}"><title>HOA-owned tract${l.label ? `, ${l.label}` : ''}</title></circle>`; });
+    // The legend's ring key reads only while a ring is on the map: redraw it when that changes.
+    const had = ringsDrawn; ringsDrawn = marks.length > 0;
     put(box, html`<svg class="map" viewBox="${vx} ${vy} ${vw} ${vh}" preserveAspectRatio="xMidYMid meet" aria-label="HOA water assets map">
       ${LOTS.map(l => html`<path class="lot k-${l.kind}"${key(l)}${owned(l) ? html` data-owned` : ''}${l.kind === 'lot' && `lot:${l.index}` === selected ? html` aria-current="true"` : ''} d="${l.rings.map(ring).join('')}"><title>${l.address || l.label || (owned(l) ? 'HOA-owned tract' : l.kind)}</title></path>`)}${labels}${marks}
       ${ASSETS.filter(a => !hidden.has(a.type) && TYPES[a.type]).map(a => { const t = TYPES[a.type], g = t.size * u;
         return html`<g class="asset t-${a.type} ${stClass(a.status)}" data-asset="${a.id}" tabindex="0" role="button" aria-label="${a.name}, ${a.type}, ${a.status}"${a.id === selected?.slice(6) ? html` aria-current="true"` : ''} transform="translate(${(P.x(a.lng) - g / 2).toFixed(2)} ${(P.y(a.lat) - g / 2).toFixed(2)}) scale(${(g / 24).toFixed(4)})"><title>${a.name} · ${a.status}</title>${TYPES[a.type].svg}</g>`; })}
     </svg>`);
+    if (had !== ringsDrawn) legend();
   }
   function zoomTo(z, at) { zoom = Math.max(ZOOMS[0], Math.min(ZOOMS[ZOOMS.length - 1], z)); if (at) center = at; drawMap(); }
   function legend() {
@@ -163,7 +166,7 @@ let polling = 0;
     ASSETS.forEach(a => { byType[a.type] = (byType[a.type] || 0) + 1; byStatus[a.status] = (byStatus[a.status] || 0) + 1; });
     put($('legend'), html`${ORDER.filter(t => byType[t]).map(t => html`<li><button type="button" data-type="${t}" aria-pressed="${hidden.has(t) ? 'false' : 'true'}">${glyph(t)}${TYPES[t].label}s <b>${byType[t]}</b></button></li>`)}<li class="sep" aria-hidden="true"></li>${
       Object.entries(byStatus).map(([s, n]) => html`<li class="status"><i class="${s === 'in service' ? '' : s === 'unknown' ? 'unk' : 'out'}" aria-hidden="true"></i>${s} <b class="data">${n}</b></li>`)}${
-      tracts ? html`<li class="status"><i class="own" aria-hidden="true"></i>HOA-owned ${tracts === 1 ? 'tract' : 'tracts'} <b class="data">${tracts}</b><i class="mark" aria-hidden="true"></i>ring: too small to see at this zoom</li>` : ''}`);
+      tracts ? html`<li class="status"><i class="own" aria-hidden="true"></i>HOA-owned ${tracts === 1 ? 'tract' : 'tracts'} <b class="data">${tracts}</b>${ringsDrawn ? html`<i class="mark" aria-hidden="true"></i>ring: tract too small to draw at this zoom` : ''}</li>` : ''}`);
   }
 
   // ---------- Details ----------
