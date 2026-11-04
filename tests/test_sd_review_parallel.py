@@ -13,12 +13,14 @@ import json
 import os
 import pathlib
 import signal
+import socket
 import subprocess
 import sys
 import textwrap
 import threading
 import time
 import unittest
+import urllib.request
 from typing import Any
 
 from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
@@ -231,6 +233,27 @@ DRIVER = textwrap.dedent("""
     sd_review.sd_lib.fill_slots(["a", "b"], 2, run_one, lambda answer: True, sd_review.READER_GROUPS)
 """)
 
+#: A url reader on a server that accepts and never answers, beside a process reader.
+STALLED_DRIVER = textwrap.dedent("""
+    import pathlib, socket, sys, urllib.request
+    sys.path.insert(0, sys.argv[1])
+    from tests.test_sd_review import sd_review
+    out = pathlib.Path(sys.argv[2])
+    stalled = socket.socket()
+    stalled.bind(("127.0.0.1", 0))
+    stalled.listen(4)
+    child = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(120)"
+    def run_one(name):
+        if name == "url":
+            (out / "url").write_text("asked")
+            return urllib.request.urlopen(f"http://127.0.0.1:{stalled.getsockname()[1]}/", timeout=120)
+        return sd_review.subprocess_runner([sys.executable, "-c", child, str(out / name)], {}, out, 300)
+    sd_review.sd_lib.fill_slots(["url", "a"], 2, run_one, lambda answer: True, sd_review.READER_GROUPS)
+""")
+
+#: Well under the phase timeout the stalled reads above wait for (120 s).
+PROMPT_EXIT_SECONDS = 15
+
 
 class ATermEndsBothReaders(ParallelFixture):
     def test_a_sigterm_to_the_review_ends_every_reader_group(self) -> None:
@@ -254,6 +277,27 @@ class ATermEndsBothReaders(ParallelFixture):
             time.sleep(0.05)
         self.assertEqual([pid for pid in pids if _alive(pid)], [])
 
+    def test_a_sigterm_beside_a_stalled_url_read_ends_promptly(self) -> None:
+        """A url reader leads no group: the review must not wait out its read."""
+        out = self.tmp / "stalled"
+        out.mkdir()
+        driver = subprocess.Popen([sys.executable, "-c", STALLED_DRIVER, str(pathlib.Path(__file__).resolve().parents[1]), str(out)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(driver.kill)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not all((out / name).is_file() and (out / name).read_text() for name in ("url", "a")):
+            time.sleep(0.05)
+        pid = int((out / "a").read_text())
+        self.addCleanup(_quietly_kill, pid)
+        sent = time.monotonic()
+        driver.send_signal(signal.SIGTERM)
+        try:
+            _out, errors = driver.communicate(timeout=PROMPT_EXIT_SECONDS)
+        except subprocess.TimeoutExpired:
+            self.fail(f"sd-review still running {PROMPT_EXIT_SECONDS}s after SIGTERM: it waits on the stalled url read")
+        self.assertEqual(driver.returncode, -signal.SIGTERM, errors)
+        self.assertLess(time.monotonic() - sent, PROMPT_EXIT_SECONDS)
+        self.assertFalse(_alive(pid), "the process reader's group outlived the review")
 
 
 class AnyExitEndsTheReaders(unittest.TestCase):
@@ -319,6 +363,31 @@ class AnyExitEndsTheReaders(unittest.TestCase):
         answers = sd_review.sd_lib.fill_slots(
             ["a"], 1, lambda _item: self.sleeper(seconds=0.2).returncode, lambda _answer: True, self.groups)
         self.assertEqual(answers, [0], "a later dispatch's group was ended as it started")
+
+    def test_a_ctrl_c_beside_a_stalled_url_read_returns_promptly(self) -> None:
+        stalled = socket.socket()
+        self.addCleanup(stalled.close)
+        stalled.bind(("127.0.0.1", 0))
+        stalled.listen(4)
+        url_asked = threading.Event()
+
+        def run_one(item: str) -> Any:
+            if item == "url":
+                url_asked.set()
+                return urllib.request.urlopen(f"http://127.0.0.1:{stalled.getsockname()[1]}/", timeout=120)
+            return self.sleeper()
+
+        def interrupt_once_both_run() -> None:
+            if self.started.wait(10) and url_asked.wait(10):
+                _thread.interrupt_main()
+        threading.Thread(target=interrupt_once_both_run, daemon=True).start()
+        began = time.monotonic()
+        with self.assertRaises(KeyboardInterrupt):
+            sd_review.sd_lib.fill_slots(["url", "a"], 2, run_one, lambda _answer: True, self.groups)
+        self.assertLess(time.monotonic() - began, PROMPT_EXIT_SECONDS, "Ctrl-C waited on the stalled url read")
+        self.assertEqual([pid for pid in self.pids if _alive(pid)], [], "a reader group outlived fill_slots")
+        left = [t for t in threading.enumerate() if t.name.startswith("sd-slot")]
+        self.assertTrue(all(t.daemon for t in left), "an abandoned url reader would hold the interpreter's exit")
 
     def test_a_reader_past_its_phase_timeout_ends_its_own_group(self) -> None:
         def run_one(_item: str) -> str:

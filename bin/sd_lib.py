@@ -29,6 +29,8 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, NamedTuple
 
 if TYPE_CHECKING:  # `sd_review_slots` imports this module; see `review_slot`.
+    import threading  # the group helpers import it where they run
+
     import sd_review_slots
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
@@ -3864,11 +3866,13 @@ class ThreadGroups:
 
         self._lock = threading.Lock()
         self._live: set[int] = set()
+        self._holders: set[threading.Thread] = set()
         self._ending = False
 
     def group_hook(self) -> Callable[[int | None], None]:
         """`run_group`'s `started`: the group's id once it runs, then None as `run_group` ends it."""
         import signal  # noqa: PLC0415 - only the group helpers need it
+        import threading  # noqa: PLC0415
 
         mine: list[int] = []
 
@@ -3879,6 +3883,7 @@ class ThreadGroups:
                     return mine.clear()
                 mine.append(pid)
                 self._live.add(pid)
+                self._holders.add(threading.current_thread())
                 ending = self._ending
             if ending:
                 _signal_group(pid, signal.SIGTERM)
@@ -3888,9 +3893,16 @@ class ThreadGroups:
         """After `end_groups` and every reader thread has stopped: a later dispatch's groups run.
 
         Left set while a thread may still start a group (a retry), which is
-        then ended as it registers; a second Ctrl-C during the wait leaves it so."""
+        then ended as it registers; a second Ctrl-C during the wait leaves it
+        so, and so does an abandoned url reader still in its read."""
         with self._lock:
             self._ending = False
+            self._holders.clear()
+
+    def holding_threads(self) -> list[threading.Thread]:
+        """The threads that led a group since the last `reopen_groups`, still running."""
+        with self._lock:
+            return [thread for thread in self._holders if thread.is_alive()]
 
     def end_groups(self) -> None:
         """SIGTERM each live group, then SIGKILL one still registered after `GROUP_CLEANUP_SECONDS`.
@@ -3927,37 +3939,53 @@ def fill_slots(items: Any, slots: int, run: Callable[[Any], Any], counted: Calla
     Answers return in item order, whatever order they finished in. `run`
     starts its processes through `run_group(started=groups.group_hook())`, so a
     SIGTERM ends each one's group, then unwinds here. Any other exception ends
-    them too, and returns only once every reader thread has stopped.
+    them too. Either way this returns once every thread that led a group has
+    stopped; a url reader leads none, so its daemon thread is left to its read.
     """
-    import concurrent.futures  # noqa: PLC0415 - only the slot runner needs it
+    import queue  # noqa: PLC0415 - only the slot runner needs it
+    import threading  # noqa: PLC0415
 
     answers: dict[int, Any] = {}
     if slots <= 0:
         return []
-    with term_ends_group(first=groups.end_groups):
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=slots, thread_name_prefix="sd-slot")
+    finished: queue.Queue[tuple[int, BaseException | None, Any]] = queue.Queue()
+
+    def answer_one(index: int) -> None:
         try:
-            running: dict[Any, int] = {}
+            finished.put((index, None, run(items[index])))
+        except BaseException as error:  # noqa: BLE001 - re-raised in the main thread
+            finished.put((index, error, None))
+    running: dict[int, threading.Thread] = {}
+    with term_ends_group(first=groups.end_groups):
+        try:
             following = done = 0
             while following < len(items) and done + len(running) < slots or running:
                 while following < len(items) and done + len(running) < slots:
-                    running[pool.submit(run, items[following])] = following
+                    running[following] = threading.Thread(target=answer_one, args=(following,),
+                                                          name=f"sd-slot-{following}", daemon=True)
+                    running[following].start()
                     following += 1
-                # Bounded, so the main thread runs a SIGTERM's handler promptly.
-                finished, _ = concurrent.futures.wait(running, timeout=1, return_when=concurrent.futures.FIRST_COMPLETED)
-                for future in sorted(finished, key=running.__getitem__):
-                    index = running.pop(future)
-                    answers[index] = future.result()
-                    done += bool(counted(answers[index]))
+                try:  # bounded, so the main thread runs a SIGTERM's handler promptly
+                    index, error, answer = finished.get(timeout=1)
+                except queue.Empty:
+                    continue
+                running.pop(index).join()
+                if error is not None:
+                    raise error
+                answers[index] = answer
+                done += bool(counted(answer))
         except BaseException:
-            # Ctrl-C, a reader or `counted` that raised: no signal handler ran,
-            # so end the groups here, then wait for their threads, so the
-            # caller's `finally` gives the gate slot back after the readers stop.
+            # Ctrl-C, a reader or `counted` that raised, or SIGTERM: end the
+            # groups, then wait for the threads that led one, so the caller's
+            # `finally` gives the gate slot back after they stop. A url reader
+            # is abandoned: its daemon thread holds no process and no exit.
             groups.end_groups()
-            pool.shutdown(wait=True, cancel_futures=True)
-            groups.reopen_groups()
+            for thread in groups.holding_threads():
+                thread.join()
+            if not any(thread.is_alive() for thread in running.values()):
+                groups.reopen_groups()
             raise
-        pool.shutdown(wait=True)
+    groups.reopen_groups()
     return [answers[index] for index in sorted(answers)]
 
 
