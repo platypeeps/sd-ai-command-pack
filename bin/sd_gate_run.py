@@ -152,12 +152,6 @@ def run_child(argv: list[str], env: dict[str, str], cwd: pathlib.Path, timeout: 
     return result.returncode, result.stdout, result.stderr
 
 
-def slot_ran_out(gate: Mapping[str, Any]) -> bool:
-    """Whether `check_in_worktree`'s gate waited out its slot bound and ran no check (`sd-check`'s
-    `gate_slot.timed_out`, pack sd:7412); a reused receipt or an unread report did not."""
-    return ((gate.get("report") or {}).get("gate_slot") or {}).get("timed_out") is True
-
-
 def base_ref(branch: str | None) -> str | None:
     """The ref a pull request's base branch is compared at: the remote-tracking one, as `sd-ship` fetches it."""
     return f"refs/remotes/origin/{branch}" if branch else None

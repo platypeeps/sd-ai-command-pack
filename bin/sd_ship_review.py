@@ -33,7 +33,7 @@ from sd_ship_history import (
     verified_index,
 )
 from sd_ship_remote import Refusal, completed_process
-from sd_ship_workflow import GATE_SLOT_WAIT, success
+from sd_ship_workflow import GATE_FAILED, GATE_SLOT_WAIT, success
 
 
 class ReviewTimeout(Exception):
@@ -1632,14 +1632,14 @@ def adjudicated_check(root: pathlib.Path, head: str, base: str | None, database:
     passed = gate["status"] == "success" if base else gate["exit_code"] == 0
     check = {"status": "pass" if passed and gate.get("head") == head else "fail", "exit_code": gate["exit_code"],
              "detail": str(gate.get("stderr") or "").strip()[-2000:], "checks": (gate.get("report") or {}).get("checks"),
-             "summary": gate.get("summary"), **({"slot_ran_out": True} if sd_gate_run.slot_ran_out(gate) else {})}
+             "summary": gate.get("summary"), **({"slot_ran_out": True} if sd_lib.slot_ran_out(gate) else {})}
     return {**check, "reused": gate["reused"]} if gate.get("reused") else check
 
 
 def gate_code(check: dict) -> str:
     """The refusal code of a failed gate: `GATE_SLOT_WAIT` when its slot wait ran out and no check ran, which the
-    lane puts back (pack sd:7412); else `gate_failed`, which it does not."""
-    return GATE_SLOT_WAIT if check.get("slot_ran_out") is True else "gate_failed"
+    lane puts back (pack sd:7412); else `GATE_FAILED`, which it does not."""
+    return GATE_SLOT_WAIT if check.get("slot_ran_out") is True else GATE_FAILED
 
 
 #: The statuses a review clears a head with; `cleared_status` is one of them when the gate failed after it.

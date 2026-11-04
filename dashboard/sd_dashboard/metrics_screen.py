@@ -58,7 +58,7 @@ from .operations_screen import BILL_NAME
 from .queue_screen import READ_FAILURES
 from .tasks_screen import is_scheduled
 
-__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "MONTHS", "RANGES", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW",
+__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "MONTHS", "RANGES", "SLOT_WAIT", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW",
            "document", "health", "slow", "times"]
 
 #: The vendor window the trend draws: seven days, in minutes.
@@ -84,6 +84,9 @@ MONTHS = 6
 #: the refusal's text; its `code` is mostly empty, so the codes count only when present.
 GATE_FAILED = re.compile(r"\bthe repository gate failed\b|\bsd/local-gate is failure on\b")
 GATE_CODES = frozenset({"gate_failed", "ci_not_passing"})
+#: sd-ship's refusal when the gate's slot wait ran out (pack sd:7412). Its text says the gate failed, but no check ran,
+#: so the entry is no gate run; the lane puts such an entry back, and only a lane before it failed one.
+SLOT_WAIT = "gate_slot_wait"
 
 #: An entry the gate passed: the lane merged it (merge refuses a failed `sd/local-gate`) or prepare cleared it.
 PASSED = ("merged", "prepared")
@@ -159,6 +162,8 @@ def _age(connection, now):
 def _failure(entry: dict) -> str:
     """What stopped a failed lane entry: `gate`, `review` (it stopped before the gate ran), `other`, or `unknown`."""
     reason = entry.get("reason")
+    if entry.get("code") == SLOT_WAIT:
+        return "other"
     if entry.get("code") in GATE_CODES or (isinstance(reason, str) and GATE_FAILED.search(reason)):
         return "gate"
     if not isinstance(reason, str) or not reason.strip():

@@ -1261,6 +1261,18 @@ def slot_bound_seconds(text: str) -> int:
     return int(text)
 
 
+def gate_slot_bound(args: argparse.Namespace) -> int:
+    """The gate's slot-wait bound: `--slot-timeout` when given, the lane's run budget left (pack sd:7412), else
+    `GATE_SLOT_SECONDS` (sd:2611). Here, not in `sd-review`, so the review lane's line cap stays put."""
+    return getattr(args, "slot_timeout", None) or GATE_SLOT_SECONDS
+
+
+def slot_ran_out(gate: Mapping[str, Any]) -> bool:
+    """Whether `sd_gate_run.check_in_worktree`'s gate waited out its slot bound and ran no check (`sd-check`'s
+    `gate_slot.timed_out`, pack sd:7412); a reused receipt or an unread report did not."""
+    return ((gate.get("report") or {}).get("gate_slot") or {}).get("timed_out") is True
+
+
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
     """`policy.ci.provider` for the repository `root` is a checkout of, `github` or `local` (pack sd:7366).
 
