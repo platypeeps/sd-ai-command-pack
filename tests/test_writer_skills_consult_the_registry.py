@@ -56,8 +56,6 @@ POINTER = "sd-rules --for"
 WRITER_SKILLS = (
     "sd-handoff",
     "sd-humanizer",
-    "sd-plan",
-    "sd-spec",
 )
 
 #: The skills `WRITES_A_FILE` also matches, with the sentence it matched and

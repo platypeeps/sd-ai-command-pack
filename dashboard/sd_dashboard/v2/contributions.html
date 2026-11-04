@@ -13,7 +13,7 @@
   Open table's Open | Hidden (sd:5753, sd:6701) shows the hidden rows. The Filed view (sd:5488) lists the Jira tickets and GitHub issues you
   filed this year from the same read, as sd shadow sync stored them (pack sd:5496); its Edit opens one in a new tab and posts nothing. Re-run collector (POST /api/shadow/sync, sd:2207) asks the server to run
   sd shadow sync in a thread, on one 120 s deadline and one run at a time; the page reads GET /api/shadow/state until it ends.
-  The page reads nothing from GitHub itself, and nothing here is sample data. The design's Trackers view opens the classic Operations > Trackers.
+  The page reads nothing from GitHub itself, and nothing here is sample data.
 -->
 <html lang="en">
 <head>
@@ -38,7 +38,6 @@
       <p id="sub">Reading the contributions…</p>
     </div>
     <div class="tools" data-again>
-      <a class="to-trackers" href="/operations?area=trackers"><span>Trackers</span><svg class="i" aria-hidden="true"><use href="#i-arrow-up-right"/></svg></a>
     </div>
   </header>
   <div id="state" hidden></div>

@@ -76,8 +76,7 @@ A change that moves state in steps still gets its own brief.
 >
 > **Check `repo` before you touch anything.** It names the checkout the row
 > belongs to. If it is not the checkout you were given, stop and print both
-> paths, exactly as [`skills/sd-plan/SKILL.md`](../skills/sd-plan/SKILL.md)
-> requires. Work done in the checkout the agent picked is the failure that rule
+> paths. Work done in the checkout the agent picked is the failure that rule
 > exists to prevent.
 >
 > <one paragraph: the citation — `path:line` for a line of a markdown page;

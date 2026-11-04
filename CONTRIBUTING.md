@@ -278,6 +278,6 @@ Its current location is `docs/spec/backend/manifest-and-filesystem.md`.
 
 Keep an `index.md` that links every surviving page in each spec directory.
 Spec changes remain subject to review through `never_skip`.
-The `sd-spec` skill maintains specs during shipping.
+Update a spec on the branch whose change alters what it documents.
 Keep `docs/fleet/README.md` as the historical link target.
 Preserve the marked historical review quotations in `docs/review-learnings.md`.

@@ -339,7 +339,7 @@ class Supervise(Case):
         self.assertEqual(done.returncode, 2, done.stderr)
 
     def test_the_builder_env_carries_the_run_and_items_for_otel(self):
-        """pack sd:6943: Claude Code's OTel joins the run's trace; a value already there stays first."""
+        """pack sd:6943: Claude Code's OTel names the run; a value already there stays first."""
         self.press(2)
         self.env["OTEL_RESOURCE_ATTRIBUTES"] = "host.name=fixture"
         env = self.supervisor().env

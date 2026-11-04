@@ -159,11 +159,8 @@ def command_fence(argv: list[str]) -> int:
     if argv:
         print("sd-db fence: takes no arguments", file=sys.stderr)
         return 1
-    from ..hub import Role, read, role_at
-    satellite = read(_home())
-    # A satellite holds no database and no role, whatever the hub's setting says.
-    found = (Role("elsewhere", satellite.host, f"this machine is a satellite of {satellite.host} (hub.json)")
-             if satellite is not None else role_at(default_path(_home())))
+    from ..hub import role_at, satellite_role
+    found = satellite_role(_home()) or role_at(default_path(_home()))
     print(f"sd-db: fence: {found.state}: {found.reason}")
     return 1 if found.refuses else 0
 
@@ -222,36 +219,11 @@ def command_usage(argv: list[str]) -> int:
 
 
 def command_telemetry(argv: list[str]) -> int:
-    """`telemetry export [--endpoint URL]`: every ended build run as OTLP traces (pack sd:6943).
-    `telemetry report [--month YYYY-MM] [--out FILE]`: the monthly lane report draft (pack sd:6947).
-
-    The endpoint is `--endpoint`, else `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`,
-    else `telemetry.ENDPOINT`. No collector there is a skip, exit 0.
-    """
-    rest = list(argv)
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or telemetry.ENDPOINT
-    if rest[:1] == ["report"]:
-        return _telemetry_report(rest[1:])
-    if rest[:1] != ["export"]:
-        print("sd-db telemetry: expected export [--endpoint URL] or report [--month YYYY-MM] [--out FILE]",
-              file=sys.stderr)
+    """`telemetry report [--month YYYY-MM] [--out FILE]`: the monthly lane report draft (pack sd:6947)."""
+    if argv[:1] != ["report"]:
+        print("sd-db telemetry: expected report [--month YYYY-MM] [--out FILE]", file=sys.stderr)
         return 1
-    rest.pop(0)
-    if rest[:1] == ["--endpoint"] and len(rest) == 2:
-        endpoint = rest[1]
-    elif rest:
-        print("sd-db telemetry export: takes --endpoint URL", file=sys.stderr)
-        return 1
-    connection = _open_for_read()
-    try:
-        result = telemetry.export(connection, endpoint)
-    finally:
-        connection.close()
-    if result["skipped"]:
-        print(f"sd-db telemetry: skip: {result['skipped']}")
-    else:
-        print(f"sd-db telemetry: sent {result['spans']} span(s) of {result['runs']} build run(s) to {endpoint}")
-    return 0
+    return _telemetry_report(argv[1:])
 
 
 def _telemetry_report(rest: list[str]) -> int:
