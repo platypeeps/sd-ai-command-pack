@@ -45,13 +45,19 @@ const FILTERS = {
   dirty:   { lbl: 'Uncommitted', icon: 'pen-line', test: r => r.dirty, warn: true, tip: 'Pages with a change not yet committed. Source: git status of the ui-design checkout.' },
   brief:   { lbl: 'Brief only', icon: 'file-text', test: r => r.type === 'brief', tip: 'Products with a design brief and no drawn page. Source: the ui-design checkout\'s products folder.' },
 };
+// sd:7361: the Open lamp is no predicate. It counts the rows the filter bar's Open shows and, pressed, sets that same Open.
+const OPEN = { lbl: 'Open', icon: 'inbox', tip: 'Rows not hidden, the rows the filter bar\'s Open lists. Press it to list them. Source: the view state Hide writes.' };
 const shown = r => window.shell.aside.shows(F.hidden, r.hidden);
 const tbody = document.getElementById('rows'), details = document.getElementById('details');
-let selected = null, F = { f: '', q: '', state: '', product: '', hidden: 'open' };
+let selected = null, F = { f: '', q: '', state: '', product: '', age: '', hidden: 'open' };
 let pickedIds = new Set();
-const match = r => shown(r) && (!F.f || FILTERS[F.f].test(r)) && (!F.state || r.state === F.state) && (!F.product || r.product === F.product)
+// sd:7361: Changed Any | 7 d | 30 d in the filter bar, in days over the last commit, measured from the reading as the
+// Changed 7 d lamp is. A row with no commit (a brief) has no age, so a set age leaves it out. F.age is '' for Any.
+const AGES = [['', 'Any'], ['7', '7 d'], ['30', '30 d']];
+const aged = r => !F.age || (!!r.changed && READ - Date.parse(r.changed) < F.age * DAY);
+const match = r => shown(r) && (!F.f || FILTERS[F.f].test(r)) && (!F.state || r.state === F.state) && (!F.product || r.product === F.product) && aged(r)
   && (!F.q || `${r.path || ''} ${r.title || ''} ${r.subject || ''} ${r.kind} ${r.product}`.toLowerCase().includes(F.q));
-const narrowed = () => !!(F.f || F.q || F.state || F.product), active = () => narrowed() || F.hidden !== 'open';
+const narrowed = () => !!(F.f || F.q || F.state || F.product || F.age), active = () => narrowed() || F.hidden !== 'open';
 // Order: product, then the header's column (sd:3455) inside it. Page, the default, is the design's order: the drawn pages
 // before the skeleton and captures, then path; it also breaks a tie in the other columns.
 const KIND = { 'v2 mockup': 0, 'v1 mockup': 1, design: 2, final: 0, reference: 3, skeleton: 4, 'brief only': 5 };
@@ -68,11 +74,16 @@ const ranked = () => ROWS.filter(match).sort((a, b) => PRODUCTS.indexOf(a.produc
 const T = iso => iso ? html`<time class="rel" datetime="${iso}" data-long></time>` : '—';
 
 function renderAnnunciator() {
-  // No "all pages" lamp: the head counts the pages and a pressed lamp, pressed again, clears its filter.
+  // No "all pages" lamp: the head counts the pages and a pressed lamp, pressed again, clears its filter. Open, below, is the
+  // nearest thing (sd:7361): it is the filter bar's Open | Hidden, so it counts the rows not hidden, follows F.hidden, not F.f,
+  // and has no clearing press, Open being the default. The other lamps count the rows the current view shows.
   const n = k => ROWS.filter(r => shown(r) && FILTERS[k].test(r)).length;
-  const cell = (k, state, val) => ({ button: true, state, pressed: F.f === k, attrs: html` data-filter="${k}"`, label: FILTERS[k].lbl, tip: FILTERS[k].tip,
-    mark: state === 'caution' ? html`<span class="g-caution" aria-hidden="true">▲</span>` : I(FILTERS[k].icon), val });
-  put(document.getElementById('annunciator'), cells(Object.keys(FILTERS).map(k => { const c = n(k); return cell(k, FILTERS[k].warn && c ? 'caution' : 'ok', html`<b>${c}</b> ${markup.plural.word(c, k === 'brief' ? 'product' : 'page')}`); })));
+  const cell = (k, spec, state, pressed, val) => ({ button: true, state, pressed, attrs: html` data-filter="${k}"`, label: spec.lbl, tip: spec.tip,
+    mark: state === 'caution' ? html`<span class="g-caution" aria-hidden="true">▲</span>` : I(spec.icon), val });
+  const open = ROWS.filter(r => !r.hidden).length;
+  put(document.getElementById('annunciator'), cells([
+    cell('open', OPEN, 'ok', F.hidden === 'open', html`<b>${open}</b> ${markup.plural.word(open, 'row')}`),
+    ...Object.keys(FILTERS).map(k => { const c = n(k); return cell(k, FILTERS[k], FILTERS[k].warn && c ? 'caution' : 'ok', F.f === k, html`<b>${c}</b> ${markup.plural.word(c, k === 'brief' ? 'product' : 'page')}`); })]));
 }
 function renderRows() {
   const rows = ranked();
@@ -108,8 +119,9 @@ function renderFilters() {
   put(document.getElementById('filters'), list.fbar(html`${window.shell.aside.seg('hidden', 'Hidden', F.hidden, { open: ROWS.filter(r => !r.hidden).length, aside: ROWS.filter(r => r.hidden).length })}
     ${list.fseg('state', 'State', STATES.map(([s, w]) => ({ v: s, pressed: F.state === s, title: `${w}: ${n('state', s)}`,
     label: html`<span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span><span class="n">${String(n('state', s))}</span><span class="sr"> ${w}</span>` })))}
+    ${list.fseg('age', 'Changed', AGES.map(([v, w]) => ({ v, pressed: F.age === v, title: v ? `Changed in the last ${v} days` : 'Changed at any time', label: w })))}
     ${list.pick('product', 'Product', PRODUCTS.map(p => [p, p, n('product', p)]), F.product, { all: 'All products' })}
-    ${F.f ? list.tok('f', F.f, FILTERS[F.f].lbl) : ''}${F.q ? list.tok('q', '', `“${F.q}”`) : ''}`, { clear: active() }));
+    ${F.f ? list.tok('f', F.f, FILTERS[F.f].lbl) : ''}${F.age ? list.tok('age', '', `Changed ${F.age} d`) : ''}${F.q ? list.tok('q', '', `“${F.q}”`) : ''}`, { clear: active() }));
 }
 function show(id) {
   const r = ROWS.find(x => x.id === id); if (!r) return;
@@ -157,7 +169,7 @@ function reconcile() {
 // The sort joins the filter in the URL when it is not the default, as shell.list.listQuery writes it.
 function writeFilter() {
   const sort = L.sort !== LIST.sort || L.dir !== LIST.dir ? { sort: L.sort, dir: L.dir > 0 ? 'asc' : 'desc' } : {};
-  shell.url({ ...(F.f && { f: F.f }), ...(F.state && { state: F.state }), ...(F.product && { product: F.product }), ...(F.hidden !== 'open' && { hidden: window.shell.aside.param(F.hidden) }), ...(qText && { q: qText }), ...sort });
+  shell.url({ ...(F.f && { f: F.f }), ...(F.state && { state: F.state }), ...(F.age && { age: F.age }), ...(F.product && { product: F.product }), ...(F.hidden !== 'open' && { hidden: window.shell.aside.param(F.hidden) }), ...(qText && { q: qText }), ...sort });
 }
 function update() {
   if (!D) return;
@@ -193,7 +205,9 @@ let reading = null;
 document.addEventListener('click', e => {
   const open = e.target.closest?.('tbody [data-open]'); if (open) { if (ROWS.some(r => r.id === open.dataset.open)) select(open.dataset.open, true); return; }
   const cell = e.target.closest?.('.annunciator .cell'); if (cell) {
-    const k = cell.dataset.filter; F.f = F.f === k ? '' : k; writeFilter(); update(); return;
+    const k = cell.dataset.filter;
+    if (k === 'open') F.hidden = 'open'; else F.f = F.f === k ? '' : k;
+    writeFilter(); update(); return;
   }
   const tr = e.target.closest?.('tr[data-id]'); if (tr && !e.target.closest('button, a, time')) select(tr.dataset.id, false);
 });
@@ -203,9 +217,10 @@ let qText = '';
 bar.addEventListener('change', e => shell.list.pickChange(e, F, () => { writeFilter(); update(); }));
 bar.addEventListener('click', e => {
   const b = e.target.closest('[data-fclear], [data-f], [data-aside]'); if (!b) return;
-  if (b.dataset.fclear != null) Object.assign(F, { f: '', q: '', state: '', product: '', hidden: 'open' });
+  if (b.dataset.fclear != null) Object.assign(F, { f: '', q: '', state: '', product: '', age: '', hidden: 'open' });
   else if (b.dataset.aside === 'hidden') F.hidden = b.dataset.v;
   else if (b.dataset.f === 'state') F.state = F.state === b.dataset.v ? '' : b.dataset.v;
+  else if (b.dataset.f === 'age') F.age = b.dataset.v; // Any and the token (v is '') clear it
   else F[b.dataset.f] = '';
   if (!F.q && qText) { qText = ''; shell.filter(''); }
   writeFilter(); update();
@@ -255,6 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const p = new URLSearchParams(location.search);
   F.f = FILTERS[p.get('f')] ? p.get('f') : '';
   F.state = STATES.some(([s]) => s === p.get('state')) ? p.get('state') : '';
+  F.age = AGES.some(([a]) => a && a === p.get('age')) ? p.get('age') : '';
   F.product = p.get('product') || ''; // a product the read does not name stays a pick option, so it can be lifted
   F.hidden = window.shell.aside.mode('hidden');
   if (p.get('q')) { qText = p.get('q').trim(); F.q = qText.toLowerCase(); }
