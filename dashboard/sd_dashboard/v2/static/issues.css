@@ -31,3 +31,31 @@
   .issues .ref { grid-area: ref; } .issues .why { grid-area: why; } .issues .what { grid-area: what; } .issues .repo { grid-area: repo; white-space: normal; } .issues .act { grid-area: act; align-self: end; } .issues .when { grid-area: act; align-self: end; text-align: right; }
   .issues tr.empty { display: block; }
 }
+/* GitHub > Dependabot (pack sd:7515): the same ledger, one band per repo that the shell's table grammar folds (shell.css
+ * .tfold), with Health's Fix kept beside the fold (data-tkeep); one row per alert, its severity a design.md state glyph
+ * plus the word, and Open (the shell's btn quiet sm) to the alert on GitHub.
+ * Hallmark · component: alert group band + alert row · genre: modern-minimal · theme: design.md instrument panel
+ * states: default · hover (Open, Fix, the fold) · focus (shell rings) · active · expanded/collapsed (the fold's chevron)
+ * · empty (no alert; details not stored yet) · error (a failed read is a row naming it).
+ * pre-emit critique: P4 H4 E4 S4 R5 V4 */
+/* The band stays a table cell, so its colspan holds; Fix sits at its right edge, outside the fold button. */
+.dependabot tr.band td { position: relative; height: auto; padding: var(--space-md) calc(var(--space-sm) + 3.5rem) var(--space-2xs) var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-rule); }
+.dependabot tr.band .tfold { font: 600 var(--text-sm)/1.3 var(--font-ui); color: var(--color-ink); align-items: flex-start; }
+.dependabot tr.band .n { margin-left: var(--space-xs); font: 400 var(--text-xs)/1.3 var(--font-data); color: var(--color-ink-2); }
+.dependabot tr.band .btn { position: absolute; right: var(--space-xs); bottom: var(--space-2xs); }
+.dependabot .sev { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); }
+.dependabot .pkg, .dependabot .adv { min-width: 0; overflow-wrap: anywhere; }
+.dependabot .pkg .name { display: block; font-weight: 500; }
+.dependabot .adv > span:first-child { display: block; }
+.dependabot .file { display: block; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-muted); }
+.dependabot .when { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); }
+.dependabot .acts { text-align: right; white-space: nowrap; }
+.dependabot .ph { color: var(--color-muted); font: 400 var(--text-xs)/1.35 var(--font-data); }
+#dependabot-notes:empty { display: none; }
+@media (max-width: 899px) {
+  .dependabot tbody tr.band { display: block; padding: 0; }
+  .dependabot tbody tr.band td { display: block; padding: var(--space-sm) calc(var(--space-sm) + 3.5rem) var(--space-2xs) var(--space-xs); }
+  .dependabot tbody tr:not(.band):not(.empty) { grid-template-areas: "sev act" "pkg pkg" "adv adv" "when when"; }
+  .dependabot .sev { grid-area: sev; } .dependabot .pkg { grid-area: pkg; } .dependabot .adv { grid-area: adv; }
+  .dependabot .when { grid-area: when; text-align: left; } .dependabot .acts { grid-area: act; align-self: start; }
+}
