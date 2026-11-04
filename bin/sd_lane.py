@@ -49,9 +49,11 @@ database and runs it under one runner lock per repository:
            back to pending, at most `HUB_RETRIES` times, and the run stops
            (sd:3239, below); so does one whose prepare refused retryably
            and spent no review pass, once (sd:3478, below). It claims
-           nothing while load5 is at or above the gate's load limit,
-           `sd.gate_load_max` (`load_stop`, sd:3479), nor inside the
-           repository's freeze window (`freeze_stop`, sd:6879);
+           under any load: its gate waits in the gate queue's ticket
+           order and load rule, at most the run's budget left, and a
+           wait that ran out puts the entry back (pack sd:7412, below).
+           It claims nothing inside the repository's freeze window
+           (`freeze_stop`, sd:6879);
   watch    print each gate end a lane or builder log records, once; with
            `--item N`, repeated, wait until each item's newest entry that is
            not cancelled ends, print one line each, and exit 0 only when all
@@ -210,6 +212,19 @@ refusal spent (`passes_spent`); when it says 0 and the blocker is
 count and stops, as after a hub fault. A refusal that does not say spent an
 unknown count and fails the entry, and so does `gate_failed`
 (`NOT_PUT_BACK`): a failed gate runs again only when asked.
+
+The lane claims under load (pack sd:7412). It used to claim nothing while
+load5 stood at the gate's load limit (sd:3479), and builders' gates, holding
+tickets in the gate queue, took every slot each time load fell: the pack lane
+sat idle 25.6 h in one week with work pending. The gate queue's admission
+(`sd_gate_slots`, sd:2262, in ticket order, sd:5409) is now the one load
+bound. Prepare's gate waits for its slot at most the run's budget left
+(`slot_wait_seconds`, `sd-ship prepare --slot-timeout`), so the wait ends
+before the job's TERM, which would spend a reclaim. A wait that ran out ran
+no gate: `sd-ship` refuses `gate_slot_wait`, and the runner puts the entry
+back, counts `slot_waits` on it, spends no reclaim and no retry, and stops.
+The review that cleared is kept (sd:2721) and serves the next prepare. A
+speculative gate still waiting at the run's deadline is cancelled.
 """
 
 from __future__ import annotations
@@ -282,6 +297,8 @@ HUB_RETRIES = 2
 RETRYABLE_RETRIES = 1
 #: Retryable refusals the lane does not put back: a failed gate runs again only when asked (sd:3478).
 NOT_PUT_BACK = frozenset({"gate_failed"})
+#: The refusal of a gate whose slot wait ran out at the bound the runner gave it: no gate ran (pack sd:7412).
+SLOT_WAIT = sd_ship_workflow.GATE_SLOT_WAIT
 #: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254), and a cancelled
 #: one at the head the caller read (sd:3389).
 BLOCKED = ("failed", "skipped", "prepared")
@@ -1224,8 +1241,9 @@ def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
 
 #: The days the Queue page's wait and gate times read back (pack sd:6006).
 TIMES_DAYS = 7
-#: A median wait past this files the parallel-lanes question (operator ruling, grill Q27).
-WAIT_QUESTION_SECONDS = 3600
+#: A median wait past this files the parallel-lanes question (operator ruling, grill Q27): the 30 min target
+#: (pack sd:7412 Q3), read weekly; an hour let a 59 min week pass.
+WAIT_QUESTION_SECONDS = 1800
 
 
 def _instant(stamp: Any) -> float | None:
@@ -1339,12 +1357,14 @@ def lane_times(connection: Any, repository: str, *, now: float, days: int = TIME
 
 
 def wait_question(connection: Any, repository: str, path: str, *, now: float) -> int | None:
-    """File the parallel-lanes question once `repository`'s median wait passes an hour (pack sd:6006); its note id.
+    """File the parallel-lanes question once `repository`'s median wait passes the target (pack sd:6006); its note id.
 
     The question goes on one item per repository, `task-ref` `lane-wait:<repository>`, opened in `path`'s repo the
-    first time. Nothing is filed while that item is done (the operator settled it), while one of its questions is open,
-    or within `TIMES_DAYS` of its last question, so an answer is not asked again within the week it read. None when
-    nothing was filed.
+    first time. Nothing is filed while one of its questions is open, or within `TIMES_DAYS` of its last question, so
+    an answer is not asked again within the week it read. A done item (the operator settled it, or its fix landed)
+    stays quiet for `TIMES_DAYS` after it went done, the week that measures the fix, then a miss reopens it: the target
+    is read weekly (pack sd:7412 Q3). One with no status change on record stays done: when it closed is unknown.
+    None when nothing was filed.
     """
     require_sd_db()
     from sd_db import writes  # noqa: PLC0415
@@ -1354,13 +1374,18 @@ def wait_question(connection: Any, repository: str, path: str, *, now: float) ->
         return None
     found = connection.execute("SELECT id, status FROM item WHERE source = 'task-ref' AND external_id = ?",
                                (f"lane-wait:{repository}",)).fetchone()
+    recent = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - TIMES_DAYS * 86400))
     if found is not None:
-        if found["status"] == "done":
-            return None
-        recent = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - TIMES_DAYS * 86400))
         if connection.execute("SELECT 1 FROM note WHERE item = ? AND kind = 'question' AND (resolved_at IS NULL "
                               "OR timestamp >= ?)", (found["id"], recent)).fetchone():
             return None
+        if found["status"] == "done":
+            closed = connection.execute("SELECT MAX(timestamp) FROM note WHERE item = ? AND kind = 'status_change'",
+                                        (found["id"],)).fetchone()[0]
+            if closed is None or closed >= recent:
+                return None
+            writes.transition(connection, found["id"], "planning", who="sd-lane",
+                              reason=f"the median lane wait passed {WAIT_QUESTION_SECONDS // 60} min again")
     item = found["id"] if found is not None else writes.create_item(
         connection, kind="task", title=f"Decide: parallel lanes for {repository}", repo=path, source="task-ref",
         external_id=f"lane-wait:{repository}")
@@ -1368,7 +1393,8 @@ def wait_question(connection: Any, repository: str, path: str, *, now: float) ->
     return writes.add_note(connection, item, "question", (
         f"The median lane wait in {repository} was {round(times['wait'] / 60)} min over the last {times['days']} days "
         f"({times['entries']} entries; median gate {round((times['gate'] or 0) / 60)} min; slowest sd:"
-        f"{slowest.get('item')} at {round((slowest.get('total') or 0) / 60)} min). That is past an hour. "
+        f"{slowest.get('item')} at {round((slowest.get('total') or 0) / 60)} min). That is past the "
+        f"{WAIT_QUESTION_SECONDS // 60} min target. "
         "Run more than one entry of this lane at a time?\nOption: Plan parallel lanes (Recommended)\nOption: Not now"))
 
 
@@ -1913,10 +1939,11 @@ def answered_retryable(answer: dict[str, Any]) -> bool:
 
 
 def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None],
-            renewed: Callable[[], None] = lambda: None) -> dict[str, Any]:
+            renewed: Callable[[], None] = lambda: None, deadline: float = math.inf) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it.
 
-    `prepare_step` prepares, and `prepare_stop` reads its answer.
+    `prepare_step` prepares, its gate's slot wait bounded by the run's
+    `deadline` (pack sd:7412), and `prepare_stop` reads its answer.
     `advance` is the before-merge write (`step: merge`); it raises `Stop`
     when the claim is lost or the hub stays down, and no merge starts.
     """
@@ -1927,7 +1954,7 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     shot = draw_shots(worktree, logs / f"shots-{item}-{stamp}")
     if shot.get("shots"):
         entry = {**entry, "body": with_shots(str(entry.get("body") or ""), shot["shots"])}
-    prepared, prepare_log = prepare_step(entry, worktree, logs / f"prepare-{item}-{stamp}", ship, renewed)
+    prepared, prepare_log = prepare_step(entry, worktree, logs / f"prepare-{item}-{stamp}", ship, renewed, deadline)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head"),
                               **shot}
     stopped = prepare_stop(entry, worktree, prepared)
@@ -1996,12 +2023,13 @@ def with_shots(body: str, files: list[str]) -> str:
 
 
 def prepare_step(entry: dict[str, Any], worktree: pathlib.Path, log: pathlib.Path, ship: Ship,
-                 renewed: Callable[[], None]) -> tuple[dict[str, Any], pathlib.Path]:
+                 renewed: Callable[[], None], deadline: float = math.inf) -> tuple[dict[str, Any], pathlib.Path]:
     """`sd-ship prepare`'s answer and its log; the body and acceptance texts go to private temporary files.
 
     An incomplete review gets the one `--retry-review` an operator would
     give it, and no second (sd:3037); `renewed` renews the claim's lease
-    first (`renew`, sd:3481).
+    first (`renew`, sd:3481). Each prepare's gate waits for a slot at most
+    the run's budget left, read as it starts (`slot_wait_seconds`, pack sd:7412).
     """
     prepare_log = log.with_name(f"{log.name}.log")
     with tempfile.TemporaryDirectory(prefix="sd-lane-texts-") as private:  # 0700, removed with the step
@@ -2014,11 +2042,12 @@ def prepare_step(entry: dict[str, Any], worktree: pathlib.Path, log: pathlib.Pat
         closes = [part for number in entry.get("closes") or () for part in ("--item", str(number))]
         argv = ["-C", str(worktree), "prepare", "--item", str(entry["item"]), *closes, *claim, "--catch-up",
                 "--title", entry["title"], "--body-file", str(body), "--json"]
-        prepared = ship(argv, prepare_log)
+        prepared = ship([*argv, "--slot-timeout", str(slot_wait_seconds(deadline, clock()))], prepare_log)
         if blocker_code(prepared) == "review_incomplete":
             renewed()
             prepare_log = log.with_name(f"{log.name}-retry.log")
-            prepared = ship([*argv, "--retry-review"], prepare_log)
+            prepared = ship([*argv, "--slot-timeout", str(slot_wait_seconds(deadline, clock())), "--retry-review"],
+                            prepare_log)
     return prepared, prepare_log
 
 
@@ -2050,6 +2079,7 @@ def prepare_stop(entry: dict[str, Any], worktree: pathlib.Path, prepared: dict[s
     return {"status": "failed", "step": "prepare", "phase": prepared.get("phase"),
             "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
             **({"hub_fault": True} if answered_hub_fault(prepared) else
+               {"slot_wait": True} if blocker_code(prepared) == SLOT_WAIT else
                {"retryable": True} if answered_retryable(prepared) else {})}
 
 
@@ -3642,26 +3672,32 @@ def requeue(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, 
 
     A hub fault puts it back `HUB_RETRIES` times (sd:3239), then held, never
     failed (`hub_fields`, sd:4184); a retryable prepare refusal that spent no
-    review pass `RETRYABLE_RETRIES` times (sd:3478). Each has its own count.
+    review pass `RETRYABLE_RETRIES` times (sd:3478); a gate slot wait that
+    ran out every time, counted in `slot_waits`: no gate ran, and the kept
+    review serves the next prepare (pack sd:7412). Each has its own count.
     It keeps its place, and `hub_fault` or `retryable_fault` says what failed
     where; a later outcome writes its own fields beside it. Its
     `expected_head` moves only to a catch-up merge prepare pushed
     (`pushed_catch_up`, sd:3283).
     """
     hub, retryable = outcome.pop("hub_fault", False), outcome.pop("retryable", False)
+    waited = outcome.pop("slot_wait", False)
     retries = int(entry.get("hub_retries" if hub else "retryable_retries") or 0)
-    if not (hub or retryable) or (not hub and retries >= RETRYABLE_RETRIES):
+    if not (hub or retryable or waited) or (retryable and retries >= RETRYABLE_RETRIES):
         return None
     expected = pushed_catch_up(pathlib.Path(entry["worktree"]), str(entry.get("branch") or ""), entry["expected_head"])
     fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log", "log_host")
                              if key in outcome}
     fields = (hub_fields(retries, fault) if hub else
+              {"slot_waits": int(entry.get("slot_waits") or 0) + 1, "slot_wait": {**fault, "at": stamp_now()}}
+              if waited else
               {"retryable_retries": retries + 1, "retryable_fault": {**fault, "at": stamp_now()}})
     put_back(queue, entry, token, expected, **fields)
     if fields.get("held"):
         return (f"a hub fault after {retries} retries; it is held at its place, and "
                 f"`sd-ship lane release {entry['item']}` runs it again")
-    return f"{'a hub fault' if hub else 'a retryable refusal'}; it is pending again, and the next run retries it"
+    met = "a hub fault" if hub else "a gate slot wait that ran out at the run's budget" if waited else "a retryable refusal"
+    return f"{met}; it is pending again, and the next run retries it"
 
 
 def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
@@ -3696,13 +3732,13 @@ def clock() -> float:
 
 
 def load_stop(environ: dict[str, str]) -> str | None:
-    """Why the runner claims no entry under this load, or None (sd:3479).
+    """Why a second lane may not start under this load, or None (`lane_room`, sd:3479).
 
     The gate's own limit, `sd.gate_load_max` or `SD_GATE_LOAD_MAX`
-    (`sd_gate_slots.load_rule`), read against load5: six gates timed out at
-    one hour under load, and a retry minutes later met the same load. Off
-    while the limit is 0, as the gate queue's rule is. A limit or a load
-    that cannot be read claims nothing: unknown is not low.
+    (`sd_gate_slots.load_rule`), read against load5. Off while the limit is
+    0, as the gate queue's rule is. A limit or a load that cannot be read is
+    no room: unknown is not low. A lane already running claims under any
+    load; its gate waits in the gate queue (pack sd:7412).
     """
     import sd_gate_slots  # noqa: PLC0415 -- stdlib only, and only the runner reads it
     try:
@@ -3789,15 +3825,15 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                         ahead = speculate(entry, queue, gate)
                     if ahead is not None and ahead.ident is None:  # held before it starts: a TERM in its start ends it
                         ahead.start()
-                    row, stopped = run_entry(root, queue, entry, token, environ, ship, note or default_note)
+                    row, stopped = run_entry(root, queue, entry, token, environ, ship, note or default_note, deadline)
                     if row is not None:
                         ran.append(row)
                     if stopped is not None:
                         answer["stopped"] = stopped
                         break
                     if ahead is not None and row is not None and row.get("status") == "merged":
-                        ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
-                answer = finish_speculation(ahead, answer)
+                        ahead.join(remaining(deadline, PREPARE_SECONDS))  # the next prepare reads its receipt
+                answer = finish_speculation(ahead, answer, deadline)
             except BaseException:  # a SIGTERM among them: no speculative gate outlives the run (sd:5776)
                 if ahead is not None:
                     ahead.cancel_gate()
@@ -3811,10 +3847,6 @@ def next_claim(queue: Queue, environ: dict[str, str], deadline: float,
     """The entry `run_lane` claims next and its token, or None, with why the run stops in `answer` when it does."""
     if clock() >= deadline:
         answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
-        return None, ""
-    loaded = load_stop(environ)
-    if loaded is not None:
-        answer["stopped"] = loaded
         return None, ""
     try:
         held = freeze_stop(queue)
@@ -3834,21 +3866,45 @@ def next_claim(queue: Queue, environ: dict[str, str], deadline: float,
     return None, token
 
 
-def finish_speculation(ahead: SpeculativeGate | None, answer: dict[str, Any]) -> dict[str, Any]:
+def finish_speculation(ahead: SpeculativeGate | None, answer: dict[str, Any],
+                       deadline: float = math.inf) -> dict[str, Any]:
     """`answer` once the speculative gate is done: waited for, or cancelled when the run stopped (sd:3361).
 
-    A stopped run waits on no check, so it frees its runner lock now.
+    A stopped run waits on no check, so it frees its runner lock now. Any
+    other waits until `deadline` at most, then cancels it too: a gate queued
+    behind builders' tickets would hold the lock past the job (pack sd:7412).
     """
-    if ahead is not None and "stopped" in answer:
-        answer["speculative_gate"] = ("cancelled" if ahead.cancel_gate() else
-                                      f"still ending {2 * CANCEL_SECONDS}s after SIGKILL; the lock is freed anyway")
-    elif ahead is not None:
-        ahead.join()
+    if ahead is None:
+        return answer
+    if "stopped" not in answer:
+        ahead.join(remaining(deadline, PREPARE_SECONDS))
+        if not ahead.is_alive():
+            return answer
+    answer["speculative_gate"] = ("cancelled" if ahead.cancel_gate() else
+                                  f"still ending {2 * CANCEL_SECONDS}s after SIGKILL; the lock is freed anyway")
     return answer
 
 
+def remaining(deadline: float, cap: float) -> float:
+    """The seconds from `clock` to `deadline`, from 0 to `cap`: NaN, a past deadline or an unknown clock is 0."""
+    left = deadline - clock()
+    return min(float(cap), left) if left > 0 else 0.0
+
+
+def slot_wait_seconds(deadline: float, now: float) -> int:
+    """Prepare's `--slot-timeout`: the whole seconds from `now` to the run's `deadline`, 1 to `GATE_SLOT_SECONDS`.
+
+    An entry claimed by `deadline` still has `ENTRY_SECONDS` to end before
+    the job's TERM (`RUN_BUDGET_SECONDS`), so a slot wait inside the budget
+    left keeps it there (pack sd:7412). `sd-check` takes no 0; an unknown or
+    spent budget (NaN, past, infinite clock) waits 1 s.
+    """
+    left = deadline - now
+    return int(min(float(sd_lib.GATE_SLOT_SECONDS), left)) if left >= 1 else 1
+
+
 def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
-              ship: Ship, note: Note) -> tuple[dict[str, Any] | None, str | None]:
+              ship: Ship, note: Note, deadline: float = math.inf) -> tuple[dict[str, Any] | None, str | None]:
     """Find a checkout here (`checkout_for`), then prepare, merge and record one claimed entry.
 
     Its row for `ran`, and why the run stops, or None. An `origin` that did
@@ -3863,7 +3919,7 @@ def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: st
         found = {"status": "failed", "step": "worktree", "reason": str(error)[:600]}
     tree = found.pop("tree", None)
     try:
-        return run_checkout(root, queue, entry, token, environ, ship, note, tree, found)
+        return run_checkout(root, queue, entry, token, environ, ship, note, tree, found, deadline)
     finally:
         if tree is not None and found.get("made"):
             drop_lane_worktree(sd_lib.main_worktree_root(root), tree, found.get("branch_made"), made=True)
@@ -3882,7 +3938,7 @@ def unknown_checkout(queue: Queue, entry: dict[str, Any], token: str,
 
 def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
                  ship: Ship, note: Note, tree: pathlib.Path | None,
-                 found: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+                 found: dict[str, Any], deadline: float = math.inf) -> tuple[dict[str, Any] | None, str | None]:
     """`run_entry` in `tree`, or the skip `found` holds when there is none.
 
     `stage` follows `advance`, so a raise after the before-merge write names
@@ -3898,7 +3954,7 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
             built = {"lane_worktree": True, "builder_worktree": entry.get("worktree"),
                      "builder_host": entry.get("enqueued_on")}
             local = {**entry, "worktree": str(tree), **(built if found.get("made") else {})}
-            outcome = process(local, queue, ship, advanced, functools.partial(renew, queue, local, token))
+            outcome = process(local, queue, ship, advanced, functools.partial(renew, queue, local, token), deadline)
             if outcome.get("moved"):
                 put_back(queue, entry, token, pushed_catch_up(tree, str(entry.get("branch") or ""),
                                                               entry["expected_head"]),
@@ -3954,7 +4010,7 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     default a lane runs here, to its end, before the next starts. While the
     run lasts, a lane whose worker ended and that got new work starts again
     (`new_work`, sd:5809), rather than wait for a later scheduled run.
-    Once the lanes ended, each hosted lane whose median wait passed an hour
+    Once the lanes ended, each hosted lane whose median wait passed 30 min
     files the parallel-lanes question (`ask_wait`, pack sd:6006), and each same-head gate flake files its
     suite as a defect (`file_flakes`, pack sd:6739).
     A build refusal on the repo-table read (`BUILD_FAULTS`) skips the run

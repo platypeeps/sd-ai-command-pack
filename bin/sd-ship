@@ -47,6 +47,7 @@ from sd_ship_review import (
     carry_forward,
     dropped_catch_up,
     failing_check_tails,
+    gate_code,
     is_ancestor,
     lead_review,
     named_commits,
@@ -1265,14 +1266,15 @@ class Ship(SharedReview):
             return False
         base = self.gate_check_base()
         check = adjudicated_check(self.root, head, base, self.database if base else None,
-                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS)
+                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS,
+                                  slot_timeout=getattr(self.args, "slot_timeout", None) or sd_lib.GATE_SLOT_SECONDS)
         passed = check["status"] == "pass"
         self.save(review_skipped={**tiered, "head": head, "check": check, "recorded_at": self.runtime.clock()},
                   reviewed_head=head if passed else None)
         if not passed:
             said = "\n".join(failing_check_tails(check.get("checks"))) or check.get("detail") or "no check output"
             raise Refusal(f"review skipped: {tiered['tier']}; the repository gate failed at {head[:12]}: {said}",
-                          code="gate_failed", boundary="runtime", state="retryable_failure",
+                          code=gate_code(check), boundary="runtime", state="retryable_failure",
                           next_action="Fix the gate, or rerun prepare when the machine is less loaded "
                                       "(--review-timeout raises the limit); no review pass was spent.")
         print(f"sd-ship: review skipped: {tiered['tier']} ({tiered['reason']}); the gate passed at {head[:12]}, "
@@ -2939,10 +2941,14 @@ def review_timeout_flag(action) -> None:
 
     It reaches sd-review's `--timeout`, which bounds the repository gate and
     each reviewer, and sd-review's timing plan sizes the watchdog from it.
+    `--slot-timeout` reaches the gate's slot wait the same way (pack sd:7412).
     """
     action.add_argument("--review-timeout", type=review_seconds, metavar="SECONDS",
                         help="per-phase limit for sd-review: the repository gate, then each reviewer "
                              "(default: sd-review's own)")
+    action.add_argument("--slot-timeout", type=sd_lib.slot_bound_seconds, metavar="SECONDS",
+                        help="the repository gate's wait for a slot; the lane passes its run budget left "
+                             f"(default {sd_lib.GATE_SLOT_SECONDS})")
 
 
 def no_item_record_flags(action) -> None:

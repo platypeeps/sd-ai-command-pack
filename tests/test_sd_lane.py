@@ -13,6 +13,7 @@ import fcntl
 import importlib.util
 import io
 import json
+import math
 import os
 import pathlib
 import signal
@@ -958,21 +959,73 @@ class Runner(Lane):
         self.assertEqual([("--retry-review" in call) for call in self.calls], [False])
         self.assertIn("reclaimed or released", answer["stopped"])
 
-    def test_a_loaded_machine_claims_no_entry_until_load5_falls_below_the_gate_limit(self) -> None:
-        """sd:3479. Six gates timed out at one hour under load, and a retry ran the same gate under the same load."""
+    def test_a_loaded_machine_claims_and_its_gate_waits_in_the_slot_queue(self) -> None:
+        """pack sd:7412. The claim-time load stop idled the pack lane 25.6 h in a week while builders took the slots;
+        the gate queue's own load rule, in ticket order, is the one bound now."""
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         environ = {**self.environ, "SD_GATE_LOAD_MAX": "8"}
-        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (2.0, 9.5, 9.0)):
+        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):
             answer = sd_lane.run_lane(self.repo, environ, self.ship)
-        self.assertEqual((self.calls, [row["status"] for row in self.entries()]), ([], ["pending"]))
-        self.assertIn("load5 9.5 is at or above 8", answer["stopped"])
+        self.assertEqual(([c[2] for c in self.calls], [row["status"] for row in self.entries()]),
+                         (["prepare"], ["prepared"]), answer.get("stopped"))
         with mock.patch.object(sd_lane.os, "getloadavg", side_effect=OSError("no load")):
-            answer = sd_lane.run_lane(self.repo, environ, self.ship)
-        self.assertEqual((self.calls, answer["stopped"]), ([], "cannot read the load average (no load); "
-                                                                 "the next run takes the pending entries"))
-        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (9.0, 7.9, 9.0)):
+            sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, claim="deliver")
             sd_lane.run_lane(self.repo, environ, self.ship)
-        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared", "prepared"])
+
+    def test_prepare_waits_for_a_slot_no_longer_than_the_runs_budget(self) -> None:
+        """pack sd:7412, failure table row 2: an unbounded slot wait ran into the job's TERM, which spends a reclaim."""
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        now = [1000.0]
+        with mock.patch.object(sd_lane, "clock", lambda: now[0]):
+            sd_lane.run_lane(self.repo, self.environ, self.ship, deadline=1000.0 + 600.5)
+        prepare = self.calls[0]
+        self.assertEqual(prepare[prepare.index("--slot-timeout") + 1], "600")
+        self.calls.clear()
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship, deadline=float("inf"))
+        prepare = self.calls[0]
+        self.assertEqual(prepare[prepare.index("--slot-timeout") + 1], str(sd_lane.sd_lib.GATE_SLOT_SECONDS))
+
+    #: `sd-ship`'s answer when the gate's slot wait ran out at the bound the lane gave it (pack sd:7412): the review
+    #: cleared and its pass is kept, so the answer says one pass was spent.
+    SLOT_WAIT = {"ok": False, "phase": "prepare", "passes_spent": 1,
+                 "error": "the repository gate failed after the review cleared; the review pass is kept: "
+                          "no gate slot came free within 600s",
+                 "workflow": {"blocker": {"code": "gate_slot_wait", "retryable": True}}}
+
+    def test_a_slot_wait_that_ran_out_puts_the_entry_back_and_spends_no_retry_or_reclaim(self) -> None:
+        """pack sd:7412, failure table row 2: no gate ran, so the entry is not failed; the kept review serves the
+        next prepare, and every run under load puts it back again, in its place."""
+        sd_lane.enqueue_entry(self.worktree("topic"), 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = self.SLOT_WAIT
+        for waits in (1, 2):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+            self.assertIn("sd:1", answer["stopped"])
+            self.assertIn("gate slot", answer["stopped"])
+            one, two = self.entries()
+            self.assertEqual((one["status"], one["slot_waits"], one["slot_wait"]["step"], two["status"]),
+                             ("pending", waits, "prepare", "pending"))
+            for spent in ("reclaims", "retryable_retries", "hub_retries"):
+                self.assertNotIn(spent, one)
+        self.assertEqual([(c[2], c[4]) for c in self.calls], [("prepare", "1"), ("prepare", "1")])
+        del self.answers[(1, "prepare")]
+        self.calls.clear()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(c[2], c[4]) for c in self.calls],
+                         [("prepare", "1"), ("merge", "1"), ("prepare", "2"), ("merge", "2")])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
+
+    def test_a_row_with_slot_waits_claims_and_merges(self) -> None:
+        """pack sd:7412, failure table row 5: a row this version put back carries `slot_waits`; a runner of either
+        version, a rollback included, claims it as any pending row (this test passes on the older runner too)."""
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(
+            slot_waits=3, slot_wait={"step": "prepare", "reason": "no gate slot came free within 600s",
+                                     "at": "2026-11-03T00:00:00Z"}))
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
 
     def test_a_frozen_repository_claims_no_entry_until_the_window_ends(self) -> None:
         """sd:6879. A freeze window holds the lane: every entry stays pending, and a lift lets the run take them."""
@@ -993,12 +1046,6 @@ class Runner(Lane):
         finally:
             connection.close()
         sd_lane.run_lane(self.repo, self.environ, self.ship)
-        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
-
-    def test_no_gate_load_limit_claims_whatever_the_load(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
-        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):
-            sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
 
     def left_running(self, pid: int | None, step: str = "prepare") -> None:
@@ -1421,6 +1468,34 @@ class Speculation(Lane):
         with self.assertRaises(ProcessLookupError):
             os.kill(int(marker.read_text()), 0)
 
+
+    def test_a_speculative_gate_still_waiting_at_the_runs_deadline_is_cancelled(self) -> None:
+        """pack sd:7412, failure table row 4: with the claim-time load stop gone, a speculative gate may wait in the
+        slot queue past the run's budget; the runner waited for it after the merge with no regard to the deadline."""
+        self.queue_both()
+        marker = self.tmp / "gate-child.pid"
+
+        def waiting(root: pathlib.Path, head: str, base: str) -> dict:
+            """A gate whose child still waits long after the run's budget, run as the real gate runs `sd-check`."""
+            child = f"import os, pathlib, time; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); time.sleep(60)"
+            code, _, _ = sd_lane.gate_run()([sys.executable, "-c", child], dict(os.environ), root, 120)
+            return {"status": "failure", "summary": f"exit {code}"}
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            for _ in range(200):  # the gate's child is running before entry 1 ships
+                if marker.exists() and marker.read_text():
+                    break
+                time.sleep(0.05)
+            return self.ship(argv, log)
+
+        started = time.monotonic()
+        answer = sd_lane.run_lane(self.repo, self.environ, ship, waiting, deadline=sd_lane.clock() + 3)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual(answer["speculative_gate"], "cancelled")
+        self.assertIn("budget", answer["stopped"])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "pending"])
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(marker.read_text()), 0)
 
     def test_a_sigterm_mid_prepare_ends_the_speculative_gate_first(self) -> None:
         """sd:5776. A TERMed runner ended prepare's group, then TERMed itself again with the default action,
@@ -5410,6 +5485,26 @@ class Bounds(unittest.TestCase):
         for bound in (sd_lane.PREPARE_SECONDS, sd_lane.MERGE_SECONDS):
             self.assertGreaterEqual(bound, 3 * 3600 + sd_lane.sd_lib.GATE_SLOT_SECONDS)
 
+    def test_the_slot_wait_bound_is_a_whole_second_count_inside_its_limits_at_any_magnitude(self) -> None:
+        """pack sd:7412. `sd-check --slot-timeout` takes a whole number of seconds above 0; the bound never passes
+        `GATE_SLOT_SECONDS`, and an unknown time left (NaN) waits the least, since the job TERMs on its own clock."""
+        cap, tiny = sd_lane.sd_lib.GATE_SLOT_SECONDS, 5e-324
+        cases = {(0.0, 0.0): 1, (100.0, 0.0): 100, (100.9, 0.0): 100, (0.0, 100.0): 1, (tiny, 0.0): 1,
+                 (-tiny, 0.0): 1, (math.inf, 0.0): cap, (-math.inf, 0.0): 1, (math.nan, 0.0): 1, (0.0, math.nan): 1,
+                 (math.inf, math.inf): 1, (math.inf, -math.inf): cap, (1e308, -1e308): cap, (-1e308, 1e308): 1,
+                 (float(cap) + 0.5, 0.0): cap, (float(cap) - 0.5, 0.0): cap - 1, (2.0 ** 63, 0.0): cap,
+                 (1e15 + 30.0, 1e15): 30}
+        for (deadline, now), expected in cases.items():
+            with self.subTest(deadline=deadline, now=now):
+                bound = sd_lane.slot_wait_seconds(deadline, now)
+                self.assertIs(type(bound), int)
+                self.assertEqual(bound, expected)
+        for exponent in range(-1074, 1024, 7):  # every binary magnitude, both signs, against two clocks
+            for sign in (1.0, -1.0):
+                for now in (0.0, 1e9):
+                    bound = sd_lane.slot_wait_seconds(now + sign * 2.0 ** exponent, now)
+                    self.assertTrue(type(bound) is int and 1 <= bound <= cap, (exponent, sign, now, bound))
+
     def test_a_gate_child_that_starts_after_the_cancel_is_ended_at_once(self) -> None:
         """sd:3361, the step between the cancel and the gate's `sd-check` start: the late group is ended too."""
         go, answers = threading.Event(), []
@@ -5457,6 +5552,25 @@ class Bounds(unittest.TestCase):
             self.assertTrue(gate.cancel_gate())
         self.assertLess(time.monotonic() - started, 10)
         self.assertEqual(answers[0][0], -signal.SIGKILL)
+
+    def test_a_drained_run_waits_for_its_speculative_gate_only_until_its_deadline(self) -> None:
+        """pack sd:7412, failure table row 4: a run that ran out of entries joined its speculative gate with no
+        bound, so a gate queued behind builders held the runner lock past the job's TERM."""
+        release = threading.Event()
+        gate = sd_lane.SpeculativeGate(lambda: release.wait(60), "queued")
+        gate.start()
+        try:
+            started = time.monotonic()
+            with mock.patch.object(sd_lane, "CANCEL_SECONDS", 0.2):
+                answer = sd_lane.finish_speculation(gate, {}, sd_lane.clock() + 0.5)
+            self.assertLess(time.monotonic() - started, 10)
+            self.assertEqual(answer["speculative_gate"], "still ending 0.4s after SIGKILL; the lock is freed anyway")
+        finally:
+            release.set()
+            gate.join(10)
+        done = sd_lane.SpeculativeGate(lambda: None, "done")
+        done.start()
+        self.assertEqual(sd_lane.finish_speculation(done, {}, sd_lane.clock() + 60), {})
 
     def test_a_gate_that_outlives_both_signals_is_reported_and_left(self) -> None:
         """sd:3361, the last step: a gate still running after SIGKILL does not hold the run; the answer says so."""

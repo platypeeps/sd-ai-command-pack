@@ -1250,6 +1250,17 @@ GATE_CHECK_SECONDS = 3600
 GATE_SLOT_SECONDS = 4 * 3600
 
 
+def slot_bound_seconds(text: str) -> int:
+    """`--slot-timeout` of `sd-ship` and `sd-review`: whole seconds above 0, at most `GATE_SLOT_SECONDS`.
+
+    The lane passes its run budget left, so a gate queued under load ends its
+    wait before the job's TERM (pack sd:7412).
+    """
+    if not text.isascii() or not text.isdigit() or not 0 < int(text) <= GATE_SLOT_SECONDS:
+        raise argparse.ArgumentTypeError(f"takes whole seconds from 1 to {GATE_SLOT_SECONDS} (got '{text}')")
+    return int(text)
+
+
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
     """`repo.ci` for the repository `root` is a checkout of, else `github`.
 

@@ -33,7 +33,7 @@ from sd_ship_history import (
     verified_index,
 )
 from sd_ship_remote import Refusal, completed_process
-from sd_ship_workflow import success
+from sd_ship_workflow import GATE_SLOT_WAIT, success
 
 
 class ReviewTimeout(Exception):
@@ -631,13 +631,14 @@ class SharedReview:
                                       "adjudicated review and runs the gate at this head before clearance.")
         base = self.gate_check_base()
         check = adjudicated_check(self.root, head, base, self.database if base else None,
-                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS)
+                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS,
+                                  slot_timeout=getattr(self.args, "slot_timeout", None) or sd_lib.GATE_SLOT_SECONDS)
         self.save(adjudicated_gate={**check, "head": head, "recorded_at": self.runtime.clock()})
         if check["status"] != "pass":
             said = "\n".join(failing_check_tails(check.get("checks"))) or check.get("detail") or "no check output"
             raise Refusal(f"the repository gate failed at {head[:12]} after its blocking findings were adjudicated; "
                           f"the review pass stays spent: {said}",
-                          code="gate_failed", boundary="runtime", state="retryable_failure",
+                          code=gate_code(check), boundary="runtime", state="retryable_failure",
                           next_action="Fix the gate and prepare again; the fix is reviewed as a fix verification.")
 
     def rerun_gate(self, head: str, carried: dict | None = None) -> None:
@@ -655,7 +656,8 @@ class SharedReview:
         """
         base = self.gate_check_base()
         check = adjudicated_check(self.root, head, base, self.database if base else None,
-                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS)
+                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS,
+                                  slot_timeout=getattr(self.args, "slot_timeout", None) or sd_lib.GATE_SLOT_SECONDS)
         passes = self.history.native(self.state)
         if check["status"] != "pass":
             self.save(review_preflight_error={"kind": "gate_failed", "stage": "check", "head": head,
@@ -663,7 +665,7 @@ class SharedReview:
                                               "checks": gate_diagnostics(check, self.runtime.diagnostic_bytes)})
             said = "\n".join(failing_check_tails(check.get("checks"))) or check.get("detail") or "no check output"
             raise Refusal(f"the repository gate failed again at {head[:12]}; its review pass stays kept: {said}",
-                          code="gate_failed", boundary="runtime", state="retryable_failure",
+                          code=gate_code(check), boundary="runtime", state="retryable_failure",
                           next_action="Fix the gate and prepare again; the fix is reviewed as a fix verification.")
         report = passes[-1]["report"]
         passes[-1].update(exit_code=0, report={**report, "status": report["cleared_status"], "check": check,
@@ -1309,7 +1311,7 @@ class SharedReview:
                 if report.get("outcomes") else "before any reviewer was asked; no review pass was spent")
         raise Refusal(f"the repository gate failed {when}: "
                       f"{evidence or 'no check output; sd-ship observe prints the ship receipt'}",
-                      code="gate_failed", boundary="runtime", state="retryable_failure",
+                      code=gate_code(check), boundary="runtime", state="retryable_failure",
                       next_action=("Rerun prepare when the machine is less loaded: it runs only the gate at this head "
                                    "or a clean catch-up of it (--review-timeout raises the limit). Or fix the gate "
                                    "and prepare again: the fix "
@@ -1613,24 +1615,31 @@ def failed_outcomes(report: dict, limit: int = 600) -> str:
 
 
 def adjudicated_check(root: pathlib.Path, head: str, base: str | None, database: pathlib.Path | None,
-                      timeout: int) -> dict:
+                      timeout: int, slot_timeout: int = sd_lib.GATE_SLOT_SECONDS) -> dict:
     """`sd-check` at `head` in a clean worktree, as sd-review's gate step runs it (sd:2605).
 
     With a `base` it runs as the local gate does and reads or leaves a receipt
     the merge gate reuses; without one exit 0 passes and no receipt is kept.
+    `slot_ran_out` marks a gate whose slot wait ran out at `slot_timeout` (pack sd:7412).
     """
     import sd_gate_run  # noqa: PLC0415 -- only a prepare that clears adjudicated findings runs a gate here
 
     try:
         gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(base),
-                                             database=database, slot_timeout=sd_lib.GATE_SLOT_SECONDS)
+                                             database=database, slot_timeout=slot_timeout)
     except sd_gate_run.GateError as error:
         gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
     passed = gate["status"] == "success" if base else gate["exit_code"] == 0
     check = {"status": "pass" if passed and gate.get("head") == head else "fail", "exit_code": gate["exit_code"],
              "detail": str(gate.get("stderr") or "").strip()[-2000:], "checks": (gate.get("report") or {}).get("checks"),
-             "summary": gate.get("summary")}
+             "summary": gate.get("summary"), **({"slot_ran_out": True} if sd_gate_run.slot_ran_out(gate) else {})}
     return {**check, "reused": gate["reused"]} if gate.get("reused") else check
+
+
+def gate_code(check: dict) -> str:
+    """The refusal code of a failed gate: `GATE_SLOT_WAIT` when its slot wait ran out and no check ran, which the
+    lane puts back (pack sd:7412); else `gate_failed`, which it does not."""
+    return GATE_SLOT_WAIT if check.get("slot_ran_out") is True else "gate_failed"
 
 
 #: The statuses a review clears a head with; `cleared_status` is one of them when the gate failed after it.

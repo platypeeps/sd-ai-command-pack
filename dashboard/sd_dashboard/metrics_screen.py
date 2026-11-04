@@ -18,8 +18,8 @@ Progress areas already make:
 - `lanes`: each managed repository's lane over the last 7 days (`times`, pack sd:6006, moved from Queue in pack
   sd:7233): the median wait from enqueue to claim, the median gate time (the speculative gate plus the prepare step)
   and the slowest entry, enqueue to end, read from each entry's history rows by the pack's `sd_lane.lane_times`. A
-  median wait past an hour is `over`: the lane runner files the parallel-lanes question then. The range leaves it at 7
-  days, as it leaves Age.
+  median wait past the 30 min target (pack sd:7412) is `over`: the lane runner files the parallel-lanes question
+  then. The range leaves it at 7 days, as it leaves Age.
 - `controls`: the provider registry as `provider_controls.snapshot` reads it, with its `revision`, and per bill the
   one cap write the route takes (`_writes`), the read the classic Usage area's forms make (sd:3387).
 - `range`: the page's range, `7d` or `6mo` (`RANGES`, pack sd:7208). With `6mo`, `ranged` holds the parts the range
