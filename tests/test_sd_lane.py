@@ -74,12 +74,13 @@ def noted(group, number):
     end_group(group, number)
 
 def gate(root, head, base):
-    code, _, _ = sd_lane.gate_run()([sys.executable, "-c", CHILD, str(marks / "gate.pid")], dict(os.environ), root, 120)
+    mark = marks / f"gate-{{pathlib.Path(root).name}}.pid"
+    code, _, _ = sd_lane.gate_run()([sys.executable, "-c", CHILD, str(mark)], dict(os.environ), root, 120)
     return {{"status": "failure", "summary": f"exit {{code}}"}}
 
 def ship(argv, log):
-    for _ in range(1200):  # the gate's child runs before prepare starts
-        if (marks / "gate.pid").exists() and (marks / "gate.pid").read_text():
+    for _ in range(1200):  # every gate's child runs before prepare starts
+        if sum(1 for mark in marks.glob("gate-*.pid") if mark.read_text()) >= int(sys.argv[4]):
             break
         time.sleep(0.05)
     try:
@@ -1262,13 +1263,8 @@ class Reorder(Lane):
         self.assertEqual(lane("cancel", "1")[1]["status"], "cancelled")  # unset keeps today's behaviour
 
 
-class Speculation(Lane):
-    """sd:2586: while one entry ships, the next one's gate runs on the predicted landing.
-
-    A bare `origin` holds main; two worktrees each add a file, and main moves
-    after they fork. The recorder lands entry 1 as
-    GitHub's squash would: its catch-up tree as a new commit on main.
-    """
+class Trees(Lane):
+    """A bare `origin` holds main; two worktrees each add a file, and main moves after they fork."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -1311,6 +1307,57 @@ class Speculation(Lane):
             return git(scratch, "rev-parse", "HEAD^{tree}")
         finally:
             git(self.repo, "worktree", "remove", "--force", str(scratch))
+
+    def assert_termed_run(self, gated: list[str]) -> None:
+        """TERM a runner mid-prepare while a gate runs for each worktree in `gated`; each gate's group ends first."""
+        marks = self.tmp / "marks"
+        marks.mkdir()
+        script = self.tmp / "runner.py"
+        script.write_text(TERMED_RUNNER.format(bin=str(REPO_ROOT / "bin")), encoding="utf-8")
+        runner = subprocess.Popen([sys.executable, str(script), str(self.repo), json.dumps(self.environ), str(marks),
+                                   str(len(gated))],
+                                  env=dict(os.environ), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(runner.kill)
+
+        def pid_of(name: str) -> int | None:
+            text = (marks / name).read_text() if (marks / name).exists() else ""
+            return int(text) if text else None
+        pids: dict[str, int] = {}
+        for name in [f"gate-{tree}.pid" for tree in gated] + ["prepare.pid"]:
+            for _ in range(1200):  # bounded: a runner that never gets there fails on the read below
+                if pid_of(name) is not None or runner.poll() is not None:
+                    break
+                time.sleep(0.05)
+            child = pid_of(name)
+            if child is None:
+                self.fail(f"no {name}: {runner.stderr.read() if runner.poll() is not None else ''}")
+            pids[name] = child
+            self.addCleanup(end_group, child)
+        runner.send_signal(signal.SIGTERM)
+        _, errors = runner.communicate(timeout=60)
+        self.assertEqual(runner.returncode, -signal.SIGTERM, errors)
+        sent = [line.split() for line in (marks / "sent").read_text().splitlines()] if (marks / "sent").exists() else []
+        gates = {str(pids[f"gate-{tree}.pid"]) for tree in gated}
+        self.assertEqual({group for group, number, _ in sent[:len(gated)] if number == str(int(signal.SIGTERM))},
+                         gates, "the runner did not signal every speculative gate's group first")
+        ended = float((marks / "prepare-ended").read_text())
+        self.assertTrue(all(float(at) < ended for _, _, at in sent[:len(gated)]), "TERM waited for prepare")
+        for tree in gated:
+            for _ in range(100):
+                try:
+                    os.kill(pids[f"gate-{tree}.pid"], 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail(f"the speculative gate's child for {tree} outlived the runner")
+
+
+class Speculation(Trees):
+    """sd:2586: while one entry ships, the next one's gate runs on the predicted landing.
+
+    The recorder lands entry 1 as GitHub's squash would: its catch-up tree as a new commit on main.
+    """
 
     def ship(self, argv: list[str], log: pathlib.Path) -> dict:
         verb, item = argv[2], int(argv[argv.index("--item") + 1])
@@ -1502,46 +1549,9 @@ class Speculation(Lane):
         so `cancel_gate` never ran: the gate's `sd-check`, in a group of its own, ran on with ppid 1 and
         held its slot. A real SIGTERM now reaches the gate's group before prepare's group ends."""
         self.queue_both()
-        marks = self.tmp / "marks"
-        marks.mkdir()
-        script = self.tmp / "runner.py"
-        script.write_text(TERMED_RUNNER.format(bin=str(REPO_ROOT / "bin")), encoding="utf-8")
-        runner = subprocess.Popen([sys.executable, str(script), str(self.repo), json.dumps(self.environ), str(marks)],
-                                  env=dict(os.environ), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        self.addCleanup(runner.kill)
-
-        def pid_of(name: str) -> int | None:
-            text = (marks / name).read_text() if (marks / name).exists() else ""
-            return int(text) if text else None
-        pids: dict[str, int] = {}
-        for name in ("gate.pid", "prepare.pid"):
-            for _ in range(1200):  # bounded: a runner that never gets there fails on the read below
-                if pid_of(name) is not None or runner.poll() is not None:
-                    break
-                time.sleep(0.05)
-            child = pid_of(name)
-            if child is None:
-                self.fail(f"no {name}: {runner.stderr.read() if runner.poll() is not None else ''}")
-            pids[name] = child
-            self.addCleanup(end_group, child)
-        runner.send_signal(signal.SIGTERM)
-        _, errors = runner.communicate(timeout=60)
-        self.assertEqual(runner.returncode, -signal.SIGTERM, errors)
-        sent = [line.split() for line in (marks / "sent").read_text().splitlines()] if (marks / "sent").exists() else []
-        self.assertTrue(sent, "the runner never signalled the speculative gate's group")
-        self.assertEqual(sent[0][:2], [str(pids["gate.pid"]), str(int(signal.SIGTERM))])
-        self.assertLess(float(sent[0][2]), float((marks / "prepare-ended").read_text()), "TERM waited for prepare")
-        for _ in range(100):
-            try:
-                os.kill(pids["gate.pid"], 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            self.fail("the speculative gate's child outlived the runner")
+        self.assert_termed_run(["second"])
         [speculation] = [entry["speculation"] for entry in self.entries() if "speculation" in entry]
         self.assertEqual((speculation["after"], speculation["status"]), (1, "cancelled"))
-
 
     def test_an_interruption_while_the_gate_starts_still_ends_it(self) -> None:
         """sd:5776, the step between the gate's start and the runner holding it: the run's cleanup ends it."""
@@ -1571,6 +1581,131 @@ class Speculation(Lane):
         self.assertFalse(gate.is_alive())
         with self.assertRaises(ProcessLookupError):
             os.kill(int(marker.read_text()), 0)
+
+
+class DepthTwo(Trees):
+    """pack sd:7412, slice 2: the entry after next is gated on both predicted landings, chained.
+
+    The recorder lands every merged entry as GitHub's squash would, so each
+    gated tree can be held against the real catch-up after the run.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.third = self.branch("third", {"three.txt": "3\n"})
+        self.fourth = self.branch("fourth", {"four.txt": "4\n"})
+        self.trees = {1: self.first, 2: self.second, 3: self.third, 4: self.fourth}
+        self.landed: dict[int, str] = {}
+
+    def queue_all(self, count: int) -> None:
+        for item in range(1, count + 1):
+            sd_lane.enqueue_entry(self.trees[item], item, f"fix: {item}", self.body, self.environ, manual=True,
+                                  claim="deliver")
+
+    def ship(self, argv: list[str], log: pathlib.Path) -> dict:
+        verb, item = argv[2], int(argv[argv.index("--item") + 1])
+        if verb == "merge":
+            git(self.repo, "fetch", "-q", "origin")
+            tree = self.caught_up(git(self.trees[item], "rev-parse", "HEAD"), "origin/main")
+            self.landed[item] = git(self.repo, "commit-tree", tree, "-p", "origin/main", "-m", f"{item} (#{item})")
+            git(self.repo, "push", "-q", "origin", f"{self.landed[item]}:refs/heads/main")
+        return Lane.ship(self, argv, log)
+
+    def passing(self, root: pathlib.Path, head: str, base: str) -> dict:
+        self.gates.append((root, head, base))
+        return {"status": "success", "summary": "sd-check pass (check pass)", "receipt_revision": 1}
+
+    def endless(self, root: pathlib.Path, head: str, base: str) -> dict:
+        """A gate whose child sleeps far past the run, as the real gate runs `sd-check`; it marks its pid."""
+        self.gates.append((root, head, base))
+        mark = self.tmp / f"gate-{root.name}.pid"
+        child = f"import os, pathlib, time; pathlib.Path({str(mark)!r}).write_text(str(os.getpid())); time.sleep(60)"
+        code, _, _ = sd_lane.gate_run()([sys.executable, "-c", child], dict(os.environ), root, 120)
+        return {"status": "failure", "summary": f"exit {code}"}
+
+    def wait_for_gates(self, *names: str) -> None:
+        for _ in range(200):  # bounded: a gate that never starts fails on the pid read
+            if all((self.tmp / f"gate-{name}.pid").exists() and (self.tmp / f"gate-{name}.pid").read_text()
+                   for name in names):
+                return
+            time.sleep(0.05)
+
+    def assert_ended(self, *names: str) -> None:
+        for name in names:
+            pid = int((self.tmp / f"gate-{name}.pid").read_text())
+            self.addCleanup(end_group, pid)
+            for _ in range(100):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail(f"the gate for {name} outlived the run")
+
+    def tree(self, rev: str) -> str:
+        return git(self.repo, "rev-parse", f"{rev}^{{tree}}")
+
+    def test_each_entry_is_gated_once_two_ahead_on_the_chained_landings(self) -> None:
+        self.queue_all(4)
+        fork = git(self.repo, "rev-parse", "origin/main")
+        sd_lane.run_lane(self.repo, self.environ, self.ship, self.passing)
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged"] * 4)
+        self.assertEqual(sorted(root.name for root, _, _ in self.gates), ["fourth", "second", "third"])
+        gated = {root.name: (head, base) for root, head, base in self.gates}
+        head, base = gated["third"]
+        # Gated while entry 1 shipped: entry 2's landing is predicted on entry 1's predicted landing on the fork.
+        self.assertNotEqual(git(self.repo, "rev-parse", f"{base}^"), self.landed[1])
+        self.assertEqual(git(self.repo, "rev-parse", f"{base}^^"), fork)
+        self.assertEqual(self.tree(f"{base}^"), self.tree(self.landed[1]))
+        self.assertEqual(self.tree(base), self.tree(self.landed[2]))
+        self.assertEqual(self.tree(head), self.caught_up(git(self.third, "rev-parse", "HEAD"), self.landed[2]))
+        head, base = gated["fourth"]
+        self.assertEqual(git(self.repo, "rev-parse", f"{base}^^"), self.landed[1])
+        self.assertEqual(self.tree(base), self.tree(self.landed[3]))
+        self.assertEqual(self.tree(head), self.caught_up(git(self.fourth, "rev-parse", "HEAD"), self.landed[3]))
+        self.assertEqual([(entry["speculation"]["after"], entry["speculation"]["depth"], entry["speculation"]["status"])
+                          for entry in self.entries()[1:]], [(1, 1, "success"), (2, 2, "success"), (3, 2, "success")])
+
+    def test_a_failure_ahead_cancels_both_gates_and_the_next_entry_gates_again(self) -> None:
+        self.queue_all(3)
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+
+        def gate(root: pathlib.Path, head: str, base: str) -> dict:
+            return self.endless(root, head, base) if len(self.gates) < 2 else self.passing(root, head, base)
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            self.wait_for_gates("second", "third")
+            return self.ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, ship, gate, deadline=sd_lane.clock() + 20)
+        self.assert_ended("second", "third")
+        self.assertEqual([root.name for root, _, _ in self.gates], ["second", "third", "third"])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["failed", "merged", "merged"])
+        cancelled = self.entries()[1]["speculation"]
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertIn("sd:1 did not merge", cancelled["reason"])
+        again = self.entries()[2]["speculation"]
+        self.assertEqual((again["after"], again["depth"], again["status"]), (2, 1, "success"))
+
+    def test_the_runs_deadline_cancels_both_gates(self) -> None:
+        self.queue_all(3)
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            self.wait_for_gates("second", "third")
+            return self.ship(argv, log)
+        started = time.monotonic()
+        answer = sd_lane.run_lane(self.repo, self.environ, ship, self.endless, deadline=sd_lane.clock() + 3)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assert_ended("second", "third")
+        self.assertEqual(answer["speculative_gate"], "cancelled")
+        self.assertIn("budget", answer["stopped"])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "pending", "pending"])
+
+    def test_a_sigterm_mid_prepare_ends_both_gates_first(self) -> None:
+        self.queue_all(3)
+        self.assert_termed_run(["second", "third"])
+        self.assertEqual([(entry["speculation"]["after"], entry["speculation"]["status"])
+                          for entry in self.entries()[1:]], [(1, "cancelled"), (2, "cancelled")])
 
 
 class Landing(Lane):
@@ -3080,7 +3215,7 @@ class ClaimAndLease(SharedQueue):
         claimed = sd_lane.claim_entry(self.store(), "token")
         self.assertEqual((claimed or {}).get("item"), 1)
         gate = mock.Mock()
-        self.assertIsNone(sd_lane.speculate(claimed, self.store(), gate))
+        self.assertEqual(sd_lane.speculate(claimed, self.store(), gate), [])
         gate.assert_not_called()
         speculation = self.entries()[1]["speculation"]
         self.assertEqual((speculation["after"], speculation["status"]), (1, "skipped"))
@@ -5578,7 +5713,7 @@ class Bounds(unittest.TestCase):
         try:
             started = time.monotonic()
             with mock.patch.object(sd_lane, "CANCEL_SECONDS", 0.2):
-                answer = sd_lane.finish_speculation(gate, {}, sd_lane.clock() + 0.5)
+                answer = sd_lane.finish_speculation([gate], {}, sd_lane.clock() + 0.5)
             self.assertLess(time.monotonic() - started, 10)
             self.assertEqual(answer["speculative_gate"], "still ending 0.4s after SIGKILL; the lock is freed anyway")
         finally:
@@ -5586,7 +5721,7 @@ class Bounds(unittest.TestCase):
             gate.join(10)
         done = sd_lane.SpeculativeGate(lambda: None, "done")
         done.start()
-        self.assertEqual(sd_lane.finish_speculation(done, {}, sd_lane.clock() + 60), {})
+        self.assertEqual(sd_lane.finish_speculation([done], {}, sd_lane.clock() + 60), {})
 
     def test_a_gate_that_outlives_both_signals_is_reported_and_left(self) -> None:
         """sd:3361, the last step: a gate still running after SIGKILL does not hold the run; the answer says so."""
@@ -5595,7 +5730,7 @@ class Bounds(unittest.TestCase):
         gate.start()
         try:
             with mock.patch.object(sd_lane, "CANCEL_SECONDS", 0.2):
-                answer = sd_lane.finish_speculation(gate, {"stopped": "BuildMismatch"})
+                answer = sd_lane.finish_speculation([gate], {"stopped": "BuildMismatch"})
             self.assertEqual(answer["speculative_gate"], "still ending 0.4s after SIGKILL; the lock is freed anyway")
         finally:
             release.set()

@@ -494,6 +494,14 @@ class TreeReceipt(BuilderFixture):
     def test_the_lanes_speculative_pass_serves_the_prepare_after_the_landing(self) -> None:
         """sd:2586, end to end: the lane gates the topic on a predicted landing of the entry ahead; the real
         landing is another commit, and the topic's prepare after it reuses that pass instead of running."""
+        self.assert_speculative_pass_serves_the_prepare(ahead_count=1)
+
+    def test_a_pass_two_ahead_serves_the_prepare_after_both_landings(self) -> None:
+        """pack sd:7412, end to end: the topic is gated on two predicted landings, chained; after the two real
+        squash merges, its prepare's catch-up makes the gated tree and reuses that pass."""
+        self.assert_speculative_pass_serves_the_prepare(ahead_count=2)
+
+    def assert_speculative_pass_serves_the_prepare(self, ahead_count: int) -> None:
         import sd_gate_run
         import sd_lane
 
@@ -503,26 +511,32 @@ class TreeReceipt(BuilderFixture):
         git(root, "remote", "add", "origin", str(origin))
         git(root, "push", "-q", "origin", "main")
         git(root, "remote", "set-head", "origin", "main")
-        ahead = self.tmp / "ahead"
-        git(root, "worktree", "add", "-q", "-b", "ahead", str(ahead), "main")
-        (ahead / "ahead.py").write_text("z = 3\n", encoding="utf-8")
-        git(ahead, "add", "ahead.py")
-        git(ahead, "commit", "-q", "-m", "ahead")
+        entries = []
+        for item in range(1, ahead_count + 1):
+            ahead = self.tmp / f"ahead-{item}"
+            git(root, "worktree", "add", "-q", "-b", f"ahead-{item}", str(ahead), "main")
+            (ahead / f"ahead_{item}.py").write_text(f"z = {item}\n", encoding="utf-8")
+            git(ahead, "add", f"ahead_{item}.py")
+            git(ahead, "commit", "-q", "-m", f"ahead {item}")
+            entries.append({"item": item, "worktree": str(ahead), "expected_head": git(ahead, "rev-parse", "HEAD")})
         moved = self.tmp / "main"
         git(root, "worktree", "add", "-q", str(moved), "main")
         (moved / "other.py").write_text("y = 2\n", encoding="utf-8")
         git(moved, "add", "other.py")
         git(moved, "commit", "-q", "-m", "main moved")
         git(moved, "push", "-q", "origin", "main")
-        entry = {"item": 1, "worktree": str(ahead), "expected_head": git(ahead, "rev-parse", "HEAD")}
-        plan = sd_lane.predict(entry, {"item": 2, "worktree": str(root), "expected_head": git(root, "rev-parse", "HEAD")})
+        plan = sd_lane.predict(entries, {"item": 9, "worktree": str(root), "expected_head": git(root, "rev-parse", "HEAD")})
         speculative = sd_gate_run.check_in_worktree(root, plan["head"], base=plan["base"], database=database,
                                                     environ=self.environment())
         self.assertIn("receipt_revision", speculative, json.dumps(speculative)[:2000])
-        git(ahead, "merge", "-q", "--no-ff", "--no-edit", "origin/main")  # the entry ahead's catch-up, then its squash
-        landed = git(root, "commit-tree", git(ahead, "rev-parse", "HEAD^{tree}"), "-p", "origin/main", "-m", "ahead (#1)")
-        git(root, "push", "-q", "origin", f"{landed}:refs/heads/main")
-        git(root, "fetch", "-q", "origin")
+        for entry in entries:  # each entry ahead's catch-up, then its squash
+            ahead = pathlib.Path(entry["worktree"])
+            git(ahead, "fetch", "-q", "origin")
+            git(ahead, "merge", "-q", "--no-ff", "--no-edit", "origin/main")
+            landed = git(root, "commit-tree", git(ahead, "rev-parse", "HEAD^{tree}"), "-p", "origin/main", "-m",
+                         f"ahead (#{entry['item']})")
+            git(root, "push", "-q", "origin", f"{landed}:refs/heads/main")
+            git(root, "fetch", "-q", "origin")
         git(root, "merge", "-q", "--no-ff", "--no-edit", "origin/main")  # prepare's catch-up
         self.assertNotEqual(git(root, "rev-parse", "HEAD"), plan["head"])
         gate = self.gate(root, database)
