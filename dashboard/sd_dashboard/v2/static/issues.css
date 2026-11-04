@@ -65,10 +65,14 @@
  * states: default · hover (the reference link) · focus (link ring) · active · empty (no open row) · error (a failed
  * read is a row naming it).
  * pre-emit critique: P4 H4 E4 S4 R5 V4 */
-.tracked .who { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); }
+.tracked .who { font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); }
+/* A reference or a repository is a long path: it and the short columns break, so the title keeps a readable measure. */
+.tracked :is(.ref, .repo, .why, .who) { white-space: normal; overflow-wrap: anywhere; }
+.tracked .what { min-width: 12rem; }
 .tracked .ph { color: var(--color-muted); }
 #tracked-health:empty { display: none; }
 @media (max-width: 899px) {
   .tracked tbody tr:not(.empty) { grid-template-areas: "ref why" "what what" "repo when" "who who"; }
   .tracked .who { grid-area: who; } .tracked .when { grid-area: when; }
+  .tracked .what { min-width: 0; }
 }
