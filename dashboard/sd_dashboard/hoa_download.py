@@ -20,7 +20,8 @@ module's `run` detached, its output in `<state>/start.log`, and 202. `status` is
    opens the page in its own tab. On a login page it prints `STATUS: waiting for login`, and the phase becomes
    `waiting`; it reads the page again every 30 seconds, up to 15 minutes, and never types. `RESULT: signed in`, as the
    last RESULT line of a successful result event, goes on; anything else ends the run there, before any download, as
-   `unavailable` or `failed`.
+   `unavailable` or `failed`. No RESULT line from a session whose init named no Chrome tool or server is
+   `unavailable`: the Chrome tools did not load (pack sd:7723).
 3. The download: the checkout's command, phase `downloading`. Exit 0 is `done`, 3 `unavailable`, any other `failed`,
    each with the command's last output line. The command keeps its own lock and its own landing.
 4. `last.json` as `done`, `unavailable` or `failed`, with the exit code and the reason.
@@ -64,6 +65,9 @@ GRACE = 60
 WAITING = "STATUS: waiting for login"
 RESULT_SIGNED_IN = re.compile(r"^RESULT: signed in\s*$")
 RESULT_UNAVAILABLE = re.compile(r"^RESULT: unavailable, (.+?)\s*$")
+#: pack sd:7723: a run whose init event named no Chrome tool or server and that said no RESULT line.
+CHROME_UNLOADED = ("the Chrome tools did not load in the headless claude run; reconnect Chrome with /chrome in an "
+                   "interactive claude, then start the download again")
 SECTION = re.compile(r"^## 2\..*?(?=^## |\Z)", re.M | re.S)
 URL = re.compile(r"https://[^\s`)>\]\"']+")
 
@@ -253,6 +257,19 @@ def _bounded(proc: subprocess.Popen, seconds: float) -> threading.Timer:
     return timer
 
 
+def _chrome_loaded(init: dict) -> bool | None:
+    """Whether the init event names a Chrome tool or a claude-in-chrome server; None when it lists neither field.
+
+    ToolSearch's deferred tools need not appear in `tools`, so a server counts too, and only a reply with no RESULT
+    line is judged by this (pack sd:7723).
+    """
+    tools, servers = init.get("tools"), init.get("mcp_servers")
+    if not isinstance(tools, list) and not isinstance(servers, list):
+        return None
+    return (any(str(name).startswith("mcp__claude-in-chrome__") for name in tools or [])
+            or any(isinstance(server, dict) and "claude-in-chrome" in str(server.get("name", "")) for server in servers or []))
+
+
 def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiting) -> tuple[int, str]:
     """Step 2: the login wait, judged by its reply's last RESULT line; `on_waiting()` once it prints WAITING."""
     argv = claude_argv(claude_binary(), source, url)
@@ -262,7 +279,7 @@ def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiti
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True, pass_fds=keep)
     except OSError as error:
         return EXIT_ERROR, f"cannot start {argv[0]}: {error}"
-    timer, texts, waited, final, ended = _bounded(proc, LOGIN_SECONDS), [], False, None, ""
+    timer, texts, waited, final, ended, chrome = _bounded(proc, LOGIN_SECONDS), [], False, None, "", None
     for line in proc.stdout:
         try:
             event = json.loads(line)
@@ -271,6 +288,9 @@ def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiti
         if not isinstance(event, dict):
             print(line.rstrip(), file=out, flush=True)
             texts.append(line)
+            continue
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            chrome = _chrome_loaded(event)
             continue
         if event.get("type") == "assistant":
             said = "\n".join(block.get("text", "") for block in (event.get("message") or {}).get("content") or []
@@ -295,11 +315,13 @@ def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiti
     lines = [row.strip() for text in texts for row in text.splitlines()]
     if proc.returncode != 0:
         return EXIT_ERROR, f"claude exited {proc.returncode}: {next((r for r in reversed(lines) if r), '')[:200]}"
+    # A RESULT line said along the way is not the end: only the successful result event's last one counts.
+    results = [row.strip() for row in (final or "").splitlines() if row.strip().startswith("RESULT: ")]
+    last = results[-1] if results else ""
+    if not last and chrome is False:
+        return EXIT_NONE, CHROME_UNLOADED
     if final is None:
         return EXIT_ERROR, f"claude ended with {ended}" if ended else "claude ended without a result"
-    # A RESULT line said along the way is not the end: only the successful result event's last one counts.
-    results = [row.strip() for row in final.splitlines() if row.strip().startswith("RESULT: ")]
-    last = results[-1] if results else ""
     if RESULT_SIGNED_IN.match(last):
         return EXIT_OK, last
     unavailable = RESULT_UNAVAILABLE.match(last)
