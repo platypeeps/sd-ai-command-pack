@@ -494,6 +494,10 @@ class SharedReview:
         self.state.update(updates)
         self.revision = self.store.save(self.connection, self.key, self.revision, self.history.stamp(self.state))
 
+    def read_only(self) -> bool:
+        """The connection refuses writes: `sd-ship` opens it so for a read verb (`connect(write=False)`)."""
+        return self.connection is not None and bool(self.connection.execute("PRAGMA query_only").fetchone()[0])
+
     def refuse_live_review(self) -> None:
         """Refuse before anything is saved while another process reviews this record (sd:1938).
 
@@ -779,8 +783,15 @@ class SharedReview:
             return False
         kept = {"head": passes[-1].get("head"), "recorded_at": self.runtime.clock(), "superseded_binding": self.state.get("binding"),
                 "changed": [list(row) for row in changed], "request_sha256": request["sha256"]}
-        self.save(binding=self.runtime.binding(self.root), binding_manifest=manifest(self.root),
-                  review_binding_kept=[*(self.state.get("review_binding_kept") or []), kept])
+        rebound = {"binding": self.runtime.binding(self.root), "binding_manifest": manifest(self.root),
+                   "review_binding_kept": [*(self.state.get("review_binding_kept") or []), kept]}
+        if self.read_only():
+            # pack sd:7576. A read verb, such as the template `sd-ship adjudicate`
+            # prints, rebinds in memory only: saving failed it with "attempt to
+            # write a readonly database". The next writing verb replays and records it.
+            self.state.update(rebound)
+        else:
+            self.save(**rebound)
         return True
 
     def replayed_request(self, passes: list[dict], request: dict) -> str | None:

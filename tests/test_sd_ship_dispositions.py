@@ -100,6 +100,27 @@ class DispositionTests(unittest.TestCase):
         rows = json.loads(result.stdout)["proposal"]["findings"]
         self.assertEqual([row["raw_finding"]["summary"] for row in rows], ["fixture disputed finding"])
 
+    def test_the_findings_print_after_a_landing_that_keeps_the_request(self):
+        """pack sd:7576. A verdict file moved but `--explain` asks the same, so the
+        receipt is rebound. The template opens the database read-only: the rebind
+        stays in memory there, and the findings print instead of "attempt to write
+        a readonly database". The filled template then records as before."""
+        self.blocked()
+        operation = self.operation()
+        operation.state["binding"] = "a review tool file landed on the default branch"
+        operation.state["binding_manifest"]["verdict"]["sd_route.py"] = "ast:before"
+        operation.save()
+        before = list(self.connection.execute("SELECT * FROM state"))
+        result = self.command()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = json.loads(result.stdout)["proposal"]["findings"]
+        self.assertEqual([row["raw_finding"]["summary"] for row in rows], ["fixture disputed finding"])
+        self.assertEqual(list(self.connection.execute("SELECT * FROM state")), before, "a read wrote the receipt")
+        self.accepted()
+        state = self.operation().state
+        self.assertEqual(state["binding"], ship.binding(self.root))
+        self.assertEqual(state["review_binding_kept"][0]["changed"], [["sd_route.py", "verdict"]])
+
     def test_a_blocking_refusal_bounds_its_message_and_names_a_no_item_record(self):
         """sd:2102. Five findings are named, a line-less one by path, and `findings` carries every one."""
         rows = [{"disposition": "blocking", "severity": "high", "path": f"f{n}.py", "line": n, "summary": "x " * 200}
