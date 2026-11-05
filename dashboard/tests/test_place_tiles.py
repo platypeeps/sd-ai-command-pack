@@ -311,7 +311,7 @@ class TheUpdateAndRefresh(Case):
                                    ('sh -c "echo update >> runs; exit 4"', "stop\nupdate\n", 4)):
             (self.app / "runs").unlink(missing_ok=True)
             self.config.write_text(f"tile|acme|app|App|{self.app}|-\nact|app|Start|sh -c \"echo start >> runs\"\n"
-                                   "act|app|Stop|sh -c \"echo stop >> runs; exit 1\"\n"
+                                   "act|app|Stop|sh -c \"echo stop >> runs\"\n"
                                    f"act|app|Update|{update}\n", encoding="utf-8")
             self.assertEqual(self.start("Refresh")[0], 202)
             last = self.wait_done("Refresh")
@@ -319,7 +319,7 @@ class TheUpdateAndRefresh(Case):
                 # Start runs under its own lock, after Refresh pressed it: its line lands when it ends.
                 self.assertEqual(self.wait_done("Start")["exit"], 0)
             self.assertEqual(((self.app / "runs").read_text(encoding="utf-8"), last["exit"]), (runs, code), update)
-        self.assertIn("Update exited 4, so Start was not pressed.", last["output"])
+        self.assertIn("Update exited 4, so Start was not pressed", last["output"])
 
     # Review of sd:7665: a Refresh that ran Start inline held a foreground server under Refresh's lock, so Start could
     # launch a second server, Refresh read running for the server's life, and the next Refresh was a 409 until Stop.
@@ -371,6 +371,7 @@ class TheUpdateAndRefresh(Case):
     def test_a_second_refresh_restarts_the_server_and_is_no_409(self):
         self.serve()
         first = self.servers()
+        self.wait_done("Refresh")
         status, body = self.start("Refresh")
         self.assertEqual(status, 202, f"the second Refresh was refused: {body}")
         self.assertEqual(self.wait_done("Refresh")["exit"], 0)
@@ -392,6 +393,112 @@ class TheUpdateAndRefresh(Case):
         self.assertEqual(self.wait_done("Update")["exit"], 0)
         head = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=clone, capture_output=True, text=True, check=True)
         self.assertEqual(head.stdout.strip(), "two")
+
+
+class TheRefreshSteps(Case):
+    """Review round 2 of sd:7665, one test per row of the failure table in the PR body: Refresh's Stop, Update and Start
+    each move state, and a step that fails, hangs or is cut short leaves Refresh ended, its lock free, and no Update
+    over a server that may still run. `refresh` runs here in-process, so the bounds can be patched."""
+
+    servers, stop_servers = TheUpdateAndRefresh.servers, TheUpdateAndRefresh.stop_servers
+    SERVER = "act|app|Start|sh -c 'echo $$ >> pids; echo start >> runs; exec sleep 60'\n"
+
+    def tiles(self, stop, update="sh -c 'echo update >> runs'", url="-"):
+        self.config.write_text(f"tile|acme|app|App|{self.app}|{url}\n{self.SERVER}act|app|Stop|{stop}\n"
+                               f"act|app|Update|{update}\n", encoding="utf-8")
+        self.addCleanup(self.stop_servers)
+
+    def refresh(self):
+        return place_tiles.refresh("acme", "app", str(self.config))
+
+    def runs(self):
+        return (self.app / "runs").read_text(encoding="utf-8") if (self.app / "runs").is_file() else ""
+
+    def running_server(self):
+        self.assertEqual(self.start("Start")[0], 202)
+        return self.servers()
+
+    def test_a_file_that_lost_its_steps_runs_nothing(self):
+        self.config.write_text(f"tile|acme|app|App|{self.app}|-\n{self.SERVER}", encoding="utf-8")
+        self.assertEqual(self.refresh(), 2)
+        self.assertEqual(self.runs(), "")
+        self.config.write_bytes(b"\xff\xfe")
+        self.assertEqual(self.refresh(), 2, "a file that does not read is no traceback")
+
+    def test_a_stop_that_fails_runs_no_update(self):
+        self.tiles("sh -c 'echo stop >> runs; exit 3'")
+        self.running_server()
+        with mock.patch.object(place_tiles, "START_WAIT", 0.2, create=True):
+            self.assertEqual(self.refresh(), 3)
+        self.assertEqual(self.runs(), "start\nstop\n", "Update ran over a server Stop did not stop")
+
+    def test_a_failed_stop_of_a_stopped_service_whose_link_refuses_goes_on(self):
+        # Already stopped: Start's lock is free and its link refuses, so Stop's exit is not a server still running.
+        self.tiles("sh -c 'echo stop >> runs; exit 1'", url=f"http://127.0.0.1:{free_port()}/")
+        self.assertEqual(self.refresh(), 0)
+        self.servers()
+        self.assertEqual(self.runs(), "stop\nupdate\nstart\n")
+
+    def test_a_failed_stop_with_no_link_to_ask_runs_no_update(self):
+        # No link to ask: whether it still runs is not known, and not known is not stopped.
+        self.tiles("sh -c 'echo stop >> runs; exit 1'")
+        self.assertEqual(self.refresh(), 1)
+        self.assertEqual(self.runs(), "stop\n")
+
+    def test_a_stop_that_leaves_the_server_running_runs_no_update(self):
+        self.tiles("sh -c 'echo stop >> runs'")
+        self.running_server()
+        with mock.patch.object(place_tiles, "STOP_WAIT", 0.5, create=True), \
+                mock.patch.object(place_tiles, "START_WAIT", 0.2, create=True):
+            self.assertEqual(self.refresh(), 1)
+        self.assertEqual(self.runs(), "start\nstop\n", "Update ran while Start's server still ran")
+
+    def test_a_hung_stop_or_update_is_ended_with_its_children_and_refresh_ends(self):
+        hang = "sh -c 'sleep 30 & echo $! > hung; wait'"
+        for stop, update, runs in ((hang, "sh -c 'echo update >> runs'", ""), ("true", hang, "")):
+            (self.app / "hung").unlink(missing_ok=True)
+            self.tiles(stop, update)
+            began = time.monotonic()
+            with mock.patch.object(place_tiles, "STEP_SECONDS", 0.5, create=True):
+                code = self.refresh()
+            self.assertLess(time.monotonic() - began, 10, "Refresh waited on the hung step")
+            self.assertEqual((code, self.runs()), (124, runs), "a step ran after the hung one")
+            pid = int((self.app / "hung").read_text(encoding="utf-8"))
+            for _ in range(100):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail("the hung step's child still runs")
+
+    def test_a_start_refused_or_gone_after_the_update_is_named_and_ends(self):
+        self.tiles("true")
+        for answer, code in ((lambda payload, config: (lambda c: (409, {"error": "App Start is already running"})), 1),
+                             (mock.Mock(side_effect=ValueError("Nothing ran: no action 'Start'")), 2)):
+            with mock.patch.object(place_tiles, "run", answer), mock.patch.object(place_tiles, "START_WAIT", 0.2, create=True):
+                self.assertEqual(self.refresh(), code)
+
+    def test_a_refresh_cut_short_after_stop_leaves_its_lock_free_and_the_next_one_finishes(self):
+        # Refresh's own process is killed between Stop and Start (a reboot, a kill): its exit record names that, its
+        # lock is free, and the next Refresh stops nothing that runs, updates and starts.
+        self.tiles("sh -c 'kill $(cat pids) 2>/dev/null; : > pids; echo stop >> runs'", update="sh -c 'kill -9 $PPID'")
+        self.running_server()
+        self.assertEqual(self.start("Refresh")[0], 202)
+        self.assertNotEqual(self.wait_done("Refresh")["exit"], 0)
+        self.tiles("sh -c 'kill $(cat pids) 2>/dev/null; : > pids; echo stop >> runs'")
+        self.assertEqual(self.start("Refresh")[0], 202, "the cut Refresh still holds its lock")
+        self.assertEqual(self.wait_done("Refresh")["exit"], 0)
+        self.servers()
+        self.assertEqual(self.runs(), "start\nstop\nstop\nupdate\nstart\n")
+
+    def test_a_hosted_refresh_says_the_start_button_here_does_not_show_its_start(self):
+        # The host's Refresh starts Start there under its own lock and writes no Start row, so the hub's Start reads
+        # its last answered request: a limit the button's hover says.
+        refresh = place_tiles.parse(f"tile|work|sim|Sim|{self.app}|-|far-host\nact|sim|Start|s\nact|sim|Stop|t\n")[0][0]["actions"][-1]
+        self.assertEqual(refresh["label"], "Refresh")
+        self.assertIn("the Start button here does not show", refresh["help"])
 
 
 class TheHostedTile(Case):

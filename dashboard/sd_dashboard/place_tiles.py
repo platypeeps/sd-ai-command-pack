@@ -48,6 +48,7 @@ import os
 import re
 import secrets
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -58,7 +59,7 @@ from pathlib import Path
 
 from .documents import _config_dir, pipe_lines
 
-__all__ = ["CONFIG", "EXAMPLE", "PROBE_SECONDS", "REQUEST", "RESULT", "START_WAIT", "WRAP", "document", "key", "parse",
+__all__ = ["CONFIG", "EXAMPLE", "PROBE_SECONDS", "REQUEST", "RESULT", "STEP_SECONDS", "STOP_WAIT", "WRAP", "document", "key", "parse",
            "refresh", "run", "state_dir", "this_host"]
 
 #: In this machine's config directory, never supplied by a request.
@@ -71,8 +72,10 @@ TAIL = 4000
 #: Runs the command, then records its exit code and end time in the file `$1`.
 WRAP = 'f=$1; shift; "$@"; c=$?; printf "%s %s\\n" "$c" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f"; exit "$c"'
 ID = re.compile(r"[a-z0-9][a-z0-9-]*")
-#: Seconds Refresh waits for the stopped server to let go of Start's lock before it calls Start refused.
-START_WAIT = 30.0
+#: Seconds Refresh's Stop and Update may each take before Refresh ends them, their children too, and stops (sd:7665).
+STEP_SECONDS = 600.0
+#: Seconds Refresh waits after Stop for Start's lock to clear, the server it stopped letting go, before Update.
+STOP_WAIT = 30.0
 #: The Refresh runner: a fresh interpreter, `-I` so the tile's folder shadows no module, given the dashboard and the
 #: pack library as its path, then `refresh(realm, tile, config)`.
 BOOT = ("import sys; sys.path[:0] = sys.argv[1:3]; from sd_dashboard.place_tiles import refresh; "
@@ -143,8 +146,11 @@ def _update_and_refresh(tile: dict) -> None:
         tile["actions"].append(by["update"])
     if "refresh" not in by and all(step in by for step in ("stop", "update", "start")):
         stop, update, start = (shlex.join(by[step]["argv"]) for step in ("stop", "update", "start"))
+        help_ = (f"Asks {tile['host']} to stop {tile['label']}, run its Update, then start it again; the Start button "
+                 "here does not show that start." if _hosted(tile)
+                 else f"Stops {tile['label']}, runs its Update, then starts it again.")
         tile["actions"].append({"label": "Refresh", "command": f"{stop}; {update} && Start: {start}", "argv": [],
-                                "refresh": True, "help": f"Stops {tile['label']}, runs its Update, then starts it again."})
+                                "refresh": True, "help": help_})
 
 
 def _read(config: Path) -> tuple[list[dict], list[str]]:
@@ -370,31 +376,87 @@ def refresh(realm: str, tile_id: str, config: str) -> int:
     """A tile's Refresh (sd:7665): its Stop, then its Update, then a start of Start through `run`, as its button does.
 
     Start runs under its own lock, so a foreground server is Start's: Start's button reads it running and refuses a
-    second server, Refresh ends once Start is started, and the next Refresh is no 409 (review of sd:7665). The stopped
-    server may hold Start's lock a moment after Stop returns, so a 409 is tried again for `START_WAIT` seconds. The
-    output goes to Refresh's `start.log`; the exit code is Update's when it fails, 1 when Start is refused.
+    second server, and Refresh ends once Start is started. Each step moves state, so a step that fails stops Refresh
+    before the next one (the PR's failure table, review round 2):
+
+    - Stop exits non-zero: the server may still run, so Update does not run, unless the service reads stopped: Start's
+      lock is free and the tile's link refuses. With no link, or one that does not refuse, it is not known to be
+      stopped, and not known is not stopped.
+    - Stop exits 0 and Start's lock is still held `STOP_WAIT` seconds later: the server still runs; no Update.
+    - Stop or Update runs past `STEP_SECONDS` (a pull waiting on a credential): Refresh ends it and its children, and
+      stops with 124. Git is told not to prompt, so a pull fails at once where it can.
+    - Update fails: nothing starts; the service stays stopped, and the output says to press Update, then Start.
+    - Start is refused (a press of Start got there first: 409) or no longer named (400): named, exit 1 or 2.
+
+    A Refresh cut short leaves no lock: its process holds it. Its exit record names the cut, and the next Refresh runs
+    every step again. On a hosted tile the host runs this, writes no row for Start, and the hub's Start button reads
+    its own last request, not this start: a limit Refresh's hover says on the hub. The output goes to Refresh's
+    `start.log`.
     """
+    from .sweep import _held
+
     config_path = Path(config)
-    tiles, _ = _read(config_path)
+    try:
+        tiles, _ = _read(config_path)
+    except (OSError, UnicodeDecodeError) as error:
+        print(f"Nothing ran: {config_path.name} was not read: {error.__class__.__name__}.")
+        return 2
     tile = next((t for t in tiles if (t["realm"], t["id"]) == (realm, tile_id)), None)
     by = {_slug(a["label"]): a for a in tile["actions"]} if tile else {}
     if tile is None or _hosted(tile) or not all(step in by for step in ("stop", "update", "start")):
         print(f"Nothing ran: {config_path.name} no longer gives {tile_id} of {realm} a Start, Stop and Update here.")
         return 2
-    for step in ("stop", "update"):
-        print(f"$ {by[step]['command']}", flush=True)
-        code = subprocess.run(by[step]["argv"], cwd=tile["folder"], stdin=subprocess.DEVNULL, check=False).returncode
-        if step == "update" and code:
-            print(f"Update exited {code}, so Start was not pressed.", flush=True)
-            return code
-    deadline = time.monotonic() + START_WAIT
-    while True:
+    start_state = _state(tile, by["start"]["label"])
+    code = _step(by["stop"], tile["folder"])
+    if code is None:
+        print(f"Stop ran past {STEP_SECONDS:g} s and was ended; whether {tile['label']} runs is not known, so Update "
+              "did not run.", flush=True)
+        return 124
+    if code and not (_held(start_state) is None and tile["url"] and _probe(tile["url"])["answers"] is False):
+        print(f"Stop exited {code} and {tile['label']} is not known to be stopped, so Update did not run.", flush=True)
+        return code
+    deadline = time.monotonic() + STOP_WAIT
+    while _held(start_state) is not None:
+        if time.monotonic() >= deadline:
+            print(f"Start's server still runs {STOP_WAIT:g} s after Stop, so Update did not run.", flush=True)
+            return 1
+        time.sleep(0.2)
+    code = _step(by["update"], tile["folder"])
+    if code is None or code:
+        why = f"ran past {STEP_SECONDS:g} s and was ended" if code is None else f"exited {code}"
+        print(f"Update {why}, so Start was not pressed: {tile['label']} stays stopped. Press Update, then Start.",
+              flush=True)
+        return 124 if code is None else code
+    try:
         status, body = run({"realm": realm, "tile": tile_id, "action": by["start"]["label"]}, config_path)(None)
-        if status != 409 or time.monotonic() >= deadline:
-            break
-        time.sleep(0.5)
+    except ValueError as error:
+        print(f"Start was not started: {error}", flush=True)
+        return 2
     if status == 202:
         print(f"Start started at {body['started']}, under its own lock: its button shows how it runs.", flush=True)
         return 0
     print(f"Start was not started: {body.get('error', status)}", flush=True)
     return 1
+
+
+def _step(action: dict, folder: str) -> int | None:
+    """Refresh's Stop or Update, in its own session; its exit code, or None when it ran past `STEP_SECONDS` and it
+    and its children were ended (TERM, then KILL)."""
+    print(f"$ {action['command']}", flush=True)
+    child = subprocess.Popen(action["argv"], cwd=folder, stdin=subprocess.DEVNULL, start_new_session=True,
+                             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    try:
+        return child.wait(timeout=STEP_SECONDS)
+    except subprocess.TimeoutExpired:
+        # TERM, then KILL whatever of its group outlived TERM; the group is gone once killpg finds no member.
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(child.pid, sig)
+            except ProcessLookupError:
+                break
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        child.wait()
+        return None
