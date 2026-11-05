@@ -117,6 +117,9 @@ addEventListener('DOMContentLoaded', () => {
   // selected is the piece the editor and the URL follow.
   // parked: Open | Parked (sd:6701), kept as ?parked=.
   let selected = null, parked = window.shell.aside.mode('parked'), view = 'board';
+  // pack sd:7670: the Ideas column's Area tile, '' for none pressed; writing_screen.AREAS.
+  const IDEA_AREAS = ['Personal', 'Work', 'RWBP'];
+  let ideaArea = '';
   const keep = () => { const v = window.shell.aside.param(parked); return v ? { parked: v } : {}; };
   function card(p) {
     const L = gates(p), st = worst(L);
@@ -132,12 +135,20 @@ addEventListener('DOMContentLoaded', () => {
     // pack sd:7244: the inbox blog ideas, highest score first, from writing_screen's `ideas`. An idea card is no piece: it
     // takes no selection, and its title links out only where the read gave an http href. The drop zone refuses a piece.
     const I = D?.ideas || { state: 'unknown', reason: 'the read gave no ideas', rows: [] };
-    const idea = i => html`<article class="card idea" aria-label="Idea: ${i.title}"><div class="top"><span class="id">${i.created || ''}</span><span class="tag">${i.score == null ? 'no score' : `${i.score}/10`}</span></div>
+    // pack sd:7670: Personal, Work and RWBP tiles, then No area while an idea has none; `rows` holds each area's highest,
+    // and with no tile pressed the column shows the first `top` of them, the highest overall.
+    const nArea = a => (I.areas || {})[a === 'none' ? '' : a] || 0;
+    const areaTiles = [...IDEA_AREAS.map(a => [a, a]), ...(nArea('none') ? [['none', 'No area']] : [])];
+    const ideasShown = ideaArea ? I.rows.filter(i => (ideaArea === 'none' ? !i.area : i.area === ideaArea)) : I.rows.slice(0, I.top || I.rows.length);
+    const ofWhat = !ideaArea ? `${I.count} inbox ideas` : ideaArea === 'none' ? `${nArea('none')} ideas with no area` : `${nArea(ideaArea)} ${ideaArea} ideas`;
+    const idea = i => html`<article class="card idea" aria-label="Idea: ${i.title}"><div class="top"><span class="id">${i.created || ''}</span>${i.area ? html`<span class="area">${i.area}</span>` : ''}<span class="tag">${i.score == null ? 'no score' : `${i.score}/10`}</span></div>
       <div class="t">${i.href ? html`<a class="ext" href="${i.href}" target="_blank" rel="noopener noreferrer">${i.title}</a>` : i.title}</div></article>`;
     const ideaCol = html`<div class="col vault" data-drop="stage:ideas">
       <header><span class="label">Ideas · vault</span>${I.state === 'read' ? html`<span class="n" title="inbox ideas in the vault">${I.count}</span>` : html`<span class="n" title="vault ideas not read">—</span>`}</header>
+      ${I.state === 'read' && I.count ? html`<div class="idea-areas">${window.shell.list.fseg('area', 'Area', areaTiles.map(([a, w]) => ({ v: a, pressed: ideaArea === a,
+        title: `${w}: ${nArea(a)}`, label: html`${w} <span class="n">${nArea(a)}</span>` })))}</div>` : ''}
       <div><p class="refusal" role="note"></p><div class="drop">
-        ${I.state === 'read' ? html`${I.rows.map(idea)}<p class="empty">${I.count ? `Highest ${I.rows.length} of ${I.count} inbox ideas.` : 'No idea in the vault inbox.'} <a href="/tasks?base=blog-idea">Tasks</a> lists them all.</p>`
+        ${I.state === 'read' ? html`${ideasShown.map(idea)}<p class="empty">${I.count ? `Highest ${ideasShown.length} of ${ofWhat}.` : 'No idea in the vault inbox.'} <a href="/tasks?base=blog-idea">Tasks</a> lists them all.</p>`
           : html`<p class="empty">Not read: ${I.reason}</p>`}
       </div></div></div>`;
     put(document.getElementById('view-board'), html`<div class="board" id="board" role="listbox" aria-label="Pieces by stage">${ideaCol}${STAGES.map(([s, name]) => {
@@ -403,6 +414,11 @@ addEventListener('DOMContentLoaded', () => {
   document.getElementById('main').addEventListener('focusin', e => { const c = e.target.closest?.('.card[data-id]'); if (c && e.target === c && c.dataset.id !== curId()) select(c.dataset.id, false); });
   document.addEventListener('shell:open', e => { if (byId(e.detail)) select(e.detail, true); });
   document.addEventListener('shell:picked', e => document.querySelectorAll('.card[data-id]').forEach(c => c.toggleAttribute('data-picked', e.detail.includes(c.dataset.id))));
+  document.getElementById('view-board').addEventListener('click', e => {
+    const c = e.target.closest?.('[data-f="area"]'); if (!c) return;
+    ideaArea = ideaArea === c.dataset.v ? '' : c.dataset.v;
+    renderBoard();
+  });
   document.getElementById('parked-seg').addEventListener('click', e => { const b = e.target.closest('button[data-aside]'); if (b && b.dataset.v !== parked) { parked = b.dataset.v; window.shell.url({ view, ...keep() }); render(); } });
 
   // ---------- Drag (mouse and pen; touch uses the Details buttons) ----------
