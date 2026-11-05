@@ -556,5 +556,40 @@ class DeletedMaterialTests(ReviewFixture):
 
     def test_material_limit_default_matches_the_review_limit(self):
         default = sd_review.sd_review_material.collect_review_material.__defaults__
-        self.assertEqual(default, (sd_review.MAX_OUTPUT_BYTES,))
+        self.assertEqual(default[0], sd_review.MAX_OUTPUT_BYTES)
+
+    def test_fallbacks_fit_prompt_material_and_overhead_not_material_alone(self):
+        """sd:7653: material that fits alone but not with the prompt goes as its rename delta or deletion header."""
+        body = "".join(f"line {index:07d} of the fixture\n" for index in range(60_000))  # ~1.6 MB
+        prompt = "fixture prompt " * 30_000  # ~450 kB: whole material plus this passes the limit
+        for change in ("rename", "delete"):
+            with self.subTest(change=change):
+                root = self.make_repo(change)
+                (root / "big.txt").write_text(body)
+                subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True, env=clean_environment())
+                subprocess.run(["git", "commit", "--quiet", "-m", "big"], cwd=root, check=True, capture_output=True, env=clean_environment())
+                if change == "rename":
+                    subprocess.run(["git", "mv", "big.txt", "moved.txt"], cwd=root, check=True, capture_output=True, env=clean_environment())
+                    with (root / "moved.txt").open("a") as stream:
+                        stream.write("edited\n")
+                else:
+                    (root / "big.txt").unlink()
+                subject = sd_review.resolve_subject(root, "worktree")
+                whole, _entries = sd_review.sd_review_material.collect_review_material(root, subject)
+                self.assertLess(len(whole.encode()), sd_review.MAX_OUTPUT_BYTES)
+                self.assertGreater(len((prompt + whole).encode()), sd_review.MAX_OUTPUT_BYTES)
+                provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="fixture",
+                                                          reader="claude-json", start="claude")
+                captured = []
+
+                def reply(argv, env, cwd, timeout, captured=captured):
+                    captured.append((sd_review.pathlib.Path(argv[argv.index("--add-dir") + 1]) / "review-subject.md").read_text())
+                    return sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success",
+                                                              "structured_output": {"findings": []}}), "")
+
+                outcome = sd_review.run_provider(provider, root, subject, prompt, reply, self.environment(), 10)
+                self.assertEqual(outcome.status, sd_review.CLEAN, outcome)
+                self.assertLessEqual(len(captured[0].encode()), sd_review.MAX_OUTPUT_BYTES)
+                self.assertIn("unchanged lines not sent" if change == "rename" else "deleted file mode ", captured[0])
+                self.assertNotIn("line 0001234 of the fixture", captured[0])
 

@@ -682,7 +682,7 @@ def _open_for_read() -> sqlite3.Connection:
 def command_repo(argv: list[str]) -> int:
     """`repo add <path>`, `repo seed [conf | --clones PROFILE]`,
     `repo list [--managed | --clones PROFILE]`,
-    `repo runner-merge <path> <manual|auto>`, `repo managed <path> <yes|no>`,
+    `repo runner-merge <path> <manual|auto>`, `repo managed <path> <yes|no> [--without-standard]`,
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
     `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
@@ -776,11 +776,13 @@ def command_repo(argv: list[str]) -> int:
             print(f"sd-db: {path} runner_merge {before} -> {rest[1]}")
             return 0
         if verb == "managed":
+            alone = "--without-standard" in rest  # sd:7710: the column alone, as the dashboard's Manage only
+            rest = [word for word in rest if word != "--without-standard"]
             if len(rest) != 2:
                 print("sd-db repo managed: needs a path and yes or no",
                       file=sys.stderr)
                 return 1
-            path, before = set_managed(connection, rest[0], rest[1])
+            path, before = set_managed(connection, rest[0], rest[1], bypass_standard=alone)
             print(f"sd-db: {path} managed {before} -> {rest[1]}")
             return 0
         if verb == "ci":
@@ -860,7 +862,7 @@ def command_repo(argv: list[str]) -> int:
                 # An empty answer is an answer: a caller asking which
                 # repositories are managed gets none, not a failure.
                 print("sd-db: no repository is marked managed; run "
-                      "`bin/sd-db repo managed PATH yes`", file=sys.stderr)
+                      "`sd fleet standard` in a checkout", file=sys.stderr)
                 return 0
         for row in rows:
             # pack sd:7366: `ci` and the last field read the policy, in the words the columns used.

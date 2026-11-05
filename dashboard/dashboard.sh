@@ -326,10 +326,11 @@ environment:
                               the pack checkout this script sits in
   SD_DASHBOARD_PYTHON         interpreter for
                               serve, preflight, install and health (default
-                              command-pack .venv/bin/python). A Resources view
-                              runs sd_tile.py as a child of the server, so this
-                              is the interpreter its vault reads use. Full Disk
-                              Access is granted to a binary, so this one and
+                              .venv/bin/python in the sd-workflow checkout,
+                              ~/repos/platypeeps/sd-workflow). A Resources
+                              view runs sd_tile.py as a child of the server, so
+                              this is the interpreter its vault reads use. Full
+                              Disk Access is granted to a binary, so this one and
                               DASHBOARD_PYTHON each need their own grant;
                               `grants` probes both
 HELPEOF

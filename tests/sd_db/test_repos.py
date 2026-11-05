@@ -339,7 +339,7 @@ class TheManagedWriter(RepoCase):
     def test_it_sets_the_column_and_names_what_it_replaced(self):
         path = self._registered()
         self.assertEqual(self._value(path), 0)
-        self.assertEqual(set_managed(self.connection, path, "yes"), (path, "no"))
+        self.assertEqual(set_managed(self.connection, path, "yes", bypass_standard=True), (path, "no"))
         self.assertEqual(self._value(path), 1)
         self.assertEqual(set_managed(self.connection, path, "no"), (path, "yes"))
         self.assertEqual(self._value(path), 0)
@@ -348,7 +348,7 @@ class TheManagedWriter(RepoCase):
         path = self._registered()
         before = dict(self.connection.execute(
             "SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
-        set_managed(self.connection, path, "yes")
+        set_managed(self.connection, path, "yes", bypass_standard=True)
         after = dict(self.connection.execute(
             "SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
         moved = {key for key in before if before[key] != after[key]}
@@ -360,6 +360,21 @@ class TheManagedWriter(RepoCase):
             with self.subTest(value=value), self.assertRaises(RepoRefusal) as caught:
                 set_managed(self.connection, path, value)
             self.assertIn("yes or no", str(caught.exception))
+        self.assertEqual(self._value(path), 0)
+
+    def test_turning_managed_on_requires_the_standard_or_a_named_bypass(self):
+        """sd:7710: managed no -> yes skipped the standard setup (sd:5610), so
+        a repository came up managed with GitHub defaults. The flip refuses,
+        names `sd fleet standard`, and writes nothing unless the caller is
+        the standard or chose managed alone; yes -> yes and off stay free."""
+        path = self._registered()
+        with self.assertRaises(RepoRefusal) as caught:
+            set_managed(self.connection, path, "yes")
+        self.assertIn("sd fleet standard", str(caught.exception))
+        self.assertEqual(self._value(path), 0)
+        self.assertEqual(set_managed(self.connection, path, "yes", bypass_standard=True), (path, "no"))
+        self.assertEqual(set_managed(self.connection, path, "yes"), (path, "yes"))
+        self.assertEqual(set_managed(self.connection, path, "no"), (path, "yes"))
         self.assertEqual(self._value(path), 0)
 
     def test_an_unregistered_path_is_refused_rather_than_registered(self):
@@ -788,14 +803,14 @@ class TheChannelsWriter(RepoCase):
         `repo managed PATH yes` reads as none, and still rides along when the
         dashboard sets the outbound channels, so that form keeps working."""
         path = self._registered()
-        set_managed(self.connection, path, "yes")
+        set_managed(self.connection, path, "yes", bypass_standard=True)
         with self.assertRaises(RepoRefusal) as caught:
             set_channels(self.connection, path, {"github": {"repo": "example/project"}, "drive": {}})
         self.assertIn("managed", str(caught.exception))
         self.assertIsNone(self._stored(path))
         set_managed(self.connection, path, "no")
         set_channels(self.connection, path, {"github": {"repo": "example/project"}, "jira": {"project": "EXAMPLE"}})
-        set_managed(self.connection, path, "yes")
+        set_managed(self.connection, path, "yes", bypass_standard=True)
         self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE"})
         set_channels(self.connection, path, {"drive": {}})
         self.assertIn('"github":{"repo":"example/project"}', self._stored(path))

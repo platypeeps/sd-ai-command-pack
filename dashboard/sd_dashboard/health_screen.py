@@ -583,7 +583,7 @@ def _no_managed(area: str, name: str) -> dict:
     return {"id": f"{area}:none", "state": "unknown", "type": "check",
             "what": f"No managed repository: {name} has nothing to read",
             "detail": "the nightly sync reads alerts for managed repositories only",
-            "kind": name, "facts": {"Managed": "0"}, "cli": "sd-db repo managed PATH yes && sd shadow sync"}
+            "kind": name, "facts": {"Managed": "0"}, "cli": "cd PATH && sd fleet standard --apply && sd shadow sync"}
 
 
 def _not_read(area: str, name: str, unread: list[str]) -> dict:

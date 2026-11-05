@@ -882,10 +882,25 @@ def codex_argv(
     ]
 
 
-def review_material(root: pathlib.Path, subject: Subject) -> str:
+def reader_overheads() -> dict[str, str | None]:
+    """What each reader kind wraps around prompt and material; None reads the repository itself."""
+    return {"codex-json": None, "claude-json": sd_lib.READER_PROMPTS["claude-json"] + "\n\nReview input:\n",
+            "agy-json": "\n\nReview input:\n",
+            "opencode-json": "\n\nReview input:\n",
+            "url": f"\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{URL_OUTPUT_CONTRACT}"}
+
+
+def collect_material(root: pathlib.Path, subject: Subject, prompt: str) -> tuple[str, list[dict[str, Any]]]:
+    """sd:7653: the rename and deletion fallbacks fit prompt, material and the largest overhead
+    under the limit, so every caller sends and measures the same material."""
+    reserve = len(prompt.encode("utf-8")) + max(len(text.encode("utf-8")) for text in reader_overheads().values() if text)
+    return sd_review_material.collect_review_material(root, subject, MAX_OUTPUT_BYTES, reserve)
+
+
+def review_material(root: pathlib.Path, subject: Subject, prompt: str) -> str:
     """Supply the resolved diff to transports that cannot run git themselves."""
     try:
-        material, _inventory = sd_review_material.collect_review_material(root, subject)
+        material, _inventory = collect_material(root, subject, prompt)
     except (OSError, UnicodeError, ValueError, subprocess.SubprocessError) as error:
         raise Refusal(f"cannot read review input; no partial subject sent: {error}") from None
     if len(material.encode("utf-8")) > MAX_OUTPUT_BYTES:
@@ -1419,7 +1434,7 @@ def run_provider(
     material = ""
     if subject.paths and (provider.url or provider.reader in MATERIAL_READERS):
         try:
-            material = review_material(root, subject)
+            material = review_material(root, subject, prompt)
         except Refusal as error:
             return _outcome(provider.name, REFUSED, str(error))
     prompt = sd_lib.reader_prompt(prompt, provider.reader)  # Claude's ranked addition (sd:7519)
@@ -1887,7 +1902,7 @@ def changed_review_input(root: pathlib.Path, args: argparse.Namespace, previous:
     try:
         subject = resolve_subject(root, args.scope, getattr(args, "item", None), getattr(args, "base", None))
         prompt, _prepended, context = prepared_prompt(root, subject, args, previous, env, before[3])
-        material, inventory = sd_review_material.collect_review_material(root, subject)
+        material, inventory = collect_material(root, subject, prompt)
     except (UsageError, sd_lib.ConfigError, OSError, UnicodeError, ValueError, subprocess.SubprocessError) as error:
         return {"status": "unreadable", "error": str(error)}
     if (subject, prompt, material, before[3]) == before:
@@ -1999,12 +2014,9 @@ def review(
         authored_subject = subject if target_base == subject.head else subject._replace(base=target_base)
     checklist = "" if preflight else blocker_checklist(root, subject, getattr(args, "database", None), env)
     prompt, prepended, context = ("", False, []) if preflight else prepared_prompt(root, subject, args, previous, env, checklist)
-    overheads = {"codex-json": None, "claude-json": sd_lib.READER_PROMPTS["claude-json"] + "\n\nReview input:\n",
-                 "agy-json": "\n\nReview input:\n",
-                 "opencode-json": "\n\nReview input:\n",
-                 "url": f"\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{URL_OUTPUT_CONTRACT}"}
+    overheads = reader_overheads()
     try:
-        _material, inventory = ("", []) if preflight else sd_review_material.collect_review_material(root, subject)
+        _material, inventory = ("", []) if preflight else collect_material(root, subject, prompt)
         input_manifest = sd_review_material.input_manifest(inventory, prompt, {}, MAX_OUTPUT_BYTES, context)
     except (OSError, UnicodeError, ValueError, subprocess.SubprocessError) as error:
         input_manifest = {"status": "unreadable", "error": str(error)}
