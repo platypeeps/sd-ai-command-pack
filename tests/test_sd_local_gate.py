@@ -1499,13 +1499,15 @@ class RamDiskGate(Repository):
         self.assertEqual(sd_gate_cache.worktree_place(self.root, self.commit(self.recipe()))["dir"], str(nested))
 
     def test_the_system_temp_dir_ignores_tmpdir(self) -> None:
-        """Without the per-user name (Linux), the first usable fixed temp dir, never `TMPDIR` on the disk."""
-        self.nested_on_disk()
+        """macOS names the per-user temp dir, whatever `TMPDIR` says. Without the name (no RAM disk there either), a
+        gate takes no fixed path (bandit B108): the inherited dir off the disk, else tempfile's default."""
+        nested = self.nested_on_disk()
         self.assertEqual(sd_tmpdisk.system_temporary(), str(self.system))
         with mock.patch.object(os, "confstr", side_effect=ValueError("unrecognized configuration name")):
-            fallback = sd_tmpdisk.system_temporary()
-        self.assertFalse(sd_tmpdisk.within(fallback), fallback)
-        self.assertIn(fallback, ("/tmp", "/var/tmp", "/usr/tmp"))
+            self.assertEqual((sd_tmpdisk.system_temporary(), sd_tmpdisk.gate_temporary(str(nested), rust=True),
+                              sd_tmpdisk.gate_temporary(str(self.outer), rust=True)), (None, None, str(self.outer)))
+        with mock.patch.object(os, "confstr", return_value=str(self.disk)):
+            self.assertIsNone(sd_tmpdisk.system_temporary(), "a per-user name on the disk is refused too")
 
     def test_a_test_run_puts_its_temp_dir_on_a_ready_disk(self) -> None:
         code = ("import os, pathlib, sys; sys.path.insert(0, 'bin'); import sd_tmpdisk; "

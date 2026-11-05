@@ -127,7 +127,7 @@ def reap_temporary(temporary: pathlib.Path, *, owners: bool = True) -> int:
 class Place(TypedDict):
     """`tempfile.TemporaryDirectory`'s keywords for a gate's folder."""
 
-    dir: str
+    dir: str | None  # None: `tempfile`'s default
     prefix: str
 
 

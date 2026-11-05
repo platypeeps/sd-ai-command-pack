@@ -87,23 +87,20 @@ def temporary(inherited: str | None = None) -> str:
     return str(ROOT)
 
 
-def system_temporary() -> str:
-    """The per-user system temp dir, whatever `TMPDIR` says: macOS names it (`CS_DARWIN_USER_TEMP_DIR`);
-    elsewhere the first fixed temp dir there is. Never on the disk."""
+def system_temporary() -> str | None:
+    """The per-user system temp dir, whatever `TMPDIR` says, as macOS names it (`CS_DARWIN_USER_TEMP_DIR`);
+    None where it names none or names one on the disk. Only macOS has the disk, so no fixed path stands in."""
     try:
         named = os.confstr("CS_DARWIN_USER_TEMP_DIR")
     except (ValueError, OSError):
-        named = None
-    for folder in (named, "/tmp", "/var/tmp", "/usr/tmp"):
-        if folder and os.path.isdir(folder) and not within(folder):
-            return os.path.normpath(folder)
-    return "/tmp"
+        return None
+    return os.path.normpath(named) if named and not within(named) else None
 
 
-def gate_temporary(inherited: str, *, rust: bool) -> str:
+def gate_temporary(inherited: str, *, rust: bool) -> str | None:
     """Where a gate places its folder: `temporary`, but off the disk for a head that may track a `Cargo.toml`
     and when the disk is not ready: `inherited` as before, or, where it lies on the disk itself (a nested run's),
-    the system's own temp dir (sd:7557 review).
+    the system's own temp dir (sd:7557 review). None, where the system names none: `tempfile`'s default.
 
     A cold `target/` is about 4.5 GB, more than the 4 GiB disk.
     """
