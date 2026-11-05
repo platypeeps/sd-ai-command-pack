@@ -870,7 +870,7 @@ def set_managed(
     sd:7710: `no` to `yes` refuses unless `bypass_standard`, so a repository
     does not come up managed with GitHub's defaults: `sd fleet standard`
     (sd:5610) writes this flag as its last step, and the dashboard's Manage
-    only and `repo managed PATH yes --without-standard` choose it alone.
+    only chooses it alone; the CLI has no such flag (sd:7732).
     """
     if value not in MANAGED_VALUES:
         raise RepoRefusal(f"{value!r} is not a managed setting; expected yes or no")
@@ -888,7 +888,7 @@ def set_managed(
         raise RepoRefusal(
             f"{target} turns managed through the standard setup (sd:5610): run `sd fleet standard` "
             f"in {target} to preview it, then `sd fleet standard --apply --digest <sha256>`, which "
-            "writes managed last; add --without-standard to write managed alone")
+            "writes managed last")
     upsert_repo(connection, target, managed=MANAGED_VALUES[value])
     return target, before
 

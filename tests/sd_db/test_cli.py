@@ -10,6 +10,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from sd_db import connect, repos
 from sd_db.schema import SCHEMA_VERSION
 from sd_db.testing.wire import hub_only
 
@@ -240,6 +241,15 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.assertIn("not a registered repository", completed.stdout + completed.stderr)
         self.assertIn("manual", self.sd_db("repo", "list").stdout)
 
+    def _manage(self, path: Path) -> None:
+        """Mark `path` managed as `sd fleet standard` and Manage only do: the CLI refuses (sd:7710, sd:7732)."""
+        connection = connect(self.home / ".local/share/sd/sd.db")
+        try:
+            with connection, mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+                repos.set_managed(connection, path, "yes", bypass_standard=True)
+        finally:
+            connection.close()
+
     def _list_row(self, *extra: str) -> list[str]:
         lines = [line for line in self.sd_db("repo", "list", *extra).stdout.splitlines()
                  if "checkout" in line]
@@ -254,9 +264,11 @@ class TheMigrationVerbs(MigrationVerbCase):
         sit between them."""
         self.sd_db("repo", "add", str(self.checkout))
         self.assertEqual(self._list_row()[-5:], ["no", "github", "off", "hub", "manual"])
-        completed = self.sd_db("repo", "managed", str(self.checkout), "yes", "--without-standard")
-        self.assertIn("managed no -> yes", completed.stdout)
+        self._manage(self.checkout)
         self.assertEqual(self._list_row()[-5:], ["yes", "github", "off", "hub", "manual"])
+        completed = self.sd_db("repo", "managed", str(self.checkout), "no")
+        self.assertIn("managed yes -> no", completed.stdout)
+        self._manage(self.checkout)
         self.sd_db("repo", "runner-merge", str(self.checkout), "auto")
         self.assertEqual(self._list_row()[-5:], ["yes", "github", "off", "hub", "auto"])
 
@@ -345,7 +357,7 @@ class TheMigrationVerbs(MigrationVerbCase):
         the last field still follows `runner-merge` alone."""
         self.sd_db("repo", "add", str(self.checkout))
         self.sd_db("repo", "ci", str(self.checkout), "local")
-        self.sd_db("repo", "managed", str(self.checkout), "yes", "--without-standard")
+        self._manage(self.checkout)
         self.sd_db("repo", "github-issues", str(self.checkout), "ask")
         self.assertEqual(self._list_row()[-1], "manual")
         self.sd_db("repo", "runner-merge", str(self.checkout), "auto")
@@ -365,15 +377,16 @@ class TheMigrationVerbs(MigrationVerbCase):
 
     def test_repo_managed_yes_requires_the_standard_setup(self):
         """sd:7710: the CLI flip on skipped `sd fleet standard` (sd:5610). It
-        refuses and names the standard; `--without-standard` writes the
-        column alone, as the dashboard's Manage only does."""
+        refuses and names the standard. sd:7732: no flag writes the column
+        alone; the dashboard's Manage only is that path."""
         self.sd_db("repo", "add", str(self.checkout))
         completed = self.sd_db("repo", "managed", str(self.checkout), "yes", expect=1)
         self.assertIn("sd fleet standard", completed.stdout + completed.stderr)
         self.assertEqual(self._list_row()[-5], "no")
-        completed = self.sd_db("repo", "managed", str(self.checkout), "yes", "--without-standard")
-        self.assertIn("managed no -> yes", completed.stdout)
-        self.assertEqual(self._list_row()[-5], "yes")
+        self.assertNotIn("--without-standard", completed.stdout + completed.stderr)
+        completed = self.sd_db("repo", "managed", str(self.checkout), "yes", "--without-standard", expect=1)
+        self.assertIn("needs a path and yes or no", completed.stderr)
+        self.assertEqual(self._list_row()[-5], "no")
 
     def test_repo_managed_refuses_a_bad_value_an_unknown_path_and_a_missing_argument(self):
         self.sd_db("repo", "add", str(self.checkout))
@@ -585,7 +598,7 @@ class TheMigrationVerbs(MigrationVerbCase):
         subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)
         self.sd_db("repo", "add", str(self.checkout))
         self.sd_db("repo", "add", str(other))
-        self.sd_db("repo", "managed", str(self.checkout), "yes", "--without-standard")
+        self._manage(self.checkout)
         listed = self.sd_db("repo", "list", "--managed").stdout
         self.assertIn("checkout", listed)
         self.assertNotIn("other", listed)
