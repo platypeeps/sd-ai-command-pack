@@ -96,10 +96,10 @@ EXIT_REFUSED = 3
 DEFAULT_OWNERS = ("platypeeps",)
 #: A GitHub login: letters, digits and single inner hyphens.
 LOGIN = re.compile(r"[A-Za-z0-9](?:-?[A-Za-z0-9])*")
-#: The pack's own remote. `ACTION_REPOSITORY` is the slug consumer workflows were
-#: written with and still use (GitHub redirects the old name); the repository is
-#: `platypeeps/sd-workflow` since sd:6027, so a remote reads as the pack under either.
-PACK_SLUGS = (sd_setup_github.ACTION_REPOSITORY, "platypeeps/sd-workflow")
+#: The pack's own remote. The repository is `platypeeps/sd-workflow` since
+#: sd:6027; a clone made before then still names the old slug, which GitHub
+#: redirects, so a remote reads as the pack under either.
+PACK_SLUGS = (sd_setup_github.ACTION_REPOSITORY, "platypeeps/sd-ai-command-pack")
 
 ROUTE_PATH = str(sd_setup_github.WORKFLOW_RELATIVE_PATH)
 DEPENDABOT_PATH = str(sd_setup_guard.DEPENDABOT_RELATIVE_PATH)

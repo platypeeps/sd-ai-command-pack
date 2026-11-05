@@ -30,7 +30,7 @@ A consumer that checked this pack out into its own workspace had to move the che
 
 ```yaml
 - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-- uses: platypeeps/sd-ai-command-pack/actions/docs-gate@<full commit sha>
+- uses: platypeeps/sd-workflow/actions/docs-gate@<full commit sha>
 ```
 
 Both refs are full SHAs, as everything in this repository's own workflows is.

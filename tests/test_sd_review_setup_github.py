@@ -436,7 +436,7 @@ updates:
       # The refusal itself is fixed upstream (platypeeps/sd-ai-command-pack#799,
       # carried by 505431b8). This entry is for the reason that outlives it: the
       # next behaviour change would arrive the same way.
-      - dependency-name: "platypeeps/sd-ai-command-pack/actions/review-route"
+      - dependency-name: "platypeeps/sd-workflow/actions/review-route"
 """
 
 # A consumer's file the pack has never touched: two entries, the first with an
@@ -788,7 +788,7 @@ class BothActionsTests(SetupFixture):
 
     def test_the_pin_is_read_for_either_action(self) -> None:
         workflow = (
-            "      - uses: platypeeps/sd-ai-command-pack/actions/docs-gate@" + PIN + "\n"
+            "      - uses: platypeeps/sd-workflow/actions/docs-gate@" + PIN + "\n"
         )
         self.assertIsNone(guard.read_pin(workflow))
         self.assertEqual(guard.read_pin(workflow, "docs-gate"), PIN)
@@ -804,9 +804,9 @@ class BothActionsTests(SetupFixture):
 # wording, and above -- ahead of it in the `ignore:` list -- nothing; the
 # review-route item comes second, carrying prose its own team wrote.
 HAND_WRITTEN_REVIEW_ROUTE = """\
-      # The sd-ai-command-pack pin is set by hand. Ask #platform before moving
+      # The sd-workflow pin is set by hand. Ask #platform before moving
       # it: the release train pins the same sha in three sibling repositories.
-      - dependency-name: "platypeeps/sd-ai-command-pack/actions/review-route"
+      - dependency-name: "platypeeps/sd-workflow/actions/review-route"
 """
 
 
@@ -918,7 +918,7 @@ SECOND_UNGUARDED = """\
 
 SECOND_STALE = """\
       # Bump this by hand, in its own commit.
-      - dependency-name: "platypeeps/sd-ai-command-pack/actions/review-route"
+      - dependency-name: "platypeeps/sd-workflow/actions/review-route"
 """
 
 
@@ -1073,7 +1073,7 @@ class CheckTests(SetupFixture):
         self.assertEqual(lines[0], f"same {setup.WORKFLOW_RELATIVE_PATH}")
         self.assertEqual(lines[1], f"DIFFERS {guard.DEPENDABOT_RELATIVE_PATH}")
         self.assertIn("-      # example-coordinator is the proof. It had no such entry, so Dependabot", lines)
-        self.assertIn("+      # The sd-ai-command-pack pin is set by hand, not by Dependabot. The action", lines)
+        self.assertIn("+      # The sd-workflow pin is set by hand, not by Dependabot. The action", lines)
         # Nothing moved on disk.
         self.assertEqual({p: p.read_text(encoding="utf-8") for p in before}, before)
 
