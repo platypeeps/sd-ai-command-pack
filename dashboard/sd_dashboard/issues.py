@@ -27,7 +27,9 @@ category names, in order, are the `tags` of one view row, `CATEGORIES_KEY`; a Ji
 view row's tags that names a listed category. `with_views` gives each Jira row of Your issues its `category` (None when it
 has none) and the document its `categories`. `view` sets or clears a row's category; `categories` saves the list against
 the one the page read, and renames a category with every issue under it in one transaction. Removing a name leaves its
-issues' tags as they were, so they read as uncategorized, and Undo, which lists the name again, puts them back.
+issues' tags as they were, so they read as uncategorized, and Undo, which lists the name again, puts them back. Undo is
+the next list write (its `before` is the list Remove wrote), so any other list write drops tags the list it read did not
+hold (pack sd:7735): a name listed again later, by New category or a rename, starts empty.
 """
 
 from __future__ import annotations
@@ -297,16 +299,22 @@ def categories(payload: dict):
             if held != before:
                 raise workflow.StaleItem("The categories changed since the page read them. Nothing was saved. Read GitHub again.")
             moved = 0
-            new = names
+            new, old, to = names, None, None
             if rename is not None:
                 old, to = rename
                 if old not in held:
                     raise workflow.StaleItem(f"No category {old} is listed. Nothing was renamed. Read GitHub again.")
                 new = category_names([to if name == old else name for name in held])
-                for key, state in kept.items():
-                    if key.startswith(f"{VIEW_ROOT}:") and key != CATEGORIES_KEY and old in state["tags"]:
-                        writes.set_view(connection, key, tags=[to if tag == old else tag for tag in state["tags"]])
-                        moved += 1
+            # pack sd:7735: a tag the list did not hold is a name removed before; only the next list write, Remove's
+            # Undo, may list it again with its issues, so any other write drops it and a later re-add starts empty.
+            keep = set(held) | (set(new) if rename is None else set())
+            for key, state in kept.items():
+                if not key.startswith(f"{VIEW_ROOT}:") or key == CATEGORIES_KEY:
+                    continue
+                tags = [to if tag == old else tag for tag in state["tags"] if tag in keep]
+                if tags != state["tags"]:
+                    writes.set_view(connection, key, tags=tags)
+                    moved += old in state["tags"]
             writes.set_view(connection, CATEGORIES_KEY, tags=new)
         return {"categories": new, "moved": moved}
 
