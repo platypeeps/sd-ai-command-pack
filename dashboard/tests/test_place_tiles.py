@@ -16,6 +16,7 @@ from __future__ import annotations
 import fcntl
 import json
 import socket
+import subprocess
 import tempfile
 import threading
 import time
@@ -98,7 +99,8 @@ class TheConfig(Case):
         tiles, problems = place_tiles.parse(place_tiles.EXAMPLE.read_text(encoding="utf-8"))
         self.assertEqual(problems, [])
         self.assertEqual([(t["realm"], t["id"], [a["label"] for a in t["actions"]]) for t in tiles],
-                         [("work", "simulator", ["Start", "Stop", "Update"]), ("acme", "staging", ["Deploy", "Tear down", "Refresh"])])
+                         [("work", "simulator", ["Start", "Stop", "Update", "Refresh"]),
+                          ("acme", "staging", ["Deploy", "Tear down", "Refresh"])])
 
     def test_a_line_it_cannot_read_is_named_with_its_number_and_the_rest_count(self):
         tiles, problems = place_tiles.parse("tile|acme|app|App|/x|-\nact|nope|Go|true\nact|app|Go|echo 'open\n"
@@ -249,6 +251,78 @@ class TheRun(Case):
                 place_tiles.run(payload, config=self.config)
             self.assertIn(why, str(refused.exception))
         self.assertFalse((place_tiles.state_dir() / "acme").exists(), "a refused start wrote state")
+
+
+class TheUpdateAndRefresh(Case):
+    """Pack sd:7665: every service gets Update (pull the latest code, restart nothing) and, when it has Start and Stop,
+    Refresh (stop, update, start), with no act line for either. A line that names one wins."""
+
+    def actions(self, text):
+        tiles, problems = place_tiles.parse(text)
+        self.assertEqual(problems, [])
+        return {t["id"]: [(a["label"], a["argv"]) for a in t["actions"]] for t in tiles}
+
+    def git(self, *args, cwd=None):
+        subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false",
+                        *args], cwd=cwd, check=True, capture_output=True, timeout=60)
+
+    def test_a_checkout_gets_update_and_one_with_start_and_stop_also_refresh(self):
+        (self.app / ".git").mkdir()
+        site = self.dir / "site"
+        (site / ".git").mkdir(parents=True)
+        got = self.actions(f"tile|acme|app|App|{self.app}|-\nact|app|Start|./app.sh start\nact|app|Stop|./app.sh stop\n"
+                           f"act|app|Status|./app.sh status\ntile|acme|site|Site|{site}|-\nact|site|Deploy|./deploy.sh\n")
+        self.assertEqual(got["app"], [("Start", ["./app.sh", "start"]), ("Stop", ["./app.sh", "stop"]),
+                                      ("Status", ["./app.sh", "status"]), ("Update", ["git", "pull", "--ff-only"]),
+                                      ("Refresh", ["/bin/sh", "-c", "./app.sh stop; git pull --ff-only && ./app.sh start"])])
+        self.assertEqual(got["site"], [("Deploy", ["./deploy.sh"]), ("Update", ["git", "pull", "--ff-only"])])
+        update = place_tiles.parse(f"tile|acme|app|App|{self.app}|-\n")[0][0]["actions"][0]
+        self.assertEqual(update["command"], "git pull --ff-only")
+        self.assertIn("restarts nothing", update["help"])
+        refresh = place_tiles.parse(f"tile|acme|app|App|{self.app}|-\nact|app|Start|./app.sh start\n"
+                                    "act|app|Stop|/bin/zsh -lc \"echo $HOME\"\n")[0][0]["actions"][-1]
+        # The hover shows the line the shell runs; each step is quoted, so the shell expands no $VAR of its own.
+        self.assertEqual(refresh["command"], "/bin/zsh -lc 'echo $HOME'; git pull --ff-only && ./app.sh start")
+
+    def test_a_folder_inside_another_checkout_or_not_here_gets_neither_and_a_hosted_one_both(self):
+        # A tool folder inside a pinned checkout (no .git of its own): pulling there moves the whole checkout, which its
+        # lane owns. A folder not here runs nothing anyway. A hosted tile's host has the folder and decides there.
+        got = self.actions(f"tile|acme|app|App|{self.app}|-\nact|app|Start|s\nact|app|Stop|t\n"
+                           f"tile|acme|gone|Gone|{self.dir / 'gone'}|-\nact|gone|Start|s\nact|gone|Stop|t\n"
+                           f"tile|acme|far|Far|{self.dir / 'gone'}|-|far-host\nact|far|Start|s\nact|far|Stop|t\n")
+        self.assertEqual([label for label, _ in got["app"]], ["Start", "Stop"])
+        self.assertEqual([label for label, _ in got["gone"]], ["Start", "Stop"])
+        self.assertEqual([label for label, _ in got["far"]], ["Start", "Stop", "Update", "Refresh"])
+
+    def test_a_line_that_names_update_or_refresh_wins_and_refresh_runs_that_update(self):
+        got = self.actions(f"tile|acme|app|App|{self.app}|-\nact|app|Start|s\nact|app|Stop|t\nact|app|update|./app.sh update\n"
+                           f"tile|acme|own|Own|{self.app}|-|far-host\nact|own|Start|s\nact|own|Stop|t\nact|own|Refresh|./re.sh\n")
+        self.assertEqual(got["app"][2:], [("update", ["./app.sh", "update"]),
+                                          ("Refresh", ["/bin/sh", "-c", "t; ./app.sh update && s"])])
+        self.assertEqual(got["own"][2:], [("Refresh", ["./re.sh"]), ("Update", ["git", "pull", "--ff-only"])])
+
+    def test_refresh_stops_updates_then_starts_and_starts_nothing_after_a_failed_update(self):
+        for update, runs, code in (('sh -c "echo update >> runs"', "stop\nupdate\nstart\n", 0),
+                                   ('sh -c "echo update >> runs; exit 4"', "stop\nupdate\n", 4)):
+            (self.app / "runs").unlink(missing_ok=True)
+            self.config.write_text(f"tile|acme|app|App|{self.app}|-\nact|app|Start|sh -c \"echo start >> runs\"\n"
+                                   "act|app|Stop|sh -c \"echo stop >> runs; exit 1\"\n"
+                                   f"act|app|Update|{update}\n", encoding="utf-8")
+            self.assertEqual(self.start("Refresh")[0], 202)
+            last = self.wait_done("Refresh")
+            self.assertEqual(((self.app / "runs").read_text(encoding="utf-8"), last["exit"]), (runs, code), update)
+
+    def test_update_pulls_the_newest_commit_into_the_checkout(self):
+        origin, clone = self.dir / "origin", self.dir / "clone"
+        self.git("init", "-q", "-b", "main", str(origin))
+        self.git("commit", "-q", "--allow-empty", "-m", "one", cwd=origin)
+        self.git("clone", "-q", str(origin), str(clone))
+        self.git("commit", "-q", "--allow-empty", "-m", "two", cwd=origin)
+        self.config.write_text(f"tile|acme|app|App|{clone}|-\nact|app|Start|true\n", encoding="utf-8")
+        self.assertEqual(self.start("Update")[0], 202)
+        self.assertEqual(self.wait_done("Update")["exit"], 0)
+        head = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=clone, capture_output=True, text=True, check=True)
+        self.assertEqual(head.stdout.strip(), "two")
 
 
 class TheHostedTile(Case):

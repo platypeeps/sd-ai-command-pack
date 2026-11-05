@@ -14,6 +14,10 @@ and probes its URL once, bounded by `PROBE_SECONDS`, the name lookup too (sd:639
 `help`, the plain words its button's hover shows ("" when the line has none, pack sd:7536), and its last run (`last`).
 The line splits on every `|`, so a command never holds one: a pipe makes too many fields, or leaves a quote open.
 
+Pack sd:7665: a tile gets Update (`git pull --ff-only`, no restart) when its folder is a checkout of its own and no line
+names Update, and Refresh (Stop, Update, Start) when it has those three and no line names Refresh
+(`_update_and_refresh`). `parse` adds them, so a run and a host's follow job see the same actions.
+
 `run` answers `POST /api/place/tiles {realm, tile, action}`. It reads the file again and runs only a command a line
 names, split by `shlex` with no shell, in the tile's folder, through `sweep.spawn`: one lock per action
 (`<state>/<realm>/<tile>/<action>/lock`), so Stop runs while Start's server holds Start's lock, and a second Deploy
@@ -108,7 +112,31 @@ def parse(text: str) -> tuple[list[dict], list[str]]:
         else:
             problems.append(f"line {number}: expected tile|<realm>|<tile>|<label>|<folder>|<url or ->[|<host>] "
                             "or act|<tile>|<label>|<command>[|<help>]")
+    for tile in tiles.values():
+        _update_and_refresh(tile)
     return list(tiles.values()), problems
+
+
+def _update_and_refresh(tile: dict) -> None:
+    """Pack sd:7665: append Update and Refresh to a tile whose lines name neither, after its own actions.
+
+    Update pulls the latest code and restarts nothing; a tile gets it when its folder is a checkout of its own (`.git`
+    there), or when its host has the folder and decides. A folder inside another checkout (a tool of a pinned
+    checkout) gets none: a pull there moves the whole checkout, which its lane or repo-sync owns. Refresh is Stop, then
+    Update, then Start, the tile's own lines, through one shell; a tile without Start and Stop runs no process to
+    restart, so it gets none. Refresh starts nothing after a failed update, as a hand-written one did.
+    """
+    by = {_slug(a["label"]): a for a in tile["actions"]}
+    if "update" not in by and (_hosted(tile) or (Path(tile["folder"]) / ".git").exists()):
+        by["update"] = {"label": "Update", "command": "git pull --ff-only", "argv": ["git", "pull", "--ff-only"],
+                        "help": "Pulls the latest code into this folder; restarts nothing, and refuses local changes."}
+        tile["actions"].append(by["update"])
+    if "refresh" not in by and all(step in by for step in ("stop", "update", "start")):
+        # Each step's argv, quoted, so the shell runs what the line split to: no $VAR, ~ or glob of its own. The
+        # hover and start.log show the script, the line the shell runs.
+        script = "{}; {} && {}".format(*(shlex.join(by[step]["argv"]) for step in ("stop", "update", "start")))
+        tile["actions"].append({"label": "Refresh", "command": script, "argv": ["/bin/sh", "-c", script],
+                                "help": f"Stops {tile['label']}, runs its Update, then starts it again."})
 
 
 def _read(config: Path) -> tuple[list[dict], list[str]]:
