@@ -90,12 +90,12 @@ class URLContractTests(ReviewFixture):
         failed = self.run_review(root, args, client, FakeRunner({"sd-check": sd_review.Completed(1, "{}", "failed")}))
         self.assertEqual(failed["status"], "gate_failed")
         # sd:2605: the reviewers run first, and a gate that fails after them still fails the review.
-        self.assertEqual([call["provider"] for call in client.sent], planned["providers"])
+        self.assertEqual(sorted(call["provider"] for call in client.sent), sorted(planned["providers"]))  # sent at once (sd:7519)
         client.sent.clear()
         actual = self.run_review(root, args, client)
         for key in ("providers", "fallback_candidates", "timing", "requested_reviews"):
             self.assertEqual(actual[key], planned[key])
-        self.assertEqual([call["provider"] for call in client.sent], planned["providers"])
+        self.assertEqual(sorted(call["provider"] for call in client.sent), sorted(planned["providers"]))  # sent at once (sd:7519)
 
     def test_footer_restates_the_validated_shape_last(self):
         # sd:1821: a reviewer that drifts from the schema 35k tokens back

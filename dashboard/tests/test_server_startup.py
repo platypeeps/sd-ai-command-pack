@@ -216,3 +216,73 @@ class ServerStartup(unittest.TestCase):
                 server.main([])
             self.assertEqual(refused.exception.code, 2)
             build.assert_not_called()
+
+
+class PieceSweep(unittest.TestCase):
+    """pack sd:7243, ruling on note #43370: the service tick sweeps every writing piece's Drive mirror each
+    `piece_sweep_seconds`, so a hand edit reaches the queue with no command or job. The sweep runs in a thread: a slow
+    database or file read never holds the tick, and a sweep still running starts no second one."""
+
+    def listener(self, sweep):
+        listening = server.DashboardServer.__new__(server.DashboardServer)  # the tick alone: no socket
+        listening.piece_sweep = sweep
+        return listening
+
+    def test_the_tick_sweeps_in_a_thread_once_per_period_and_never_waits_on_it(self):
+        self.assertEqual(server.DashboardServer.piece_sweep_seconds, 300)
+        started, release, runs = threading.Event(), threading.Event(), []
+
+        def sweep():
+            runs.append(1)
+            started.set()
+            release.wait(10)
+        listening = self.listener(sweep)
+        began = time.monotonic()
+        listening.service_actions()
+        self.assertTrue(started.wait(5), "the first tick did not start a sweep")
+        listening.piece_swept -= listening.piece_sweep_seconds  # a period passes while the sweep still runs
+        with patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            listening.service_actions()
+            listening.service_actions()
+        self.assertLess(time.monotonic() - began, 1, "the tick waited on the sweep")
+        self.assertEqual(runs, [1], "a sweep in flight started a second one")
+        self.assertEqual(stderr.getvalue().count("piece sweep is still running"), 1, stderr.getvalue())
+        release.set()
+        listening.piece_sweeping.join(5)
+        listening.service_actions()
+        self.assertEqual(len(runs), 2, "the period passed and no sweep followed the slow one")
+        listening.piece_sweeping.join(5)
+        listening.service_actions()
+        self.assertEqual(len(runs), 2, "a sweep ran before its period passed")
+
+    def test_no_sweep_is_set_sweeps_nothing(self):
+        listening = self.listener(None)
+        listening.service_actions()
+        self.assertIsNone(listening.piece_sweeping)
+
+    def test_a_sweep_queues_every_piece_logs_only_a_change_and_never_raises(self):
+        lines = ["mirror: queued 2026-a-piece-draft -> the Writing/Drafts Drive folder",
+                 "mirror: 2026-a-piece-research: unchanged since it was last mirrored; not queued again",
+                 "mirror: 2026-a-piece-fact-check: already queued -> drive (unchanged since 0123456789ab)"]
+        connection = Mock()
+        with patch.object(server.sd_db, "connect", return_value=connection) as connect, \
+                patch("sd_dashboard.publishing.queue_piece", return_value=lines) as queue, \
+                patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            server._piece_sweep("/fixture/sd.db")
+        connect.assert_called_once_with("/fixture/sd.db", write=False)
+        queue.assert_called_once_with(connection, None)
+        connection.close.assert_called_once()
+        self.assertEqual(stderr.getvalue(), f"sd-dashboard: piece sweep: {lines[0]}\n")
+        with patch.object(server.sd_db, "connect", side_effect=OSError("database locked")), \
+                patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            server._piece_sweep("/fixture/sd.db")
+        self.assertIn("piece sweep did not run: database locked", stderr.getvalue())
+
+    def test_main_sets_the_sweep_on_the_served_database(self):
+        listening = Mock(server_address=("127.0.0.1", 8767), restart_probe=None, piece_sweep=None)
+        with patch.object(runtime, "installed_library"), patch.object(server, "build", return_value=listening):
+            self.assertEqual(server.main(["--database", "/fixture/sd.db"]), 0)
+        self.assertIsNotNone(listening.piece_sweep)
+        with patch.object(server, "_piece_sweep") as sweep:
+            listening.piece_sweep()
+        sweep.assert_called_once_with("/fixture/sd.db")

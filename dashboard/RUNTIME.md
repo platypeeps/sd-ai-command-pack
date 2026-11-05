@@ -92,6 +92,10 @@ makes the next read wait for a fresh one, and a failed refresh keeps the last
 reading marked `stale` with its reason. `/api/usage` without `?month=` is kept the same way (`server._usage_kept`);
 there a stale reading answers 503, not old bytes. `/api/metrics?month=` reads that month per request, unkept (pack sd:7524). A restart reads again, and starts these reads, Health's walkers and its
 doctor in the background as serving begins (`server._warm`, sd:5064).
+The served process also sweeps every writing piece's Drive mirror every 5 minutes
+in a thread (`server._piece_sweep`, pack sd:7243), so a hand edit to a piece file
+reaches the queue with no verb after it. Only a changed file is queued; a sweep
+still running starts no second one and logs that once.
 
 Every page links the dashboard's icons from `sd_dashboard/static/`
 (`caching.ICONS`, pack sd:6322): `icon.svg` for the tab, `icon-32.png` for a

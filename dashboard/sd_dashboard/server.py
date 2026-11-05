@@ -138,6 +138,26 @@ def _warm(database, kept) -> None:
     threading.Thread(target=health, name="sd-dashboard-warm", daemon=True).start()
 
 
+def _piece_sweep(database) -> None:
+    """One sweep of every writing piece's Drive mirror (pack sd:7243, ruling on note #43370), so a hand edit with no
+    verb after it reaches the queue. `enqueue_pieces` queues only a file whose text changed, so the log names only a
+    change; a sweep that cannot run says why and the next one tries again."""
+    from . import publishing
+
+    try:
+        connection = sd_db.connect(database, write=False)
+        try:
+            lines = publishing.queue_piece(connection, None)
+        finally:
+            connection.close()
+    except Exception as failure:  # noqa: BLE001 - unknown, never "nothing changed"; the next sweep retries
+        print(f"sd-dashboard: the piece sweep did not run: {failure or type(failure).__name__}", file=sys.stderr, flush=True)
+        return
+    for line in lines:
+        if "unchanged since" not in line:
+            print(f"sd-dashboard: piece sweep: {line}", file=sys.stderr, flush=True)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -325,6 +345,18 @@ def _reopen_report(connection, item, *, expected_revision):
             if note["id"] in resolved and note["kind"] == "followup" and note["resolved_at"]:
                 writes.reopen_note(connection, note["id"])
         return workflow.item_state(connection, item)
+
+
+def _queued_piece(connection, number: int, answer):
+    """`answer`, after the pack queues the piece's Drive copies (pack sd:7243), as an `sd writing` verb queues them.
+
+    Best effort: the write is done, so `publishing.queue_piece` never raises and its lines go to the log only.
+    """
+    from . import publishing
+
+    for line in publishing.queue_piece(connection, number):
+        print(f"sd-dashboard: sd:{number}: {line}", file=sys.stderr, flush=True)
+    return answer
 
 
 def _base_kind(connection, item):
@@ -625,8 +657,10 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
 
         if values:
             raise ValueError("Parking accepts only the current item revision.")
-        return lambda connection: writing.park_piece(connection, number,
-            parked=suffix == "/park", actor="human", require_row=True, **options)
+        def park(connection):
+            return _queued_piece(connection, number, writing.park_piece(connection, number,
+                parked=suffix == "/park", actor="human", require_row=True, **options))
+        return park
     if entity == "items" and suffix == "/stage":
         from sd_db import writing
 
@@ -654,9 +688,9 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
                                              expected_revision=revision)
             if values["stage"] == "published":
                 raise ValueError("Publication uses the reviewed publishing workflow.")
-            return writing.change_stage(connection, number, values["stage"],
+            return _queued_piece(connection, number, writing.change_stage(connection, number, values["stage"],
                 actor="human", require_row=True, reason=values.get("reason") or None,
-                correct=values.get("correct", False), **options)
+                correct=values.get("correct", False), **options))
         return stage
     if entity == "items" and suffix in ("/relink", "/cancel"):
         from sd_db import progress
@@ -1487,8 +1521,30 @@ class DashboardServer(Listener):
     # The probe's own bound; it runs beside the accept loop, so no request waits on it.
     probe_seconds = 60
 
+    #: The piece mirror's sweep (pack sd:7243, ruling on note #43370): `main` sets it; None sweeps nothing. A hand
+    #: edit reaches the queue within `piece_sweep_seconds`. It runs in a thread, so a slow read never holds the tick.
+    piece_sweep = None
+    piece_sweep_seconds = 300
+    piece_swept = float("-inf")
+    piece_sweeping = None
+    piece_sweep_late = False
+
+    def _sweep_pieces(self):
+        if self.piece_sweep is None or time.monotonic() - self.piece_swept < self.piece_sweep_seconds:
+            return
+        if self.piece_sweeping is not None and self.piece_sweeping.is_alive():
+            if not self.piece_sweep_late:  # said once: a sweep that never ends stops every later one
+                self.piece_sweep_late = True
+                print(f"sd-dashboard: the piece sweep is still running after {self.piece_sweep_seconds} s; "
+                      "the next one waits for it", file=sys.stderr, flush=True)
+            return
+        self.piece_swept, self.piece_sweep_late = time.monotonic(), False
+        self.piece_sweeping = threading.Thread(target=self.piece_sweep, daemon=True, name="sd-dashboard-piece-sweep")
+        self.piece_sweeping.start()
+
     def service_actions(self):
         super().service_actions()
+        self._sweep_pieces()
         if self.restart_probe is None:
             return
         if self.probing is not None:
@@ -1664,6 +1720,7 @@ def main(argv: list[str] | None = None, *, serve: bool = True) -> int:
         return 0
     kept = (options["fleet_backend"], options["metrics_backend"], options["usage_backend"])
     server.warm_up = lambda: _warm(arguments.database, kept)
+    server.piece_sweep = lambda: _piece_sweep(arguments.database)
     # A run a command started before the last stop is watched again, so its journal record ends (sd:5541).
     from . import command_journal
 

@@ -790,6 +790,71 @@ class BriefDesignation(brief_tests.BriefCase):
         self.assertEqual([(c["channel"], c["state"]) for c in brief["pub"]["copies"]], [("drive", "queued")])
 
 
+class PieceMirror(ScreenCase):
+    """A writing piece's Drive copies (pack sd:7243): no designation; the stage's folder and each file's copy from the
+    queue, the receipt or the item, and `queue_piece`, the best-effort enqueue after a dashboard write."""
+
+    def setUp(self):
+        super().setUp()
+        from sd_db import upsert_repo, writing
+
+        self.checkout = (Path(self.tmp.name) / "writing").resolve()
+        folder = self.checkout / "content" / "2026" / "a-piece"
+        folder.mkdir(parents=True)
+        (folder / "index.md").write_text("---\ntitle: A piece\nstatus: review\n---\n\n## Draft\n\nA claim.\n", encoding="utf-8")
+        upsert_repo(self.connection, str(self.checkout), pieces_source="file")
+        self.piece = writing.import_piece(self.connection, str(self.checkout), "2026/a-piece", who="operator")["item"]["id"]
+
+    def test_each_file_carries_its_drive_copy_from_the_queue_the_receipt_or_the_item(self):
+        queue, receipts = Path(self.tmp.name) / "queue", Path(self.tmp.name) / "receipts"
+        queue.mkdir()
+        receipts.mkdir()
+        (queue / "writing.2026-a-piece-research.drive.json").write_text(json.dumps({"repo": str(self.checkout)}))
+        (receipts / "writing.2026-a-piece-draft.drive.json").write_text(
+            json.dumps({"repo": str(self.checkout), "delivered": "abc", "url": DRIVE_URL}))
+        published = {f"{self.checkout}::2026-a-piece-adversarial": {"drive": DRIVE_URL + "?a"}}
+        mirror = publishing.piece_mirror(self.checkout, "2026/a-piece", "Writing/Drafts", {"published": published},
+                                         queue=queue, receipts=receipts)
+        self.assertEqual(mirror["folder"], "Writing/Drafts")
+        got = {name: [(c["channel"], c["state"], c["url"]) for c in copies] for name, copies in mirror["copies"].items()}
+        self.assertEqual(got, {"index.md": [("drive", "published", DRIVE_URL)],
+                               "research.md": [("drive", "queued", None)],
+                               "fact-check.md": [],
+                               "adversarial.md": [("drive", "published", DRIVE_URL + "?a")]})
+
+    def test_a_long_slug_reads_the_bounded_names_the_pack_queues(self):
+        # Lead review: the page looks a copy up by the name the pack writes, bounded the same way (`piece_out`).
+        from sd_db import writing
+
+        slug = "2026/" + "a" * 240
+        outs = publishing._piece_outs(slug)
+        self.assertEqual(outs["index.md"], writing.piece_out(slug, "draft"))
+        self.assertTrue(all(len(out.encode()) <= writing.OUT_BYTES for out in outs.values()), outs)
+
+    def test_queue_piece_asks_the_pack_for_that_piece(self):
+        enqueue = mock.Mock(return_value=["mirror: queued 2026-a-piece-draft -> the Writing/Drafts Drive folder"])
+        with mock.patch.object(publishing.kit(), "enqueue_pieces", enqueue):
+            lines = publishing.queue_piece(self.connection, self.piece)
+        enqueue.assert_called_once_with(self.connection, {self.piece})
+        self.assertEqual(lines, enqueue.return_value)
+
+    def test_queue_piece_with_no_item_asks_the_pack_for_every_piece(self):
+        # The service tick's sweep (ruling on note #43370): None is every piece, as `enqueue_pieces` reads it.
+        enqueue = mock.Mock(return_value=[])
+        with mock.patch.object(publishing.kit(), "enqueue_pieces", enqueue):
+            publishing.queue_piece(self.connection, None)
+        enqueue.assert_called_once_with(self.connection, None)
+
+    def test_queue_piece_names_a_failure_and_never_raises(self):
+        # Failure table, "Verb or page write, then enqueue": the write stands; the lines say why nothing was queued.
+        with mock.patch.object(publishing.kit(), "enqueue_pieces", side_effect=OSError("disk full")):
+            self.assertEqual(publishing.queue_piece(self.connection, self.piece), ["mirror: piece not queued: disk full"])
+        with mock.patch.object(publishing, "kit", return_value=object()):
+            self.assertIn("no enqueue_pieces", publishing.queue_piece(self.connection, self.piece)[0])
+        with mock.patch.object(publishing, "kit", side_effect=ImportError("no kit")):
+            self.assertEqual(publishing.queue_piece(self.connection, self.piece), ["mirror: piece not queued: no kit"])
+
+
 class BriefUndesignation(brief_tests.BriefCase):
     """Unticking a brief's destination (sd:5489): the trash request first, with the item's URL, then fields.publish."""
 

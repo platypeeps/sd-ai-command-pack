@@ -63,7 +63,7 @@ Do not substitute another diff or copy a cap into this procedure.
    Repository policy determines risk and depth; the registry determines eligible reviewers.
 2. Review the exact resolved subject.
    Only consented, enabled, supported, independent reviewers qualify.
-   Automatic fallback follows ranked registry order.
+   The first `depth` eligible readers run at once; a failed one's slot takes the next entry in ranked registry order.
    Rate limits, missing executables, authentication failures, failed runs, and timeouts can advance that chain.
    An exhausted chain with insufficient completed coverage fails.
 3. Disposition findings locally against the repository's severity floor; unset, it is `high`.
@@ -77,8 +77,10 @@ Do not substitute another diff or copy a cap into this procedure.
    A failing gate fails the review.
    Under `repo.ci = local`, follow the round order below instead.
 
-Reviewing tiers require one completed independent local review.
-Skip requires none, subject to planning and challenge minimums.
+Reviewing tiers ask two independent local reviews: the first two entries on the reviewer order, run at once.
+With one eligible reader, the review asks one, and `review_shortfall` and a `shortfall` line say so.
+The `claude-json` reader's prompt adds the ranked instruction: trace callers and config readers, findings in production-impact order.
+Skip requires none, subject to the planning, lens and challenge floor of two.
 Enabled reviewers outside the order `sd providers list` shows require explicit `--provider NAME` selection and the same eligibility checks.
 Copilot never fills the local slot.
 Shipping may request it afterward through the configured `deep` tier or explicit task direction.
