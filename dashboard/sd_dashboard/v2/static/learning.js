@@ -3,6 +3,8 @@
 // shows), and draws the Documents list grammar: a filter bar, a sorted and paged ledger, and the one Details pane, which
 // the Documents list leaves alone while another view shows. Nothing here writes: a row's stage and kind stay as the
 // store holds them, and Open item opens the row in Tasks, where its stage moves. Add book and Add video file a new row.
+// pack sd:7669: a Category tile per category of the view's fixed set (learning_screen.CATEGORIES), then Other for a row
+// off the set or with none.
 (() => {
   const { html, put } = window.markup;
   const $ = id => document.getElementById(id);
@@ -33,15 +35,17 @@
   const COLS = t => [[null, html`<span class="sr">State</span>`, 'g'], ['title', 'Title'], [t.by[0], t.by[1], 'repo'],
     ...(t.when ? [[t.when[0], t.when[1], 'num']] : []), ['state', t.stateName, 'kind'], ['host', 'URL', 'mod'], [null, html`<span class="sr">Actions</span>`, 'acts']];
   const V = Object.fromEntries(Object.entries(TYPES).map(([id, t]) => [id, { rows: [], doc: null, reader: null, selected: null,
-    F: { state: '', q: '' }, L: { sort: t.sort, dir: t.dir, page: 1, size: 50 } }]));
+    F: { state: '', category: '', q: '' }, L: { sort: t.sort, dir: t.dir, page: 1, size: 50 } }]));
   const current = () => window.shell.view?.current?.();
   const words = (t, stage) => t.states.find(s => s[0] === stage)?.[1] || stage || 'no stage';
+  // A row's category tile: its category when the view's set names it, else other.
+  const catOf = (v, r) => (v.doc?.categories || []).includes(r.category) ? r.category : 'other';
   const order = (t, stage) => { const i = t.states.findIndex(s => s[0] === stage); return i < 0 ? t.states.length : i; };
   function shown(id) {
     const v = V[id], t = TYPES[id], q = v.F.q.toLowerCase().split(/\s+/).filter(Boolean);
     const key = { title: r => r.title.toLowerCase(), state: r => order(t, r.stage), host: r => r.host || r.url_text }[v.L.sort] || (r => String(r[v.L.sort] || '').toLowerCase());
-    return v.rows.filter(r => (!v.F.state || r.stage === v.F.state)
-      && q.every(w => `${r.title} ${r.by || ''} ${r.channel || ''} ${r.url || r.url_text} ${r.description}`.toLowerCase().includes(w)))
+    return v.rows.filter(r => (!v.F.state || r.stage === v.F.state) && (!v.F.category || catOf(v, r) === v.F.category)
+      && q.every(w => `${r.title} ${r.by || ''} ${r.channel || ''} ${r.category || ''} ${r.url || r.url_text} ${r.description}`.toLowerCase().includes(w)))
       .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * v.L.dir);
   }
   function row(id, r) {
@@ -58,8 +62,12 @@
   function draw(id) {
     const v = V[id], t = TYPES[id], L_ = window.shell.list, list = shown(id), slice = L_.pageOf(list, v.L);
     const n = stage => v.rows.filter(r => r.stage === stage).length;
+    const nc = c => v.rows.filter(r => catOf(v, r) === c).length;
+    const cats = [...(v.doc?.categories || []).map(c => [c, c]), ...(nc('other') ? [['other', 'Other']] : [])];
     put($(`${id}-filters`), L_.fbar(html`${L_.fseg('state', t.stateName, t.states.map(([s, w]) => ({ v: s, pressed: v.F.state === s, title: `${w}: ${n(s)}`,
-      label: html`<span class="g-${glyph(s)[0]}" aria-hidden="true">${glyph(s)[1]}</span>${w} <span class="n">${n(s)}</span>` })))}`, { clear: !!v.F.state }));
+      label: html`<span class="g-${glyph(s)[0]}" aria-hidden="true">${glyph(s)[1]}</span>${w} <span class="n">${n(s)}</span>` })))}${cats.length
+      ? L_.fseg('category', 'Category', cats.map(([c, w]) => ({ v: c, pressed: v.F.category === c, title: `${w}: ${nc(c)}`,
+        label: html`${w} <span class="n">${nc(c)}</span>` }))) : ''}`, { clear: !!(v.F.state || v.F.category) }));
     put($(`${id}-head`), L_.sortHead(COLS(t), v.L));
     put($(`${id}-rows`), html`${slice.map(r => row(id, r))}`);
     const empty = $(`${id}-empty`);
@@ -77,7 +85,7 @@
     const v = V[id], t = TYPES[id], r = v.rows.find(x => x.id === key); if (!r) return;
     v.selected = key;
     $(`${id}-rows`).querySelectorAll('tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', tr.dataset.id === key));
-    const [g, mark] = glyph(r.stage), facts = [...t.facts(r), ['Added', r.added]].filter(([, x]) => x);
+    const [g, mark] = glyph(r.stage), facts = [...t.facts(r), ['Category', r.category || '— none recorded'], ['Added', r.added]].filter(([, x]) => x);
     put($('details'), html`<p class="kind"><span class="g-${g}" aria-hidden="true">${mark}</span> ${words(t, r.stage)} · ${t.type}</p>
       <h2>${r.title}</h2>
       ${r.description ? html`<p>${r.description}</p>` : ''}
@@ -133,15 +141,15 @@
   Object.keys(TYPES).forEach(id => {
     const v = V[id], redraw = () => { v.L.page = 1; draw(id); };
     $(`${id}-filters`).addEventListener('click', e => {
-      if (e.target.closest('[data-fclear]')) { v.F.state = ''; return redraw(); }
-      const c = e.target.closest('[data-f="state"]'); if (!c) return;
-      v.F.state = v.F.state === c.dataset.v ? '' : c.dataset.v;
+      if (e.target.closest('[data-fclear]')) { v.F.state = ''; v.F.category = ''; return redraw(); }
+      const c = e.target.closest('[data-f="state"]') || e.target.closest('[data-f="category"]'); if (!c) return;
+      v.F[c.dataset.f] = v.F[c.dataset.f] === c.dataset.v ? '' : c.dataset.v;
       redraw();
     });
     // The empty state's Clear filters empties the search field too, and tells the Documents list (sd:6285).
     $(`${id}-empty`).addEventListener('click', e => {
       if (!e.target.closest('[data-fclear]')) return;
-      v.F.state = ''; v.F.q = ''; $('shift').value = ''; $('shift').dispatchEvent?.(new Event('input')); redraw();
+      v.F.state = ''; v.F.category = ''; v.F.q = ''; $('shift').value = ''; $('shift').dispatchEvent?.(new Event('input')); redraw();
     });
     $(`${id}-head`).addEventListener('click', e => { if (window.shell.list.sortBy(e, v.L)) window.shell.list.keepFocus(e, () => draw(id)); });
     $(`${id}-pager`).addEventListener('click', e => { if (window.shell.list.paging(e, v.L)) window.shell.list.keepFocus(e, () => draw(id)); });
