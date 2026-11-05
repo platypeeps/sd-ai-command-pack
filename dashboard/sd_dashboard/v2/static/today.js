@@ -438,9 +438,12 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   const openRow = t => ['open', OPENS[t.status] || 'queued', html`<tr class="child" data-type="open" data-item="${t.key}" data-id="${t.key}" aria-selected="${String(row() === t.key)}">${marker(OPENS[t.status] || 'queued', 'open')}
     <td class="what"><a href="${shell.itemHref(t.id)}">#${t.id} ${t.title}</a></td>
     <td class="detail">${String(t.status).replace(/_/g, ' ')}${t.p ? ` · P${t.p}` : ''}</td><td class="num">${t.since ? age(t.since) : ''}</td><td class="act">${shell.commands.rowActions(t.key)}</td></tr>`];
+  // pack sd:7699: an idea kind (/api/tasks' `ideas`, reads.IDEA_KINDS) is no Queue row; ideas live on Writing.
   function openItems() {
     TASKS = new Map((QV.tasks ? QV.tasks.rows.map(TD.shape) : []).map(t => [t.key, t]));
-    return new Map([...TASKS].filter(([k, t]) => qShow.has('open') && t.status !== 'done' && !t.parked && t.repo_path && !(qShow.has('suggested') && SUGG.has(k))));
+    const ideas = new Set((QV.tasks && QV.tasks.ideas) || []);
+    return new Map([...TASKS].filter(([k, t]) => qShow.has('open') && t.status !== 'done' && !t.parked && t.repo_path && !ideas.has(t.kind)
+      && !(qShow.has('suggested') && SUGG.has(k))));
   }
   // A task's read row (SROW) holds while it is still an item row at the revision its /api/tasks row has (pack sd:7251): a
   // row read at another revision is dropped, so taskOf acts on the fresh row, not the status it had when it was selected.

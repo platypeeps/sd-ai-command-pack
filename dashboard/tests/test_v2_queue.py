@@ -1470,6 +1470,22 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         kept = self.run_view("open('system'); R.kids = kids();", search="?show=open", answers=answers)
         self.assertIn("open", kept["R"]["kids"])
 
+    def test_all_items_leaves_ideas_out_they_live_on_writing(self):
+        """pack sd:7699: an idea of any idea kind is no Queue row, with a repo or without; a task still is."""
+        from sd_dashboard import tasks_screen
+        made = {kind: self.item(f"A {kind}", kind=kind, priority=2, repo=str(self.checkout))
+                for kind in ("task", "idea", "work-idea", "personal-idea")}
+        loose = {kind: self.item(f"Loose {kind}", kind=kind, priority=2) for kind in ("idea", "work-idea")}
+        answers = {"/api/tasks": [200, tasks_screen.document(self.connection, now=NOW)]}
+        out = self.run_view("R.repos = repos(); open('system'); R.html = ELS.queue.html; open(''); R.none = ELS.queue.html;",
+                            search="?show=open", answers=answers)
+        self.assertIn(f'data-type="open" data-item="{made["task"]}"', out["R"]["html"], "a task is a Queue row")
+        for kind in ("idea", "work-idea", "personal-idea"):
+            self.assertNotIn(f'data-type="open" data-item="{made[kind]}"', out["R"]["html"], f"a {kind} lives on Writing")
+        for n in loose.values():
+            self.assertNotIn(f'data-type="open" data-item="{n}"', out["R"]["none"], "an idea with no repo is no row")
+        self.assertEqual([r for r in out["R"]["repos"] if r.startswith(":")], [], "no Unassociated group")
+
     def test_an_open_row_selects_into_task_details_and_offers_its_next_status_move(self):
         made, answers = self.open_items()
         for status, move in (("blocked", "item.status.ready"), ("in_progress", "item.status.done")):
