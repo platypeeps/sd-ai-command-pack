@@ -852,11 +852,17 @@ def set_managed(
     connection: sqlite3.Connection,
     path: Path | str,
     value: str,
+    *,
+    bypass_standard: bool = False,
 ) -> tuple[str, str]:
     """Set one registered repository's `managed` flag. Returns `(path, before)`.
 
     `before` is the word, `yes` or `no`. Same refusals as `set_runner_merge`:
     a value that is not one of the two words, and a path no row holds.
+    sd:7710: `no` to `yes` refuses unless `bypass_standard`, so a repository
+    does not come up managed with GitHub's defaults: `sd fleet standard`
+    (sd:5610) writes this flag as its last step, and the dashboard's Manage
+    only and `repo managed PATH yes --without-standard` choose it alone.
     """
     if value not in MANAGED_VALUES:
         raise RepoRefusal(f"{value!r} is not a managed setting; expected yes or no")
@@ -870,6 +876,11 @@ def set_managed(
             f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
     target = row["path"]
     before = "yes" if row["managed"] else "no"
+    if before == "no" and value == "yes" and not bypass_standard:
+        raise RepoRefusal(
+            f"{target} turns managed through the standard setup (sd:5610): run `sd fleet standard` "
+            f"in {target} to preview it, then `sd fleet standard --apply --digest <sha256>`, which "
+            "writes managed last; add --without-standard to write managed alone")
     upsert_repo(connection, target, managed=MANAGED_VALUES[value])
     return target, before
 

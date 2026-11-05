@@ -625,5 +625,6 @@ def set_repo(connection: sqlite3.Connection, field: str, path: str, value, befor
                    else (row[column] or "off") if column == "jira_project" else row[column])
         if current != before:
             raise StaleSetting(f"{column} for {path} is {current} now, not {before}; read the page again")
-        _, was = setter(connection, row["path"], value)
+        # sd:7710: the page reaches a managed flip on only through its Manage only choice or an Undo.
+        _, was = setter(connection, row["path"], value, **({"bypass_standard": True} if field == "managed" else {}))
     return {"path": row["path"], "field": column, "value": value, "before": was}

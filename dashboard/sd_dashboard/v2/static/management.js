@@ -681,7 +681,7 @@ function registerCommands() {
       cli: o => `${SDDB} repo runner-merge ${shq(o.path)} ${o.row.merge === 'auto' ? 'manual' : 'auto'}`, executes: true,
       run: o => flipRepo('runner-merge', o), undo: undoOf },
     { id: 'repo.managed', on: 'repo', label: 'Switch managed', does: 'Switches whether the workflow manages this repo; Undo switches it back.', key: 'g', risk: 'undo', bulk: true, primary: o => o.row.managed !== 'yes', when: o => o.row.registered || 'register this repo first (sd-db repo add)',
-      cli: o => `${SDDB} repo managed ${shq(o.path)} ${o.row.managed === 'yes' ? 'no' : 'yes'}`, executes: true,
+      cli: o => o.row.managed === 'yes' ? `${SDDB} repo managed ${shq(o.path)} no` : `cd ${shq(o.path)} && sd fleet standard`, executes: true,
       run: o => o.row.managed === 'yes' ? flipRepo('managed', o) : sheet(() => standardRepo(o, true)), undo: undoOf },
     // sd:5610: the managed-repo standard, previewed by `sd fleet standard` and applied with the digest the sheet showed.
     { id: 'repo.standard', on: 'repo', label: 'Standard setup', does: 'Previews the standard setup for this repo; applies it when you confirm.', icon: 'shield-check', risk: 'confirm', executes: true,
