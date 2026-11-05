@@ -10,6 +10,8 @@
 // pack sd:7208: the range 6mo reads /api/metrics?range=6mo and draws its `ranged` parts: Spend adds each month by bill,
 // and Providers and CI read the six months. The lamps and the badge stay on the 7d reading. ?range=6mo keeps the choice.
 // pack sd:7233: Lane times, Queue's Last 7 days moved here, reads the document's `lanes`: 7 days whatever the range.
+// pack sd:7524: Operations Usage moved here. The month picker reads /api/metrics?month=YYYY-MM, kept as ?month=, and Spend
+// draws each capped bill's burn: spend to date, the cap and the straight projection from the month's rate.
 // moved:start
 // sd:5881: an old address of the Skills view opens Skills' Usage view, keeping its query (?row=).
 {
@@ -33,7 +35,11 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   // The range segment: 7d and 6mo are live; the others say why not (pack sd:7084, sd:7208).
   const RANGES = [{ id: '24h', off: 'Most sources here are daily or weekly; 24h would be one reading' }, { id: '7d' },
     { id: '30d', off: '30d switches on once the cost ledger holds 30 days of rows' }, { id: '6mo' }];
-  let range = new URLSearchParams(location.search).get('range') === '6mo' ? '6mo' : '7d';
+  const asked = new URLSearchParams(location.search);
+  let range = asked.get('range') === '6mo' ? '6mo' : '7d';
+  // The month the picker names, YYYY-MM, or '' for this one (pack sd:7524).
+  let month = /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(asked.get('month') || '') ? asked.get('month') : '';
+  const query = () => [...(range === '7d' ? [] : [['range', range]]), ...(month ? [['month', month]] : [])];
   // The part a ranged panel draws: the 6mo read's own, else the 7d one.
   const part = k => DOC?.ranged ? DOC.ranged[k] : DOC?.[k];
   const span = () => DOC?.ranged ? `${DOC.ranged.months[0]} to ${DOC.ranged.months[DOC.ranged.months.length - 1]}` : 'this month';
@@ -66,7 +72,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
       note: m.rows ? '' : 'No row is not a zero: the ledger holds nothing for this month.', cli: `sd-db usage --month ${m.month}` }));
     if (!d.trend.error) d.trend.series.forEach(s => s.points.forEach(([day, p, at], i) => put1(`t:${s.provider}:${day}`, { kind: 'Window reading', title: `${s.provider} · ${day}`, s: pctState(p),
       facts: [['Used', `${p}%`], ['Window', `${d.trend.window} min (7 days)`], ['Reading', `last meter row of the day · ${at}`], ['Source', 'reads.meter_days']], cli: 'sd-db usage --json' })));
-    if (!d.numbers.error) d.numbers.rows.forEach(n => put1(`num:${n.key}`, { kind: 'The week', title: n.label, s: n.value == null ? 'unknown' : 'ok', facts: [['Value', numText(n)], ...n.inputs, ['Source', 'reads.weekly_numbers']], cli: '/operations?area=usage' }));
+    if (!d.numbers.error) d.numbers.rows.forEach(n => put1(`num:${n.key}`, { kind: 'The week', title: n.label, s: n.value == null ? 'unknown' : 'ok', facts: [['Value', numText(n)], ...n.inputs, ['Source', 'reads.weekly_numbers']], cli: '—' }));
     const order = (role, name) => { const at = (d.controls.orders?.[role] || []).indexOf(name); return d.controls.error ? '— (not read)' : at < 0 ? 'not in the order' : `${at + 1} of ${d.controls.orders[role].length}`; };
     const sc = part('scorecard');
     if (!sc.error) sc.rows.forEach(r => put1(`sc:${r.provider}`, { type: 'provider', kind: `Provider · ${span()}`, title: r.provider, label: r.provider, p: r.provider, s: scState(r),
@@ -116,7 +122,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     // a stale month (sd:4955) keeps its numbers on show, and lights no lamp: each of its cells is unknown.
     const d = DOC, u = d.usage, out = [], stale = u.stale ? 'unknown' : '';
     out.push(u.error ? { id: 'spend', label: 'Spend month', view: 'spend', state: 'unknown', val: html`<b>—</b> not read`, small: u.error }
-      : { id: 'spend', label: 'Spend month', view: 'spend', state: stale || 'ok', ev: 'spend', val: html`<b>${money(u.spent)}</b>`, small: `${u.month} to date · ${plural(u.bills.length, 'bill')}` });
+      : { id: 'spend', label: 'Spend month', view: 'spend', state: stale || 'ok', ev: 'spend', val: html`<b>${money(u.spent)}</b>`, small: `${u.month}${u.today == null ? '' : ' to date'} · ${plural(u.bills.length, 'bill')}` });
     if (!u.error) u.meter.filter(m => m.window_minutes === d.trend.window).forEach(m => out.push({ id: `w-${m.provider}`, label: `${m.provider} week`, view: 'spend', state: stale || pctState(m.used_percent), ev: `win:${m.provider}:${m.window_minutes}`,
       val: html`<b>${Math.round(m.used_percent)}%</b> used`, small: `meter ${String(m.timestamp).slice(5, 16).replace('T', ' ')}Z` }));
     if (!u.error) out.push({ id: 'bound', label: 'Estimated spend', view: 'spend', state: stale || (u.bound.length ? 'caution' : 'ok'), ev: 'bound', val: html`<b>${u.bound.length}</b> bound`, small: u.bound.length ? 'rows to check against invoices' : 'no row to check' });
@@ -147,14 +153,46 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     return href ? html`<li><a class="hbar" href="${href}">${body}</a></li>` : html`<li><button class="hbar" type="button" data-ev="${id}" aria-pressed="${id === selected ? 'true' : 'false'}">${body}</button></li>`; };
   function spend() {
     const u = DOC?.usage;
-    if (!u || u.error) { put($('bills'), html`<li>${unknownBlock(u ? u.error : 'the Metrics document did not arrive')}</li>`); put($('windows'), html``); $('bills-note').textContent = ''; return; }
+    $('bills-h').textContent = u && !u.error ? `Dollars in ${u.month}, by bill` : 'Dollars by bill';
+    if (u && !u.error) $('month').value = u.month;
+    if (!u || u.error) { put($('bills'), html`<li>${unknownBlock(u ? u.error : 'the Metrics document did not arrive')}</li>`); put($('windows'), html``); put($('burns'), html``); $('bills-note').textContent = ''; return; }
     // build: dollars are the month to date as sd usage reads them; a bill that spends a window shows hatched, not a zero.
     const max = Math.max(0.01, ...u.bills.map(b => b.spent));
     // build (hallmark audit): a bill at 75% of its cap is caution and at its cap a warning, each with its glyph, not colour alone.
     const capState = b => b.cap == null ? 'ok' : b.spent >= b.cap ? 'warning' : b.spent / b.cap >= 0.75 ? 'caution' : 'ok';
     put($('bills'), html`${u.bills.map(b => { const st = capState(b); return bar(`bill:${b.name}`, b.name, `${b.cost_basis}${b.cap == null ? '' : ` · cap ${money(b.cap)}`}`, windowed(b) && !b.spent ? null : (b.cap ? b.spent / b.cap * 100 : b.spent / max * 100), windowed(b) && !b.spent ? '▨ window' : money(b.spent), st === 'ok' ? '' : st, st === 'ok' ? '' : st); })}`);
     $('bills-note').textContent = `Total ${money(u.spent)} spent${u.unbilled == null ? '' : ` (${money(u.unbilled)} on no bill)`} and ${money(u.held)} held in ${u.month}. ▨ marks a bill that spends a vendor window, not a zero.`;
-    put($('windows'), u.meter.length ? html`${u.meter.map(m => { const st = pctState(m.used_percent); return bar(`win:${m.provider}:${m.window_minutes}`, m.provider, `${m.window_minutes} min window`, m.used_percent, `${m.used_percent}%`, st === 'ok' ? 's1' : st, st === 'ok' ? '' : st); })}` : html`<li class="why">No meter reading yet.</li>`);
+    burns(u);
+    // A past month keeps this month's meter (metrics_screen._past); meter_error says that read failed.
+    put($('windows'), u.meter_error ? html`<li>${unknownBlock(u.meter_error)}</li>` : u.meter.length ? html`${u.meter.map(m => { const st = pctState(m.used_percent); return bar(`win:${m.provider}:${m.window_minutes}`, m.provider, `${m.window_minutes} min window`, m.used_percent, `${m.used_percent}%`, st === 'ok' ? 's1' : st, st === 'ok' ? '' : st); })}` : html`<li class="why">No meter reading yet.</li>`);
+  }
+  // pack sd:7524: Operations Usage's burn line (charts.burn_svg), drawn here. A capped bill that is not a plan bill draws
+  // spend to date as cumulative points, flat from its last row to today, the cap as a dashed rule, and, in the month
+  // `now` is in, a straight projection at the month's rate. The projection stops where it leaves the chart, so its slope
+  // is the rate, and data-cross names the day it passes the cap, rounded up (PR #430 review).
+  function burns(u) {
+    const capped = u.bills.filter(b => b.cap != null && b.cost_basis !== 'plan');
+    if (!capped.length) { put($('burns'), html`<p class="why">No bill has a dollar cap in ${u.month}.</p>`); return; }
+    put($('burns'), html`${capped.map(b => burn(b, u.days, u.today))}`);
+  }
+  function burn(b, days, today) {
+    const W = 300, H = 80, pts = b.burn, last = pts[pts.length - 1], top = Math.max(b.cap, ...pts.map(p => p[1])) || 1;
+    const X = d => (W * (d - 1) / Math.max(1, days - 1)).toFixed(2), Y = v => (H - 4 - (H - 8) * v / top).toFixed(2);
+    const line = [...(!pts.length || pts[0][0] !== 1 ? [[1, 0]] : []), ...pts, ...(last && today > last[0] ? [[today, last[1]]] : [])];
+    let proj = null;
+    if (last && today) {
+      const spent = last[1], rate = spent / today, end = spent + rate * (days - today);
+      const cross = rate > 0 && end > b.cap ? Math.ceil(today + Math.max(0, b.cap - spent) / rate) : null;
+      proj = { spent, end, cross, until: end <= top ? days : today + (top - spent) / rate };
+    }
+    const said = proj ? `projected ${money(proj.end)} by day ${days}${proj.cross == null ? '' : `; passes its cap on day ${proj.cross}`}` : 'no projection outside the month in progress';
+    return html`<figure class="spark burn" data-burn="${b.name}"><header><span class="label">${b.name} · cap ${money(b.cap)}</span><span class="now">${money(b.spent)} <small>${said}</small></span></header>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${b.name}: spend to date against its ${money(b.cap)} cap, ${said}">
+        <line class="cap" data-cap="${(+b.cap).toFixed(2)}" x1="0" x2="${W}" y1="${Y(b.cap)}" y2="${Y(b.cap)}"/>
+        <polyline class="ln" data-points="${pts.map(([d, v]) => `${d}:${(+v).toFixed(2)}`).join(';')}" points="${line.map(([d, v]) => `${X(d)},${Y(v)}`).join(' ')}"/>
+        ${proj ? html`<line class="proj" data-end="${proj.end.toFixed(2)}" data-cross="${proj.cross == null ? '' : String(proj.cross)}" x1="${X(today)}" y1="${Y(proj.spent)}" x2="${X(proj.until)}" y2="${Y(Math.min(proj.end, top))}"/>` : ''}
+      </svg><div class="axis"><span>day 1</span><span>dashed = cap · dotted = projection</span><span>day ${days}</span></div>
+      <table class="sr"><caption>${b.name}, spend to date by day</caption><tbody>${pts.map(([d, v]) => html`<tr><th scope="row">day ${d}</th><td>${money(v)}</td></tr>`)}</tbody></table></figure>`;
   }
   function trends() {
     const t = DOC?.trend;
@@ -322,7 +360,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   // Read again (sd:5638): the shell's head button reads the Metrics readings again.
   window.PAGE_AGAIN = { title: 'Read the Metrics readings again', run: load };
   const spec = {
-    source: () => range === '6mo' ? '/api/metrics?range=6mo' : '/api/metrics', what: 'the Metrics readings',
+    source: () => `/api/metrics${query().length ? `?${query().map(([k, v]) => `${k}=${v}`).join('&')}` : ''}`, what: 'the Metrics readings',
     adopt: doc => {
       DOC = doc; evidence(); CELLS = readCells(); attention();
       document.body.dataset.observed = doc.read;
@@ -349,7 +387,6 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
 
   window.PAGE_COMMANDS = [
     { label: 'Read Metrics again', icon: 'rotate-ccw', run: () => load() },
-    { label: 'Open Usage (classic)', icon: 'chart-no-axes-column', run: () => { location.href = '/operations?area=usage'; } },
   ];
   window.PAGE_LIST = { rows: () => document.querySelectorAll('.tbl tbody tr[data-id]'), current: () => selected, select: id => show(id, false) };
 
@@ -357,7 +394,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     const S = window.shell, C = S.commands;
     reader = S.read(spec);
     // ---------- Commands (products/system/commands.md) ----------
-    // Metrics' two write homes (sd:3387). Each posts the route the classic Usage forms post, with the revision this page
+    // Metrics' two write homes (sd:3387). Each posts its route with the revision this page
     // read, and settles itself: write() toasts what landed with its Undo, and says in Details when the outcome is unknown.
     const offWhy = o => !o.control ? (DOC?.controls?.error ? `the provider registry was not read: ${DOC.controls.error}` : 'not in the provider registry')
       : o.revision ? true : 'the page holds no registry revision';
@@ -387,7 +424,13 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
       const c = e.target.closest('button[data-range]'); if (!c) return;
       if (c.getAttribute('aria-disabled') === 'true') { S.toast(c.title); return; }
       if (c.dataset.range === range) return;
-      range = c.dataset.range; S.url(range === '7d' ? [] : [['range', range]]); ranges(); load();
+      range = c.dataset.range; S.url(query()); ranges(); load();
+    });
+    // The month picker (pack sd:7524): a month reads that month; a cleared one reads this one again.
+    $('month').addEventListener('change', e => {
+      const v = /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(e.target.value) ? e.target.value : '';
+      if (v === month) return;
+      month = v; S.url(query()); load();
     });
     ranges();
     document.addEventListener('shell:open', e => { if (EV[e.detail]) show(e.detail, true); });

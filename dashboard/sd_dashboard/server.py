@@ -162,7 +162,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def route(connection: sqlite3.Connection, path: str, parameters, *, now: str, services_backend=None) -> str:
+def route(connection: sqlite3.Connection, path: str, parameters, *, now: str) -> str:
     """One request, one page. The router is a function so a test can call it.
 
     A test that has to start a socket to assert a page is a test that runs
@@ -185,12 +185,13 @@ def route(connection: sqlite3.Connection, path: str, parameters, *, now: str, se
 
         return render(connection, parameters=parameters)
     if path == "/operations":
-        from .operations_screen import operations_page
+        # pack sd:7517: every area moved; the handler answers a moved one with a 301 before this, and the bare address
+        # lists their homes. Any other area, such as one sd:3402 retired, is a 404.
+        if parameters.get("area"):
+            raise NotFound("/operations?area=" + parameters["area"][0])
+        from .operations_screen import moved_page
 
-        rendered = operations_page(connection, parameters=parameters, now=now, services_backend=services_backend)
-        if rendered is None:
-            raise NotFound("/operations?area=" + (parameters.get("area") or [""])[0])
-        return rendered
+        return moved_page()
     if path.startswith("/item/"):
         tail = path[len("/item/") :].strip("/")
         if not tail.isdigit():
@@ -479,7 +480,7 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
             raise ValueError("Provide the complete provider configuration and current revision.")
         return lambda connection: provider_controls.configure(connection, enabled=values["enabled"],
             orders=values["orders"], expected_revision=values["revision"], who="dashboard")
-    from .operations_screen import BILL_NAME
+    from .metrics_screen import BILL_NAME
 
     match = re.fullmatch(f"/api/bills/({BILL_NAME})/cap", path)
     if match:
@@ -1027,6 +1028,13 @@ class Dashboard(BaseHTTPRequestHandler):
                              for key in ("id", "title", "kind", "status", "repo", "parked_at")},
                     "revision": state["revision"],
                 })
+            if path == "/operations":
+                from .operations_screen import moved_to
+
+                # pack sd:7517: a retired area's bookmark opens the view that holds it now.
+                moved = moved_to(parameters)
+                if moved:
+                    return self._send(301, b"", "text/plain; charset=utf-8", overrides={"Location": moved})
             if path == "/queue":
                 # pack sd:7234: Queue became Today's Queue view; its Show All is that view's Ended builds filter.
                 shown = "?show=ended" if (parameters.get("show") or [""])[0] == "all" else ""
@@ -1039,7 +1047,7 @@ class Dashboard(BaseHTTPRequestHandler):
 
                 location = from_backlog(connection, parameters, now=self.clock())
                 return self._send(301, b"", "text/plain; charset=utf-8", overrides={"Location": location})
-            body = route(connection, path, parameters, now=self.clock(), services_backend=self.services_backend)
+            body = route(connection, path, parameters, now=self.clock())
         except workflow.MissingItem:
             return self._error(404, "The related item no longer exists. Choose another item.", path)
         except NotFound as missing:

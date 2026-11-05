@@ -3,7 +3,7 @@
 // build: days are this machine's (the document's tz), times show in the viewer's own zone. The daily note is the day's text
 // from the vault (sd:3426), or a named state: no note, no vault. The inbox mail and the runner runs left the page (sd:5289).
 (() => {
-  const { html, put, plural } = window.markup;
+  const { html, put, plural, tile } = window.markup;
   const $ = id => document.getElementById(id);
   const G = { ok: ['ok', '●'], caution: ['caution', '▲'], warning: ['warning', '■'], queued: ['queued', '◌'], unknown: ['unknown', '▨'] };
   const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -190,10 +190,15 @@
     qKeep.addEventListener('click', keep);
     qIn.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); keep(); } });
     paintQ(); readQ();
-    // Read again (sd:5638): the shell's button, in the date bar, reads the week and the quick notes again.
-    window.PAGE_AGAIN = { title: 'Read the week and the quick notes again', run: () => Promise.all([reader.load(), readQ()]) };
+    // Vault (pack sd:7527): Operations > Resources > Vault, the vault's areas, followups and stale inbox (sd_tile.py vault),
+    // read when the page opens. A vault the server cannot read, such as one Full Disk Access keeps out, says why.
+    const readVault = () => { put($('vault'), html`<p class="empty">Reading the vault areas…</p>`);
+      return S.getJSON('/api/notes/vault').then(d => put($('vault'), tile(d)), e => put($('vault'), notRead(e.message))); };
+    // Read again (sd:5638): the shell's button, in the date bar, reads the week, the quick notes and the vault again.
+    window.PAGE_AGAIN = { title: 'Read the week, the quick notes and the vault again', run: () => Promise.all([reader.load(), readQ(), readVault()]) };
     S.suggest(['What did I merge today in system?', 'Which items reached done this week?', 'Draft this day\'s summary from its activity']);
     reader.load();
+    readVault();
   });
 })();
 // Top level, not inside DOMContentLoaded: shell.js builds the ? sheet from PAGE_KEYS when it loads.

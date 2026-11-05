@@ -1,6 +1,7 @@
 """Notes (sd:2120): the last week, a day at a time: merges and items done and opened, from the records Activity reads,
 and each day's daily note from the Obsidian vault (sd:3426). The inbox mail and the runner runs left the page (sd:5289).
-Quick notes (sd:2549) are `sdw.quick-note` store items, listed and kept through `sd store` (notes_screen)."""
+Quick notes (sd:2549) are `sdw.quick-note` store items, listed and kept through `sd store` (notes_screen).
+Vault (pack sd:7527) is the view Operations > Resources showed: `sd_tile.py vault`, the vault's areas and inbox."""
 
 from __future__ import annotations
 
@@ -24,6 +25,12 @@ def _quick(read):
         return 503, {"error": str(problem)}
 
 
+def _vault(read):
+    from ... import reports_screen
+
+    return reports_screen.view("vault")
+
+
 def _keep(payload, principal):
     from ... import notes_screen
 
@@ -39,5 +46,5 @@ PAGE = Page(
     routes=("/notes",),
     html="notes.html",
     item="sd:2120",
-    api=(Api("/api/notes", _read), Api("/api/notes/quick", _quick), Api("/api/notes/quick/add", write=_keep)),
+    api=(Api("/api/notes", _read), Api("/api/notes/quick", _quick), Api("/api/notes/vault", _vault), Api("/api/notes/quick/add", write=_keep)),
 )

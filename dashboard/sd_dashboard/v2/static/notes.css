@@ -71,3 +71,7 @@ details.repo > summary .n { margin-left: auto; font: 500 var(--text-xs)/1 var(--
   section.act > header .src { margin-left: 0; text-align: left; flex-basis: 100%; }
 }
 @media (forced-colors: active) { .row[aria-selected="true"] { outline: 2px solid Highlight; } }
+
+/* Vault (pack sd:7527): the vault's areas under the day, drawn by markup.tile. */
+.vault-areas { margin-top: var(--space-lg); min-width: 0; }
+.vault-areas h2 { margin: 0 0 var(--space-xs); font-size: var(--text-md); font-weight: 500; }

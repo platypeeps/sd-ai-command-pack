@@ -289,12 +289,13 @@ ELS['qn-dlg'] = Object.assign(El('qn-dlg'), { open: false, showModal() { this.op
 class TheScript(Fixture):
     """notes.js against the document `notes_screen` builds from the fixture database."""
 
-    def run_page(self, body, doc=None, status=200, quick=(200, {"notes": QUICK[::-1]}), kept=(200, {"title": "2026-09-06 060000", "text": "Call the plumber"})):
+    def run_page(self, body, doc=None, status=200, quick=(200, {"notes": QUICK[::-1]}), kept=(200, {"title": "2026-09-06 060000", "text": "Call the plumber"}),
+                 vault_answer=(200, {"title": "Vault", "sections": [], "rows": []})):
         doc = doc if doc is not None else self.doc()
         script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + NOTES_SHELL + READ_SHELL
-                  + f"\nvar DOC = {json.dumps(doc)}, STATUS = {status}, QUICK = {json.dumps(list(quick))}, KEPT = {json.dumps(list(kept))};\n"
+                  + f"\nvar DOC = {json.dumps(doc)}, STATUS = {status}, QUICK = {json.dumps(list(quick))}, KEPT = {json.dumps(list(kept))}, VAULT = {json.dumps(list(vault_answer))};\n"
                   + "ANSWER = (path, body) => path === '/api/notes' ? [STATUS, DOC] : path === '/api/notes/quick' ? QUICK"
-                  + " : path === '/api/notes/quick/add' ? KEPT : [404, { error: 'no answer' }];\n"
+                  + " : path === '/api/notes/quick/add' ? KEPT : path === '/api/notes/vault' ? VAULT : [404, { error: 'no answer' }];\n"
                   + COMMANDS_JS + NOTES_JS + "\nvar R = {};\n(async () => { try {\n(WIN_LISTENERS.DOMContentLoaded || []).forEach(f => f());\n"
                   + "(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
                   + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
@@ -308,7 +309,7 @@ class TheScript(Fixture):
 
     def test_the_page_opens_on_today_with_its_tally_and_names_what_is_not_read(self):
         out = self.run_page("R.daily = ELS.daily.html; R.day = ELS['day-name'].textContent; R.next = ELS.next.disabled; R.prev = ELS.prev.disabled;")
-        self.assertEqual(out["gets"], ["/api/notes/quick", "/api/notes"])
+        self.assertEqual(out["gets"], ["/api/notes/quick", "/api/notes", "/api/notes/vault"])
         r = out["R"]
         self.assertEqual((r["day"], r["next"], r["prev"]), ("Sunday, September 6", True, False))
         self.assertRegex(r["daily"], r'href="#merges"><b>1</b><span>merges in 1 repo</span>')
@@ -334,10 +335,33 @@ class TheScript(Fixture):
         out = self.run_page("R.daily = ELS.daily.html;", doc)
         self.assertIn("<b>▨ Vault not configured.</b> OBSIDIAN_VAULT is not set.", out["R"]["daily"])
 
-    def test_read_again_reads_the_week_and_the_quick_notes_again(self):
+    def test_read_again_reads_the_week_the_quick_notes_and_the_vault_again(self):
         # sd:5638: the shell's Read again runs window.PAGE_AGAIN.
         out = self.run_page("await window.PAGE_AGAIN.run(); await flush();")
-        self.assertEqual(out["gets"], ["/api/notes/quick", "/api/notes", "/api/notes", "/api/notes/quick"])
+        self.assertEqual(out["gets"], ["/api/notes/quick", "/api/notes", "/api/notes/vault",
+                                       "/api/notes", "/api/notes/quick", "/api/notes/vault"])
+
+    def test_the_vault_areas_are_drawn_escaped_and_a_refused_read_says_why(self):
+        """pack sd:7527: Operations > Resources > Vault is the Notes page's Vault section."""
+        vault = {"title": "Vault", "rows": [{"what": "<b>Inbox idea</b>", "detail": "inbox note untouched for a week"}],
+                 "sections": [{"figures": [["inbox", "4"], ["stale inbox", "1"]]},
+                              {"table": {"columns": [["Area", "text"], ["Notes", "num"]], "search": "filter areas",
+                                         "rows": [[{"text": "Projects", "title": "a, b"}, {"text": "12", "num": True}]]}}]}
+        out = self.run_page("R.vault = ELS.vault.html;", vault_answer=(200, vault))
+        self.assertIn("<dt>&lt;b&gt;Inbox idea&lt;/b&gt;</dt>", out["R"]["vault"])
+        self.assertIn("<dt>stale inbox</dt><dd>1</dd>", out["R"]["vault"])
+        self.assertIn('<td title="a, b">Projects</td><td class="n">12</td>', out["R"]["vault"])
+        out = self.run_page("R.vault = ELS.vault.html;", vault_answer=(503, {"error": "Vault could not be observed: vault: Full Disk Access"}))
+        self.assertIn("<b>▨ Not read.</b> Vault could not be observed: vault: Full Disk Access", out["R"]["vault"])
+        page = (V2 / "notes.html").read_text(encoding="utf-8")
+        self.assertIn('<h2 id="vault-h">Vault</h2><div id="vault"></div>', page)
+
+    def test_the_vault_route_answers_the_vault_tile(self):
+        page = next(entry for entry in v2.registry.PAGES if entry.section == "Notes")
+        route = next(api for api in page.api if api.path == "/api/notes/vault")
+        with mock.patch("sd_dashboard.reports_screen.collect", return_value={"sections": []}) as collect:
+            self.assertEqual(route.read(None), {"sections": []})
+        collect.assert_called_once_with("vault")
 
     def test_slash_writes_a_quick_note_as_the_palette_and_keys_sheet_say(self):
         """sd:3525 (review 2026-10-12, A2 F9): the palette offers / for the quick note, so the page binds it and the ? sheet lists it.
@@ -671,7 +695,7 @@ class QuickNotes(BrowserSession):
 
 
 class TheRegistration(Registers, unittest.TestCase):
-    page, section, route, api = "notes", "Notes", "/notes", ("/api/notes", "/api/notes/quick", "/api/notes/quick/add")
+    page, section, route, api = "notes", "Notes", "/notes", ("/api/notes", "/api/notes/quick", "/api/notes/vault", "/api/notes/quick/add")
 
 
 if __name__ == "__main__":

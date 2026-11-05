@@ -3,8 +3,11 @@
 What this slice promises: each retired address answers 404, as `/classic/backlog` does (`test_backlog_retired`), the
 palette no longer offers it, and no page, script or server module links to it. A link built from a variable
 (`/operations?area=${...}`) counts as a link to a retired area: only the kept areas may follow `area=`. The kept
-screens still answer: Contributions (classic), Usage, Services, Resources, Trackers, Sessions and Protection hold data
-no v2 page shows; Services holds each service's last request and Sessions the live worktree rows.
+screens still answer: Contributions (classic) and Protection hold data no v2 page shows.
+Every Operations area moved: Services and Sessions to Management in pack sd:7517, Usage to Metrics in pack sd:7524,
+Resources to Management, Notes and Tasks in pack sd:7527, and Trackers to GitHub in pack sd:7525. Their addresses
+answer 301 there (`test_operations_actions`), the bare one lists them (`test_operations_rail`), and no page links to
+an `/operations?area=` address.
 Commands retired because Activity reads the same journal, `runner_exec.execution_journal` under the same cap, as
 `runner_exec.executions`, which the classic area listed; the last test holds that.
 """
@@ -17,7 +20,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_dashboard import activity_screen, operations_screen, pages, server, v2
+from sd_dashboard import activity_screen, pages, server, v2
 from sd_db import runner_exec
 from support import NOW, ScreenCase
 
@@ -26,7 +29,6 @@ PACKAGE = Path(server.__file__).resolve().parent
 RETIRED_CLASSIC = ("designs", "documents", "skills", "today", "writing")
 RETIRED_AREAS = ("jobs", "ports", "progress", "repos", "reports", "commands")
 KEPT_CLASSIC = ("contributions",)
-KEPT_AREAS = ("usage", "services", "resources", "trackers", "sessions")
 
 
 def sources():
@@ -53,8 +55,7 @@ class TheRetiredScreens(ScreenCase):
         self.assertEqual([entry.path for page in v2.registry.PAGES for entry in page.takes], ["/classic/contributions"])
 
     def test_no_page_script_or_module_links_to_a_retired_address(self):
-        # A bare "/classic/" or "?area=" names no screen. Operations' views are AREAS, the kept areas.
-        self.assertEqual(tuple(key for key, _ in operations_screen.AREAS), KEPT_AREAS)
+        # A bare "/classic/" or "?area=" names no screen. No Operations area is kept (pack sd:7525).
         found = []
         for path in sources():
             text, name = path.read_text(encoding="utf-8"), path.relative_to(PACKAGE).as_posix()
@@ -62,34 +63,13 @@ class TheRetiredScreens(ScreenCase):
                 if match[1] not in KEPT_CLASSIC:
                     found.append(f"{name}: {match[0]}")
             for match in re.finditer(r"/operations\?area=([^\"'&#\s`).]+)", text):
-                # operations.js loads a view's area by its PAGE_VIEWS id, which the shell keeps to the declared views.
-                if match[1] not in KEPT_AREAS and (name, match[1]) != ("v2/static/operations.js", "${id}"):
-                    found.append(f"{name}: {match[0]}")
+                found.append(f"{name}: {match[0]}")
         self.assertEqual(found, [])
 
     def test_the_kept_screens_still_answer(self):
-        # Resources reads sd_tile in a child, which runs launchctl; the test reads a fixture instead.
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        for area in KEPT_AREAS:
-            with self.subTest(area=area):
-                # Every area draws inside the v2 shell (sd:3586), whose titles end "· system".
-                self.assertIn("<title>Operations · system</title>", self.render("/operations", {"area": [area]}))
-        self.assertIn("<title>Operations · system</title>", self.render("/operations"))
-
-    def test_every_kept_area_renders_inside_the_v2_shell_under_operations(self):
-        """sd:3586 PR 5 drew every area inside the v2 shell; pack sd:7266 puts them all under Fleet's Operations."""
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        for area in KEPT_AREAS:
-            with self.subTest(area=area):
-                body = self.render("/operations", {"area": [area]})
-                self.assertIn('<body data-page="Operations" data-scope="operations">', body)
-                self.assertIn('<div class="shell"><main id="main" class="classic">', body)
-                self.assertNotIn("/static/dashboard.css", body)
-                self.assertEqual(body.count("<h1>"), 1)
+        # Every server-drawn screen draws inside the v2 shell (sd:3586), whose titles end "· system".
+        self.assertIn("<title>Operations moved · system</title>", self.render("/operations"))
+        self.assertIn("<title>Protection · system</title>", self.render("/protection"))
 
 
 class TheClassicStylesheetIsGone(ScreenCase):
@@ -109,12 +89,11 @@ class TheClassicStylesheetIsGone(ScreenCase):
         self.assertEqual(found, [])
 
     def test_every_server_drawn_screen_and_the_error_page_link_the_shell_stylesheets(self):
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.item("an item")
-        bodies = {f"/operations?area={area}": self.render("/operations", {"area": [area]}) for area in KEPT_AREAS}
-        bodies.update({path: self.render(path) for path in ("/item/1", "/protection", "/classic/contributions")})
+        bodies = {path: self.render(path) for path in ("/operations", "/item/1", "/protection", "/classic/contributions")}
         bodies["error"] = pages.error_page(404, "Nothing here.")
         for path, body in bodies.items():
             with self.subTest(path=path):
@@ -127,12 +106,11 @@ class EveryPickerAsksForAKnownScreen(ScreenCase):
     /api/palette answer 400, so the picker listed nothing."""
 
     def test_every_server_drawn_page_names_a_screen_runner_exec_knows(self):
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
         patcher.start()
         self.addCleanup(patcher.stop)
         item = self.item("Picker fixture")
-        rendered = {f"/operations?area={area}": self.render("/operations", {"area": [area]}) for area in KEPT_AREAS}
-        rendered |= {f"/item/{item}": self.render(f"/item/{item}"), "/protection": self.render("/protection"),
+        rendered = {"/operations": self.render("/operations"), f"/item/{item}": self.render(f"/item/{item}"), "/protection": self.render("/protection"),
                      "/classic/contributions": self.render("/classic/contributions"),
                      "error page": pages.error_page(404, "Nothing here.")}
         for name, body in rendered.items():

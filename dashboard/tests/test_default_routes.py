@@ -29,7 +29,6 @@ V2 = Path(v2.__file__).resolve().parent
 
 #: Every old screen that stays, and where it lives now. An old screen whose path a page took is where that page's module says.
 OLD_SCREENS = ("/protection", "/operations",
-               *(f"/operations?area={key}" for key in ("usage", "services", "resources", "trackers", "sessions")),
                *(entry.path for page in v2.registry.PAGES for entry in page.takes))
 
 
@@ -44,17 +43,15 @@ class TheDefault(BrowserSession):
         root = tempfile.TemporaryDirectory()
         self.addCleanup(root.cleanup)
         self.backend = JobsBackend(root.name, jobs=[("nightly-sync", "failed", 7, None)])
-        # No collector child runs in a test: the sessions and resources areas read fixtures.
-        for target, value in (("sd_dashboard.sessions_screen.collect", lambda area: fleet_document(area)),
-                              ("sd_dashboard.reports_screen.collect", lambda area: "")):
-            patcher = patch(target, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        # No collector child runs in a test: the resources area reads a fixture.
+        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: {"sections": [], "rows": []})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         super().setUp()
         self.listening.RequestHandlerClass.ports_backend = staticmethod(ports_fixture)
         empty = Path(root.name) / "launchd"
         empty.mkdir()
-        # No service is installed, so the Services area makes no launchctl call.
+        # No service is installed, so no page makes a launchctl call.
         self.listening.RequestHandlerClass.services_backend = services.ServiceBackend(
             user_agents=empty, system_daemons=empty, runner=lambda argv: self.fail(f"launchctl {argv}"))
 
@@ -111,7 +108,7 @@ class TheDefault(BrowserSession):
             status, _, _ = self.raw(href)
             self.assertEqual(status, 200, (name, href))
 
-    def test_the_rail_map_is_served_once_and_reaches_the_operations_screens(self):
+    def test_the_rail_map_is_served_once_and_reaches_the_old_screens(self):
         status, headers, body = self.raw("/ui/sections.js")
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "text/javascript; charset=utf-8")
@@ -120,9 +117,10 @@ class TheDefault(BrowserSession):
                          {"SHELL_PAGES": v2.SECTIONS, "SHELL_CLASSIC": v2.CLASSIC, "SHELL_SCREENS": v2.SCREENS,
                           "SHELL_COUNTS": {"pages": {}}, "SHELL_REALMS": []})
         reachable = set(v2.CLASSIC.values()) | set(v2.SCREENS.values())
-        # The Operations areas are the views of the rail's Operations entry (pack sd:7266).
-        for required in ("/operations", "/protection", "/classic/contributions"):
+        # Operations left the rail when its last area moved (pack sd:7517); the other old screens stay reachable.
+        for required in ("/protection", "/classic/contributions"):
             self.assertIn(required, reachable)
+        self.assertNotIn("/operations", reachable)
         # A ported section is never also classic, and no page script names a section's address.
         self.assertEqual(set(v2.SECTIONS) & set(v2.CLASSIC), set())
         for script in (V2 / "static").glob("*.js"):

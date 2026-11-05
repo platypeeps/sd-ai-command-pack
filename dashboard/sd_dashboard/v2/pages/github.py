@@ -7,7 +7,9 @@ Their rows' Hide (sd:6175) is the view state that read carries; Refresh from Git
 posts `/api/jobs/shadow-sync-nightly/retry` (pack sd:6702).
 Your issues holds the operator's GitHub issues `today_github` reads too (sd:5899), so the Pull requests view lists none.
 Dependabot (pack sd:7515) is `/api/github/dependabot` (`health_screen.dependabot_document`): the alerts `sd shadow sync`
-stored in `repo_protection`, grouped by repository; a group's Fix is Health's (`/api/items` with its `dependabot:` ref)."""
+stored in `repo_protection`, grouped by repository; a group's Fix is Health's (`/api/items` with its `dependabot:` ref).
+Tracked (pack sd:7525, Operations > Trackers until then) is `/api/github/tracked` (`trackers_screen.document`): every
+open pull request and issue `sd shadow sync` keeps, of every tracker, watched and Jira rows too."""
 
 from __future__ import annotations
 
@@ -40,6 +42,12 @@ def _dependabot(read):
     from ... import health_screen
 
     return health_screen.dependabot_document(protection.rows(read.connection))
+
+
+def _tracked(read):
+    from ... import trackers_screen
+
+    return trackers_screen.document(read.connection, now=read.now)
 
 
 def _view(payload, principal):
@@ -84,7 +92,7 @@ PAGE = Page(
     html="github.html",
     item="sd:5781",
     api=(Api("/api/today/github", _github), Api("/api/github/issues", _issues),
-         Api("/api/github/dependabot", _dependabot),
+         Api("/api/github/dependabot", _dependabot), Api("/api/github/tracked", _tracked),
          # Hide (sd:6175): the per-page view route Designs, Documents and Contributions have, on the same view store.
          Api("/api/github/issues/view", write=_view),
          Api("/api/today/github/copilot-review", write=_copilot),

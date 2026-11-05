@@ -41,17 +41,6 @@
     });
   });
 
-  document.querySelectorAll('[action="/api/providers/configure"]').forEach(function (form) {
-    ["author", "reviewer"].forEach(function (role) {
-      form.elements.namedItem("first_" + role).addEventListener("change", function (event) {
-        var order = form.elements.namedItem(role + "_order");
-        order.value = [event.target.value].concat(order.value.split(",").map(function (name) {
-          return name.trim();
-        }).filter(function (name) { return name && name !== event.target.value; })).join(", ");
-      });
-    });
-  });
-
   // Every screen draws inside the v2 shell (sd:3586, pages.shell_page), which owns j, k, Enter, ?, Escape and / (its one
   // bar, sd:5539). This script keeps p, which the shell's key sheet lists from PAGE_KEYS. A key that ends a pending g-chord
   // is the shell's.
@@ -94,25 +83,6 @@
     if (/^\/api\/skill-reviews\/[0-9]+\/apply$/.test(action)) {
       values.notes = Array.from(form.querySelectorAll('[name="notes"]:checked')).map(function (input) { return Number(input.value); });
     }
-    if (/^\/api\/bills\/[^/]+\/cap$/.test(action)) {
-      // The route takes a number or null; a form field is a string, and blank clears.
-      // Only a blank field becomes null: Number("abc") is NaN, which JSON carries
-      // as null, and null is the clear (#435's review). A value that is not a
-      // finite decimal (the number input's own grammar) goes as its string, and
-      // the library refuses it with 400 instead of clearing anything.
-      var cap = values.cap_usd_month;
-      values.cap_usd_month = cap === "" ? null : /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(cap) && Number.isFinite(Number(cap)) ? Number(cap) : cap;
-    }
-    if (action === "/api/providers/configure") {
-      var enabled = {};
-      Object.keys(values).filter(function (key) { return key.startsWith("enabled."); }).forEach(function (key) {
-        enabled[key.slice(8)] = values[key] === "true";
-      });
-      values = { revision: values.revision, enabled: enabled, orders: {
-        author: (values.author_order || "").split(",").map(function (name) { return name.trim(); }).filter(Boolean),
-        reviewer: (values.reviewer_order || "").split(",").map(function (name) { return name.trim(); }).filter(Boolean)
-      } };
-    }
     var token = document.querySelector('meta[name="sd-csrf"]');
     button.disabled = true;
     output.textContent = "Saving…";
@@ -140,7 +110,6 @@
         result.item && typeof result.item === "object" ?
         "/item/" + encodeURIComponent(result.item.id) :
         action.startsWith("/api/skills/") ? "/skills" :
-        action === "/api/providers/configure" || action.startsWith("/api/bills/") ? "/operations?area=usage" :
         window.location.pathname + window.location.search);
     } catch (problem) {
       output.textContent = "The response was interrupted. Reload to check whether it saved before trying again.";

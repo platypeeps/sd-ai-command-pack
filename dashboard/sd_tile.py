@@ -8,9 +8,10 @@ instead of being ported into it -- the collectors below are `collectors.py`'s
 own, imported rather than copied, and this file is only the part that turns
 them into a tab. The pack dashboard is no longer served and its plugin loader
 is gone (sd:719). The workflow dashboard in `sd_dashboard/` renders the views
-now: under Operations, Resources, `reports_screen.collect` runs this file as a
-child for Toolbox, Vault, Research and Queues, and the Ports area
-calls `collect_ports` in-process (`ports_screen.py`).
+now: `reports_screen.collect` runs this file as a child for Toolbox
+(Management's Machine view), Research (its Repos filter), Vault (Notes) and
+Queues (Tasks), pack sd:7527, and Health calls `collect_ports` in-process
+(`ports_screen.py`).
 
 Five when this file was written; Queues joined at 6b-6, and the count is now
 `TABS` rather than a number in a sentence. A new view is a builder and its
@@ -53,15 +54,12 @@ five seconds left its vault probe or `launchctl list` running with nobody to
 stop it, and a TCC-held vault showed "ran past its budget" instead of the Full
 Disk Access reason. Now the tile kills them itself and exits 1 with its reason.
 
-**Markup is a table and nothing else.** A tile cannot send script: the
-Resources view's filter (`SafeFragment` in `reports_screen.py`) keeps only
-headings, paragraphs, tables, lists and links, an `href` only when it is
-http(s), and drops every other tag and attribute. The pack loader's filter
-dropped script, inline handlers and anything that fetched, and its backbone
-read `data-sd-search` as a filter box, `data-sd-sort` as click-to-sort headers,
-and `data-sort` on a header as how that column compares. The tables here still
-carry those attributes; the Resources view drops them. Everything here is
-therefore plain markup, and nothing here needs to be trusted.
+**Data, not markup** (pack sd:7527). A tab prints `{title, sections, rows}`:
+each section is one of `figures`, `heading`, `table` or `listing`, and a cell
+is text with an optional title, http(s) link or numeric flag. The page that
+shows the view draws it with `/ui/tile.js`, which escapes every value, so a
+tile cannot send markup at all; `reports_screen.collect` refuses output of
+any other shape.
 
 **No shebang, on purpose, and two interpreters rather than one.** Two callers
 run this file and they do not agree on the interpreter. A Resources view runs
@@ -104,7 +102,6 @@ turned it into a rank-0 row.
 
 from __future__ import annotations
 
-import html
 import importlib.util
 import json
 import os
@@ -140,71 +137,35 @@ def load_collectors():
 # -- markup ---------------------------------------------------------------
 
 
-def esc(value: object) -> str:
-    return html.escape("" if value is None else str(value), quote=True)
-
-
-def cell(value: object) -> str:
-    """One `<td>`. A dict carries a link, a title, or a numeric alignment."""
+def cell(value: object) -> dict:
+    """One table cell as data: its text, and a title, an http(s) link or a numeric alignment when it has them."""
     if not isinstance(value, dict):
-        return f"<td>{esc(value)}</td>"
-    text = esc(value.get("text"))
+        return {"text": "" if value is None else str(value)}
+    out = {"text": "" if value.get("text") is None else str(value["text"])}
+    if value.get("title"):
+        out["title"] = str(value["title"])
     href = value.get("href")
     if isinstance(href, str) and href.startswith(("https://", "http://")):
-        # Relative and scheme-less links are dropped by the Resources view's
-        # filter rather than rewritten, so emitting one would silently lose the
-        # link.
-        text = f'<a href="{esc(href)}">{text}</a>'
-    attrs = ""
-    if value.get("class"):
-        attrs += f' class="{esc(value["class"])}"'
-    if value.get("title"):
-        # Six builders were passing a title into a cell that never emitted one,
-        # so every tooltip in this file was dropped without complaint -- the
-        # filter had nothing to object to, because nothing was rendered. Found
-        # in review, and the reason the key is read here rather than trusted to
-        # be read somewhere. The pack loader's filter allow-listed `title` on
-        # any element; the Resources view's filter drops it.
-        attrs += f' title="{esc(value["title"])}"'
-    return f"<td{attrs}>{text}</td>"
+        out["href"] = href
+    if value.get("class") == "n":
+        out["num"] = True
+    return out
 
 
-def table(columns: list[tuple[str, str]], rows: list[list[object]], search: str = "") -> str:
-    """A table marked for sorting, and for filtering when `search` names a box.
-
-    `columns` is (label, how), where `how` is `text`, `num`, or `none` for a
-    column that does not sort -- a free-text cell sorts lexically and means
-    nothing, so saying so is cheaper than letting an operator discover it.
-    """
+def table(columns: list[tuple[str, str]], rows: list[list[object]], search: str = "") -> dict | None:
+    """A table section: `columns` is (label, how), `how` being `text`, `num`, or `none` for a column that does not
+    sort; `search` names the filter box. An empty table is no section."""
     if not rows:
-        return ""
-    # Built by concatenation rather than one f-string: a nested quote inside an
-    # f-string expression is a syntax error before 3.12, and this file has to
-    # parse under the interpreter that happens to be `python3` as well as the
-    # one that actually runs it.
-    cells = []
-    for label, how in columns:
-        numeric = ' class="n"' if how == "num" else ""
-        cells.append('<th data-sort="' + esc(how) + '"' + numeric + ">" + esc(label) + "</th>")
-    head = "".join(cells)
-    body = "".join("<tr>" + "".join(cell(value) for value in row) + "</tr>" for row in rows)
-    opens = "<table data-sd-sort" + (f' data-sd-search="{esc(search)}"' if search else "") + ">"
-    return f"{opens}<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+        return None
+    return {"table": {"columns": [[label, how] for label, how in columns],
+                      "rows": [[cell(value) for value in row] for row in rows], "search": search}}
 
 
-def figures(pairs: list[tuple[str, object]]) -> str:
-    """The counts a tab leads with, as a definition list rather than cards.
-
-    The dashboard this file was written for drew these as styled boxes; the
-    styling was its own CSS and does not cross the plugin boundary, so the
-    numbers cross and the boxes do not. Named here so the parity checklist
-    reads it as a decision -- and it outlived that dashboard, which was deleted
-    at 6b-8 while this rule stayed true of the one that replaced it.
-    """
+def figures(pairs: list[tuple[str, object]]) -> dict | None:
+    """The counts a tab leads with, label and value."""
     if not pairs:
-        return ""
-    items = "".join(f"<dt>{esc(label)}</dt><dd>{esc(value)}</dd>" for label, value in pairs)
-    return f'<dl class="figures">{items}</dl>'
+        return None
+    return {"figures": [[label, "" if value is None else str(value)] for label, value in pairs]}
 
 
 def drift_when(got) -> str:
@@ -226,15 +187,15 @@ def drift_when(got) -> str:
     return f"{round(age)}h ago"
 
 
-def heading(text: str) -> str:
-    return f"<h3>{esc(text)}</h3>"
+def heading(text: str) -> dict:
+    return {"heading": text}
 
 
-def listing(lines: list[str]) -> str:
+def listing(lines: list[str]) -> dict | None:
     """Lines that are text, not a table -- log tails and drift complaints."""
     if not lines:
-        return ""
-    return "<ul>" + "".join(f"<li>{esc(line)}</li>" for line in lines) + "</ul>"
+        return None
+    return {"listing": [str(line) for line in lines]}
 
 
 # A cap for the 64KB tile budget rather than for taste. Whatever it hides, the
@@ -495,7 +456,7 @@ def tab_toolbox(collectors) -> dict:
             "what": "current machine drift is not known",
             "detail": got["drift_unknown"],
         })
-    return {"title": "Toolbox", "html": "".join(parts), "rows": rows}
+    return {"title": "Toolbox", "sections": [part for part in parts if part], "rows": rows}
 
 
 def tab_vault(collectors) -> dict:
@@ -554,7 +515,7 @@ def tab_vault(collectors) -> dict:
          "what": note["name"], "detail": "inbox note untouched for a week"}
         for note in got["stale_inbox"]
     ]
-    return {"title": "Vault", "html": "".join(parts), "rows": rows}
+    return {"title": "Vault", "sections": [part for part in parts if part], "rows": rows}
 
 
 def tab_research(collectors) -> dict:
@@ -633,7 +594,9 @@ def tab_research(collectors) -> dict:
         }
         for item in broken
     ]
-    return {"title": "Research", "html": "".join(parts), "rows": rows}
+    # The checkouts' paths, for the Repos filter that shows this tab (pack sd:7527).
+    return {"title": "Research", "sections": [part for part in parts if part], "rows": rows,
+            "paths": [item["path"] for item in items]}
 
 
 def conflict_ports(service) -> list[str]:
@@ -705,7 +668,7 @@ def tab_ports(collectors) -> dict:
         for one in services
         if one["flags"]
     ]
-    return {"title": "Ports", "html": "".join(parts), "rows": rows}
+    return {"title": "Ports", "sections": [part for part in parts if part], "rows": rows}
 
 
 def tab_queues(collectors) -> dict:
@@ -779,7 +742,7 @@ def tab_queues(collectors) -> dict:
          "detail": f"oldest {q['oldest']} days \u00b7 {q['total']} rows in the queue"}
         for q in queues if q["pending"]
     ]
-    return {"title": "Queues", "html": "".join(parts), "rows": rows}
+    return {"title": "Queues", "sections": [part for part in parts if part], "rows": rows}
 
 
 TABS = {

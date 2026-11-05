@@ -39,7 +39,7 @@ class Patches:
 class Resources(unittest.TestCase):
     def test_a_stand_in_tile_outwaits_the_production_budget(self):
         """sd:7144: a five-second view budget refused a one-line tile on a loaded gate."""
-        tile, _ = self.tile("import sys\nsys.stdout.write('{\"html\": \"\"}')\n")
+        tile, _ = self.tile("import sys\nsys.stdout.write('{\"sections\": []}')\n")
         production = dict(reports_screen.VIEW_SECONDS)
         with tile:
             self.assertTrue(all(reports_screen.VIEW_SECONDS[area] > production[area] for area in production))
@@ -93,7 +93,7 @@ class Resources(unittest.TestCase):
             self.assertEqual(rows["literal"]["docs"][0]["title"], "Literal document")
             self.assertEqual(rows["literal"]["docs"][0]["words"], 5)
             with patch.dict(os.environ, {"REPO_ROOT": str(root)}):
-                html = str(reports_screen.collect("research"))
+                html = json.dumps(reports_screen.collect("research"))
             self.assertIn("Literal document", html)
             self.assertIn("computed could not be fully observed", html)
             self.assertIn("run sd-research-kit render once to write docs/dashboard/research.json", html)
@@ -115,35 +115,65 @@ class Resources(unittest.TestCase):
             patches.append(patch.dict(reports_screen.VIEW_SECONDS, dict.fromkeys(reports_screen.VIEW_SECONDS, seconds)))
         return Patches(patches), Path(directory.name)
 
-    def test_resource_observations_are_visible_and_escaped_in_every_view(self):
-        payload = {"html": "<p>Healthy content</p>", "rows": [
+    def test_resource_observations_are_kept_as_data_in_every_view(self):
+        payload = {"sections": [{"heading": "Healthy content"}], "rows": [
             {"what": "<script>repo alert</script>", "detail": '<img src=x onerror="bad()">'}]}
         tile, _ = self.tile("import os, sys\nsys.stdout.write(os.environ['TILE_PAYLOAD'])\n")
         with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps(payload)}):
             for area, _ in reports_screen.VIEWS:
                 with self.subTest(area=area):
-                    html = str(reports_screen.collect(area))
-                    self.assertIn("Healthy content", html)
-                    self.assertIn("Needs attention", html)
-                    self.assertIn("&lt;script&gt;repo alert&lt;/script&gt;", html)
-                    self.assertIn("&lt;img", html)
-                    self.assertNotIn("<script", html)
-                    self.assertNotIn("<img", html)
+                    # Data, not markup: the page's markup.tile escapes it (test_v2_management, _notes, _tasks).
+                    self.assertEqual(reports_screen.collect(area), {"title": dict(reports_screen.VIEWS)[area],
+                                     "sections": payload["sections"], "rows": payload["rows"]})
             payload["rows"] = []
             with patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps(payload)}):
-                self.assertNotIn("Needs attention", reports_screen.collect("toolbox"))
+                self.assertEqual(reports_screen.collect("toolbox")["rows"], [])
+
+    def test_a_tile_sends_sections_of_text_and_markup_is_refused(self):
+        """pack sd:7527: a tile prints data that /ui/markup.js tile draws escaped; an html key, or any other shape, is refused."""
+        tile, _ = self.tile("import os, sys\nsys.stdout.write(os.environ['TILE_PAYLOAD'])\n")
+        good = [{"figures": [["jobs", "2"]]}, {"heading": "Cron jobs"}, {"listing": ["a line"]},
+                {"table": {"columns": [["Job", "text"], ["Exit", "num"]], "search": "filter jobs",
+                           "rows": [[{"text": "sync", "title": "t", "href": "https://example.test/"}, {"text": "7", "num": True}]]}}]
+        with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"title": "Toolbox", "sections": good, "rows": []})}):
+            self.assertEqual(reports_screen.collect("toolbox"), {"title": "Toolbox", "sections": good, "rows": []})
+        with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"sections": [], "rows": [], "paths": ["/r/a"]})}):
+            self.assertEqual(reports_screen.collect("research")["paths"], ["/r/a"])
+        with tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"sections": [], "rows": [], "paths": [3]})}):
+            with self.assertRaisesRegex(ValueError, "incomplete output"):
+                reports_screen.collect("research")
+        table = good[3]["table"]
+        for sections in (None, "<p>x</p>", [{"html": "<p>x</p>"}], [{"heading": 3}], [{"heading": "a", "listing": []}],
+                         [{"figures": [["jobs"]]}], [{"listing": [None]}],
+                         [{"table": dict(table, rows=[[{"text": "sync"}]])}],
+                         [{"table": dict(table, rows=[[{"text": "x", "href": "javascript:bad()"}, {"text": "7"}]])}],
+                         [{"table": dict(table, rows=[[{"text": "x", "onclick": "bad()"}, {"text": "7"}]])}]):
+            with self.subTest(sections=sections), tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"html": "<p>x</p>", "sections": sections})}):
+                with self.assertRaisesRegex(ValueError, "incomplete output"):
+                    reports_screen.collect("toolbox")
+
+    def test_every_tab_prints_sections_the_view_accepts(self):
+        """pack sd:7527: each sd_tile.py builder's helpers make the sections `collect` checks."""
+        spec = importlib.util.spec_from_file_location("sections_sd_tile", HERE / "sd_tile.py")
+        sd_tile = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sd_tile)
+        sections = [sd_tile.figures([("jobs", 2), ("drift", None)]), sd_tile.heading("Cron jobs"), sd_tile.listing(["x"]),
+                    sd_tile.table([("Job", "text"), ("Exit", "num")], [[{"text": "sync", "title": "t"}, sd_tile.num(None)]])]
+        self.assertTrue(reports_screen._sections(sections), sections)
+        self.assertEqual(sections[3]["table"]["rows"], [[{"text": "sync", "title": "t"}, {"text": "\u2014", "num": True}]])
+        self.assertEqual((sd_tile.table([("Job", "text")], []), sd_tile.listing([]), sd_tile.figures([])), (None, None, None))
 
     def test_resource_observations_refuse_incomplete_rows(self):
         tile, _ = self.tile("import os, sys\nsys.stdout.write(os.environ['TILE_PAYLOAD'])\n")
         for rows in (None, {}, ["warning"], [{"what": "warning"}], [{"what": "warning", "detail": 3}]):
-            with self.subTest(rows=rows), tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"html": "<p>Content</p>", "rows": rows})}):
+            with self.subTest(rows=rows), tile, patch.dict(os.environ, {"TILE_PAYLOAD": json.dumps({"sections": [], "rows": rows})}):
                 with self.assertRaisesRegex(ValueError, "incomplete observations"):
                     reports_screen.collect("research")
 
     def test_a_view_passes_its_start_and_the_tile_counts_its_deadline_from_it(self):
         # sd:2501: the tile counted from its own main(), so a slow interpreter start spent the margin and the view's kill won.
         tile, directory = self.tile("import json, sys\nopen(sys.argv[0] + '.argv', 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
-                                    "sys.stdout.write(json.dumps({'html': '', 'rows': []}))\n")
+                                    "sys.stdout.write(json.dumps({'sections': [], 'rows': []}))\n")
         with tile:
             before = time.clock_gettime(time.CLOCK_MONOTONIC)
             reports_screen.collect("toolbox")
@@ -167,7 +197,7 @@ class Resources(unittest.TestCase):
 
         since = time.clock_gettime(time.CLOCK_MONOTONIC) - 2.0
         with patch.object(sd_tile, "load_collectors", lambda: Collectors), \
-                patch.dict(sd_tile.TABS, {"toolbox": lambda collectors: {"html": ""}}), \
+                patch.dict(sd_tile.TABS, {"toolbox": lambda collectors: {"sections": []}}), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(sd_tile.main(["toolbox", f"{since:.6f}"]), 0)
         # Two seconds spent starting come off the deadline, never on top of it.
@@ -217,9 +247,11 @@ class Resources(unittest.TestCase):
             reports_screen.collect("vault")
         self.assertFalse((directory / "tile.py.finished").exists(), "the view waited for the tile instead of killing it")
         self.assertGone(directory / "tile.py.pids")
-        # The page shows the refusal and its reason rather than an empty view.
-        html = str(reports_screen.resources({"resource": ["vault"]}, backend=Mock(side_effect=refused.exception)))
-        self.assertIn("This resource could not be observed: resource inspection was stopped at its budget", html)
+        # The page's route answers the refusal and its reason rather than an empty view.
+        with patch.object(reports_screen, "collect", Mock(side_effect=refused.exception)):
+            status, answer = reports_screen.view("vault")
+        self.assertEqual(status, 503)
+        self.assertIn("Vault could not be observed: resource inspection was stopped at its budget", answer["error"])
 
     def test_every_view_declares_a_ceiling_inside_the_tile_contract(self):
         self.assertEqual(set(reports_screen.VIEW_SECONDS), {area for area, _ in reports_screen.VIEWS})
@@ -265,40 +297,35 @@ cat {str(root)!r}/"$3.json"
             "sd_tile.TILE_SECONDS = 60.0\nsys.exit(sd_tile.main(sys.argv[1:]))\n")
         with tile, \
                 patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}", "OBSIDIAN_VAULT": str(stub / "vault")}):
-            html = str(reports_screen.resources({"resource": ["queues"]}))
-        return html, (stub / "calls").read_text().splitlines()
+            answer = reports_screen.view("queues")
+        return answer, (stub / "calls").read_text().splitlines()
+
+    @staticmethod
+    def cells(doc):
+        """Each table row's cell texts, in order."""
+        return [[one["text"] for one in row] for section in doc["sections"] if "table" in section
+                for row in section["table"]["rows"]]
 
     def test_queues_view_renders_the_base_rows_from_the_database(self):
         # The real tile, through the page's own path, reading `sd store list` for each queue.
-        html, calls = self.queues(self.LISTED)
-        self.assertIn('aria-current="page">Queues</a>', html)
-        self.assertNotIn("could not be observed", html)
+        doc, calls = self.queues(self.LISTED)
         self.assertEqual(sorted(calls), sorted(f"store list {kind} --json" for kind in self.LISTED))
-        self.assertIn("<td>Blog Ideas</td><td>2</td><td>3</td>", html)
-        self.assertIn("<td>Topics</td><td>0</td><td>1</td>", html)
-        self.assertIn("<td>Old idea</td><td>Blog Ideas</td>", html)
-        self.assertIn("<td>New idea</td><td>Blog Ideas</td>", html)
-        self.assertNotIn("Declined idea", html)
-        self.assertNotIn("Vault note", html)
-        self.assertIn("<dt>2 in Blog Ideas to decide</dt>", html)
+        cells = self.cells(doc)
+        self.assertIn(["Blog Ideas", "2", "3"], [row[:3] for row in cells])
+        self.assertIn(["Topics", "0", "1"], [row[:3] for row in cells])
+        self.assertIn(["Old idea", "Blog Ideas"], [row[:2] for row in cells])
+        self.assertIn(["New idea", "Blog Ideas"], [row[:2] for row in cells])
+        self.assertNotIn("Declined idea", json.dumps(doc))
+        self.assertNotIn("Vault note", json.dumps(doc))
+        self.assertIn("2 in Blog Ideas to decide", [row["what"] for row in doc["rows"]])
 
     def test_queues_collector_failure_surfaces_on_the_screen(self):
         # A read that fails is an error the page states, never a calm table of zero queues.
-        html, _ = self.queues({kind: rows for kind, rows in self.LISTED.items() if kind != "sdw.tip"})
-        self.assertIn('aria-current="page">Queues</a>', html)
-        self.assertIn("This resource could not be observed: queues: ", html)
-        self.assertIn("`sd store list sdw.tip --json` gave no rows to read", html)
-        self.assertNotIn("<table", html)
+        (status, answer), _ = self.queues({kind: rows for kind, rows in self.LISTED.items() if kind != "sdw.tip"})
+        self.assertEqual(status, 503)
+        self.assertIn("Queues could not be observed: queues: ", answer["error"])
+        self.assertIn("`sd store list sdw.tip --json` gave no rows to read", answer["error"])
 
-    def test_collector_markup_cannot_add_active_content(self):
-        parser = reports_screen.SafeFragment()
-        parser.feed('<p onclick="bad()">Text<script>alert(1)</script><a href="javascript:bad()">Link</a><img src=x onerror=bad()></p>')
-        result = "".join(parser.output)
-        self.assertNotIn("onclick", result)
-        self.assertNotIn("<script", result)
-        self.assertNotIn("javascript:", result)
-        self.assertNotIn("<img", result)
-        self.assertIn("Text", result)
 
 class CronJobFiles(unittest.TestCase):
     """Toolbox reads job files where cron-jobs.sh does, not from the checkout."""

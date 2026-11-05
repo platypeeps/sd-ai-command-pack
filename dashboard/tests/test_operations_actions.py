@@ -1,8 +1,7 @@
 """HTTP operations proof using an in-memory observer; no launchctl calls."""
 
-import re
+import http.client
 import subprocess
-from unittest.mock import patch
 
 from sd_db import operations, record_state, workflow
 from sd_db.workflow import WorkflowError
@@ -98,29 +97,41 @@ class OperationsActions(BrowserSession):
         self.assertTrue(reloaded["capabilities"]["retry"]["allowed"])
         self.assertEqual(self.backend.calls, [("cancel", "fixture/running-fixture")])
 
-    def test_operations_tabs_select_one_kept_area_and_default_to_usage(self):
-        # sd:3402 retired Jobs, Ports, Progress, Repos, Reports and Commands. Services and Sessions stay; their
-        # reads are tested in test_services_actions and test_sessions_screen, with fixture backends.
-        headings = {"usage": "Week, cost and provider details", "resources": "<h2>Resources</h2>", "trackers": "<h2>Trackers</h2>"}
-        # Resources reads sd_tile in a child, which runs launchctl; the test reads a fixture instead.
-        patcher = patch("sd_dashboard.reports_screen.collect", lambda area: "")
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        for area, heading in headings.items():
-            with self.subTest(area=area):
-                status, _, page = self.request(f"/operations?area={area}")
-                self.assertEqual(status, 200)
-                # pack sd:7266: the five areas are the shell's views; only the one asked for is drawn and shown.
-                panels = re.findall(r'<div id="view-(\w+)"( hidden)?>', page)
-                self.assertEqual([key for key, _ in panels], ["usage", "services", "resources", "trackers", "sessions"])
-                self.assertEqual([key for key, hidden in panels if not hidden], [area])
-                self.assertIn(heading, page)
-                for other in headings.values():
-                    if other != heading:
-                        self.assertNotIn(other, page)
-        self.assertIn(headings["usage"], self.request("/operations")[2])
+    def test_operations_keeps_no_area_and_lists_where_each_went(self):
+        # sd:3402 retired Jobs, Ports, Progress, Repos, Reports and Commands; pack sd:7517 moved Services and
+        # Sessions to Management (test_v2_management), pack sd:7524 Usage to Metrics (test_v2_metrics), pack sd:7527
+        # Resources' views to Management, Notes and Tasks, and pack sd:7525 Trackers to GitHub (test_trackers_screen).
+        status, _, page = self.request("/operations")
+        self.assertEqual(status, 200)
+        self.assertIn('<a href="/github#view=tracked" data-view="trackers">', page)
+        self.assertNotIn('id="view-', page)
         for area in ("unknown", "jobs", "progress", "ports"):
             self.assertEqual(self.request(f"/operations?area={area}")[0], 404, area)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_a_moved_area_address_answers_301_to_its_management_view(self):
+        """pack sd:7517: a retired area's bookmark lands on the view that holds it now."""
+        host, port = self.listening.server_address[:2]
+        # pack sd:7524: Usage moved to Metrics' Spend view, and the month its picker named rides along.
+        for area, target in (("services", "/management#view=deploys"), ("sessions", "/management#view=sessions"),
+                             ("usage", "/metrics#view=spend"), ("usage&month=2026-08", "/metrics?month=2026-08#view=spend"),
+                             ("usage&month=soon", "/metrics#view=spend"),
+                             # pack sd:7527: each Resources view moved to the page that holds it now.
+                             ("resources&resource=toolbox", "/management#view=machine"),
+                             ("resources&resource=research", "/management?research=yes#view=repos"),
+                             ("resources&resource=vault", "/notes"), ("resources&resource=queues", "/tasks?queues=open"),
+                             ("resources", "/management#view=machine"), ("resources&resource=ports", "/management#view=machine"),
+                             # pack sd:7525: Trackers moved to GitHub's Tracked view.
+                             ("trackers", "/github#view=tracked"), ("trackers&view=issues", "/github#view=tracked")):
+            with self.subTest(area=area):
+                connection = http.client.HTTPConnection(host, port, timeout=10)
+                try:
+                    connection.request("GET", f"/operations?area={area}", headers={"Cookie": self.cookie})
+                    answer = connection.getresponse()
+                    answer.read()
+                finally:
+                    connection.close()
+                self.assertEqual((answer.status, answer.headers["Location"]), (301, target))
         self.assertEqual(self.backend.calls, [])
 
     def test_retry_acceptance_is_distinct_from_observed_job_state(self):

@@ -41,7 +41,7 @@ def caps(connection: sqlite3.Connection) -> dict[str, float | None] | None:
     connection's database (`registry.beside`), parsed and merged here rather
     than through `registry.read`, whose first-open seeding is a write this
     module's verb does not make. None when the file is absent, cannot be
-    opened or cannot be parsed -- the set `_provider_controls` catches --
+    opened or cannot be parsed -- the set the Metrics page's `_guard` catches --
     or parses with a cap that is not a number or too large for a float
     (`parse` does not type one, and a bill with no row shows the file's), so
     the tile and the card fall back to the row's cap and the panel is where
