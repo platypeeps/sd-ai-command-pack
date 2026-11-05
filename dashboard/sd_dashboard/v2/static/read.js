@@ -57,7 +57,7 @@
     }
     async function run(after, quiet) {
       const mine = ++generation, source = at();
-      if (!after && !quiet) state({ kind: 'loading', text: `Reading ${what}. Rows appear when ${source} answers.`, source });
+      if (!after && !quiet) state({ kind: 'loading', text: `Reading ${what}. Rows appear when the read finishes.`, source });
       let doc;
       try { doc = await get(source); } catch (err) {
         if (mine !== generation) return false;

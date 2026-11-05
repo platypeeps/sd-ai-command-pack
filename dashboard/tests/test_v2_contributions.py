@@ -831,7 +831,7 @@ shellRun(cmd('collector.sync'), C.get('collector')); await flush();""", answer=s
         self.assertNotIn('id="contrib-refresh"', page)
         self.assertNotIn("contrib-refresh", PAGE_JS)
         out = self.run_page("R.title = window.PAGE_AGAIN.title; R.sync = cmd('collector.sync').label;")
-        self.assertEqual(out["R"]["title"], "Read the contributions again; Re-run collector runs the sync")
+        self.assertEqual(out["R"]["title"], "Refresh contributions")
         self.assertEqual(out["R"]["sync"], "Re-run collector")
 
     def test_a_sync_that_ends_with_a_failed_tracker_or_a_broken_run_says_why(self):
@@ -870,7 +870,7 @@ R.off = [w('contribution.ack', 'issue:""" + ISSUE + """'), w('contribution.nudge
         self.assertNotIn("GitHub now", rows)
         self.assertNotIn("GitHub merged", rows)
         self.assertIn('title="example/project">example/project</span><span class="v">2</span>', settled)
-        self.assertIn("This sd records no merge or close dates", out["R"]["note"])
+        self.assertIn("This version records no merge or close dates", out["R"]["note"])
         self.assertEqual(out["R"]["tally"], "3 rows · 2 merged · 1 closed")
         self.assertEqual(out["attention"], {"state": "caution", "n": 2, "what": "contributions want you"})
         self.assertEqual(out["states"][0]["kind"], "loading")
@@ -924,7 +924,7 @@ R.off = [w('contribution.ack', 'issue:""" + ISSUE + """'), w('contribution.nudge
         self.assertIn(('github', 'unknown'), re.findall(r'data-cell="(\w+)" data-state="(\w+)"', out["R"]["lamps"]))
         self.assertIn("not recorded", out["R"]["lamps"])
         self.assertEqual(out["R"]["tp"], "")
-        self.assertIn("This sd records no merge or close dates", out["R"]["note"])
+        self.assertIn("This version records no merge or close dates", out["R"]["note"])
 
     def test_each_row_links_its_issues_in_a_new_tab_and_a_row_without_shows_none(self):
         # sd:5308: GitHub as owner/repo#N, Jira as its key; a link opens its page and leaves the row unselected.

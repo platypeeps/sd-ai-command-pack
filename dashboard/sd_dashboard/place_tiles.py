@@ -5,13 +5,14 @@ the config folder, never in a request or a setting row the page writes: `<config
 (`CONFIG`; `place-tiles.conf.example` is the template), one line each, as `documents.conf` does:
 
     tile|<realm>|<tile>|<label>|<folder>|<url or ->[|<host>]   a tile on the realm's Overview, in file order
-    act|<tile>|<label>|<command>                               a button on that tile, in file order
+    act|<tile>|<label>|<command>[|<help>]                      a button on that tile, in file order
 
 `document` answers `GET /api/place/<realm>/overview`. Each tile says whether its folder is on this machine (`here`,
 else `why`: an app that runs on another machine shows the tile and the reason, never a button that seems to work),
 and probes its URL once, bounded by `PROBE_SECONDS`, the name lookup too (sd:6396): any HTTP answer is
 `answers: true` with its status, a refused connection `false`, anything else `null`, unknown. Each action carries its
-last run (`last`).
+`help`, the plain words its button's hover shows ("" when the line has none, pack sd:7536), and its last run (`last`).
+The line splits on every `|`, so a command never holds one: a pipe makes too many fields, or leaves a quote open.
 
 `run` answers `POST /api/place/tiles {realm, tile, action}`. It reads the file again and runs only a command a line
 names, split by `shlex` with no shell, in the tile's folder, through `sweep.spawn`: one lock per action
@@ -91,8 +92,8 @@ def parse(text: str) -> tuple[list[dict], list[str]]:
                 continue
             tiles[tile] = {"realm": realm, "id": tile, "label": label, "folder": str(Path(folder).expanduser()),
                            "url": "" if url == "-" else url, "host": "".join(host), "actions": []}
-        elif kind == "act" and len(fields) == 4 and all(fields):
-            _, tile, label, command = fields
+        elif kind == "act" and len(fields) in (4, 5) and all(fields):
+            _, tile, label, command, *help_ = fields
             try:
                 argv = shlex.split(command)
             except ValueError as error:
@@ -103,10 +104,10 @@ def parse(text: str) -> tuple[list[dict], list[str]]:
             elif any(_slug(a["label"]) == _slug(label) for a in tiles[tile]["actions"]):
                 problems.append(f"line {number}: {tile} has two actions labelled {label}")
             else:
-                tiles[tile]["actions"].append({"label": label, "command": command, "argv": argv})
+                tiles[tile]["actions"].append({"label": label, "command": command, "argv": argv, "help": "".join(help_)})
         else:
             problems.append(f"line {number}: expected tile|<realm>|<tile>|<label>|<folder>|<url or ->[|<host>] "
-                            "or act|<tile>|<label>|<command>")
+                            "or act|<tile>|<label>|<command>[|<help>]")
     return list(tiles.values()), problems
 
 
@@ -259,7 +260,7 @@ def document(realm: str, *, now: str, config: Path | None = None, connection=Non
         rows.append({"id": tile["id"], "label": tile["label"], "url": tile["url"], "probe": probe, "here": here,
                      "host": tile["host"] if hosted else "",
                      "why": "" if here or hosted else f"{tile['folder']} is not on this machine, so its actions run elsewhere",
-                     "actions": [{"label": a["label"], "command": a["command"], "last": last}
+                     "actions": [{"label": a["label"], "command": a["command"], "help": a["help"], "last": last}
                                  for a, last in zip(tile["actions"], lasts, strict=True)]})
     reason = "; ".join(problems) if problems else "" if rows else f"{source} names no tile for {realm}."
     return {**base, "state": "read", "rows": rows, "problems": problems, "reason": reason}

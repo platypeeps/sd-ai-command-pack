@@ -939,7 +939,7 @@ class TheOverviewScript(Fixture):
     TILES = {"state": "read", "area": "acme", "read": NOW, "reason": "", "problems": [], "rows": [
         {"id": "app", "label": "Staging site", "url": "https://staging.example.test", "here": True, "why": "",
          "probe": {"answers": False, "status": "nothing listens there"},
-         "actions": [{"label": "Deploy", "command": "npm run staging:deploy", "last": {"state": "done", "exit": 0, "started": NOW, "ended": NOW, "output": "deployed\n", "cut": False}},
+         "actions": [{"label": "Deploy", "command": "npm run staging:deploy", "help": "Builds the site and puts it on staging.", "last": {"state": "done", "exit": 0, "started": NOW, "ended": NOW, "output": "deployed\n", "cut": False}},
                      {"label": "Tear down", "command": "npm run staging:down", "last": {"state": "done", "exit": 3, "started": NOW, "ended": NOW, "output": "", "cut": False}},
                      {"label": "Refresh", "command": "npm run staging:up", "last": {"state": "running", "started": NOW, "output": "", "cut": False}},
                      {"label": "Smoke", "command": "npm run staging:smoke", "last": {"state": "unknown", "reason": "it ended with no exit record", "started": NOW, "output": "", "cut": False}}]},
@@ -972,6 +972,16 @@ class TheOverviewScript(Fixture):
         self.assertIn("<p class=\"why\">/x is not on this machine, so its actions run elsewhere.</p>", rows)
         self.assertIn('data-tile-act="Start" aria-disabled="true"', rows)
 
+    def test_a_buttons_hover_says_what_it_does_then_the_command(self):
+        # Pack sd:7536: the act line's help leads; with none, the hover names the action plainly. The command is the
+        # second line.
+        rows = self.run_overview("R.rows = ELS['overview-rows'].html;")["R"]["rows"]
+        self.assertIn('data-tile-act="Deploy" data-tip="Builds the site and puts it on staging.\nnpm run staging:deploy"', rows)
+        self.assertIn('data-tile-act="Smoke" data-tip="Runs the Smoke action in this tile&#39;s folder.\nnpm run staging:smoke"', rows)
+        hosted = self.run_page("R.rows = ELS['overview-rows'].html;", {"/api/place/acme/overview": [200, self.hosted({"state": "none"})]},
+                               place="acme")["R"]["rows"]
+        self.assertIn('data-tip="Asks far-host to run the Start action in this tile&#39;s folder there.\n./run.sh studio"', hosted)
+
     def test_a_button_posts_the_tiles_names_toasts_the_start_and_reads_again(self):
         out = self.run_overview("clickAct('app', 'Deploy'); await flush();")
         self.assertEqual(out["posts"], [["/api/place/tiles", {"realm": "acme", "tile": "app", "action": "Deploy"}, 64]])
@@ -994,13 +1004,13 @@ class TheOverviewScript(Fixture):
 DOCS['/api/place/acme/overview'] = [200, {json.dumps(pending)}];
 clickAct('sim', 'Start'); await flush(); R.after = ELS['overview-rows'].html;""", docs, place="acme")
         before, after = out["R"]["before"], out["R"]["after"]
-        self.assertIn("Runs on far-host: its follow job answers a button within about five minutes.", before)
+        self.assertIn("Runs on far-host; a press takes up to five minutes to start.", before)
         self.assertNotIn("aria-disabled", before, "a hosted tile's button is off")
         self.assertIn("Not run on far-host from here yet.", before)
         self.assertEqual(out["posts"], [["/api/place/tiles", {"realm": "acme", "tile": "sim", "action": "Start"}, 64]])
-        self.assertEqual(out["toasts"][-1]["msg"], "Simulator · Start asked of far-host; its follow job runs it within about five minutes.")
+        self.assertEqual(out["toasts"][-1]["msg"], "Simulator · Start asked of far-host; it starts within about five minutes.")
         self.assertIn("Asked far-host <time", after)
-        self.assertIn("waiting for its follow job, every five minutes.", after)
+        self.assertIn("; it starts within five minutes.", after)
 
     def test_a_hosted_actions_answer_reads_with_its_host(self):
         doc = self.hosted({"state": "starting", "started": NOW}, {"state": "running", "started": NOW, "output": "", "cut": False},

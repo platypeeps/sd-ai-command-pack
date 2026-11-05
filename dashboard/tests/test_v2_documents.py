@@ -834,7 +834,7 @@ R.cli = cmd('document.request').cli(C.get('draft:request'));""")
         self.assertEqual(out["states"][0]["kind"], "loading")
         # The fixture's twin key is contested: the slot names it, and the source is the config.
         self.assertEqual(out["states"][-1]["kind"], "partial")
-        self.assertIn("claim the key twin", out["states"][-1]["text"])
+        self.assertIn("use the name twin", out["states"][-1]["text"])
         empty = {**self.doc, "roots": [], "documents": [], "contested": []}
         last = self.run_page("", answer=f"() => [200, {json.dumps(empty)}]")["states"][-1]
         self.assertEqual((last["kind"], last["title"]), ("empty", "No document roots"))
@@ -990,7 +990,7 @@ window.shell.reconcile = o => { if (o.current != null) return o.current;"""
         self.assertIn("shell.read(", DOCUMENTS_JS)
         self.assertNotIn("fetch(", DOCUMENTS_JS)
         out = self.run_page("")
-        self.assertEqual(out["states"][0]["text"], "Reading the documents. Rows appear when /api/documents answers.")
+        self.assertEqual(out["states"][0]["text"], "Reading the documents. Rows appear when the read finishes.")
 
     def test_a_document_the_next_read_drops_runs_no_command_and_loses_the_selection(self):
         out = self.run_page("""const first = ANSWER()[1];

@@ -39,14 +39,14 @@ function rowsOf(doc) {
 }
 // tip (sd:5287): the lamp's hover and focus text, what it counts and from where.
 const FILTERS = {
-  recent:  { lbl: 'Changed 7 d', icon: 'git-branch', test: r => r.changed && READ - Date.parse(r.changed) < 7 * DAY, tip: 'Pages whose last commit is under 7 days old. Source: git log of the ui-design checkout.' },
+  recent:  { lbl: 'Changed 7 d', icon: 'git-branch', test: r => r.changed && READ - Date.parse(r.changed) < 7 * DAY, tip: 'Pages changed in the last 7 days.' },
   stale:   { lbl: 'Shot stale', icon: 'eye', test: r => r.type === 'page' && !!shotStale(r), warn: true, tip: 'Pages whose page or a file it loads changed after the screenshot. Source: the screenshots\' recorded inputs.' },
   noshot:  { lbl: 'No screenshot', icon: 'eye-off', test: r => r.type === 'page' && !r.shots.length, warn: true, tip: 'Pages with no screenshot in the checkout. Source: the ui-design checkout.' },
-  dirty:   { lbl: 'Uncommitted', icon: 'pen-line', test: r => r.dirty, warn: true, tip: 'Pages with a change not yet committed. Source: git status of the ui-design checkout.' },
+  dirty:   { lbl: 'Uncommitted', icon: 'pen-line', test: r => r.dirty, warn: true, tip: 'Pages with changes not yet committed.' },
   brief:   { lbl: 'Brief only', icon: 'file-text', test: r => r.type === 'brief', tip: 'Products with a design brief and no drawn page. Source: the ui-design checkout\'s products folder.' },
 };
 // sd:7361: the Open lamp is no predicate. It counts the rows the filter bar's Open shows and, pressed, sets that same Open.
-const OPEN = { lbl: 'Open', icon: 'inbox', tip: 'Rows not hidden, the rows the filter bar\'s Open lists. Press it to list them. Source: the view state Hide writes.' };
+const OPEN = { lbl: 'Open', icon: 'inbox', tip: 'Rows you have not hidden. Press it to list them.' };
 const shown = r => window.shell.aside.shows(F.hidden, r.hidden);
 const tbody = document.getElementById('rows'), details = document.getElementById('details');
 let selected = null, F = { f: '', q: '', state: '', product: '', age: '', hidden: 'open' };

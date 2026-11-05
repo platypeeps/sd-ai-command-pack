@@ -158,7 +158,7 @@
     const hidden = REVIEWED ? 0 : Q.filter(q => inBatch(q) && !isOpen(q)).length;
     const by = new Map();
     list.forEach(q => { if (!by.has(q.item)) by.set(q.item, []); by.get(q.item).push(q); });
-    put(tb, html`${[...by].map(([item, qs]) => html`${band(B.get(item) || { item }, qs)}${qs.map(row)}`)}${list.some(isOpen) ? '' : html`<tr class="empty"><td colspan="4">${batch === null ? 'No question is open. A batch filed with sd-db review file appears here.' : 'No question is open in this batch.'}${hidden
+    put(tb, html`${[...by].map(([item, qs]) => html`${band(B.get(item) || { item }, qs)}${qs.map(row)}`)}${list.some(isOpen) ? '' : html`<tr class="empty"><td colspan="4">${batch === null ? 'No question is open. A new review batch appears here.' : 'No question is open in this batch.'}${hidden
       ? ` ${plural(hidden, 'reviewed question')} hidden: Show reviewed lists them.` : ''}</td></tr>`}`);
     tb.querySelectorAll('input[data-mixed]').forEach(box => { box.indeterminate = true; });
     refocus(tb, was);
@@ -251,7 +251,7 @@
     // A pick or a refusal outlives a read only while its question is still open.
     [...PICKED].forEach(n => { const q = find(n); if (!q || !isOpen(q)) PICKED.delete(n); });
     [...REFUSED.keys()].forEach(n => { const q = find(n); if (!q || !isOpen(q)) REFUSED.delete(n); });
-    window.shell.state(doc.batches.length ? null : { kind: 'empty', text: 'No batch is open. A batch filed with sd-db review file appears here.', source: '/api/review' });
+    window.shell.state(doc.batches.length ? null : { kind: 'empty', text: 'No review batch is open. A new one appears here.', source: '/api/review' });
     draw(); first();
   }
 

@@ -571,7 +571,7 @@ R.cli = cmd('report.resolve').cli(C.get('r{n}')); shellRun(cmd('report.resolve')
         out = self.run_page(f"""R.what = cmd('report.fix').consequence(C.get('r{n}')); R.off = cmd('report.fix').when(C.get('r{done}'));
 shellRun(cmd('report.fix'), C.get('r{n}')); await flush();""", answer=answer)
         self.assertEqual(out["confirms"], ["report.fix"])
-        self.assertIn(f"starts claude on report #{n}: the sd-debug skill", out["R"]["what"])
+        self.assertIn(f"Opens a Claude session on report #{n} in herdr.", out["R"]["what"])
         self.assertEqual(out["R"]["off"], "already acknowledged")
         self.assertEqual(out["posts"], [[f"/api/items/{n}/fix", {"revision": revision}, 64]])
         self.assertEqual(out["toasts"][-1], [f"Fix started · #{n} · debug session in herdr pane w9:p1", False])
@@ -622,7 +622,7 @@ R.does = fix.does(o); shellRun(fix, o); await flush(); R.href = location.href;""
         self.assertIn("shell.read(", REPORTS_JS)
         self.assertNotIn("getJSON('/api/reports')", REPORTS_JS)
         out = self.run_page("")
-        self.assertEqual(out["states"][0]["text"], "Reading the reports, jobs and job logs. Rows appear when /api/reports answers.")
+        self.assertEqual(out["states"][0]["text"], "Reading the reports, jobs and job logs. Rows appear when the read finishes.")
 
     def test_a_failed_read_after_a_good_one_clears_the_rows_and_runs_no_command(self):
         n = self.ids["clean"]

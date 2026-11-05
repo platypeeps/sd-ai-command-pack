@@ -1185,7 +1185,7 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
            "working": "working: live sessions, build runs and lane gates now running",
            "next": "next: queued in the lane, not started",
            "blocked": "blocked: stopped in the lane until someone acts",
-           "suggested": "suggested: ready or planned items sd-next offers, up to 3"}
+           "suggested": "suggested: up to 3 ready or planned tasks to do next"}
 
     def test_each_box_says_its_count_and_what_it_counts_on_hover(self):
         # Pack sd:7383: the native title names the count and the meaning; the aria-label stays.

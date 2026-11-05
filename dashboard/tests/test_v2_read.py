@@ -247,7 +247,7 @@ R.first = OUT.states[OUT.states.length - 1].text;
 r.load(); await flush(); HELD[1].ok(502, null); await flush();""")
         self.assertIn("Open a dashboard page before reading Rows.", out["R"]["first"])
         self.assertIn("HTTP 502", out["states"][-1]["text"])
-        self.assertEqual(out["states"][0], {"kind": "loading", "text": "Reading the rows. Rows appear when /api/rows answers.",
+        self.assertEqual(out["states"][0], {"kind": "loading", "text": "Reading the rows. Rows appear when the read finishes.",
                                             "source": "/api/rows"})
 
 

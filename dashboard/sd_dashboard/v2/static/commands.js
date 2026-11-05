@@ -21,12 +21,12 @@
   // sd:6964: `login(o)` is a report's expired login (job_failures.login): no session can sign in for the operator, so Fix
   // then opens that login's row on Health > Credentials, where Sign in is, and asks nothing first.
   function fix(on, { item, report, login = () => null, when = () => true, post }) {
-    return { id: `${on}.fix`, on, label: 'Fix', does: o => login(o) ? 'Opens the expired login\'s row on Health, where Sign in is.' : report(o) ? 'Asks first, then starts claude in herdr to fix this report.' : 'Asks first, then starts claude in herdr as a builder on this item.', key: 'f', risk: 'safe', askFirst: o => !login(o), executes: true, icon: 'bot', when,
+    return { id: `${on}.fix`, on, label: 'Fix', does: o => login(o) ? 'Opens the expired login\'s row on Health, where Sign in is.' : report(o) ? 'Asks first, then opens a Claude session (herdr) to fix this report.' : 'Asks first, then opens a Claude session (herdr) to build this item.', key: 'f', risk: 'safe', askFirst: o => !login(o), executes: true, icon: 'bot', when,
       cli: o => login(o) ? `no CLI: opens ${login(o).href}` : 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
       sends: o => login(o) ? `GET ${login(o).href}` : `POST /api/items/${item(o)}/fix {revision}`,
       consequence: o => report(o)
-        ? `Opens a herdr workspace and starts claude on report #${item(o)}: the sd-debug skill finds the cause and fixes it, and acknowledges the report after a clean run.`
-        : `Opens a herdr workspace in the item's checkout and starts claude as a builder on #${item(o)}: a worktree, commits, a pull-request body and the lane.`,
+        ? `Opens a Claude session on report #${item(o)} in herdr. It finds the cause, fixes it, and acknowledges the report after a clean run.`
+        : `Opens a Claude session on #${item(o)} in herdr, in the item's repo. It builds the change in its own folder and sends it to the merge queue.`,
       run: o => login(o) ? (location.href = login(o).href, `Health opens on ${login(o).row ? login(o).row.replace(/^cred:/, '') : 'Credentials'}`) : Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`)).then(
         out => `Fix started · #${item(o)} · ${out.fix.session} session in herdr pane ${out.fix.pane}`,
         err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) };
@@ -40,10 +40,10 @@
     const inner = fix('dependabot alerts', { item: o => o.filed ?? '<filed>', report: () => false,
       post: (o, path) => window.shell.post(path, { revision: o.filedRevision }) });
     return { ...inner, when: o => !!o.slug || 'no github.com remote: there is no alerts page to fix from',
-      does: 'Asks first, files an sd item in this repo, then starts claude in herdr as a builder on it.',
+      does: 'Asks first, files a task in this repo, then opens a Claude session to fix it.',
       sends: o => `POST /api/items {ref: dependabot:${o.slug}}, then POST /api/items/<id>/fix {revision}`,
-      consequence: o => `Files an sd item in ${o.facts.Repository} for ${o.slug}'s ${o.facts.Shown} open Dependabot alerts (reused while one is open), `
-        + 'then opens a herdr workspace there and starts claude as a builder on it: it lands an open Dependabot PR through sd-ship, or bumps the dependency in a worktree.',
+      consequence: o => `Files a task in ${o.facts.Repository} for ${o.slug}'s ${o.facts.Shown} open Dependabot alerts (reused while one is open), `
+        + 'then opens a Claude session there (herdr): it merges an open Dependabot pull request, or updates the dependency itself.',
       run: o => window.shell.post('/api/items', { title: `Dependabot: ${o.facts.Shown} open alerts in ${o.slug}`, repo: o.repo_path, ref: `dependabot:${o.slug}`,
         body: `${o.facts.Shown} open Dependabot alerts in ${o.slug}, ${o.grave} critical or high. Land an open Dependabot PR through sd-ship if one exists; `
           + 'else bump the dependency in a worktree. Never re-enable Actions.' })
@@ -54,10 +54,10 @@
   // grill questions as question notes; apply starts claude to edit the draft to follow each ruling, uncommitted. `ready(o)`
   // is true or why not; `post(o, path, body)` answers the server's reply.
   const GRILL = {
-    ask: { label: 'Grill', does: 'Asks first, then starts claude in herdr to write 5 to 10 questions about the draft.',
-      consequence: n => `Opens a herdr workspace in the piece's repository and starts claude on #${n}: it reads the draft and writes 5 to 10 questions as question notes. You answer them here in Details.` },
-    apply: { label: 'Apply answers', does: 'Asks first, then starts claude in herdr to edit the draft to follow your answers.',
-      consequence: n => `Opens a herdr workspace in the piece's repository and starts claude on #${n}: it edits the draft to follow each answer. The edit stays uncommitted for you to read; nothing is published.` },
+    ask: { label: 'Grill', does: 'Asks first, then has Claude write 5 to 10 questions about the draft.',
+      consequence: n => `Opens a Claude session on #${n} in the piece's repo (herdr). It reads the draft and writes 5 to 10 questions. You answer them here in Details.` },
+    apply: { label: 'Apply answers', does: 'Asks first, then has Claude edit the draft to match your answers.',
+      consequence: n => `Opens a Claude session on #${n} in the piece's repo (herdr). It edits the draft to match each answer. The edit stays uncommitted for you to read; nothing is published.` },
   };
   function grill(on, step, { item, ready, post }) {
     const g = GRILL[step];
@@ -75,11 +75,11 @@
   // rejects it with a reason, and records each there; the edit stays uncommitted and nothing is published. `ready(o)` is
   // true or why not; `post(o, path, body)` answers the server's reply.
   function applyReview(on, { item, ready, post }) {
-    return { id: `${on}.apply-review`, on, label: 'Apply review', does: 'Asks first, then starts claude in herdr to apply adversarial.md to the draft.',
+    return { id: `${on}.apply-review`, on, label: 'Apply review', does: 'Asks first, then has Claude fix the draft for each review finding.',
       icon: 'bot', risk: 'safe', askFirst: true, executes: true, when: ready,
       cli: () => 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
       sends: o => `POST /api/items/${item(o)}/fix {apply: "adversarial", revision}`,
-      consequence: o => `Opens a herdr workspace in the piece's repository and starts claude on #${item(o)}: it edits the draft for each adversarial.md finding or rejects it with a reason, and records each in adversarial.md. The edit stays uncommitted for you to read; nothing is published.`,
+      consequence: o => `Opens a Claude session on #${item(o)} in the piece's repo (herdr). For each review finding, it fixes the draft or says why not, and records each answer with the review. The edit stays uncommitted for you to read; nothing is published.`,
       run: o => Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`, { apply: 'adversarial' })).then(
         out => `Apply review started · #${item(o)} · herdr pane ${out.fix.pane}`,
         err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Apply review again`); }) };
@@ -143,7 +143,7 @@
   // Print (sd:5886): launchd's whole record of the job, in Details. It is the row's act after exit 127, where Retry is
   // not (sd:3392). The server finds the service from the installed job, not from the row. `job(o)` names { name, service, exit }.
   function printJob({ job }) {
-    return { id: 'jobs.print', on: 'job', label: 'Print', does: 'Prints launchd\'s full record of the job in Details.', key: 'p', icon: 'terminal', risk: 'safe', executes: true, primary: o => job(o).exit === 127,
+    return { id: 'jobs.print', on: 'job', label: 'Print', does: 'Shows everything macOS knows about this job in Details.', key: 'p', icon: 'terminal', risk: 'safe', executes: true, primary: o => job(o).exit === 127,
       when: o => !!job(o).service || 'the row names no launchd service', cli: o => `launchctl print ${job(o).service}`,
       sends: o => `POST /api/actions/run {action: job.print, job: ${job(o).name}}`,
       run: o => runAction(o, 'job.print', { job: job(o).name }) };
@@ -208,9 +208,9 @@
       dlg.showModal(); (dlg.querySelector('[value="build"]') || dlg.querySelector('[value="cancel"]'))?.focus();
     }
     return { id: 'item.build', on: 'item', label: 'Build', icon: 'rocket', risk: 'safe', bulk: true, executes: true, primary,
-      does: 'Queues a headless build per item; the dispatcher bundles them by repository.',
+      does: 'Queues an unattended build for each item, grouped by repo.',
       when: o => { const t = row(o); return !t ? 'the task is no longer listed' : t.status !== 'ready' ? `a build takes a ready task; this one is ${String(t.status || '').replace(/_/g, ' ').toLowerCase()}`
-        : !t.repo_path ? 'a build needs a repository' : t.assignment === 'running' || t.assignment === 'queued' ? `a runner assignment is ${t.assignment}` : true; },
+        : !t.repo_path ? 'a build needs a repository' : t.assignment === 'running' || t.assignment === 'queued' ? `an agent run is ${t.assignment} for it` : true; },
       cli: o => `sd assignments build ${row(o)?.id ?? o.id}`,
       sends: () => 'POST /api/tasks/build {items, revisions}',
       batch: (objs, done) => ask(objs, done),
@@ -238,7 +238,7 @@
       const bad = s.error || s.trackers.filter(t => !t.ok && t.configured).map(t => `${t.tracker}: ${t.reason || 'failed'}`)[0];
       if (bad) window.shell.toast(`Shadow sync ended with a problem: ${bad}`);
     }, e => window.shell.toast(`The sync's state was not read: ${e.message}`)), SYNC_POLL);
-    return { id: 'collector.sync', on: 'collector', label: 'Re-run collector', does: 'Runs shadow sync now, for up to 2 minutes, then reads again.', key: 'r', icon: 'rotate-ccw', risk: 'safe', primary: () => true,
+    return { id: 'collector.sync', on: 'collector', label: 'Re-run collector', does: 'Gets the latest from GitHub now, up to 2 minutes, then refreshes.', key: 'r', icon: 'rotate-ccw', risk: 'safe', primary: () => true,
       cli: () => 'sd shadow sync --max-seconds 120',
       run: () => window.shell.post('/api/shadow/sync', {}).then(() => { wait(); return `Shadow sync started · ${page} reads again when it ends`; }) };
   }
@@ -270,7 +270,7 @@
       e => still() && follow(key, { ...run, unread: e.message })), REVIEW_POLL);
   }
   function adversarialReview(on, { payload, when = () => true, id = `${on}.adversarial-review`, label = 'Adversarial review',
-    does = 'Starts a codex review in the background; its brief lists tasks to pick.', fields, consequence }) {
+    does = 'Starts a background review (Codex); you pick fixes from its report.', fields, consequence }) {
     return { id, on, label, does, risk: 'safe', executes: true, icon: 'shield-alert', when, fields, consequence, askFirst: !!consequence,
       cli: () => 'no sd verb: the dashboard runs local-adversarial-gate in the background',
       sends: (o, v) => `POST /api/adversarial ${JSON.stringify(payload(o, v || {}))}`,
@@ -369,13 +369,13 @@
   }
   function publishCommands(on, { base, payload, cli, reread }) {
     return [
-      { id: `${on}.publish`, on: `${on} destination`, label: 'Publish to', does: 'Designates the destination and queues the copy; Publish now drains it.', icon: 'send', risk: 'safe', askFirst: true, executes: true,
+      { id: `${on}.publish`, on: `${on} destination`, label: 'Publish to', does: 'Marks this destination and queues the copy; Publish now sends it.', icon: 'send', risk: 'safe', askFirst: true, executes: true,
         when: o => o.channel === 'obsidian' && o.repoWide ? o.repoWide
           : o.set ? `already designated for ${o.name}; untick it to remove the copy` : o.why || true,
         cli: o => cli(o.row, o.channel),
         sends: o => `POST ${base}/publish ${JSON.stringify({ ...payload(o.row), channel: o.channel })}`,
         consequence: o => o.channel === 'obsidian' ? `Designates ${o.row.label} for Obsidian and writes its Markdown into the vault now. Nothing leaves the machine.`
-          : `Designates ${o.row.label} for ${o.name} and queues it. Nothing leaves the machine until Publish now or a drain by hand.`,
+          : `Marks ${o.row.label} for ${o.name} and queues it. Nothing leaves the machine until you press Publish now, or publish it from a Claude session.`,
         run: o => window.shell.post(`${base}/publish`, { ...payload(o.row), channel: o.channel }).then(
           r => reread().then(() => r.wrote ? `Written to the vault · ${o.row.label}` : r.queued ? `Queued for ${o.name} · ${o.row.label}`
             : `${o.name} designated; not ${o.channel === 'obsidian' ? 'written' : 'queued'}: ${(r.lines || []).slice(-1)[0] || 'publish said nothing'}`),
@@ -394,28 +394,28 @@
           err => refusal(err, 'the trash was queued')),
         undo: o => window.shell.post(`${base}/publish`, { ...payload(o.row), channel: o.channel }).then(() => reread()) },
       // A row whose icon reads "designated, no copy yet": POST <base>/publish again keeps the designation and queues the copy.
-      { id: `${on}.queue-copy`, on, label: 'Queue copy', does: 'Queues the missing copy of each designated destination; Publish now drains it.', icon: 'send', risk: 'safe', askFirst: true, executes: true,
+      { id: `${on}.queue-copy`, on, label: 'Queue copy', does: 'Queues each missing copy for its destination; Publish now sends them.', icon: 'send', risk: 'safe', askFirst: true, executes: true,
         when: o => !o.pub ? `not a ${on} the dashboard publishes` : missingCopies(o.pub).length > 0 || 'every designated destination has its copy or is queued',
         cli: o => missingCopies(o.pub).map(ch => cli(o, ch)).join('\n'),
         sends: o => missingCopies(o.pub).map(ch => `POST ${base}/publish ${JSON.stringify({ ...payload(o), channel: ch })}`).join('\n'),
-        consequence: o => `Queues ${o.label} for ${missingCopies(o.pub).map(ch => PUB_NAME[ch]).join(' and ')}. Nothing leaves the machine until Publish now or a drain by hand.`,
+        consequence: o => `Queues ${o.label} for ${missingCopies(o.pub).map(ch => PUB_NAME[ch]).join(' and ')}. Nothing leaves the machine until you press Publish now, or publish it from a Claude session.`,
         // A failure after an earlier destination queued leaves that copy queued (sd:5924): the page reads again, so the row and
         // Publish now show it, and the toast names what queued and what failed. A failed reread shows on the page itself.
         run: o => {
           const want = missingCopies(o.pub), queued = [];
           let at = null;
           return want.reduce((done, ch) => done.then(() => { at = ch; return window.shell.post(`${base}/publish`, { ...payload(o), channel: ch }).then(r => { if (r.queued) queued.push(ch); }); }), Promise.resolve())
-            .then(() => reread().then(() => { const n = queued.length; return n === want.length ? `Queued ${n === 1 ? 'one copy' : `${n} copies`} · ${o.label}; Publish now drains ${n === 1 ? 'it' : 'them'}`
+            .then(() => reread().then(() => { const n = queued.length; return n === want.length ? `Queued ${n === 1 ? 'one copy' : `${n} copies`} · ${o.label}; Publish now sends ${n === 1 ? 'it' : 'them'}`
               : `${n} of ${want.length} copies queued · ${o.label}; the publish said nothing for the rest`; }),
             err => !queued.length ? refusal(err, 'the copy was queued')
               : reread().catch(() => {}).then(() => `Queued for ${queued.map(ch => PUB_NAME[ch]).join(' and ')} · ${o.label}; `
                 + ([400, 404, 409].includes(err.status) ? `${PUB_NAME[at]} refused: ${err.message}` : `whether ${PUB_NAME[at]} queued is not known: ${err.message}`)));
         } },
-      { id: `${on}.publish-now`, on, label: 'Publish now', does: 'Starts a drain that mirrors the queued copies to Notion or Drive.', icon: 'send', risk: 'safe', askFirst: true, executes: true,
+      { id: `${on}.publish-now`, on, label: 'Publish now', does: 'Copies the queued documents to Notion or Drive now.', icon: 'send', risk: 'safe', askFirst: true, executes: true,
         when: o => !o.pub ? `not a ${on} the dashboard publishes` : (o.pub.copies || []).some(c => c.state === 'queued') || 'nothing is queued: tick Drive or Notion under Publish to first',
         cli: () => 'no sd verb: drain the queue in a Claude session by the publication contract',
         sends: o => `POST ${base}/publish-now ${JSON.stringify(payload(o))}`,
-        consequence: o => `Starts claude in the background to mirror ${o.label} to each destination it is queued for, by the publication contract. It creates or updates pages and files in the configured folders only.`,
+        consequence: o => `Has Claude copy ${o.label} to each place it is queued for, in the background. It creates or updates pages and files only in the folders you set.`,
         run: o => window.shell.post(`${base}/publish-now`, payload(o)).then(run => { followDrain(base, o.id, run, reread); return `Drain started · run ${run.id}`; },
           err => refusal(err, 'a drain started')) },
     ];

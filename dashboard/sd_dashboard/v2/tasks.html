@@ -44,7 +44,7 @@
         <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>
         <input id="shift-in" autocomplete="off" spellcheck="false" placeholder="Add or find a task" aria-describedby="shift-ghost" aria-controls="shift-preview" aria-expanded="false">
         <span class="ghost" id="shift-ghost">p1 due fri #system</span>
-        <button class="help" type="button" aria-label="Help: add or find" data-help="<b>One box adds or finds.</b> <code>p1</code>–<code>p4</code> set priority, <code>due fri</code> or <code>due 2026-10-02</code> a date, <code>#system</code> a repo shown on this page, <code>#1038</code> opens that task. The rest is the title. Enter files it in Planning with sd task add; Esc clears."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button>
+        <button class="help" type="button" aria-label="Help: add or find" data-help="<b>One box adds or finds.</b> <code>p1</code>–<code>p4</code> set priority, <code>due fri</code> or <code>due 2026-10-02</code> a date, <code>#system</code> a repo shown on this page, <code>#1038</code> opens that task. The rest is the title. Enter adds it as a Planning task; Esc clears."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button>
       </div>
       <div class="preview" id="shift-preview" hidden></div>
     </div>
@@ -57,9 +57,9 @@
           <button type="button" role="menuitemradio" data-view="matrix" aria-checked="false"><svg class="i" aria-hidden="true"><use href="#i-grid-2x2"/></svg><span>Matrix</span><kbd>v m</kbd></button>
         </div>
       </div>
-      <button class="help" type="button" aria-label="Help: views" data-help="<b>List</b> sorts and filters every open task. <b>Board</b> has one column per status; a move saves at once with Undo, except Done on a repeating task, which asks first: it opens the next occurrence. <b>Matrix</b> places tasks by importance (priority 1–2) and urgency (the rule in <code>reads.is_urgent</code>: due within 7 days or overdue, a message ready to send for over 3 days, or a report that needs attention); a drop there edits priority or due."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button>
+      <button class="help" type="button" aria-label="Help: views" data-help="<b>List</b> sorts and filters every open task. <b>Board</b> has one column per status; a move saves at once with Undo, except Done on a repeating task, which asks first: it opens the next occurrence. <b>Matrix</b> places tasks by importance (priority 1–2) and urgency (due within 7 days or overdue, a message ready to send for over 3 days, or a report that needs attention); a drop there edits priority or due."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button>
       <button class="btn quiet" type="button" id="start-next"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg><span class="txt">Start next</span></button>
-      <button class="help" type="button" aria-label="Help: start next" data-help="<b>Start next</b> shows the next ready tasks first, then queues a headless build of each, as Build does; the dispatcher bundles them by repository. It offers at most 6 builders on this machine, and none while the five-minute load is above the gate's cap; a count or load that was not read queues nothing. Fix alone starts a session in herdr."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button>
+      <button class="help" type="button" aria-label="Help: start next" data-help="<b>Start next</b> shows the next ready tasks first, then queues an unattended build of each, as Build does, grouped by repo. It offers at most 6 builders on this machine, and none while the five-minute load is above the gate's cap; a count or load that was not read queues nothing. Fix opens a Claude session instead."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button>
     </div>
   </div>
   <div class="filters toolbar-2" id="filterbar" role="group" aria-label="Filters">

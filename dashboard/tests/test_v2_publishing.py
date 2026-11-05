@@ -660,7 +660,7 @@ class BriefRows(brief_tests.BriefCase):
 shellRun(cmd('brief.queue-copy'), C.get({json.dumps(stem)})); await flush();""", answer)
         self.assertIs(out["R"]["when"], True)
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/briefs/publish", {"item": item, "channel": "drive"}]])
-        self.assertIn(f"Queued one copy · {stem}; Publish now drains it", [t[0] for t in out["toasts"]])
+        self.assertIn(f"Queued one copy · {stem}; Publish now sends it", [t[0] for t in out["toasts"]])
 
     def test_queue_copy_rereads_and_names_what_queued_when_a_later_destination_fails(self):
         """sd:5924: Drive queues, then Notion fails; the page reads again, so Publish now is on, and the toast names Drive."""

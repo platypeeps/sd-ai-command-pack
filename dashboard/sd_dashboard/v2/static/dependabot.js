@@ -36,7 +36,7 @@
     return html`<tr class="band" data-band="${g.id}"><td colspan="${String(COLS)}">${mark(g.worst)} ${g.name}<span class="n">${g.shown} open · worst ${g.worst}${counts ? ` · ${counts}` : ''}${g.more ? ' · first page only' : ''}</span><button class="btn quiet sm" type="button" data-tkeep="" data-cmd="dependabot alerts.fix" data-obj="${g.id}">Fix</button></td></tr>`;
   }
   function group(g) {
-    if (!g.alerts) return html`${band(g)}<tr class="empty"><td colspan="${String(COLS)}">The alerts' details are not stored yet; the next sd shadow sync stores them. Fix works from the counts.</td></tr>`;
+    if (!g.alerts) return html`${band(g)}<tr class="empty"><td colspan="${String(COLS)}">The alerts' details are not stored yet; the next GitHub sync gets them. Fix works from the counts.</td></tr>`;
     // A count past the page read (more) lists the first page's alerts only; the band says so.
     return html`${band(g)}${g.alerts.map(a => alertRow(g, a))}`;
   }
@@ -63,7 +63,7 @@
     const more = d.groups.some(g => g.more) ? '+' : '';
     put($('dependabot-tally'), html`${d.groups.length ? `${count}${more} open in ${plural(d.groups.length, 'repo')}` : ''}`);
     put($('dependabot'), d.groups.length ? html`${d.groups.map(group)}`
-      : html`<tr class="empty"><td colspan="${String(COLS)}">${d.managed ? 'No open Dependabot alert in a managed repo that was read.' : 'No managed repository: sd shadow sync reads alerts for managed repositories only.'}</td></tr>`);
+      : html`<tr class="empty"><td colspan="${String(COLS)}">${d.managed ? 'No open Dependabot alert in a managed repo that was read.' : 'No managed repository: the GitHub sync reads alerts for managed repos only.'}</td></tr>`);
     put($('dependabot-notes'), html`${notes(d)}${d.at ? html` Alerts read <time class="rel" datetime="${d.at}"></time>.` : ''}`);
   }
   async function load() {

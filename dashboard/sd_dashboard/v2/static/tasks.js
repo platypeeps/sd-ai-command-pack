@@ -145,7 +145,7 @@ addEventListener('DOMContentLoaded', () => {
     put(document.getElementById('filters'), html`${combo('kind', 'Kind', [...same(kinds), ...bases.map(b => [`base:${b}`, kindWord(`base:${b}`)])])}${combo('repo', 'Repo', same(repos), '', 'All', true)}${
       combo('p', 'Priority', [['1', 'P1'], ['2', 'P2'], ['3', 'P3'], ['4', 'P4'], ['', 'unset']].map(([v, l]) => [v || 'unset', l]))}${
       combo('due', 'Due', DUE_OPTS, html`<button class="help" type="button" aria-label="Help: due filter" data-help="Buckets count from today. <b>≤ 7 days</b> is the same window the matrix calls urgent. An old link may name two buckets; they widen the view, and filters narrow it.">${ICON('circle-help')}</button>`)}${
-      combo('age', 'In status', AGES.map(a => [a.key, a.label]), html`<button class="help" type="button" aria-label="Help: in status filter" data-help="Days since the task's last status change, in the buckets the Operations Progress histogram counts (<code>reads.age_bucket</code>). A bar there opens its bucket here.">${ICON('circle-help')}</button>`)}${
+      combo('age', 'In status', AGES.map(a => [a.key, a.label]), html`<button class="help" type="button" aria-label="Help: in status filter" data-help="Days since the task last changed status, in the buckets the Progress histogram counts. A bar there opens its bucket here.">${ICON('circle-help')}</button>`)}${
       // sd:5643: Scope is one choice: open and done (the default) or open only; sd:5649: or Scheduled only, the repeating
       // tasks' next rows that have not opened yet. Parked left it for the toolbar's Open | Parked (sd:6701).
       combo('active', 'Scope', [['1', 'Open only'], ['scheduled', 'Scheduled only']], html`<button class="help" type="button" aria-label="Help: scope filter" data-help="<b>Open only</b> hides Done tasks, as the Operations histogram counts only open ones. The nightly prune parks an open P4 task untouched for 30 days, and a planning task that never ran untouched for 90 days; parked tasks show under the toolbar's <b>Parked</b> or <b>All</b>, and <b>Unpark</b> brings one back with its fields and history. Completing a repeating task opens its next row at once; it stays off every other scope, and off Today, until its due date less its lead. <b>Scheduled only</b> lists those rows with the day each opens.">${ICON('circle-help')}</button>`, 'Open and done')}${
@@ -211,7 +211,7 @@ addEventListener('DOMContentLoaded', () => {
         <span class="id">${label(t)}</span>${issueLink(t)}
         ${tileF(t) ? html`<select class="tile-f pri" data-edit="p" data-key="${t.key}" data-p="${String(t.p || '')}" aria-label="Priority of ${label(t)}">${t.p ? '' : html`<option value="" selected>P–</option>`}${[1, 2, 3, 4].map(n => html`<option value="${n}"${t.p === n ? html` selected` : ''}>P${n}</option>`)}</select>`
           : html`<span class="pri" data-p="${String(t.p || '')}" title="Priority">${t.p ? 'P' + t.p : 'P–'}</span>`}
-        ${t.assignment === 'running' ? html`<span class="lock" title="Runner assignment running">${ICON('lock')}</span>` : t.assignment === 'queued' ? html`<span class="queued" title="Build queued: the dispatcher claims it when there is room">queued</span>` : ''}
+        ${t.assignment === 'running' ? html`<span class="lock" title="Runner assignment running">${ICON('lock')}</span>` : t.assignment === 'queued' ? html`<span class="queued" title="Build queued; it starts when a build slot frees up">queued</span>` : ''}
         ${doneBtn(t)}${C.rowActions(t.key)}
       </div>
       <div class="t">${t.title}</div>
@@ -371,7 +371,7 @@ addEventListener('DOMContentLoaded', () => {
         <label class="label" for="start-n">Tasks to build (1–${P.room})</label>
         <input id="start-n" type="number" min="1" max="${P.room}" value="${P.room}" required>
         <ol class="start-list">${P.start.map((r, i) => html`<li data-i="${i}"><code>#${r.id}</code> ${r.title}</li>`)}</ol>
-        <p class="why">Each queues a headless build; the dispatcher bundles them by repository. Cancel on Queue › Builds stops one.</p>`}
+        <p class="why">Each queues an unattended build, grouped by repo. Cancel on Queue › Builds stops one.</p>`}
       ${P.skipped.length ? html`<details><summary>${plural(P.skipped.length, 'ready task')} left out</summary>
         <ul class="start-list">${P.skipped.map(r => html`<li><code>#${r.id}</code> ${r.title}: ${r.why}</li>`)}</ul></details>` : ''}
       <div class="actions">
@@ -682,7 +682,7 @@ addEventListener('DOMContentLoaded', () => {
   // ---------- Run sweep (sd:5096, sd:5097) ----------
   // POST /api/tasks/sweep {realm} starts that realm's sweep in the background (sd_dashboard/sweep.py); a 409 names the run going. It asks
   // first: the run files a brief and followups and saves drafts, and takes up to an hour.
-  C.register({ id: 'realm-sweep.run', on: 'sweep', label: 'Run sweep', does: 'Runs this realm\'s sweep headless: a brief, followups and drafts; sends nothing.',
+  C.register({ id: 'realm-sweep.run', on: 'sweep', label: 'Run sweep', does: 'Reads this realm\'s mail and changes; writes a brief, follow-ups and drafts. Sends nothing.',
     icon: 'play', risk: 'safe', askFirst: true, executes: true, primary: () => true,
     when: o => { const w = sweepOf(o); return !w ? 'the sweep was not read' : w.error || (w.running ? 'a sweep is running now' : true); },
     consequence: o => `Reads the ${o.id === 'sweep:work' ? 'work mail, Drive, Notion, Jira and GitHub' : 'personal mail and My Drive'} since the last run, files a dated brief and sd followups, and saves Gmail drafts. Nothing is sent or committed. Up to 60 min.`,

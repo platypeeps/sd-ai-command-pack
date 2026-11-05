@@ -106,6 +106,25 @@ class TheConfig(Case):
         self.assertEqual([a["label"] for a in tiles[0]["actions"]], ["Go"])
         self.assertEqual([p.split(":")[0] for p in problems], ["line 2", "line 3", "line 5", "line 6"])
 
+    def test_an_act_line_may_end_with_its_help_and_a_four_field_line_reads_as_before(self):
+        # Pack sd:7536: act|<tile>|<label>|<command>|<help>, the help optional; the button's hover shows it.
+        tiles, problems = place_tiles.parse("tile|acme|app|App|/x|-\nact|app|Go|true\nact|app|Stop|./app.sh stop|Stops the app.\n")
+        self.assertEqual(problems, [])
+        self.assertEqual([(a["label"], a["command"], a["argv"], a["help"]) for a in tiles[0]["actions"]],
+                         [("Go", "true", ["true"], ""), ("Stop", "./app.sh stop", ["./app.sh", "stop"], "Stops the app.")])
+
+    def test_a_command_that_holds_a_pipe_is_still_refused(self):
+        # The line splits on every |, as before the help field: a pipe in a command made too many fields, or a
+        # quote the split leaves open, and runs nothing. An empty help field is refused like any empty field.
+        tiles, problems = place_tiles.parse('tile|acme|app|App|/x|-\nact|app|Count|ls | wc -l|Counts the files.\n'
+                                            'act|app|Count|sh -c "ls | wc -l"\nact|app|Go|true|\n')
+        self.assertEqual(tiles[0]["actions"], [])
+        self.assertEqual([p.split(":")[0] for p in problems], ["line 2", "line 3", "line 4"])
+
+    def test_every_example_action_says_what_it_does(self):
+        tiles, _ = place_tiles.parse(place_tiles.EXAMPLE.read_text(encoding="utf-8"))
+        self.assertEqual([a["label"] for t in tiles for a in t["actions"] if not a["help"]], [])
+
     def test_no_file_is_an_empty_read_naming_the_file_to_copy(self):
         doc = self.doc()
         self.assertEqual((doc["state"], doc["rows"]), ("read", []))
@@ -124,7 +143,7 @@ class TheTiles(Case):
         doc = self.doc()
         self.assertEqual([(r["id"], r["here"]) for r in doc["rows"]], [("app", True), ("far", False)])
         self.assertIn("is not on this machine", doc["rows"][1]["why"])
-        self.assertEqual(doc["rows"][0]["actions"][0], {"label": "Say hi", "command": "printf hi", "last": {"state": "none"}})
+        self.assertEqual(doc["rows"][0]["actions"][0], {"label": "Say hi", "command": "printf hi", "help": "", "last": {"state": "none"}})
 
     def test_the_link_answers_does_not_or_is_not_known(self):
         up = Answering(503)

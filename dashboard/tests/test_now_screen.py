@@ -118,7 +118,7 @@ class Ranking(ScreenCase):
             (now_screen.DIRTY, "dirty:dirty-pin:1", "dirty"),
         ])
         self.assertEqual(rows[0]["what"], "system pinned 3 behind origin/main")
-        self.assertIn("refresh: local-repo-sync/repo-sync.sh refresh", rows[0]["detail"])
+        self.assertIn("to refresh now: local-repo-sync/repo-sync.sh refresh", rows[0]["detail"])
         self.assertEqual(now_screen.band(now_screen.PINNED), "look")
 
     def test_a_pinned_count_that_is_not_a_number_darkens_the_repos_source(self):
