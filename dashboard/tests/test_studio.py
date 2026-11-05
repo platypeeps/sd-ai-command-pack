@@ -729,7 +729,8 @@ class TheServer(BrowserSession):
                    project("songs/tune", "song", "assemble", "2026-11-03T10:00:00Z", [
                        ("media", [file("songs/tune/media/old.mp4", "2026-11-01T10:00:00Z"),
                                   file("songs/tune/media/new.mp4", "2026-11-03T10:00:00Z"),
-                                  file("songs/tune/media/gone.mp4", "2026-11-03T11:00:00Z", hidden=True)])])]}
+                                  file("songs/tune/media/gone.mp4", "2026-11-03T11:00:00Z", hidden=True),
+                                  file("songs/tune/media/cover.png", "2026-11-02T10:00:00Z")])])]}
         click = ("const expand = id => ELS.rows.listeners.click.forEach(f => f({ target: { closest: s => "
                  "s === '[data-expand]' ? { dataset: { expand: id } } : null } }));\n")
         return self.run_page(doc, click + body)["R"]
@@ -753,11 +754,23 @@ class TheServer(BrowserSession):
         self.assertIn('aria-label="File type"', out["filters"])
         tiles = re.findall(r'data-f="type" data-v="([^"]*)"', out["filters"])
         self.assertEqual(tiles, ["mp4", "png"])
-        self.assertIn('title="png: 1 project"', out["filters"])
+        self.assertIn('title="png: 2 projects"', out["filters"])
         self.assertIn('data-v="mp4" aria-pressed="true"', out["on"])
         self.assertNotIn('data-id="art/shirts/cat"', out["mp4"])
         self.assertIn('data-id="art/songs/tune"', out["mp4"])
         self.assertIn('data-id="art/shirts/cat"', out["off"])
+
+    def test_a_file_type_tile_narrows_an_expanded_projects_files_to_that_type(self):
+        # pack sd:7709: with mp4 pressed, an expanded song lists its mp4 results and not its png; cleared, both.
+        out = self.rendered(
+            "const press = (f, v) => ELS.filters.listeners.click.forEach(h => h({ target: { closest: s => "
+            "s === '[data-f]' ? { dataset: { f, v } } : null } }));"
+            "expand('art/songs/tune'); R.all = ELS.rows.html; press('type', 'mp4'); R.mp4 = ELS.rows.html;"
+            "press('type', 'mp4'); R.off = ELS.rows.html;")
+        self.assertIn("cover.png", out["all"])
+        self.assertIn("new.mp4", out["mp4"])
+        self.assertNotIn("cover.png", out["mp4"])
+        self.assertIn("cover.png", out["off"])
 
     def test_a_project_row_expands_and_only_one_is_expanded_at_a_time(self):
         # pack sd:7490: a disclosure button per row; opening one closes the other, a second press closes it.
