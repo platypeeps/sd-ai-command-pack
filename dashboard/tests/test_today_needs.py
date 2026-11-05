@@ -7,6 +7,7 @@ nothing the list does not show. A lane read that failed is a dark row, never an 
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from unittest import mock
 
@@ -407,3 +408,19 @@ class TheFlakyHeads(ReportsCase):
         self.assertEqual((row["band"], row["lamp"], row["partial"], row["what"]),
                          ("broken", "lane", True, "lane not read for flaky heads"))
         self.assertIn("database is locked", row["detail"])
+
+    def test_a_lane_entry_that_cannot_be_read_is_a_partial_lane_row_not_a_quiet_week(self):
+        """pack sd:7706: `_entries` counts a body that is not a lane entry; the flaky read dropped that count, so a bad
+        entry vanished and the Lane lamp read 0. It is the partial `dark:flaky` row, which names the count."""
+        self.flaky("1" * 40, 9)
+        for n in (1, 2):
+            self.connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                                    (f"lane:v1:example/alpha:bad{n}", NOW, json.dumps({"status": "merged"})))
+        self.connection.commit()
+        doc = self.today()
+        [row] = [row for row in doc["needs"] if row["id"] == "dark:flaky"]
+        self.assertEqual((row["band"], row["lamp"], row["partial"], row["what"]),
+                         ("broken", "lane", True, "lane not read for flaky heads"))
+        self.assertIn("2 lane entries could not be read", row["detail"])
+        # The heads it could read still show.
+        self.assertIn("flaky:example/alpha:" + "1" * 40, [r["id"] for r in doc["needs"]])

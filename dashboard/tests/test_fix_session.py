@@ -320,6 +320,7 @@ class TheNowRow(FixCase):
         """sd:5954: Today raised dark lane, gate, reports, mail and live rows and a partial repos row, and Fix on each was a
         400 or a 409. Each is confirmed by Today's own read now and starts claude in this checkout on the dark prompt."""
         from sd_dashboard import active_sessions, now_screen, today_mail, today_reports
+        from sd_db import reads
 
         def lane_down(connection, now):
             raise OSError("sd-ship gave no answer")
@@ -341,7 +342,9 @@ class TheNowRow(FixCase):
         cases = (("dark:lane", mock_lanes(lane_down)), ("dark:gate", mock_lanes(gate_down)),
                  ("dark:reports", patch.object(today_reports, "document", reports)),
                  ("dark:mail", patch.object(today_mail, "document", mail)),
-                 ("dark:live", patch.object(active_sessions, "document", live)))
+                 ("dark:live", patch.object(active_sessions, "document", live)),
+                 # pack sd:7706: the flaky heads' lane read raises its own partial row, and ROW_ID refused it.
+                 ("dark:flaky", patch.object(reads, "lane_entries", side_effect=sqlite3.OperationalError("locked"))))
         for row, raised in cases:
             with self.subTest(row=row):
                 with raised:
