@@ -260,6 +260,13 @@ class Publication(WritingCase):
         with self.assertRaisesRegex(WorkflowError, "restore"):
             self.dispatch(claim)
 
+    def test_a_drive_account_other_than_the_configured_one_is_refused(self):
+        # pack sd:7243 lead review class: the claim takes its account from the connector's profile, checked against the
+        # explicit configuration, never from the realm list; another signed-in account is refused, nothing claimed.
+        self.context["profile"]["email"] = "other@example.test"
+        with self.assertRaisesRegex(WorkflowError, "explicit machine configuration"):
+            self.claim()
+
     def test_claim_context_and_payload_must_be_exact(self):
         self.context["published"]["title"] = "Drafts"
         with self.assertRaisesRegex(WorkflowError, "Published"):

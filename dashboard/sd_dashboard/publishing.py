@@ -52,6 +52,10 @@ and it names each entry it seeds. `python3 -m sd_dashboard.publishing seed-obsid
 **A brief's choice** (ruling on sd:5102, note #23223) is `fields.publish.<channel>` on its item: `designate_brief` writes
 it in one transaction and calls the pack's `enqueue_briefs`, which builds the request from the row and queues it as for a
 research document; every brief render queues it again when its text changes. `undesignate_brief` unticks it as above.
+
+**A writing piece** (pack sd:7243) is designated by no one: at review or later the pack's `enqueue_pieces` queues each
+of its files, after each `sd writing` write and after the dashboard's Stage and Park (`queue_piece`, best effort).
+`piece_mirror` reads each file's copy for the Writing page's gate rows.
 """
 
 from __future__ import annotations
@@ -66,7 +70,8 @@ import urllib.parse
 from pathlib import Path
 
 __all__ = ["CHANNELS", "DESIGNATED", "OUTWARD", "PUBLISH_SECONDS", "brief_choice", "brief_copies", "brief_request", "choices", "choices_of",
-           "designate", "designate_brief", "document_copies", "item_fields", "published_fields", "remove_key", "request",
+           "designate", "designate_brief", "document_copies", "item_fields", "piece_mirror", "published_fields",
+           "queue_piece", "remove_key", "request",
            "seed_obsidian", "undesignate", "undesignate_brief", "unrequest", "brief_unrequest", "vault_repository"]
 
 #: The destinations, in the order a row shows their icons.
@@ -862,6 +867,40 @@ def designate_brief(connection, item: int, channel: str, *, enqueue=None) -> dic
     stem = row["title"]
     queued = any(line.startswith((f"mirror: queued {stem} ", f"mirror: {stem}: already queued")) for line in lines)
     return {"designated": channel, "already": already, "queued": queued, "exit": 0, "lines": lines[-12:]}
+
+
+# -- a writing piece's mirror (pack sd:7243) ------------------------------------------------------------------------
+
+
+def _piece_outs(piece: str) -> dict[str, str]:
+    """Each mirrored file's name -> its document, `writing.piece_out`, as the pack's `piece_docs` names it."""
+    from sd_db import writing
+
+    return {name: writing.piece_out(piece, stem) for stem, name in writing.MIRRORED.items()}
+
+
+def piece_mirror(checkout: Path, piece: str, folder: str | None, fields: dict, *, queue: Path | None,
+                 receipts: Path | None) -> dict:
+    """A piece's Drive `folder` (None: its stage mirrors nothing) and each mirrored file's Drive copies by file name,
+    from the queue, the receipt and the item's `fields.published`, as `document_copies` reads a document's."""
+    published = fields.get("published") if isinstance(fields.get("published"), dict) else {}
+    copies = {name: [copy for copy in document_copies(checkout, out, setting=None, unread="", fields=published,
+                                                      queue=queue, receipts=receipts)["copies"] if copy["channel"] == "drive"]
+              for name, out in _piece_outs(piece).items()}
+    return {"folder": folder, "copies": copies}
+
+
+def queue_piece(connection, item: int | None) -> list[str]:
+    """The pack's `enqueue_pieces` for one piece after a dashboard write, or every piece (`item` None) for the service
+    tick's sweep, best effort: the write is committed, so a failure is named in the lines, never raised; the next
+    write, verb or sweep queues it."""
+    try:
+        queue = getattr(kit(), "enqueue_pieces", None)
+        if queue is None:
+            return ["mirror: the installed command pack has no enqueue_pieces (pack sd:7243); the piece was not queued"]
+        return queue(connection, None if item is None else {item})
+    except Exception as error:  # noqa: BLE001 - reported; the write stands
+        return [f"mirror: piece not queued: {error or type(error).__name__}"]
 
 
 def brief_request(values: dict):
