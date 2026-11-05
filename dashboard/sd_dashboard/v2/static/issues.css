@@ -31,6 +31,20 @@
   .issues .ref { grid-area: ref; } .issues .why { grid-area: why; } .issues .what { grid-area: what; } .issues .repo { grid-area: repo; white-space: normal; } .issues .act { grid-area: act; align-self: end; } .issues .when { grid-area: act; align-self: end; text-align: right; }
   .issues tr.empty { display: block; }
 }
+/* Your issues' category groups (pack sd:7708): the Jira rows under Pull requests' repo group rows (today.css lists .cats
+ * beside .pulls for the chevron, the name and the row's press), and an Actions cell per row for the shell's ⋯ menu. */
+.cats .act { width: 1%; text-align: right; white-space: nowrap; }
+/* The Actions cell takes room the title had: a long repository breaks, as on Tracked, so the title keeps a measure. */
+.cats .repo { white-space: normal; overflow-wrap: anywhere; }
+.cats .what { min-width: 12rem; }
+.cats tr.repo .why { color: var(--color-ink-2); }
+@media (max-width: 899px) {
+  .cats tbody tr:not(.empty) { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "ref why act" "what what what" "repo when when"; }
+  .cats tbody tr.repo { grid-template-areas: "what why act" ". when when"; }
+  .cats tr.repo .repo:empty { display: none; }
+  .cats .when { grid-area: when; } .cats .act { grid-area: act; width: auto; align-self: start; }
+  .cats .what { min-width: 0; }
+}
 /* GitHub > Dependabot (pack sd:7515): the same ledger, one band per repo that the shell's table grammar folds (shell.css
  * .tfold), with Health's Fix kept beside the fold (data-tkeep); one row per alert, its severity a design.md state glyph
  * plus the word, and Open (the shell's btn quiet sm) to the alert on GitHub.
