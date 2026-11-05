@@ -518,7 +518,7 @@ shellRun(cmd('asg.get'), C.get('run:{n}')); await flush(); R.details = ELS.detai
         week = activity_screen.document(self.connection, now=NOW, jobs_backend=backend(self),
                                         window=activity_screen.RANGES["7d"])
         older = self.ids["older"]
-        out = self.run_page("""R.urls = OUT.urls.slice(); R.bar = ELS.filters.html; R.rows = ELS.rows.html; R.ann = ELS.annunciator.html;
+        out = self.run_page("""R.urls = OUT.urls.slice(); R.bar = ELS.filters.html; R.rows = ELS.rows.html; R.ann = ELS.annunciator.html; R.sub = ELS.sub.html;
 ELS.filters.listeners.click[0]({ target: { closest: s => s === '[data-f="range"]' ? { dataset: { f: 'range', v: '7d' } } : null } });
 await flush(); R.after = OUT.urls[OUT.urls.length - 1];""", "p => p === '/api/activity?range=7d' ? [200, DOC] : [404, { error: 'no answer' }]",
                             doc=week, pre="location.search = '?range=7d';")
@@ -527,6 +527,7 @@ await flush(); R.after = OUT.urls[OUT.urls.length - 1];""", "p => p === '/api/ac
         self.assertIn('class="tok" data-f="range" data-v="7d" aria-label="Remove filter: Last 7 days"', out["R"]["bar"])
         self.assertIn(f'data-id="cmd:{older}"', out["R"]["rows"], "the record 28 hours old is in the 7 days")
         self.assertIn(" in 7 d</span>", out["R"]["ann"])
+        self.assertIn("across the fleet · last 7 days to ", out["R"]["sub"])
         self.assertEqual(out["R"]["after"], [None, None])
 
     def test_only_a_link_reads_the_older_journal_records_and_its_token_goes_back_to_24h(self):
