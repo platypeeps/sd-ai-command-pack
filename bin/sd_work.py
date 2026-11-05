@@ -244,7 +244,9 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
         changes["priority"] = None
     if args.clear_due:
         changes["due"] = None
-    # Clear only: the build records a branch (`build.py`), and `edit_item` refuses any other value (sd:2729).
+    # `edit_item` refuses a clear on an in_progress row, which lint rule 2 fails (sd:2729, sd:7659).
+    if args.branch is not None:
+        changes["branch"] = args.branch
     if args.clear_branch:
         changes["branch"] = None
     # The field `add` sets and nothing could change afterwards. It is not in
@@ -1597,8 +1599,11 @@ def register(groups: Any, store: Any) -> None:
     due = edit.add_mutually_exclusive_group()
     due.add_argument("--due", help="YYYY-MM-DD; to defer the item, set a later date, or park it with --park")
     due.add_argument("--clear-due", action="store_true")
-    edit.add_argument("--clear-branch", action="store_true",
-                      help="clear a stale branch name; the build records one")
+    branch_group = edit.add_mutually_exclusive_group()
+    branch_group.add_argument("--branch", metavar="NAME",
+                              help="record the branch the item lives on; the build records one too")
+    branch_group.add_argument("--clear-branch", action="store_true",
+                              help="clear a stale branch name; an in_progress item takes --branch instead")
     # `--belongs-to` and not `--repo`: see `_belongs_to`. `--no-repo` is the
     # word `add` already uses for the same idea, so the pair reads the same on
     # both verbs.
