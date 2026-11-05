@@ -38,8 +38,8 @@
     F: { state: '', category: '', q: '' }, L: { sort: t.sort, dir: t.dir, page: 1, size: 50 } }]));
   const current = () => window.shell.view?.current?.();
   const words = (t, stage) => t.states.find(s => s[0] === stage)?.[1] || stage || 'no stage';
-  // A row's category tile: its category when the view's set names it, else other.
-  const catOf = (v, r) => (v.doc?.categories || []).includes(r.category) ? r.category : 'other';
+  // A row's category tile: the set's value the read filed it under (pack sd:7695), else other.
+  const catOf = (v, r) => (v.doc?.categories || []).includes(r.filed) ? r.filed : 'other';
   const order = (t, stage) => { const i = t.states.findIndex(s => s[0] === stage); return i < 0 ? t.states.length : i; };
   function shown(id) {
     const v = V[id], t = TYPES[id], q = v.F.q.toLowerCase().split(/\s+/).filter(Boolean);
