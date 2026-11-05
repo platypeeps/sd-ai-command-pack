@@ -64,7 +64,9 @@ class OneDeclaration(unittest.TestCase):
         # dependabot.js is GitHub's Dependabot view (pack sd:7515), loaded by github.html.
         modules = {"brief-details.js": ["briefs.html", "hoa.html", "home.html", "place.html"], "report-details.js": ["hoa.html", "home.html", "reports.html"],
                    "task-details.js": ["hoa.html", "home.html", "place.html", "tasks.html", "today.html"],
-                   "today-github.js": ["github.html"], "learning.js": ["documents.html"], "dependabot.js": ["github.html"]}
+                   "today-github.js": ["github.html"], "learning.js": ["documents.html"], "dependabot.js": ["github.html"],
+                   # pack sd:7682: the Issues page loads github.js for its read and Refresh from GitHub.
+                   "github.js": ["github.html", "issues.html"]}
         def scripts(page):
             return re.findall(r'<script src="/ui/([^"]+)"', page.read_text(encoding="utf-8"))
         for name in users:

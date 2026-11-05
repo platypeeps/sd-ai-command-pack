@@ -3,8 +3,9 @@ and issues: `/api/today/github` (`today_github`); a pull request's Copilot revie
 `/api/today/github/copilot-review`, and its Merge (sd:5668) previews with a GET and copies into the lane with a POST
 (`pr_merge`); Close original (sd:5669) previews its comment with a GET and closes with a POST (`pr_close`). Your issues
 (sd:4628) and Intake (sd:4840) are `/api/github/issues` (`issues`); File as item posts `/api/items` with the ref.
-Their rows' Hide (sd:6175) is the view state that read carries; Refresh from GitHub, on all three views,
-posts `/api/jobs/shadow-sync-nightly/retry` (pack sd:6702).
+Their rows' Hide (sd:6175) is the view state that read carries; Refresh from GitHub, on every view,
+posts `/api/jobs/shadow-sync-nightly/retry` (pack sd:6702). Pack sd:7682 moved those two views to the Issues page
+(`issues.py`); their routes stay here, since this page's Refresh from GitHub reads the sync job from the same read.
 Your issues holds the operator's GitHub issues `today_github` reads too (sd:5899), so the Pull requests view lists none.
 Dependabot (pack sd:7515) is `/api/github/dependabot` (`health_screen.dependabot_document`): the alerts `sd shadow sync`
 stored in `repo_protection`, grouped by repository; a group's Fix is Health's (`/api/items` with its `dependabot:` ref).

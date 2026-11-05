@@ -157,15 +157,19 @@ class TheDocument(ScreenCase):
         self.assertIn("{ id: 'pulls', label: 'Pull requests' }", (V2 / "static" / "github.js").read_text(encoding="utf-8"))
 
     def views(self):
-        html = (V2 / "github.html").read_text(encoding="utf-8")
-        return dict(re.findall(r'<div id="view-([a-z]+)"[^>]*>(.*?)(?=<div id="view-|</main>)', html, re.S))
+        # pack sd:7682: Your issues and Issue Intake are the Issues page's views, with the same heads and filter rows.
+        found = {}
+        for page in ("github.html", "issues.html"):
+            html = (V2 / page).read_text(encoding="utf-8")
+            found.update(re.findall(r'<div id="view-([a-z]+)"[^>]*>(.*?)(?=<div id="view-|</main>)', html, re.S))
+        return found
 
     def test_each_view_has_one_filter_row_its_table_joins(self):
         """pack sd:7215: a table that names no toolbar row gets its column filter as a second row (shell.js); each GitHub
         view's table names its view's one filter row, as Health's do."""
         views = self.views()
         self.assertEqual(sorted(views), ["dependabot", "intake", "issues", "pulls", "tracked"])
-        drawn = {"pulls": re.findall(r'<table class="ledger st"[^>]*>', PAGE_JS)}
+        drawn = {"pulls": re.findall(r'<table class="ledger st[^"]*"[^>]*>', PAGE_JS)}
         for view, body in views.items():
             rows = re.findall(r'<div class="filters toolbar-2" id="([a-z-]+)"', body)
             self.assertEqual(len(rows), 1, view)
@@ -467,13 +471,14 @@ class TheRepoColumnAndFilter(unittest.TestCase):
     BOX = ("const box = (value, checked) => ELS['github-filters'].listeners.change[0]({ currentTarget: ELS['github-filters'],"
            " target: { type: 'checkbox', checked, value, dataset: { pick: 'repo' }, getAttribute: () => null } });\n")
 
-    def test_a_repo_column_names_each_rows_repository(self):
+    def test_a_group_row_names_each_repository_so_no_repo_column_repeats_it(self):
+        # pack sd:7664: the repo groups took the Repo column's place (sd:6173).
         out = self.draw(repos_doc())
         sections = out["R"]["sections"]
-        self.assertIn('<th scope="col">Repo</th>', sections)
-        self.assertIn(f'data-key="{HUB}/example/forge/pull/3"', sections)
-        self.assertEqual(re.findall(r'<td class="src">([^<]*)</td>', sections),
-                         ["example/anvil", "example/anvil", "example/forge", "example/press"])
+        self.assertNotIn('<th scope="col">Repo</th>', sections)
+        self.assertNotIn('<td class="src">', sections)
+        self.assertEqual(re.findall(r'<tr class="repo" data-repo="([^"]+)"', sections),
+                         ["example/anvil", "example/forge", "example/press"])
 
     def test_a_two_repo_selection_hides_the_third_and_survives_a_reload(self):
         found = repos_doc()
@@ -485,11 +490,13 @@ class TheRepoColumnAndFilter(unittest.TestCase):
             return [n for n in (1, 2, 3, 4) if f"pull/{n}\"" in html]
         self.assertIn('data-pick="repo" value="example/press"', out["R"]["bar"])
         self.assertIn("2 picked", out["R"]["after"])
-        self.assertEqual(keys(out["R"]["sections"]), [1, 2, 3])
+        def groups(html):
+            return re.findall(r'<tr class="repo" data-repo="([^"]+)"', html)
+        self.assertEqual((groups(out["R"]["sections"]), keys(out["R"]["sections"])), (["example/anvil", "example/forge"], [1, 2]))
         self.assertIn("3 of 4 open pull requests", out["R"]["tally"])
         self.assertIn("example%2Fanvil%2Cexample%2Fforge", out["R"]["search"])
         again = self.draw(found, search=out["R"]["search"])
-        self.assertEqual(keys(again["R"]["sections"]), [1, 2, 3])
+        self.assertEqual(groups(again["R"]["sections"]), ["example/anvil", "example/forge"])
 
     def test_no_repo_selected_lists_every_repo_and_unpicking_goes_back(self):
         out = self.run_page(self.BOX + "show(); await flush(); R.all = ELS['github-sections'].html;"
@@ -497,8 +504,9 @@ class TheRepoColumnAndFilter(unittest.TestCase):
                             " box('example/press', false); R.back = ELS['github-sections'].html; R.s2 = location.search;",
                             f"(path, body) => [200, {json.dumps(repos_doc())}]")
         def count(html):
-            return html.count("<tr data-key=")
-        self.assertEqual((count(out["R"]["all"]), count(out["R"]["one"]), count(out["R"]["back"])), (4, 1, 4))
+            return html.count('<tr class="repo"'), html.count("<tr data-key=")
+        # The open group a pick removed gives way to the first group left (pack sd:7664).
+        self.assertEqual((count(out["R"]["all"]), count(out["R"]["one"]), count(out["R"]["back"])), ((3, 2), (1, 1), (3, 1)))
         self.assertIn("repo=example%2Fpress", out["R"]["s1"])
         self.assertEqual(out["R"]["s2"], "")
 
@@ -509,13 +517,58 @@ class TheRepoColumnAndFilter(unittest.TestCase):
                             f"(path, body) => [200, {json.dumps(found)}]")
         sections = out["R"]["sections"]
         self.assertIn('<th scope="col"><span class="sr">Actions</span></th>', sections)
-        self.assertEqual(re.findall(r'<td class="act">.*?</td>', sections, re.S).__len__(), 1)
+        self.assertEqual(len([cell for cell in re.findall(r'<td class="act">.*?</td>', sections, re.S)
+                              if cell != '<td class="act"></td>']), 1)
         self.assertEqual(re.findall(r'data-cmd="([^"]+)"', sections), ["github pull request.open"])
         self.assertIn('aria-label="Open on GitHub"', sections)
         self.assertIn(f'data-menu-for="gh:{PR}"', sections)
         self.assertEqual(out["R"]["live"], ["github pull request.open", "github pull request.item",
                                            "github pull request.adversarial-review", "github pull request.copilot-review",
                                            "github pull request.merge", "github pull request.close-original"])
+
+
+class TheRepoGroups(unittest.TestCase):
+    """pack sd:7664: the pull requests group by repository, one group open at a time, as Today's Queue view opens a repo:
+    a press on a repo opens it and closes the one that was open, a press on the open one closes it."""
+
+    run_page = TheScript.run_page
+    draw = TheScript.draw
+    OPEN = ("const open = repo => ELS['github-sections'].listeners.click[0]({ target: { closest: s => s === '[data-open]'"
+            " ? { dataset: { open: repo } } : null } });\n")
+
+    @staticmethod
+    def keys(html):
+        return [n for n in (1, 2, 3, 4) if f'data-key="{HUB}/' in html and f'/pull/{n}" data-id' in html]
+
+    @staticmethod
+    def groups(html):
+        return re.findall(r'<tr class="repo" data-repo="([^"]+)" aria-expanded="(true|false)"', html)
+
+    def test_each_repository_is_one_group_row_and_the_first_opens(self):
+        out = self.draw(repos_doc())
+        sections = out["R"]["sections"]
+        self.assertEqual(self.groups(sections), [("example/anvil", "true"), ("example/forge", "false"),
+                                                 ("example/press", "false")])
+        self.assertEqual(self.keys(sections), [1, 2])
+        self.assertIn('data-tgrid="off"', sections)
+        self.assertRegex(sections, re.compile(r'data-repo="example/anvil".*?<td class="detail">2 open pull requests</td>', re.S))
+        self.assertRegex(sections, r'<button type="button" class="disc" data-open="example/forge" aria-expanded="false"'
+                                   r' aria-label="Open example/forge">')
+
+    def test_opening_a_group_closes_the_one_that_was_open_and_a_second_press_closes_it(self):
+        out = self.run_page(self.OPEN + "show(); await flush(); open('example/forge'); R.forge = ELS['github-sections'].html;"
+                            " open('example/forge'); R.none = ELS['github-sections'].html;",
+                            f"(path, body) => [200, {json.dumps(repos_doc())}]")
+        self.assertEqual(self.groups(out["R"]["forge"]), [("example/anvil", "false"), ("example/forge", "true"),
+                                                          ("example/press", "false")])
+        self.assertEqual(self.keys(out["R"]["forge"]), [3])
+        self.assertEqual([state for _, state in self.groups(out["R"]["none"])], ["false"] * 3)
+        self.assertEqual(self.keys(out["R"]["none"]), [])
+
+    def test_a_selected_pull_request_opens_its_group(self):
+        out = self.draw(repos_doc(), f"?row=gh:{HUB}/example/press/pull/4")
+        self.assertEqual([repo for repo, state in self.groups(out["R"]["sections"]) if state == "true"], ["example/press"])
+        self.assertEqual(self.keys(out["R"]["sections"]), [4])
 
 
 PR = f"{HUB}/example/anvil/pull/1"

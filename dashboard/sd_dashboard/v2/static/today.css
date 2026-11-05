@@ -106,11 +106,11 @@
 .intents .chip:disabled { opacity: 0.5; cursor: default; }
 .needs tr.band th { padding: var(--space-sm) var(--space-xs) var(--space-2xs); text-align: left; font: 600 var(--text-2xs)/1 var(--font-label); letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-muted); border-bottom: var(--rule-hair) solid var(--color-rule); }
 .needs .what { min-width: 0; overflow-wrap: anywhere; }
-.needs .what .disc, .queue .what .disc { all: unset; float: left; display: grid; place-items: center; width: 1.25rem; height: 1.25rem; margin-right: var(--space-3xs); cursor: pointer; color: var(--color-muted); vertical-align: -0.2em; }
-.needs .what .disc + .pick, .queue .what .disc + .pick { display: flow-root; } /* beside the floated chevron, wrapping in its own box */
-.needs .what .disc .i, .queue .what .disc .i { transition: transform var(--dur-fast) var(--ease-out); }
-.needs .what .disc[aria-expanded="true"] .i, .queue .what .disc[aria-expanded="true"] .i { transform: rotate(90deg); }
-.needs .what .disc:focus-visible, .queue .what .disc:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+.needs .what .disc, .queue .what .disc, .pulls .what .disc { all: unset; float: left; display: grid; place-items: center; width: 1.25rem; height: 1.25rem; margin-right: var(--space-3xs); cursor: pointer; color: var(--color-muted); vertical-align: -0.2em; }
+.needs .what .disc + .pick, .queue .what .disc + .pick, .pulls .what .disc + .pick { display: flow-root; } /* beside the floated chevron, wrapping in its own box */
+.needs .what .disc .i, .queue .what .disc .i, .pulls .what .disc .i { transition: transform var(--dur-fast) var(--ease-out); }
+.needs .what .disc[aria-expanded="true"] .i, .queue .what .disc[aria-expanded="true"] .i, .pulls .what .disc[aria-expanded="true"] .i { transform: rotate(90deg); }
+.needs .what .disc:focus-visible, .queue .what .disc:focus-visible, .pulls .what .disc:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
 .needs tr.member .what { padding-left: var(--space-lg); font-weight: 400; }
 .needs tr.more td { padding-block: var(--space-2xs); font-size: var(--text-xs); color: var(--color-muted); }
 .needs .age, .ledger.active .num { white-space: nowrap; font: 400 var(--text-xs)/1 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
@@ -119,8 +119,8 @@
 .foot a { color: var(--color-ink-2); }
 .foot a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 @media (pointer: coarse) { .active .what a { display: flex; align-items: center; min-height: var(--row-touch); } }
-@media (pointer: coarse) { .needs .what .disc, .queue .what .disc { width: var(--row-touch); height: var(--row-touch); } .needs tr.more .linkbtn, .foot a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
-@media (prefers-reduced-motion: reduce) { .needs .what .disc .i, .queue .what .disc .i { transition: none; } }
+@media (pointer: coarse) { .needs .what .disc, .queue .what .disc, .pulls .what .disc { width: var(--row-touch); height: var(--row-touch); } .needs tr.more .linkbtn, .foot a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
+@media (prefers-reduced-motion: reduce) { .needs .what .disc .i, .queue .what .disc .i, .pulls .what .disc .i { transition: none; } }
 @media (max-width: 899px) {
   .needs tbody tr { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "g what age" ". detail detail" ". src act"; }
   .needs tbody tr.band, .needs tbody tr.more { display: block; }
@@ -152,13 +152,13 @@
 .queue .mk { width: 8rem; white-space: nowrap; font: 500 var(--text-2xs)/1.35 var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-2); }
 .queue .mk > span[aria-hidden] { display: inline-block; width: 1rem; margin-right: var(--space-2xs); text-align: center; font: 400 var(--text-xs)/1 var(--font-data); }
 .queue tr.child .mk { padding-left: var(--space-lg); }
-.queue tr.repo { cursor: pointer; }
-.queue tr.repo .mk { color: var(--color-ink); }
-.queue tr.repo .what { font: 600 var(--text-sm)/1.3 var(--font-data); }
-.queue tr.repo .what small { display: block; font: 400 var(--text-2xs)/1.3 var(--font-data); color: var(--color-muted); }
-.queue .what .pick { all: unset; cursor: pointer; overflow-wrap: anywhere; }
-.queue .what .pick:hover { text-decoration: underline; }
-.queue .what .pick:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+.queue tr.repo, .pulls tr.repo { cursor: pointer; }
+.queue tr.repo .mk, .pulls tr.repo .mk { color: var(--color-ink); }
+.queue tr.repo .what, .pulls tr.repo .what { font: 600 var(--text-sm)/1.3 var(--font-data); }
+.queue tr.repo .what small, .pulls tr.repo .what small { display: block; font: 400 var(--text-2xs)/1.3 var(--font-data); color: var(--color-muted); }
+.queue .what .pick, .pulls .what .pick { all: unset; cursor: pointer; overflow-wrap: anywhere; }
+.queue .what .pick:hover, .pulls .what .pick:hover { text-decoration: underline; }
+.queue .what .pick:focus-visible, .pulls .what .pick:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
 .queue .what code { font: 500 var(--text-xs)/1.2 var(--font-data); }
 .queue .detail { font: 400 var(--text-xs)/1.4 var(--font-data); color: var(--color-ink-2); }
 .queue .detail b { font-weight: 500; color: var(--color-ink); }
@@ -172,7 +172,7 @@
 .queue .act { text-align: right; white-space: nowrap; }
 .queue .act .ctl { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3xs); vertical-align: middle; }
 .queue .act .ctl .btn .i { margin-right: 0; }
-@media (pointer: coarse) { .queue .act .btn, .queue .what .pick { min-height: var(--row-touch); min-width: var(--row-touch); } }
+@media (pointer: coarse) { .queue .act .btn, .queue .what .pick, .pulls .what .pick { min-height: var(--row-touch); min-width: var(--row-touch); } }
 @media (max-width: 899px) {
   .queue tbody tr { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "mk num" "what what" "detail detail" "act act"; }
   .queue .mk { grid-area: mk; width: auto; } .queue .what { grid-area: what; width: auto; } .queue .detail { grid-area: detail; }
@@ -202,7 +202,7 @@
 .st .what a:hover { text-decoration: underline; }
 .st .what a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .st .id { font: 400 var(--text-xs)/1 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-muted); }
-.st .repo, .st .sub { display: block; margin-top: var(--space-3xs); font: 400 var(--text-xs)/1.3 var(--font-data); color: var(--color-muted); }
+.st td .repo, .st .sub { /* td: tr.repo is a group row (pack sd:7664) */  display: block; margin-top: var(--space-3xs); font: 400 var(--text-xs)/1.3 var(--font-data); color: var(--color-muted); }
 .st .detail { min-width: 0; overflow-wrap: anywhere; }
 .st .when { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
 .st-sec .more { margin-top: var(--space-xs); font-size: var(--text-xs); }

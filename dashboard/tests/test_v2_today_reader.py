@@ -404,7 +404,8 @@ class TheTrack(ReaderCase):
 
 HELP = {
     "jobs": "Failed scheduled jobs. Press to list them in Needs you.",
-    "lane": "Lane entries blocked until someone acts; merging and next are counted under it. Press to list the blocked ones in Needs you.",
+    "lane": "Lane entries blocked until someone acts; merging, next and flaky heads (a gate that failed, then passed at one"
+            " head) are counted under it. Press to list them in Needs you.",
     "reports": "Open job alerts and reports. Press to list them in Needs you.",
     "pulls": "Pull requests waiting on you. Press to list them in Needs you.",
     "mail": "Mail waiting for you. Press to list it in Needs you.",
@@ -551,8 +552,8 @@ class TheSnooze(ReaderCase):
 R.types = REG.filter(c => c.id.endsWith('.snooze')).map(c => c.on);
 FIELD_VALUES.until = 'snooze-week'; shellRun(cmd('repo.snooze'), C.get('ahead:pushy:1')); await flush();
 R.ahead = Date.parse(OUT.posts[0][1].until) - Date.now();""")
-        self.assertEqual(out["R"]["types"], ["item group", "job", "pull request", "repo", "sessions", "collector", "work item", "report",
-                                            "mail thread"])
+        self.assertEqual(out["R"]["types"], ["item group", "flaky group", "job", "pull request", "repo", "sessions", "collector",
+                                            "work item", "report", "mail thread", "flaky head"])
         # The row's own fingerprint goes with it, so the snooze holds only while the row reads the same.
         seen = next(row["seen"] for row in self.doc["rows"] if row["id"] == "ahead:pushy:1")
         self.assertEqual([(path, body["page"], body["row"], body["seen"]) for path, body, _ in out["posts"]],
@@ -930,3 +931,56 @@ refresh(); await flush(); shellRun(cmd('collector.fix'), C.get('dark:jobs')); aw
         self.assertEqual(out["posts"], [["/api/now/fix", {"row": "dark:jobs"}, 64]])
         self.assertEqual(out["toasts"][-1]["msg"], "jobs could not be read not changed: the jobs collector reads now; read Now again")
         self.assertEqual(out["gets"][-1], "/api/now")
+
+
+class TheFlakyHeads(ReaderCase):
+    """pack sd:7663: the flaky heads moved from Metrics to Needs you: a look group on the Lane lamp that opens to each head;
+    a head's Details name its repo, head, failures and pass, with Open item and Snooze; the group snoozes all."""
+
+    def setUp(self):
+        super().setUp()
+        from test_v2_metrics import GATE, lane_run
+
+        for item, head, repository in ((9, "1" * 40, "example/alpha"), (10, "2" * 40, "example/beta")):
+            lane_run(self.connection, f"f{item}", "failed", "2026-09-04T10:00:00Z", expected=head, reason=GATE, item=item,
+                     repository=repository)
+            lane_run(self.connection, f"p{item}", "merged", "2026-09-04T14:00:00Z", head=head, item=item,
+                     repository=repository)
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.doc = now_screen.document(self.connection, now=NOW, jobs=JobsBackend(root.name, jobs=[("nightly-sync", "failed", 7, None)]),
+                                       fleet=lambda area: fleet_document(area, repos=[repo("pushy", ahead=1)]))
+
+    ALPHA = "flaky:example/alpha:" + "1" * 40
+
+    def test_the_group_opens_to_each_head_and_a_head_shows_its_details(self):
+        out = self.run_page(TheList.IDS + TheList.CLICK + f"""R.closed = ids();
+click('rows', 'toggle', 'group:flaky'); R.open = ids();
+R.types = [C.get('group:flaky').type, C.get('{self.ALPHA}').type];
+ROWS_EL.listeners.click[0]({{ target: {{ closest: s => s === 'tr[data-id]' ? {{ dataset: {{ id: '{self.ALPHA}' }} }} : null }} }});
+R.details = ELS.details.html;
+R.cmds = REG.filter(c => c.on === 'flaky head' || c.on === 'flaky group').map(c => c.id);""")
+        r = out["R"]
+        self.assertEqual(r["closed"], ["job:nightly-sync:7", "group:flaky", "ahead:pushy:1"])
+        self.assertEqual(r["open"], ["job:nightly-sync:7", "group:flaky", self.ALPHA, "flaky:example/beta:" + "2" * 40,
+                                     "ahead:pushy:1"])
+        self.assertEqual(r["types"], ["flaky group", "flaky head"])
+        for fact in ("Flaky head · caution", '<a href="/tasks?row=9">sd:9 Item 9</a>', "<dt>Repo</dt><dd>example/alpha</dd>",
+                     "<dt>Head</dt><dd>111111111111</dd>", "<dt>Gate failed</dt><dd>2026-09-04 10:00 UTC</dd>",
+                     "<dt>Passed</dt><dd>2026-09-04 14:00 UTC · merged</dd>"):
+            self.assertIn(fact, r["details"])
+        self.assertEqual(sorted(r["cmds"]), ["flaky head.snooze", "today.flaky.open", "today.flaky.snooze"])
+
+    def test_the_lane_lamp_counts_blocked_entries_apart_from_flaky_heads(self):
+        out = self.run_page("""const lane = El('div'), val = El('span'); lane.dataset = { src: 'lane' }; lane.querySelector = () => val;
+document.querySelectorAll = sel => sel === '.cell[data-src]' ? [lane] : [];
+refresh(); await flush(); R.lane = [lane.dataset.state, val.html];""")
+        state, text = out["R"]["lane"]
+        self.assertEqual(state, "caution")
+        self.assertIn("<b>0</b> blocked", text)
+        self.assertIn("2 flaky", text)
+
+    def test_snooze_all_writes_one_snooze_per_head(self):
+        out = self.run_page("""REG.find(c => c.id === 'today.flaky.snooze').run(C.get('group:flaky')); await flush();""")
+        self.assertEqual(sorted(body["row"] for _, body, _ in out["posts"]),
+                         [self.ALPHA, "flaky:example/beta:" + "2" * 40])
