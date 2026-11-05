@@ -1316,6 +1316,18 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertIn('aria-label="1 merging, 3 working, 2 next, 2 blocked, 3 suggested"', out["R"]["html"])
         self.assertEqual(out["R"]["build"], "a build takes a ready task; this one is planning")
 
+    def test_suggested_leaves_out_an_item_with_no_repo_so_no_unassociated_group_shows(self):
+        # pack sd:7731 (operator ruling on sd:7699): a ready item with no repo is no Suggested row; it stays on Tasks.
+        def row(n, repo):
+            return {"id": n, "repo": repo, "title": f"Next {n}", "status": "ready", "why": "ready", "due": None, "priority": 2}
+        self.doc["queues"]["suggested"] = [row(60, "~/repos/example/system"), row(4501, None), row(4503, None), row(4504, "")]
+        out = self.run_view("R.repos = repos(); open('system'); R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;",
+                            search="")
+        self.assertEqual([r for r in out["R"]["repos"] if r.startswith(":")], [], "no Unassociated group")
+        self.assertNotIn("Unassociated", out["R"]["html"])
+        self.assertIn('data-type="suggested" data-item="60"', out["R"]["html"])
+        self.assertIn('Suggested <span class="n">1</span>', out["R"]["filters"])
+
     def test_ended_builds_adds_ended_rows_and_a_repo_that_has_only_those(self):
         out = self.run_view("R.before = repos(); press('ended'); R.after = repos(); open('gamma'); R.gamma = ELS.queue.html;"
                             " open('system'); R.kids = kids(); press('suggested');")
@@ -1416,13 +1428,14 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/tasks/build", {"items": [item], "revisions": {str(item): "c" * 64}}]])
 
     def test_build_on_an_unread_suggested_row_reads_the_queue_rows_repository(self):
-        """Pack sd:7275. Before Details load, Build reads the queue row: its repo path allows, a null one refuses."""
+        """Pack sd:7275. Before Details load, Build reads the queue row: its repo path allows. A null one is no
+        Suggested row since pack sd:7731, so Build finds no row and refuses."""
         item, answers = self.suggested()
         on = self.run_view(f"R.on = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
         self.assertIs(on["R"]["on"], True)
         self.doc["queues"]["suggested"][0]["repo"] = None
         off = self.run_view(f"R.off = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
-        self.assertEqual(off["R"]["off"], "a build needs a repository")
+        self.assertEqual(off["R"]["off"], "the task is no longer listed")
 
     # pack sd:7334: a planned or an unscheduled suggested row offers its next status before its Details are read, as a
     # Tasks list row does: its task is the /api/tasks row, read while Suggested shows, not only once Details open.
