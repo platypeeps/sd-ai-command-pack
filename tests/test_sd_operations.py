@@ -126,18 +126,27 @@ class OperationsCLI(unittest.TestCase):
             ended = self.call("assignments", "beat", "7", "--end", "--reason", "reported")
             for argv, why in ((["7", "--start", "--branch", "b", "--budget", "9"], "--start needs"),
                               (["7", "--worktree", "/w"], "go with --start"), (["7", "8"], "one item"),
-                              (["7", "--reason", "x"], "goes with --end")):
+                              (["7", "--reason", "x"], "goes with --start or --end"),
+                              (["7", "--into", "b"], "go with --start")):
                 with self.subTest(argv=argv), self.assertRaisesRegex(cli.WorkRefusal, why):
                     self.call("assignments", "beat", *argv)
             with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
                 self.parser.parse_args(["assignments", "beat", "7", "--start", "--end"])
+            # pack sd:7737: a second open branch of a repo names the bundle it merges into, or why it is a second PR.
+            self.call("assignments", "beat", "7", "--start", "--worktree", "/w/pack-8", "--branch", "feat/y",
+                      "--budget", "30", "--into", "feat/x", "--reason", "in-lane")
+            side = team.start.call_args.kwargs
+            self.call("assignments", "beat", "sd:7", "9", "--start", "--worktree", "/w/pack-7",
+                      "--branch", "feat/x", "--budget", "90", "--json")
             team.beat.side_effect = sd_db.SdDbError("no open teammate run holds item 7")
             with self.assertRaisesRegex(cli.WorkRefusal, "no open teammate run"):
                 self.call("assignments", "beat", "7")
         self.assertEqual(json.loads(started[1]), {"run": "r1", "due": "2026-11-02T12:00:00+00:00", "items": [7, 9]})
         self.assertEqual(team.start.call_args.args[1:], ([7, 9],))
         self.assertEqual(team.start.call_args.kwargs, {"worktree": str(Path("/w/pack-7").resolve()), "branch": "feat/x",
-                                                       "budget_minutes": 90, "owner": "operator"})
+                                                       "budget_minutes": 90, "owner": "operator", "into": None,
+                                                       "reason": None})
+        self.assertEqual((side["into"], side["reason"]), ("feat/x", "in-lane"))
         self.assertEqual((beat, ended), ((0, "teammate run r1 beat\n"), (0, "teammate run r1 ended\n")))
         self.assertEqual(team.end.call_args.kwargs, {"reason": "reported"})
         self.connect.assert_called_with(sd_db, write=True)
