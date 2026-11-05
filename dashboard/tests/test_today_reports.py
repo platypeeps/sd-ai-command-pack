@@ -7,6 +7,7 @@ person. Seen is a Today snooze; Acknowledge is the Reports page's route. A read 
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -120,6 +121,22 @@ class TheClaims(ReportsCase):
         workflow.add_item_note(self.connection, item, kind="comment", who="dashboard", body=body)
         [row] = self.read()["problems"]
         self.assertEqual(row["claim"], "dashboard has it (Fix: debug session, herdr pane w9:p1)")
+
+    def test_a_fix_note_older_than_the_claim_window_no_longer_holds_the_report(self):
+        """pack sd:7733: one Fix attempt kept Fix off on Today forever; a launch note claims for `CLAIM_HOURS`."""
+        from sd_dashboard import fix_session
+        from sd_db import workflow
+
+        item = self.report("nas-full-copy", "r1")
+        body = fix_session.NOTE.format(session="debug", item=item, pane="w9:p1", where="~/repos/system")
+        workflow.add_item_note(self.connection, item, kind="comment", who="dashboard", body=body)
+        [note] = self.connection.execute("SELECT max(id) FROM note WHERE item = ?", (item,)).fetchone()
+        hours = today_reports.CLAIM_HOURS
+        for age, held in ((hours - 1, True), (hours + 1, False)):
+            stamp = (datetime.fromisoformat(NOW.replace("Z", "+00:00")) - timedelta(hours=age)).isoformat()
+            self.connection.execute("UPDATE note SET timestamp = ? WHERE id = ?", (stamp, note))
+            [row] = self.read()["problems"]
+            self.assertEqual(row["claim"] is not None, held, f"a Fix note {age} h old")
 
 
 class TheBriefs(ReportsCase):

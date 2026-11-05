@@ -847,6 +847,25 @@ class TheCategoryStore(ScreenCase):
         self.write(issues.categories({"categories": ["Alerts", "Ingest"], "before": ["Ingest"]}))
         self.assertEqual(self.jira()["category"], "Alerts")
 
+    def test_a_removed_name_listed_again_after_another_write_starts_empty(self):
+        """pack sd:7735: a removed name's tags stayed on its issues for good, so listing it again later, by New category
+        or a rename, silently refilled the group. Undo is the next list write only; after another, the tags go."""
+        self.write(issues.categories({"categories": ["Alerts", "Ingest"], "before": []}))
+        self.write(issues.view({"key": "jira:EXAMPLE-8", "category": "Alerts"}))
+        self.write(issues.categories({"categories": ["Ingest"], "before": ["Alerts", "Ingest"]}))
+        self.write(issues.categories({"categories": ["Ingest", "Paging"], "before": ["Ingest"]}))
+        self.assertEqual(writes.views(self.connection).get(issues.view_key("jira:EXAMPLE-8"), {}).get("tags", []), [])
+        self.write(issues.categories({"categories": ["Ingest", "Paging", "Alerts"], "before": ["Ingest", "Paging"]}))
+        self.assertIsNone(self.jira()["category"])
+
+    def test_renaming_to_a_removed_name_moves_only_the_renamed_issues(self):
+        """pack sd:7735: a rename to a name removed earlier took that name's old issues along."""
+        self.write(issues.categories({"categories": ["Alerts", "Ingest"], "before": []}))
+        self.write(issues.view({"key": "jira:EXAMPLE-8", "category": "Alerts"}))
+        self.write(issues.categories({"categories": ["Ingest"], "before": ["Alerts", "Ingest"]}))
+        self.write(issues.categories({"rename": "Ingest", "to": "Alerts", "before": ["Ingest"]}))
+        self.assertIsNone(self.jira()["category"])
+
     def test_rename_moves_the_category_and_its_issues_in_one_write(self):
         self.write(issues.categories({"categories": ["Alerts", "Ingest"], "before": []}))
         self.write(issues.view({"key": "jira:EXAMPLE-8", "category": "Alerts"}))

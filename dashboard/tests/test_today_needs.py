@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta
 from unittest import mock
 
 from sd_dashboard import now_screen, queue_screen
@@ -428,3 +429,14 @@ class TheFlakyHeads(ReportsCase):
         self.assertIn("2 lane entries could not be read", row["detail"])
         # The heads it could read still show.
         self.assertIn("flaky:example/alpha:" + "1" * 40, [r["id"] for r in doc["needs"]])
+
+    def test_an_unreadable_lane_entry_older_than_the_window_is_not_counted(self):
+        """pack sd:7734: the count covered every body in history, so one old bad entry kept `dark:flaky` up for good."""
+        from sd_dashboard import metrics_screen
+
+        old = (datetime.fromisoformat(NOW.replace("Z", "+00:00"))
+               - timedelta(days=metrics_screen.CI_DAYS + 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                                ("lane:v1:example/alpha:old", old, json.dumps({"status": "merged"})))
+        self.connection.commit()
+        self.assertEqual([row["id"] for row in self.today()["needs"] if row["id"] == "dark:flaky"], [])
