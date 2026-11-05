@@ -49,14 +49,17 @@ import re
 import secrets
 import shlex
 import socket
+import subprocess
+import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from .documents import _config_dir, pipe_lines
 
-__all__ = ["CONFIG", "EXAMPLE", "PROBE_SECONDS", "REQUEST", "RESULT", "WRAP", "document", "key", "parse", "run",
-           "state_dir", "this_host"]
+__all__ = ["CONFIG", "EXAMPLE", "PROBE_SECONDS", "REQUEST", "RESULT", "START_WAIT", "WRAP", "document", "key", "parse",
+           "refresh", "run", "state_dir", "this_host"]
 
 #: In this machine's config directory, never supplied by a request.
 CONFIG = _config_dir() / "place-tiles.conf"
@@ -68,6 +71,12 @@ TAIL = 4000
 #: Runs the command, then records its exit code and end time in the file `$1`.
 WRAP = 'f=$1; shift; "$@"; c=$?; printf "%s %s\\n" "$c" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f"; exit "$c"'
 ID = re.compile(r"[a-z0-9][a-z0-9-]*")
+#: Seconds Refresh waits for the stopped server to let go of Start's lock before it calls Start refused.
+START_WAIT = 30.0
+#: The Refresh runner: a fresh interpreter, `-I` so the tile's folder shadows no module, given the dashboard and the
+#: pack library as its path, then `refresh(realm, tile, config)`.
+BOOT = ("import sys; sys.path[:0] = sys.argv[1:3]; from sd_dashboard.place_tiles import refresh; "
+        "sys.exit(refresh(*sys.argv[4:]))")
 #: The setting rows of a hosted tile's action (sd:6387): the hub's request and that host's result.
 REQUEST, RESULT = "place_tiles.request", "place_tiles.result"
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -122,9 +131,10 @@ def _update_and_refresh(tile: dict) -> None:
 
     Update pulls the latest code and restarts nothing; a tile gets it when its folder is a checkout of its own (`.git`
     there), or when its host has the folder and decides. A folder inside another checkout (a tool of a pinned
-    checkout) gets none: a pull there moves the whole checkout, which its lane or repo-sync owns. Refresh is Stop, then
-    Update, then Start, the tile's own lines, through one shell; a tile without Start and Stop runs no process to
-    restart, so it gets none. Refresh starts nothing after a failed update, as a hand-written one did.
+    checkout) gets none: a pull there moves the whole checkout, which its lane or repo-sync owns. Refresh runs the
+    tile's own Stop and Update, then starts Start as its button does, under Start's own lock (`refresh`); a tile
+    without Start and Stop runs no process to restart, so it gets none. Refresh starts nothing after a failed update,
+    as a hand-written one did. Its `argv` is empty: `run` builds the runner, which needs the file's path.
     """
     by = {_slug(a["label"]): a for a in tile["actions"]}
     if "update" not in by and (_hosted(tile) or (Path(tile["folder"]) / ".git").exists()):
@@ -132,11 +142,9 @@ def _update_and_refresh(tile: dict) -> None:
                         "help": "Pulls the latest code into this folder; restarts nothing, and refuses local changes."}
         tile["actions"].append(by["update"])
     if "refresh" not in by and all(step in by for step in ("stop", "update", "start")):
-        # Each step's argv, quoted, so the shell runs what the line split to: no $VAR, ~ or glob of its own. The
-        # hover and start.log show the script, the line the shell runs.
-        script = "{}; {} && {}".format(*(shlex.join(by[step]["argv"]) for step in ("stop", "update", "start")))
-        tile["actions"].append({"label": "Refresh", "command": script, "argv": ["/bin/sh", "-c", script],
-                                "help": f"Stops {tile['label']}, runs its Update, then starts it again."})
+        stop, update, start = (shlex.join(by[step]["argv"]) for step in ("stop", "update", "start"))
+        tile["actions"].append({"label": "Refresh", "command": f"{stop}; {update} && Start: {start}", "argv": [],
+                                "refresh": True, "help": f"Stops {tile['label']}, runs its Update, then starts it again."})
 
 
 def _read(config: Path) -> tuple[list[dict], list[str]]:
@@ -331,9 +339,10 @@ def run(payload, config: Path | None = None):
     if not folder.is_dir():
         raise ValueError(f"Nothing ran: {folder} is not on this machine, so {tile['label']} runs elsewhere.")
     state = _state(tile, action["label"])
+    argv = _refresher(tile, config) if action.get("refresh") else action["argv"]
 
     def start(connection):
-        return spawn(state, folder, ["/bin/sh", "-c", WRAP, "sh", str(state / "exit"), *action["argv"]], action["command"],
+        return spawn(state, folder, ["/bin/sh", "-c", WRAP, "sh", str(state / "exit"), *argv], action["command"],
                      f"{tile['label']} {action['label']}", prepare=lambda: (state / "exit").unlink(missing_ok=True))
 
     return start
@@ -347,3 +356,45 @@ def _ask(connection, tile: dict, action: dict):
              "tile": tile["id"], "action": action["label"]}
     writes.set_setting(connection, key(REQUEST, tile, action["label"]), json.dumps(asked))
     return 202, {"requested": asked["id"], "at": asked["at"], "host": tile["host"], "command": action["command"]}
+
+
+def _refresher(tile: dict, config: Path) -> list[str]:
+    """The argv of a tile's Refresh: `refresh` in a fresh interpreter, which the WRAP and Refresh's lock hold."""
+    from . import pack_library
+
+    return [sys.executable, "-I", "-c", BOOT, str(Path(__file__).resolve().parents[1]), str(pack_library()), "refresh",
+            tile["realm"], tile["id"], str(config)]
+
+
+def refresh(realm: str, tile_id: str, config: str) -> int:
+    """A tile's Refresh (sd:7665): its Stop, then its Update, then a start of Start through `run`, as its button does.
+
+    Start runs under its own lock, so a foreground server is Start's: Start's button reads it running and refuses a
+    second server, Refresh ends once Start is started, and the next Refresh is no 409 (review of sd:7665). The stopped
+    server may hold Start's lock a moment after Stop returns, so a 409 is tried again for `START_WAIT` seconds. The
+    output goes to Refresh's `start.log`; the exit code is Update's when it fails, 1 when Start is refused.
+    """
+    config_path = Path(config)
+    tiles, _ = _read(config_path)
+    tile = next((t for t in tiles if (t["realm"], t["id"]) == (realm, tile_id)), None)
+    by = {_slug(a["label"]): a for a in tile["actions"]} if tile else {}
+    if tile is None or _hosted(tile) or not all(step in by for step in ("stop", "update", "start")):
+        print(f"Nothing ran: {config_path.name} no longer gives {tile_id} of {realm} a Start, Stop and Update here.")
+        return 2
+    for step in ("stop", "update"):
+        print(f"$ {by[step]['command']}", flush=True)
+        code = subprocess.run(by[step]["argv"], cwd=tile["folder"], stdin=subprocess.DEVNULL, check=False).returncode
+        if step == "update" and code:
+            print(f"Update exited {code}, so Start was not pressed.", flush=True)
+            return code
+    deadline = time.monotonic() + START_WAIT
+    while True:
+        status, body = run({"realm": realm, "tile": tile_id, "action": by["start"]["label"]}, config_path)(None)
+        if status != 409 or time.monotonic() >= deadline:
+            break
+        time.sleep(0.5)
+    if status == 202:
+        print(f"Start started at {body['started']}, under its own lock: its button shows how it runs.", flush=True)
+        return 0
+    print(f"Start was not started: {body.get('error', status)}", flush=True)
+    return 1

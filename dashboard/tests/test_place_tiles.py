@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
+import signal
 import socket
 import subprocess
 import tempfile
@@ -274,15 +276,16 @@ class TheUpdateAndRefresh(Case):
                            f"act|app|Status|./app.sh status\ntile|acme|site|Site|{site}|-\nact|site|Deploy|./deploy.sh\n")
         self.assertEqual(got["app"], [("Start", ["./app.sh", "start"]), ("Stop", ["./app.sh", "stop"]),
                                       ("Status", ["./app.sh", "status"]), ("Update", ["git", "pull", "--ff-only"]),
-                                      ("Refresh", ["/bin/sh", "-c", "./app.sh stop; git pull --ff-only && ./app.sh start"])])
+                                      ("Refresh", [])])
         self.assertEqual(got["site"], [("Deploy", ["./deploy.sh"]), ("Update", ["git", "pull", "--ff-only"])])
         update = place_tiles.parse(f"tile|acme|app|App|{self.app}|-\n")[0][0]["actions"][0]
         self.assertEqual(update["command"], "git pull --ff-only")
         self.assertIn("restarts nothing", update["help"])
         refresh = place_tiles.parse(f"tile|acme|app|App|{self.app}|-\nact|app|Start|./app.sh start\n"
                                     "act|app|Stop|/bin/zsh -lc \"echo $HOME\"\n")[0][0]["actions"][-1]
-        # The hover shows the line the shell runs; each step is quoted, so the shell expands no $VAR of its own.
-        self.assertEqual(refresh["command"], "/bin/zsh -lc 'echo $HOME'; git pull --ff-only && ./app.sh start")
+        # The hover names each step's command as its line split it; Start runs through its own button (`refresh`).
+        self.assertEqual((refresh["command"], refresh["refresh"]),
+                         ("/bin/zsh -lc 'echo $HOME'; git pull --ff-only && Start: ./app.sh start", True))
 
     def test_a_folder_inside_another_checkout_or_not_here_gets_neither_and_a_hosted_one_both(self):
         # A tool folder inside a pinned checkout (no .git of its own): pulling there moves the whole checkout, which its
@@ -297,8 +300,10 @@ class TheUpdateAndRefresh(Case):
     def test_a_line_that_names_update_or_refresh_wins_and_refresh_runs_that_update(self):
         got = self.actions(f"tile|acme|app|App|{self.app}|-\nact|app|Start|s\nact|app|Stop|t\nact|app|update|./app.sh update\n"
                            f"tile|acme|own|Own|{self.app}|-|far-host\nact|own|Start|s\nact|own|Stop|t\nact|own|Refresh|./re.sh\n")
-        self.assertEqual(got["app"][2:], [("update", ["./app.sh", "update"]),
-                                          ("Refresh", ["/bin/sh", "-c", "t; ./app.sh update && s"])])
+        self.assertEqual(got["app"][2:], [("update", ["./app.sh", "update"]), ("Refresh", [])])
+        refresh = place_tiles.parse(f"tile|acme|app|App|{self.app}|-\nact|app|Start|s\nact|app|Stop|t\n"
+                                    "act|app|update|./app.sh update\n")[0][0]["actions"][-1]
+        self.assertEqual(refresh["command"], "t; ./app.sh update && Start: s")
         self.assertEqual(got["own"][2:], [("Refresh", ["./re.sh"]), ("Update", ["git", "pull", "--ff-only"])])
 
     def test_refresh_stops_updates_then_starts_and_starts_nothing_after_a_failed_update(self):
@@ -310,9 +315,73 @@ class TheUpdateAndRefresh(Case):
                                    f"act|app|Update|{update}\n", encoding="utf-8")
             self.assertEqual(self.start("Refresh")[0], 202)
             last = self.wait_done("Refresh")
+            if code == 0:
+                # Start runs under its own lock, after Refresh pressed it: its line lands when it ends.
+                self.assertEqual(self.wait_done("Start")["exit"], 0)
             self.assertEqual(((self.app / "runs").read_text(encoding="utf-8"), last["exit"]), (runs, code), update)
+        self.assertIn("Update exited 4, so Start was not pressed.", last["output"])
+
+    # Review of sd:7665: a Refresh that ran Start inline held a foreground server under Refresh's lock, so Start could
+    # launch a second server, Refresh read running for the server's life, and the next Refresh was a 409 until Stop.
+    def serve(self):
+        """A tile whose Start runs a foreground server; each server adds its pid to `pids`, and Stop ends them all."""
+        self.config.write_text(f"tile|acme|app|App|{self.app}|-\n"
+                               "act|app|Start|sh -c 'echo $$ >> pids; echo start >> runs; exec sleep 60'\n"
+                               "act|app|Stop|sh -c 'kill $(cat pids) 2>/dev/null; : > pids; echo stop >> runs'\n"
+                               "act|app|Update|sh -c 'echo update >> runs'\n", encoding="utf-8")
+        self.addCleanup(self.stop_servers)
+        status, body = self.start("Refresh")
+        self.assertEqual(status, 202, body)
+
+    def servers(self):
+        """The pids of the servers running, once the first one wrote its pid (at most 10 s)."""
+        for _ in range(200):
+            pids = (self.app / "pids").read_text(encoding="utf-8").split() if (self.app / "pids").is_file() else []
+            if pids:
+                return pids
+            time.sleep(0.05)
+        self.fail("no server started")
+
+    def stop_servers(self):
+        """Ends every test server and waits for each lock, so the folder's cleanup races no exit-record write."""
+        for pid in (self.app / "pids").read_text(encoding="utf-8").split() if (self.app / "pids").is_file() else []:
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        for action in ("start", "refresh"):
+            lock = place_tiles.state_dir() / "acme" / "app" / action / "lock"
+            if lock.is_file():
+                with open(lock, "a+", encoding="utf-8") as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX)
+
+    def test_refresh_ends_once_it_has_started_start(self):
+        self.serve()
+        last = self.wait_done("Refresh")
+        self.assertEqual((last["state"], last["exit"]), ("done", 0))
+        self.servers()
+        self.assertEqual(self.last("Start")["state"], "running", "the server is not Start's")
+
+    def test_start_after_a_refresh_is_a_409_not_a_second_server(self):
+        self.serve()
+        self.servers()
+        self.assertEqual(self.start("Start")[0], 409, "Start launched a second server")
+        self.assertEqual(len(self.servers()), 1)
+
+    def test_a_second_refresh_restarts_the_server_and_is_no_409(self):
+        self.serve()
+        first = self.servers()
+        status, body = self.start("Refresh")
+        self.assertEqual(status, 202, f"the second Refresh was refused: {body}")
+        self.assertEqual(self.wait_done("Refresh")["exit"], 0)
+        second = self.servers()
+        self.assertEqual(len(second), 1)
+        self.assertNotEqual(first, second, "the old server still runs")
+        self.assertEqual((self.app / "runs").read_text(encoding="utf-8"), "stop\nupdate\nstart\n" * 2)
 
     def test_update_pulls_the_newest_commit_into_the_checkout(self):
+        # No global or system git config: a signing or hook setting of the machine's is not this test's.
+        self.enterContext(mock.patch.dict("os.environ", {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}))
         origin, clone = self.dir / "origin", self.dir / "clone"
         self.git("init", "-q", "-b", "main", str(origin))
         self.git("commit", "-q", "--allow-empty", "-m", "one", cwd=origin)
