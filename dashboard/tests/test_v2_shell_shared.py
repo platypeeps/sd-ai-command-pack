@@ -2109,6 +2109,18 @@ class TheRowActions(unittest.TestCase):
         self.assertEqual(re.findall(r'data-cmd="([^"]+)"', html), ["x.deck", "x.slides"])
         self.assertIn('data-menu-for="r1"', html)
 
+    def test_icons_as_a_list_shows_only_those_and_an_empty_list_leaves_the_menu_alone(self):
+        # pack sd:7700: a Studio project row keeps its commands in ⋯; a primary one is not drawn on the row.
+        extra = (", { id: 'x.pin', label: 'Pin', does: 'Pins it.', icon: 'pin', risk: 'undo', undo() {}, cli: () => 'no CLI: view' },"
+                 " { id: 'x.stage', label: 'Next stage', does: 'Moves it.', icon: 'chevron-right', primary: () => true,"
+                 " risk: 'confirm', cli: () => 'no CLI: here' }")
+        deck = "{ id: 'x.deck', label: 'Build deck', does: 'Builds it.', icon: 'file-text', risk: 'safe', cli: () => 'sd deck' }"
+        html = self.row(deck, call="rowActions('r1', { icons: ['x.pin'] })", extra=extra)
+        self.assertEqual(re.findall(r'data-cmd="([^"]+)"', html), ["x.pin"])
+        html = self.row(deck, call="rowActions('r1', { icons: [] })", extra=extra)
+        self.assertEqual(re.findall(r'data-cmd="([^"]+)"', html), [])
+        self.assertIn('data-menu-for="r1"', html)
+
 
 if __name__ == "__main__":
     unittest.main()

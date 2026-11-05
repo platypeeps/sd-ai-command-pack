@@ -37,7 +37,8 @@ here. An item at a stage off its strip is refused, so a move never overwrites an
 
 **Pin and hide.** Documents' view state (`writes.set_view`), keyed `studio/<repo key>/<path in the repository>`: a
 rejected candidate hides without a delete. `view_request` refuses a file the gallery does not serve. A view store that
-does not read pins and hides nothing, and `store.reason` says why.
+does not read pins and hides nothing, and `store.reason` says why. A project pins too (sd:7700), keyed by its
+`project.json` (`project_key`), a name no gallery file takes; the page lists pinned projects first.
 
 **Actions.** `ACTIONS` here are rows of `run_actions.ACTIONS`, posted to `/api/actions/run` with a project id the
 server finds again: `studio.check` runs `make check` in its checkout, `studio.episode` and `studio.song` run the
@@ -376,6 +377,7 @@ def document(connection, *, now: str = "", repo_root: Path | None = None) -> dic
     kept, unread = views(connection)
     for entry in found:
         _stage(connection, entry)
+        entry["pinned"] = bool(kept.get(project_key(entry["id"]), {}).get("pinned"))
         for root in entry["roots"]:
             for file in root["files"]:
                 state = kept.get(view_key(f"{entry['repo']}/{file['path']}"), {})
@@ -392,6 +394,12 @@ def document(connection, *, now: str = "", repo_root: Path | None = None) -> dic
 def view_key(file: str) -> str:
     """The view key of `/studio/files/<file>`: `studio/<repo key>/<path in the repository>`."""
     return f"{VIEW_ROOT}/{file}"
+
+
+def project_key(ident: str) -> str:
+    """The view key of the project `ident` (sd:7700): its `project.json` as a file key names it. `TYPES` holds no
+    `.json`, so no gallery file shares it."""
+    return view_key(f"{ident}/{PROJECT}")
 
 
 def next_stage(kind: str, current: str | None) -> str | None:
@@ -462,10 +470,22 @@ def move_stage(connection, item: int, project: dict, target: str, *, who: str, e
 
 
 def view_request(payload: dict):
-    """`POST /api/studio/view`: `{"file", "pinned" | "hidden"}`, `file` as `/studio/files/<file>` names it; the write as
-    `action_route` returns one. A file the gallery does not serve now is refused, so a stale page writes nothing."""
+    """`POST /api/studio/view`: `{"file", "pinned" | "hidden"}`, `file` as `/studio/files/<file>` names it, or
+    `{"project", "pinned"}`, a project's id (sd:7700); the write as `action_route` returns one. A file the gallery does
+    not serve now, or a project the scan does not list now, is refused, so a stale page writes nothing."""
     from sd_db import writes
 
+    if "project" in payload:
+        if (not isinstance(payload["project"], str) or set(payload) != {"project", "pinned"}
+                or type(payload["pinned"]) is not bool):
+            raise ValueError("Send the project, and pinned, true or false.")
+        ident = payload["project"]
+
+        def pin(connection):
+            if not any(entry["id"] == ident for entry in projects(connection, listing=False)[0]):
+                raise ValueError(f"No studio project {ident} is listed: read the projects again.")
+            return {"project": ident, **writes.set_view(connection, project_key(ident), pinned=payload["pinned"])}
+        return pin
     fields = {name: payload[name] for name in ("pinned", "hidden") if name in payload}
     if (not isinstance(payload.get("file"), str) or set(payload) - {"file", "pinned", "hidden"} or not fields
             or not all(type(value) is bool for value in fields.values())):
