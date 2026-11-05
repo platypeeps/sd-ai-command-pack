@@ -599,6 +599,34 @@ def brief_needs(briefs: list[dict]) -> list[dict]:
                    QUIET, rows, source="briefs")]
 
 
+def flaky_rows(connection: sqlite3.Connection, now: str) -> list[dict]:
+    """Each flaky head of the last week as a look row on the Lane lamp (pack sd:7663; Metrics' Flaky tests until then).
+
+    `metrics_screen.flaky` finds them: a head the gate failed at, then passed at that same head. Its problem is the
+    repository, the head and the failures, so a snooze holds until the gate fails that head again.
+    """
+    from .metrics_screen import flaky
+
+    return [{"rank": ATTENTION, "kind": "flaky", "id": f"flaky:{found['repository']}:{found['head']}",
+             "what": " ".join(part for part in ("Flaky:", found["repository"],
+                                                 f"sd:{found['item']}" if found.get("item") else "",
+                                                 f"at {found['head'][:12]}") if part),
+             "detail": f"the gate failed {len(found['failed'])}× at this head, then passed at it",
+             "source": "lane", "at": found["passed"], "item": found.get("item"), "title": found["title"],
+             "repo": found["repository"], "head": found["head"], "failed": found["failed"], "passed": found["passed"],
+             "status": found["status"], "problem": [found["repository"], found["head"], found["failed"]]}
+            for found in flaky(connection, now)]
+
+
+def flaky_needs(rows: list[dict]) -> list[dict]:
+    """The flaky heads (pack sd:7663): two or more fold into one look group row that opens to them, as the work groups
+    do; a lone head is its own row."""
+    if len(rows) < 2:
+        return rows
+    return [_group("group:flaky", f"{len(rows)} flaky heads", " · ".join(sorted({row["repo"] for row in rows})),
+                   ATTENTION, rows, source="lane")]
+
+
 def grill_rows(connection: sqlite3.Connection) -> list[dict]:
     """Each weekly grill the KISS audit filed with questions open, as one queued Needs you row (pack sd:6022).
 
@@ -936,6 +964,8 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     `queues` is the Queues panel (pack sd:6946, `queues`): ready items, build queue and merge lane in one list.
     `builders` is the builder runs Details read (sd:6003, `builders`): each open build run's items, stage, start and ETA.
     `digest` is Since yesterday (sd:6002, `digest`): merged per repo, failed with why and fix, questions waiting.
+    The flaky heads (pack sd:7663, `flaky_rows`) are look rows in `needs`, a group of two or more; a lane read that failed
+    is the partial `dark:flaky` row.
     """
     collect_area, kept = fleet or fleet_module.collect, {}
 
@@ -981,16 +1011,25 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     reports, reports_snoozed = snooze.split("today", report_rows(reported["problems"]), snoozes)
     threads, mail_snoozed = snooze.split("today", mail_rows(mail["mail"]), snoozes)
     live = {row["item"] for row in active.get("rows") or []}
+    # The flaky heads (pack sd:7663): a read that failed is a partial lane row, so the Lane lamp reads unknown, never 0.
+    try:
+        flakes, flaky_dark = flaky_rows(connection, now), []
+    except (OSError, ValueError, TypeError, KeyError, SdDbError, sqlite3.Error) as failure:
+        flakes, flaky_dark = [], [{**dark_row("lane", str(failure) or "the lane entries could not be read"),
+                                   "id": "dark:flaky", "what": "lane not read for flaky heads", "partial": True}]
     # The dark rows a part read raises snooze as a dark collector does (sd:5954): each carries its `seen`, and a snoozed
     # one names its lamp, so the lamp still reads unknown (sd:5939).
     dark, dark_snoozed = snooze.split("today", [*([dark_row("lane", sources["lane"])] if sources["lane"] else []),
-                                                *unread_rows(sources, kept, queue, active, reported, mail)], snoozes)
+                                                *unread_rows(sources, kept, queue, active, reported, mail), *flaky_dark],
+                                      snoozes)
     # The Grill ready row snoozes as a work item does: its seen is its question count (pack sd:6235).
     grills, grill_snoozed = snooze.split("today", grill_rows(connection), snoozes)
+    flakes, flaky_snoozed = snooze.split("today", flakes, snoozes)
     held = [{**row, "lamp": LAMP.get(row["source"], "")} if row["kind"] == "dark" else row
-            for row in snoozed + dark_snoozed + work_snoozed + reports_snoozed + mail_snoozed + grill_snoozed]
-    listed = needs([*shown, *dark, *reports, *threads, *grills], work=work, live=live, today=now[:10],
-                   lanes=queue.get("lanes") or [], briefs=reported["briefs"])
+            for row in snoozed + dark_snoozed + work_snoozed + reports_snoozed + mail_snoozed + grill_snoozed
+            + flaky_snoozed]
+    listed = needs([*shown, *dark, *reports, *threads, *grills, *flaky_needs(flakes)], work=work, live=live,
+                   today=now[:10], lanes=queue.get("lanes") or [], briefs=reported["briefs"])
     summary = lane_summary(queue)
     motion(connection, active, queue.get("lanes") or [])
     return {"now": now, "sources": sources, "observed": observed, "rows": shown, "active": active,

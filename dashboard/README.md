@@ -70,12 +70,12 @@ Today is one page with no tabs (sd:5921, the system checkout's `system/docs/work
 Decisions are on **Decide** and GitHub on **GitHub**; an old `#view=` address opens its new home with its query.
 `sd today` prints the sections the Status tab showed.
 
-**GitHub**, at `/github` in the rail's Work group (sd:5781), has three tabs. **Pull requests** lists your open pull requests and issues, and those merged or closed in 7 days (sd:5608).
+**GitHub**, at `/github` in the rail's Work group (sd:5781), has three tabs: Pull requests, Dependabot and Tracked. **Pull requests** lists your open pull requests and issues, and those merged or closed in 7 days (sd:5608).
 `/api/today/github` (`today_github.py`) reads only what is stored: `shadow`, the Contributions projection, the
 repos with GitHub issues on, sd-ship's delivery notes and items filed under a `github:` ref; it calls no collector.
-Rows sort newest GitHub activity first; a row with no stamp says not recorded. **Your issues** lists the open Jira and
-GitHub issues assigned to you or filed by you, and **Intake** each third-party issue no item carries (sd:4628, sd:4840),
-both read from `/api/github/issues`.
+Rows sort newest GitHub activity first; a row with no stamp says not recorded. **Issues**, at `/issues` after GitHub
+(pack sd:7682), holds **Your issues**, the open Jira and GitHub issues assigned to you or filed by you, and **Issue
+Intake**, each third-party issue no item carries (sd:4628, sd:4840), both read from `/api/github/issues`.
 A pull request row opens its details in the right pane (sd:5633), with Open on GitHub, Open item, Adversarial review
 (a codex review of the pull request at its head, in its registered checkout) and Copilot review. Copilot review asks
 GitHub once per press through `POST /api/today/github/copilot-review`, which runs `gh api` for one open pull request.

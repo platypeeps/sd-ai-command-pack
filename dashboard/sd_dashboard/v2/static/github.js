@@ -1,6 +1,7 @@
-// GitHub (sd:5781): the page script. It loads before issues.js, today-github.js and shell.js, which read what it declares.
-// Three views: Pull requests (today-github.js, sd:5608), Your issues (sd:4628) and Intake (sd:4840), Today's GitHub and
-// Issues views until sd:5781. Your issues and Intake are one read, /api/github/issues (issues.document, issues.intake),
+// GitHub (sd:5781) and Issues (pack sd:7682): the two pages' script. It loads before issues.js, today-github.js and
+// shell.js, which read what it declares. GitHub's views: Pull requests (today-github.js, sd:5608), Dependabot and Tracked;
+// Issues' views: Your issues (sd:4628) and Issue Intake (sd:4840), GitHub's until pack sd:7682 and Today's Issues view
+// until sd:5781. It declares GitHub's views; issues.js, which only issues.html loads, declares the Issues page's after it. Your issues and Intake are one read, /api/github/issues (issues.document, issues.intake),
 // made when either view first shows and on Read again; issues.js draws them from the issues:read and intake:read events,
 // and counts each tab. A failed read is each table's row naming it, never an empty list.
 // Refresh from GitHub (sd:6175, pack sd:6702): the same read carries shadow-sync-nightly, the job that runs sd shadow
@@ -10,8 +11,14 @@
 // after it ends draws every view from what it stored, Pull requests and Dependabot too (githubPulls.again,
 // githubDependabot.again; pack sd:7515: Dependabot is dependabot.js's own read, /api/github/dependabot), and Tracked
 // (githubTracked.again; pack sd:7525: tracked.js's own read, /api/github/tracked).
-window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'issues', label: 'Your issues', key: 'y' },
-  { id: 'intake', label: 'Intake' }, { id: 'dependabot', label: 'Dependabot' }, { id: 'tracked', label: 'Tracked' }];
+window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'dependabot', label: 'Dependabot' }, { id: 'tracked', label: 'Tracked' }];
+// moved:start
+// pack sd:7682: an old /github address of Your issues or Intake opens the Issues page, keeping its query (?row=, ?hidden=).
+{
+  const was = (/^#view=(issues|intake)$/.exec(location.hash) || [])[1];
+  if (was && location.pathname === '/github') location.replace(`/issues${location.search}#view=${was}`);
+}
+// moved:end
 (() => {
   const SYNC_POLL = 15000, JOB = 'job:shadow-sync-nightly';
   let reads = 0, started = false, SYNC = null, SYNCED = null, polling = 0;
@@ -35,7 +42,9 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'issues', la
   const TIP = 'Gets the latest pull requests and issues from GitHub. Changes nothing on GitHub.';
   function drawSync() {
     const { html, put } = window.markup;
-    if (!SYNC) return LINES.forEach(id => { put(document.getElementById(id), html``); put(document.getElementById(id.replace('-sync', '-said')), html``); });
+    // Each page holds its own views' lines: a line the page lacks is skipped.
+    const lines = LINES.filter(id => document.getElementById(id));
+    if (!SYNC) return lines.forEach(id => { put(document.getElementById(id), html``); put(document.getElementById(id.replace('-sync', '-said')), html``); });
     window.shell.commands.put({ id: JOB, type: 'job', label: SYNC.name, job: SYNC.name });
     const c = facts().capability, running = SYNC.state === 'running', off = !c?.allowed;
     const said = running ? 'The refresh is running in the background; every view reads again when it ends.'
@@ -44,7 +53,7 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'issues', la
     const at = SYNCED?.last_success_at ? html` GitHub read <time class="rel" datetime="${SYNCED.last_success_at}"></time>.` : ' GitHub not read yet.';
     // pack sd:7084: the button sits in each view's section head tools; what it does and when GitHub was read stay under it.
     const button = html`<button class="btn quiet sm" type="button" title="${TIP}" data-cmd="jobs.retry" data-obj="${JOB}"${off ? html` disabled` : ''}><svg class="i" aria-hidden="true"><use href="#i-rotate-ccw"/></svg><span>Refresh from GitHub</span></button>`;
-    LINES.forEach(id => { put(document.getElementById(id), button); put(document.getElementById(id.replace('-sync', '-said')), html`${said}${at}`); });
+    lines.forEach(id => { put(document.getElementById(id), button); put(document.getElementById(id.replace('-sync', '-said')), html`${said}${at}`); });
   }
   document.addEventListener('DOMContentLoaded', () => {
     const retry = window.commands.retry({ job: facts,

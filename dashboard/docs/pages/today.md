@@ -22,6 +22,11 @@ Today again, then a line above Needs you says why until the next press: for a 40
 was read again, and that a press now acts on that read (pack sd:7315). Nothing retries by itself.
 A job row also has Show log, which opens the job on Management > Schedules, and Print, the `launchctl print` line to
 copy; Print is the row's act after exit 127. Both are the declarations Management and Activity use (sd:3449).
+A flaky head is a look row on the Lane lamp (pack sd:7663; Metrics' Flaky tests until then): a head the
+gate failed at, then passed at, in the last 7 days (`metrics_screen.flaky`). Two or more fold into one group
+row that opens to them. A head's Details name its repo, head, failures and pass, with Open item and Snooze;
+the group's Snooze all 1w writes one snooze per head, and a new failure at a head shows it again. A lane read
+that failed is a partial lane row, so the lamp reads unknown.
 
 ## Queue view
 

@@ -11,7 +11,7 @@
 // view (#view=now|work|inbox|status) is this page now, so its hash leaves the address.
 {
   const was = (/^#view=([a-z]+)$/.exec(location.hash) || [])[1];
-  const moved = { decisions: '/decide#view=decisions', github: '/github#view=pulls', issues: '/github#view=issues' }[was];
+  const moved = { decisions: '/decide#view=decisions', github: '/github#view=pulls', issues: '/issues#view=issues' }[was];
   if (moved) location.replace(moved.replace('#', `${location.search}#`));
   else if (['now', 'work', 'inbox', 'status'].includes(was)) history.replaceState(null, '', `/today${location.search}`);
   // pack sd:7234: Queues and In motion are the Queue view now.
@@ -33,9 +33,11 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   const SRC = { jobs: ['Jobs', 'activity', '/management', 'Management'], prs: ['Pull requests', 'git-pull-request', '/github', 'GitHub'], sessions: ['Sessions', 'bot', '/management#view=sessions', 'Management'], repos: ['Repos', 'hard-drive-download', '/management', 'Management'],
     lane: ['Lane', 'git-merge', '/today#view=queue', 'Queue'], reports: ['Reports', 'file-text', '/reports', 'Reports'], mail: ['Mail', 'mail', '', ''], tasks: ['Tasks', 'list-checks', '/tasks', 'Tasks'], briefs: ['Briefs', 'book-open', '/briefs', 'Briefs'] };
   const TYPE = { job: 'job', pr: 'pull request', ahead: 'repo', dirty: 'repo', pinned: 'repo', worktree: 'sessions', dark: 'collector', item: 'work item',
-    report: 'report', mail: 'mail thread', lane: 'lane entry', brief: 'brief', group: 'group' };
+    report: 'report', mail: 'mail thread', lane: 'lane entry', brief: 'brief', flaky: 'flaky head', group: 'group' };
   const KIND = { job: 'Job', pr: 'Pull request', ahead: 'Repo', dirty: 'Repo', pinned: 'Repo', worktree: 'Sessions', dark: 'Collector', item: 'Work item',
-    report: 'Report', mail: 'Mail', lane: 'Lane entry', brief: 'Brief', group: 'Group' };
+    report: 'Report', mail: 'Mail', lane: 'Lane entry', brief: 'Brief', flaky: 'Flaky head', group: 'Group' };
+  // A group row's command type: the briefs and the flaky heads (pack sd:7663) have their own acts; the rest are work items.
+  const GROUP = { 'group:briefs': 'brief group', 'group:flaky': 'flaky group' };
   // The intents (sd:5921): views over the one list, not tabs. Each says which rows it keeps.
   const INTENTS = [['fix', 'Fix', r => r.band === 'broken'], ['reply', 'Reply', r => ['reports', 'mail', 'pulls'].includes(r.lamp)],
     ['ship', 'Ship', r => r.kind === 'lane' || r.id === 'group:ready' || r.state === 'ready_to_send'], ['read', 'Read', r => r.source === 'briefs']];
@@ -113,6 +115,11 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       <dl><dt>Repo</dt><dd>${r.repo}</dd><dt>Why</dt><dd>${r.detail}</dd><dt>Head</dt><dd>${(r.expected_head || '').slice(0, 12) || 'not recorded'}</dd>
         <dt>Ended</dt><dd>${r.at || 'not recorded'}</dd><dt>Merge</dt><dd>${r.runner_merge}</dd></dl>
       <p><a href="#view=queue">Open the lane in Queue</a></p>${act}`;
+    // pack sd:7663: a flaky head, Metrics' Flaky tests row until then. Flakiness is per head: no store names the test.
+    if (r.kind === 'flaky') return html`${head}<h2>${r.item ? html`<a href="${shell.itemHref(r.item)}">sd:${r.item} ${r.title}</a>` : r.what}</h2>
+      <dl><dt>Repo</dt><dd>${r.repo}</dd><dt>Head</dt><dd>${r.head.slice(0, 12)}</dd>
+        <dt>Gate failed</dt><dd>${r.failed.map(t => `${day(t)} ${hm(t)} UTC`).join(' · ')}</dd><dt>Passed</dt><dd>${day(r.passed)} ${hm(r.passed)} UTC · ${r.status}</dd></dl>
+      <p class="why">The gate failed at this head, then passed at it with no new commit: a test that fails by chance. No store names the test.</p>${act}`;
     if (r.kind === 'brief') return html`${head}<h2>${r.subj}</h2>
       <dl><dt>Day</dt><dd>${r.day}</dd><dt>Series</dt><dd>${r.src}</dd><dt>Words</dt><dd>${r.words}</dd></dl>
       <h3>Body · first lines</h3><div class="mailbody">${r.lead || ''}</div>${act}`;
@@ -188,7 +195,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // What each lamp counts and what a press does (pack sd:7383): its title, then the lamp's own detail on a second line.
   const HELP = {
     jobs: 'Failed scheduled jobs. Press to list them in Needs you.',
-    lane: 'Lane entries blocked until someone acts; merging and next are counted under it. Press to list the blocked ones in Needs you.',
+    lane: 'Lane entries blocked until someone acts; merging, next and flaky heads (a gate that failed, then passed at one head) are counted under it. Press to list them in Needs you.',
     reports: 'Open job alerts and reports. Press to list them in Needs you.',
     pulls: 'Pull requests waiting on you. Press to list them in Needs you.',
     mail: 'Mail waiting for you. Press to list it in Needs you.',
@@ -208,10 +215,12 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       const st = rows.map(r => STATE[r.band]);
       cell.dataset.state = seen?.stale ? 'unknown' : st.includes('warning') ? 'warning' : st.includes('caution') ? 'caution' : st.length ? 'queued' : 'ok';
       const n = k => rows.filter(r => r.kind === k).length;
+      // pack sd:7663: the flaky heads light the Lane lamp too, a lone row or a group's members, and count apart from blocked.
+      const flaky = rs => rs.reduce((c, r) => c + (r.kind === 'flaky' ? 1 : r.id === 'group:flaky' ? r.members.length : 0), 0);
       // sd:2014: interrupted, unloaded and unknown jobs are rows too; the lamp counts the failed ones and names the rest.
       const failed = rows.filter(r => r.state === 'failed').length, other = rows.length - failed;
       put(val, s === 'jobs' ? html`<b>${failed}</b> failed${other ? html`<small>${other} other</small>` : ''}`
-        : s === 'lane' ? html`<b>${rows.length}</b> blocked<small>${L.merging ?? 0} merging · ${L.next ?? 0} next${L.unread ? ` · ${L.unread} not read` : ''}</small>`
+        : s === 'lane' ? html`<b>${n('lane')}</b> blocked<small>${L.merging ?? 0} merging · ${L.next ?? 0} next${flaky(rows) ? ` · ${flaky(rows)} flaky` : ''}${L.unread ? ` · ${L.unread} not read` : ''}</small>`
         : s === 'reports' ? html`<b>${rows.length}</b> open${DOC.problems_more ? html`<small>${DOC.problems_more}${DOC.problems_capped ? '+' : ''} more on Reports</small>` : ''}`
         : s === 'pulls' ? html`<b>${rows.length}</b> for you`
         : s === 'mail' ? html`<b>${rows.length}</b> waiting${DOC.mail_more || unread.length ? html`<small>${DOC.mail_more ? `${DOC.mail_more} more in Gmail` : ''}${DOC.mail_more && unread.length ? ' · ' : ''}${unread.length ? `${plural(unread.length, 'repo')} not read` : ''}</small>` : ''}`
@@ -238,7 +247,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   function objectOf(r) {
     const pr = r.kind === 'pr' && r.id.match(/^pr:(.+)#(\d+):\d+$/);
     const job = r.kind === 'job' && r.id.match(/^job:(.+):[^:]+$/);
-    return { id: r.id, type: r.group ? (r.id === 'group:briefs' ? 'brief group' : 'item group') : TYPE[r.kind] || r.kind, label: r.what,
+    return { id: r.id, type: r.group ? GROUP[r.id] || 'item group' : TYPE[r.kind] || r.kind, label: r.what,
              failed: r.kind === 'job' && !!r.retry, retry: r.retry, job: job && job[1], service: r.service,
              exit: r.exit, revision: r.revision, capability: r.capability, repo: pr ? pr[1] : r.repo, number: pr && +pr[2], seen: r.seen,
              item: r.item, itemKind: r.item_kind, state: r.state, url: r.url, fieldsRead: r.fields_read, until: r.until, login: r.login,
@@ -907,6 +916,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
         askFirst: o => o.members.length > BULK, consequence: o => `Writes ${o.members.length} snoozes, one per member; each member comes back on its own after a week or by Unsnooze.`,
         cli: () => 'no sd verb: the dashboard writes one snooze per member (POST /api/snooze)',
         run: o => each(o, m => ({ page: 'today', row: m.id, until: week(), seen: m.seen })).then(() => `Snoozed ${o.members.length} for a week · ${o.label}`) },
+      // A flaky head (pack sd:7663): Open item, and Snooze below; its group snoozes every head for a week.
+      { id: 'today.flaky.open', on: 'flaky head', label: 'Open item', does: 'Opens the item whose head the gate failed, then passed.', key: 'o', icon: 'arrow-up-right', risk: 'safe', executes: false, primary: () => true,
+        when: o => !!o.item || 'the lane entry named no item', cli: o => `sd task show ${o.item}`, run: o => shell.openItem(o.item) },
+      { id: 'today.flaky.snooze', on: 'flaky group', label: 'Snooze all 1w', does: 'Hides every flaky head for a week, one snooze each.', key: 'z', icon: 'clock', risk: 'safe', primary: () => true,
+        askFirst: o => o.members.length > BULK, consequence: o => `Writes ${o.members.length} snoozes, one per head; each comes back after a week, by Unsnooze, or when its gate fails again.`,
+        cli: () => 'no sd verb: the dashboard writes one snooze per head (POST /api/snooze)',
+        run: o => each(o, m => ({ page: 'today', row: m.id, until: week(), seen: m.seen })).then(() => `Snoozed ${o.members.length} for a week · ${o.label}`) },
       // The Queue view and the day track (sd:6714): a live item opens, shows its builder's assignment, or gets a Fix
       // session, posted with the revision the read gave; a landed item opens.
       { id: 'today.live.open', on: 'live item', label: 'Open item', does: 'Opens the item on Tasks.', key: 'o', icon: 'arrow-up-right', risk: 'safe', executes: false, primary: () => true,
@@ -925,7 +941,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
         run: o => each(o, m => ({ page: 'today', row: m.id, until: m.until, seen: m.seen })).then(() => `Seen · ${o.members.length} briefs`) },
     );
     // Snooze (sd:1896) on every row type that ends by time: the row leaves Today until then, and Unsnooze brings it back.
-    window.snooze.register(C, { page: 'today', types: ['job', 'pull request', 'repo', 'sessions', 'collector', 'work item', 'report', 'mail thread'], reread: () => load() });
+    window.snooze.register(C, { page: 'today', types: ['job', 'pull request', 'repo', 'sessions', 'collector', 'work item', 'report', 'mail thread', 'flaky head'], reread: () => load() });
 
     $('rows').addEventListener('click', e => {
       if (e.target.closest('.rowact')) return;

@@ -74,9 +74,14 @@ class TheRail(unittest.TestCase):
         self.assertIn(("Decide", "list-checks", "l"), group("Now"))
 
     def test_work_gains_github_after_tasks(self):
-        self.assertEqual([name for name, _, _ in group("Work")], ["Tasks", "GitHub", "Writing", "Research", "Contributions"])
+        self.assertEqual([name for name, _, _ in group("Work")], ["Tasks", "GitHub", "Issues", "Writing", "Research", "Contributions"])
         self.assertIn(("GitHub", "git-branch", "b"), group("Work"))
         self.assertIn('<symbol id="i-git-branch"', js("icons.js"))
+
+    def test_issues_is_its_own_rail_entry_after_github(self):
+        # pack sd:7682 (operator 2026-11-05): Your issues and Issue Intake left GitHub for a rail entry of their own.
+        self.assertIn(("Issues", "circle-dot", "u"), group("Work"))
+        self.assertIn('<symbol id="i-circle-dot"', js("icons.js"))
 
     def test_no_page_is_named_review_any_more(self):
         sections = {page.section for page in registry().PAGES}
@@ -89,6 +94,10 @@ class TheGitHubRegistration(Registers, unittest.TestCase):
     page, section, route = "github", "GitHub", "/github"
     api = ("/api/today/github", "/api/github/issues", "/api/github/dependabot", "/api/github/tracked", "/api/github/issues/view", "/api/today/github/copilot-review", "/api/today/github/merge/preview",
            "/api/today/github/merge", "/api/today/github/close/preview", "/api/today/github/close")
+
+
+class TheIssuesRegistration(Registers, unittest.TestCase):
+    page, section, route = "issues", "Issues", "/issues"
 
 
 class TheTabs(unittest.TestCase):
@@ -120,17 +129,36 @@ class TheTabs(unittest.TestCase):
         found = {page.name: page for page in registry().PAGES}["decide"]
         self.assertEqual((found.section, found.routes, found.html), ("Decide", ("/decide", "/review"), "decide.html"))
 
-    def test_github_has_pull_requests_your_issues_intake_dependabot_and_tracked(self):
-        # pack sd:7515 added Dependabot, pack sd:7525 Tracked (Operations > Trackers until then).
-        self.assertEqual(views(js("github.js")), [("pulls", "Pull requests"), ("issues", "Your issues"), ("intake", "Intake"),
-                                                  ("dependabot", "Dependabot"), ("tracked", "Tracked")])
-        self.assertEqual(panels("github.html"), ["pulls", "issues", "intake", "dependabot", "tracked"])
+    def test_github_has_pull_requests_dependabot_and_tracked(self):
+        # pack sd:7515 added Dependabot, pack sd:7525 Tracked (Operations > Trackers until then); pack sd:7682 moved
+        # Your issues and Intake to the Issues page.
+        self.assertEqual(views(js("github.js")), [("pulls", "Pull requests"), ("dependabot", "Dependabot"), ("tracked", "Tracked")])
+        self.assertEqual(panels("github.html"), ["pulls", "dependabot", "tracked"])
         page = (V2 / "github.html").read_text(encoding="utf-8")
-        for there in ('id="github-sections"', '<tbody id="issues">', '<tbody id="intake">', '<tbody id="dependabot">', '<tbody id="tracked">', 'id="details"'):
+        for there in ('id="github-sections"', '<tbody id="dependabot">', '<tbody id="tracked">', 'id="details"', 'id="pulls-sync"'):
             with self.subTest(there=there):
                 self.assertIn(there, page)
-        # The view keys differ: Your issues takes y, so i is Intake's.
-        self.assertIn("{ id: 'issues', label: 'Your issues', key: 'y' }", js("github.js"))
+        for gone in ('<tbody id="issues">', '<tbody id="intake">', "/ui/issues.js", 'aria-label="Your issues"', 'aria-label="Intake"', 'id="issues-sync"'):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, page)
+
+    def test_issues_has_your_issues_and_issue_intake(self):
+        # pack sd:7682: GitHub > Intake is Issue Intake, on the Issues page with Your issues; github.js still reads
+        # /api/github/issues and draws Refresh from GitHub on both pages, and issues.js declares the views after it.
+        self.assertEqual(views(js("issues.js")), [("issues", "Your issues"), ("intake", "Issue Intake")])
+        self.assertEqual(panels("issues.html"), ["issues", "intake"])
+        page = (V2 / "issues.html").read_text(encoding="utf-8")
+        self.assertIn("<title>Issues · system</title>", page)
+        self.assertIn('data-page="Issues"', page)
+        self.assertIn('<div id="view-intake" aria-label="Issue Intake"', page)
+        for there in ('<tbody id="issues">', '<tbody id="intake">', 'id="issues-sync"', 'id="intake-sync"', 'id="details"'):
+            with self.subTest(there=there):
+                self.assertIn(there, page)
+        scripts = re.findall(r'<script src="/ui/([\w-]+\.js)"></script>', page)
+        self.assertLess(scripts.index("github.js"), scripts.index("issues.js"))
+        self.assertLess(scripts.index("issues.js"), scripts.index("shell.js"))
+        # The view keys stay: Your issues takes y, so i is Issue Intake's.
+        self.assertIn("{ id: 'issues', label: 'Your issues', key: 'y' }", js("issues.js"))
 
     def test_the_moved_scripts_name_no_today_hook(self):
         # todayPick and todayCount were today.js's; the moved views now count and select on their own page.
@@ -151,7 +179,7 @@ class TheOldAddresses(unittest.TestCase):
         self.assertEqual(moved(today, search="?row=7", hash="#view=decisions"), [["replace", "/decide?row=7#view=decisions"]])
         self.assertEqual(moved(today, search="?row=gh%3Aexample%2Frepo%2312&gh=all", hash="#view=github"),
                          [["replace", "/github?row=gh%3Aexample%2Frepo%2312&gh=all#view=pulls"]])
-        self.assertEqual(moved(today, hash="#view=issues"), [["replace", "/github#view=issues"]])
+        self.assertEqual(moved(today, hash="#view=issues"), [["replace", "/issues#view=issues"]])
         for old in ("now", "inbox", "status", "work"):
             with self.subTest(view=old):
                 self.assertEqual(moved(today, search="?row=item%3A7", hash=f"#view={old}"),
@@ -159,6 +187,19 @@ class TheOldAddresses(unittest.TestCase):
         for stays in ("#main", ""):
             with self.subTest(hash=stays):
                 self.assertEqual(moved(today, hash=stays), [])
+
+
+    def test_githubs_old_issue_views_open_the_issues_page_with_the_query(self):
+        # pack sd:7682: a bookmark of /github#view=issues or #view=intake lands on the Issues page.
+        github = js("github.js")
+        self.assertEqual(moved(github, path="/github", search="?row=iss%3Aexample&hidden=1", hash="#view=issues"),
+                         [["replace", "/issues?row=iss%3Aexample&hidden=1#view=issues"]])
+        self.assertEqual(moved(github, path="/github", hash="#view=intake"), [["replace", "/issues#view=intake"]])
+        for stays in ("#view=pulls", "#view=tracked", ""):
+            with self.subTest(hash=stays):
+                self.assertEqual(moved(github, path="/github", hash=stays), [])
+        # The Issues page loads the same script: its own views stay where they are.
+        self.assertEqual(moved(github, path="/issues", hash="#view=intake"), [])
 
 
 class TheBadges(ScreenCase):

@@ -25,7 +25,7 @@ and points each view at `GET /api/place/<id>/overview`, `/tasks`,
 - Tasks: the open items `places.realm_of` puts in the realm, the rows of
   Tasks under that Realm.
   Under them, Issues (sd:6164, `places.realm_issues`): the open GitHub and
-  Jira issues GitHub's Your issues reads (`/api/github/issues`) whose repo
+  Jira issues Issues' Your issues reads (`/api/github/issues`) whose repo
   the realm owns, each with its source and a link to its tracker. An issue
   outside the issue sources counts by its registered checkout; an upstream
   one stays off. An issue Hide hid (sd:6175) stays off until Show hidden.

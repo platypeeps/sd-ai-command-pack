@@ -1,7 +1,8 @@
 // Metrics (sd:2119): the design source's products/system/designs/pages/metrics.js, ported. Each change from the reference is
 // marked "build:". The readings are /api/metrics (metrics_screen.py), read through the shared reader; none is sample data.
 // A part that did not read, and each panel no reader covers, is unknown with its reason.
-// sd:5473: CI health and Flaky tests read the merge lane's gate runs (metrics_screen._ci), not GitHub Actions.
+// sd:5473: CI health reads the merge lane's gate runs (metrics_screen._ci), not GitHub Actions. The flaky heads moved
+// to Today's Needs you (pack sd:7663).
 // Writes (sd:3387): Cap and Configure post /api/bills/<bill>/cap and /api/providers/configure with the revision the page
 // read (controls.revision). A 400 or 409 wrote nothing; any other failure, or no answer, leaves the outcome unknown.
 // build: bars are SVG rects sized by attribute, not CSSOM widths, and the age chart is the design's bar list only.
@@ -88,13 +89,10 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
         facts: [['Passed', r.passed], ['Gate failed', r.gate], ['Pass rate', rate(r.rate)], ['Stopped by review', r.review], ['Stopped otherwise', r.other], ['Failed, no reason kept', r.unknown],
           ['Last failure', said(r.newest)], ['Its reason', r.newest ? r.newest.reason || '—' : '—'], ['Last gate failure', said(r.newest_gate)], src],
         note: 'Pass rate is passed over gate runs. A review stop or a conflict ran no gate.', open: r.newest ? [window.shell.itemHref(r.newest.item), `Open sd:${r.newest.item} in Tasks`] : null, cli: lane }));
-      pc.flaky.forEach(f => put1(`flaky:${f.repository}:${f.head}`, { kind: 'CI · flaky head', title: `sd:${f.item} · ${f.head.slice(0, 12)}`, s: 'caution',
-        facts: [['Repository', f.repository], ['Item', f.title || '—'], ['Head', f.head], ['Gate failed', f.failed.map(at).join(' · ')], ['Passed', `${at(f.passed)} (${f.status})`], src],
-        note: 'Per head, not per test: the gate failed at this head, then passed at it with no new commit.', open: [window.shell.itemHref(f.item), `Open sd:${f.item} in Tasks`], cli: lane }));
     }
     put1('ci', d.ci.error ? { kind: 'CI · not read', title: 'CI health', s: 'unknown', facts: [['Reason', d.ci.error]], cli: 'sd-ship -C CHECKOUT lane list' }
-      : { kind: `CI · ${d.ci.days} days`, title: 'Gate runs through the merge lane', s: d.ci.flaky.length ? 'caution' : 'ok',
-        facts: [['Since', at(d.ci.since)], ['Repositories', d.ci.repos.length], ['Flaky heads', d.ci.flaky.length], ['Unreadable entries', d.ci.unreadable], ['Source', 'reads.lane_entries']], cli: 'sd-ship -C CHECKOUT lane list' });
+      : { kind: `CI · ${d.ci.days} days`, title: 'Gate runs through the merge lane', s: 'ok',
+        facts: [['Since', at(d.ci.since)], ['Repositories', d.ci.repos.length], ['Unreadable entries', d.ci.unreadable], ['Source', 'reads.lane_entries']], cli: 'sd-ship -C CHECKOUT lane list' });
     if (d.lanes && !d.lanes.error) d.lanes.lanes.filter(l => l.times.error || l.times.entries).forEach(l => put1(`lane:${l.path}`, l.times.error
       ? { kind: 'Lane times · not read', title: l.repo, s: 'unknown', facts: [['Reason', l.times.error]], cli: `sd-ship -C ${l.path} lane list` }
       : { kind: `Lane times · ${l.times.days} days`, title: l.repo, s: l.times.over ? 'caution' : 'ok',
@@ -113,9 +111,8 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   const mins = s => s == null ? 'none ended' : dur(Math.round(s));
   // A repository name may break after its owner, so a narrow table keeps every column on screen.
   const slashed = name => { const cut = name.indexOf('/'); return cut < 0 ? name : html`${name.slice(0, cut + 1)}<wbr>${name.slice(cut + 1)}`; };
-  // A repository with a flaky head is caution, as its row in Flaky tests; a gate failure alone is the gate doing its job.
-  const flakyIn = repo => (part('ci')?.flaky || []).filter(f => f.repository === repo).length;
-  const ciState = r => flakyIn(r.repository) ? 'caution' : r.passed + r.gate ? 'ok' : 'unknown';
+  // A gate failure alone is the gate doing its job; a flaky head is a row on Today (pack sd:7663), not a lamp here.
+  const ciState = r => r.passed + r.gate ? 'ok' : 'unknown';
 
   // ---------- Annunciator ----------
   function readCells() {
@@ -126,11 +123,10 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     if (!u.error) u.meter.filter(m => m.window_minutes === d.trend.window).forEach(m => out.push({ id: `w-${m.provider}`, label: `${m.provider} week`, view: 'spend', state: stale || pctState(m.used_percent), ev: `win:${m.provider}:${m.window_minutes}`,
       val: html`<b>${Math.round(m.used_percent)}%</b> used`, small: `meter ${String(m.timestamp).slice(5, 16).replace('T', ' ')}Z` }));
     if (!u.error) out.push({ id: 'bound', label: 'Estimated spend', view: 'spend', state: stale || (u.bound.length ? 'caution' : 'ok'), ev: 'bound', val: html`<b>${u.bound.length}</b> bound`, small: u.bound.length ? 'rows to check against invoices' : 'no row to check' });
-    // The lamp lights for a flaky head alone, as metrics_screen._attention counts it.
     const ci = d.ci, runs = ci.error ? 0 : ci.repos.reduce((n, r) => n + r.passed + r.gate, 0), passed = ci.error ? 0 : ci.repos.reduce((n, r) => n + r.passed, 0);
     out.push(ci.error ? { id: 'ci', label: 'CI 7d', view: 'ci', state: 'unknown', ev: 'ci', val: html`<b>—</b> not read`, small: ci.error }
       : !runs ? { id: 'ci', label: 'CI 7d', view: 'ci', state: 'unknown', ev: 'ci', val: html`<b>—</b> no gate run`, small: `in ${ci.days} days` }
-      : { id: 'ci', label: 'CI 7d', view: 'ci', state: ci.flaky.length ? 'caution' : 'ok', ev: 'ci', val: html`<b>${rate(passed / runs)}</b> passed`, small: `${plural(runs, 'gate run')} · ${plural(ci.flaky.length, 'flaky head')}` });
+      : { id: 'ci', label: 'CI 7d', view: 'ci', state: 'ok', ev: 'ci', val: html`<b>${rate(passed / runs)}</b> passed`, small: plural(runs, 'gate run') });
     return out;
   }
   // the oldest reading on the page: a kept part (sd:4955) can be older than the request.
@@ -236,13 +232,11 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   }
   function ci() {
     const c = part('ci');
-    if (!c || c.error) { put($('ci-state'), unknownBlock(c ? c.error : 'the Metrics document did not arrive')); put($('ci-body'), html``); put($('flaky-body'), html``); return; }
+    if (!c || c.error) { put($('ci-state'), unknownBlock(c ? c.error : 'the Metrics document did not arrive')); put($('ci-body'), html``); return; }
     put($('ci-state'), c.unreadable ? html`<p class="foot-note"><span class="g-unknown" aria-hidden="true">▨</span> ${plural(c.unreadable, 'lane entry', 'lane entries')} ${c.unreadable === 1 ? 'is' : 'are'} not readable and ${c.unreadable === 1 ? 'is' : 'are'} not counted.</p>` : html``);
     put($('ci-body'), c.repos.length ? html`${c.repos.map(r => { const st = ciState(r), stopped = r.review + r.other + r.unknown;
-      return row(`ci:${r.repository}`, html`<td class="g g-${st}">${G[st]}<span class="sr">${st === 'caution' ? 'caution: a flaky head' : st}</span></td><td class="what"><button type="button">${slashed(r.repository)}</button></td><td class="num hide-sm">${r.passed}</td><td class="num">${r.gate}</td><td class="num">${rate(r.rate)}</td><td class="num hide-sm">${stopped}</td><td class="mono hide-sm">${r.newest ? `sd:${r.newest.item} · ${r.newest.kind}` : '—'}</td>`); })}`
+      return row(`ci:${r.repository}`, html`<td class="g g-${st}">${G[st]}<span class="sr">${st}</span></td><td class="what"><button type="button">${slashed(r.repository)}</button></td><td class="num hide-sm">${r.passed}</td><td class="num">${r.gate}</td><td class="num">${rate(r.rate)}</td><td class="num hide-sm">${stopped}</td><td class="mono hide-sm">${r.newest ? `sd:${r.newest.item} · ${r.newest.kind}` : '—'}</td>`); })}`
       : html`<tr><td colspan="7" class="why">No lane entry ended ${within(c)}.</td></tr>`);
-    put($('flaky-body'), c.flaky.length ? html`${c.flaky.map(f => row(`flaky:${f.repository}:${f.head}`, html`<td class="what"><button type="button">sd:${f.item}</button><small>${f.repository}</small></td><td class="mono">${f.head.slice(0, 12)}</td><td class="mono hide-sm">${f.failed.map(at).join(' · ')}</td><td class="mono">${at(f.passed)}</td>`))}`
-      : html`<tr><td colspan="4" class="why">No head failed its gate and then passed at that head ${within(c)}.</td></tr>`);
   }
   // Lane times (pack sd:6006, moved from Queue in pack sd:7233): one row per lane with an entry in 7 days, a read that
   // failed its own unknown row; the quiet lanes fold into one line. A median wait past an hour is caution, in words too.
