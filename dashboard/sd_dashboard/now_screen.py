@@ -509,10 +509,12 @@ def lane_rows(lanes: list[dict]) -> list[dict]:
 
 
 def report_rows(problems: list[dict]) -> list[dict]:
-    """The open problem reports as Needs you rows (sd:5921), in the look band; Acknowledge is each one's act."""
+    """The open problem reports as Needs you rows (sd:5921), in the look band; Fix and Acknowledge are each one's acts, and
+    a report another session took names who has it (pack sd:7683)."""
     return [{**problem, "rank": ATTENTION, "kind": "report", "what": f"Report: {problem['title']}",
              "detail": " · ".join(part for part in (problem.get("why"), f"on {problem['host']}" if problem.get("host") else "",
-                                                     f"repeats {problem['repeats']}×" if problem.get("repeats") else "") if part)
+                                                     f"repeats {problem['repeats']}×" if problem.get("repeats") else "",
+                                                     problem.get("claim")) if part)
                        or "asks for a person",
              "source": "reports", "problem": [problem["title"], problem.get("why")]}
             for problem in problems]

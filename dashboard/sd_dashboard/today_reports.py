@@ -7,6 +7,9 @@ Two lists, read from the workflow database and from nothing else:
   read, which is for a person to look at as well (`reporting.UNREADABLE_FIELDS`). A quiet run report is left out, as the
   backlog leaves it out. Acknowledge posts the Reports page's route, `/api/reports/<id>/acknowledge`, with the revision.
   A report whose output shows an expired login carries `login` (`job_failures.login`), which Fix opens (sd:6964).
+  Fix on any other report is the Reports page's debug session (pack sd:7683). A report another session already took
+  carries `claim`, who has it: `in_progress`, by its status change's `who`, or a note Fix wrote (`fix_session.NOTE`),
+  by that note's session; Today then names it in place of Fix.
 - `briefs`: the routine briefs (`briefs_screen`) filed in the last `WINDOW_DAYS` days, newest first, that the operator has
   not marked seen. Seen is a Today snooze (`snooze`), key `today:brief:<stem>`, held until the brief changes
   (`writes.SNOOZE_FOREVER`, sd:5752): the place pages' Briefs (`places.briefs`) read the same mark (`seen_row`), so a brief
@@ -19,13 +22,14 @@ A read that fails is its reason (`problems_error`, `briefs_error`), never an emp
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from sd_db import reads, reporting, writes
 from sd_db.errors import SdDbError
 
-from . import briefs_screen, job_failures, snooze
+from . import active_sessions, briefs_screen, job_failures, snooze
 
 __all__ = ["READ", "SHOWN", "WINDOW_DAYS", "document", "seen_row"]
 
@@ -52,6 +56,25 @@ def _open(row) -> bool:
     return not (isinstance(fields, dict) and fields.get("attention") is False)
 
 
+#: A status change's body, as `writes.transition` writes it: `<old> -> <new> by <who>`, then `: <reason>` if given.
+MOVED = re.compile(r"-> in_progress by (?P<who>.+?)(?:: |$)")
+
+
+def claim(connection, row) -> str | None:
+    """Who has the report (pack sd:7683): the session that moved it to `in_progress`, else the newest Fix note's; None
+    while nobody took it."""
+    notes = reads.item_notes(connection, row["id"])
+    if row["status"] == "in_progress":
+        moved = [MOVED.search(note["body"]) for note in notes if note["kind"] == "status_change"]
+        who = next((found["who"] for found in reversed(moved) if found), None)
+        return f"{who or 'someone'} has it (in_progress)"
+    for note in reversed(notes):
+        found = note["kind"] == "comment" and active_sessions.LAUNCH.match(note["body"])
+        if found:
+            return f"{note['session'] or 'a session'} has it (Fix: {found['session']} session, herdr pane {found['pane']})"
+    return None
+
+
 def _problem(connection, row, revision: str) -> dict:
     try:
         fields = reporting.fields_document(connection, row["fields"])
@@ -72,7 +95,7 @@ def _problem(connection, row, revision: str) -> dict:
             "job": report.get("job") or None, "exit": report.get("exit_code"), "host": report.get("host") or None,
             "why": basis.splitlines()[0] if basis else ("its fields cannot be read" if not readable else ""),
             "basis": basis, "repeats": repeats.get("count"), "body": text[-BODY_CHARS:], "cut": len(text) > BODY_CHARS,
-            "revision": revision, "fields_read": readable, "login": job_failures.login(text)}
+            "revision": revision, "fields_read": readable, "login": job_failures.login(text), "claim": claim(connection, row)}
 
 
 def problems(connection: sqlite3.Connection) -> tuple[list[dict], int, bool]:

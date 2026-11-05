@@ -511,7 +511,7 @@ shellRun(cmd('work item.fix'), C.get('item:{self.task}')); await flush();""")
 
     def test_fix_on_a_report_with_an_expired_login_opens_its_credentials_row(self):
         """sd:6964: a job alert whose log shows claude signed out gets Fix, first, to Health > Credentials' claude row;
-        a report with no login cause keeps Acknowledge first, and Fix is off there."""
+        a report with no login cause keeps Acknowledge first, and Fix there is the Reports page's (pack sd:7683)."""
         from sd_db import reporting
 
         def report(job, text):
@@ -534,7 +534,40 @@ shellRun(fix, o); await flush();""")
         self.assertEqual(out["toasts"][-1]["msg"], "Health opens on claude")
         self.assertEqual((out["posts"], out["confirms"]), ([], []))
         self.assertEqual(out["R"]["primary"], [True, False, False, True])
-        self.assertEqual(out["R"]["off"], "no expired login in its log: Fix it from Reports")
+        self.assertIs(out["R"]["off"], True)
+
+    def test_fix_on_a_report_is_the_reports_debug_session_unless_another_session_has_it(self):
+        """pack sd:7683: a report row offers Fix as Reports does, a debug session posted with the read's revision, beside
+        Acknowledge; a report another session took names who has it, in the row and Details, and offers no Fix."""
+        from sd_db import reporting, workflow, writes
+
+        def report(job):
+            return reporting.ingest(self.connection, job=job, run_id="r1", started="2026-09-06T09:00:00Z",
+                                    ended="2026-09-06T09:01:00Z", exit_code=1, text="mirror failed\n", source_path="/tmp/x.log",
+                                    attention=True, attention_basis="job exited 1")["item"]["id"]
+        plain, taken = report("nas-full-copy"), report("hoa-core-bills")
+        writes.transition(self.connection, taken, "in_progress", who="hub-triage", reason="triage")
+        revision = workflow.item_state(self.connection, plain)["revision"]
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.doc = now_screen.document(self.connection, now=NOW, jobs=JobsBackend(root.name, jobs=[]),
+                                       fleet=lambda area: fleet_document(area, repos=[]))
+        out = self.run_page(ICONS + f"""ANSWER = (path, body) => path.endsWith('/fix') ? [200, {{ revision: 'e'.repeat(64), fix: {{ session: 'debug', pane: 'w9:p1' }} }}] : [200, DOC0];
+refresh(); await flush();
+const fix = cmd('report.fix'), o = C.get('report:{plain}'), t = C.get('report:{taken}');
+R.drawn = OUT.drawn['report:{plain}']; R.plain = icons('report:{plain}'); R.taken = icons('report:{taken}');
+R.off = fix.when(t); R.says = fix.consequence(o);
+window.PAGE_LIST.select('report:{taken}'); R.details = ELS.details.html;
+shellRun(fix, o); await flush();""")
+        self.assertTrue(out["R"]["drawn"], "a report row draws its icon actions, Fix beside Acknowledge")
+        self.assertEqual([c for c, _, _ in out["R"]["plain"]], ["report.fix", "today.report.ack"])
+        self.assertEqual([c for c, _, _ in out["R"]["taken"]], ["today.report.ack"])
+        self.assertEqual(out["R"]["off"], "hub-triage has it (in_progress): open its session in herdr, or Fix it from Reports")
+        self.assertIn(f"Opens a Claude session on report #{plain} in herdr", out["R"]["says"])
+        self.assertIn("hub-triage has it (in_progress)", out["R"]["details"])
+        self.assertEqual(out["confirms"], ["report.fix"])
+        self.assertEqual(out["posts"], [[f"/api/items/{plain}/fix", {"revision": revision}, 64]])
+        self.assertEqual(out["toasts"][-1]["msg"], f"Fix started · #{plain} · debug session in herdr pane w9:p1")
 
     def test_a_stale_fix_reads_now_again_and_says_why(self):
         out = self.run_page("""ANSWER = (path, body) => path.endsWith('/fix') ? [409, { error: 'item changed; reload it before applying this change', reload: true }] : [200, DOC0];
