@@ -225,7 +225,7 @@ let polling = 0;
   }
   const attachForms = () => html`<form class="attach-form" data-attach="upload"><input type="file" name="file" required aria-label="File to upload"><button class="btn quiet sm" type="submit">Upload</button></form>
     <form class="attach-form" data-attach="reference"><input type="url" name="link" required placeholder="Drive link" aria-label="Drive link to reference"><input type="text" name="name" placeholder="Name" aria-label="Reference name"><button class="btn quiet sm" type="submit">Reference</button></form>
-    <p class="why" role="status" data-attach-said>Upload and Reference write into this asset's folder in the water committee's Drive.</p>`;
+    <p class="why" role="status" data-attach-said>Upload and Reference write into this asset's Drive folder.</p>`;
   async function drawAttachments(a) {
     const live = window.shell.shown('attach', `asset:${a.id}`, () => selected); if (!live || !$('attach')) return;
     put($('attach'), html`<p class="note">Reading Drive…</p>`);

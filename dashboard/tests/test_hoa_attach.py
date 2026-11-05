@@ -99,20 +99,23 @@ class Case(Fixture):
 
 
 class TheFolders(unittest.TestCase):
-    def test_each_asset_type_has_its_water_system_folder(self):
-        self.assertEqual(hoa_attach.place({"id": "V-01", "type": "valve"}), ("Main", "V-01"))
-        self.assertEqual(hoa_attach.place({"id": "HYD-03", "type": "hydrant"}), ("Main", "HYD-03"))
-        self.assertEqual(hoa_attach.place({"id": "WELL-A1", "type": "well"}), ("Well A1", None))
-        self.assertEqual(hoa_attach.place({"id": "WELL-A2", "type": "well"}), ("Well A2", None))
-        self.assertEqual(hoa_attach.place({"id": "TANK-01", "type": "tank"}), ("Cistern", None))
+    def test_each_asset_type_has_its_folder(self):
+        water, light = hoa_attach.FOLDER_KEY, hoa_attach.LIGHT_KEY
+        self.assertEqual(hoa_attach.place({"id": "V-01", "type": "valve"}), (water, "Main", "V-01"))
+        self.assertEqual(hoa_attach.place({"id": "HYD-03", "type": "hydrant"}), (water, "Main", "HYD-03"))
+        self.assertEqual(hoa_attach.place({"id": "WELL-A1", "type": "well"}), (water, "Well A1", None))
+        self.assertEqual(hoa_attach.place({"id": "WELL-A2", "type": "well"}), (water, "Well A2", None))
+        self.assertEqual(hoa_attach.place({"id": "TANK-01", "type": "tank"}), (water, "Cistern", None))
         # sd:7516: the booster station, the "submarine", files under Submarine.
-        self.assertEqual(hoa_attach.place({"id": "BST-1", "type": "booster"}), ("Submarine", None))
-        with self.assertRaisesRegex(ValueError, "has no Water System folder"):
+        self.assertEqual(hoa_attach.place({"id": "BST-1", "type": "booster"}), (water, "Submarine", None))
+        # sd:7667: the irrigation system, point or line, is Water System/Irrigation; a street light LGT-n is
+        # Light System/LGT-n, a folder the operator made per pole.
+        self.assertEqual(hoa_attach.place({"id": "IRR-1", "type": "irrigation"}), (water, "Irrigation", None))
+        self.assertEqual(hoa_attach.place({"id": "IRL-1", "type": "irrline"}), (water, "Irrigation", None))
+        self.assertEqual(hoa_attach.place({"id": "LGT-3", "type": "light"}), (light, "LGT-3", None))
+        with self.assertRaisesRegex(ValueError, "has no attachment folder"):
             hoa_attach.place({"id": "X-1", "type": "meter"})
-        # sd:7516: a street light or irrigation line is no Water System asset: its listing is that 400, not a folder.
-        for asset in ({"id": "LGT-1", "type": "light"}, {"id": "IRL-1", "type": "irrline"}):
-            with self.assertRaisesRegex(ValueError, "has no Water System folder"):
-                hoa_attach.place(asset)
+        self.assertEqual(light, "hoa.light_system_folder")
 
 
 class TheListing(Case):
@@ -169,6 +172,63 @@ class TheListing(Case):
                 self.assertEqual(got[0], 503)
                 self.assertIn("unreadable", got[1]["error"])
         self.assertEqual(self.drive.writes(), [], "an unreadable listing makes no folder")
+
+
+class TheOtherSystems(Case):
+    """sd:7667: the irrigation system lists under Water System; a street light under the Light System folder."""
+
+    def setUp(self):
+        super().setUp()
+        assets = json.loads(json.dumps(test_v2_hoa.LIGHTS))
+        assets["features"].append({"type": "Feature", "properties": {**assets["features"][0]["properties"],
+                                                                     "id": "IRR-1", "type": "irrigation"},
+                                   "geometry": {"type": "Point", "coordinates": [10.0002, 50.0002]}})
+        (self.hoa / "water" / "map" / "assets.geojson").write_text(json.dumps(assets), encoding="utf-8")
+        self.drive.items["ROOT"].append(("Irrigation", "IRR", FOLDER))
+        self.drive.items.update({"IRR": [("zones.pdf", "DOC2", "application/pdf")], "LIGHTS": [
+            ("LGT-1", "L1", FOLDER), ("LGT-2", "L2", FOLDER)], "L1": [("pole.jpg", "PIC2", "image/jpeg")], "L2": []})
+        writes.set_setting(self.connection, hoa_attach.LIGHT_KEY, "LIGHTS")
+
+    def test_the_irrigation_and_a_light_pole_list_their_own_folders(self):
+        got = hoa_attach.listing(self.connection, {"asset": ["IRR-1"]})
+        self.assertEqual((got["folder"], [f["name"] for f in got["files"]]),
+                         ("https://drive.google.com/drive/folders/IRR", ["zones.pdf"]))
+        got = hoa_attach.listing(self.connection, {"asset": ["IRL-1"]})
+        self.assertEqual(got["folder"], "https://drive.google.com/drive/folders/IRR")
+        before = len(self.drive.calls)
+        got = hoa_attach.listing(self.connection, {"asset": ["LGT-1"]})
+        self.assertEqual((got["folder"], [f["name"] for f in got["files"]]),
+                         ("https://drive.google.com/drive/folders/L1", ["pole.jpg"]))
+        self.assertEqual([a["folder_id"] for _, a in self.drive.calls[before:]], ["LIGHTS", "L1"],
+                         "a pole is found under the Light System folder, never Water System")
+        self.assertEqual(self.drive.writes(), [])
+
+    def test_an_upload_to_a_light_pole_writes_into_its_folder(self):
+        staged = self.stage()
+        self.assertEqual(self.attach({"asset": "LGT-1", "sha256": staged["sha256"], "name": "a.jpg"})[0], 200)
+        self.assertEqual([(t, a["folder_id"]) for t, a in self.drive.writes()], [("create_drive_file", "L1")])
+
+    def test_an_unset_light_setting_is_no_folder_yet_and_an_upload_names_it(self):
+        # The pack lands before hoa declares the key and before it is set: a pole lists no folder and no files,
+        # nothing is read or made, and an upload is refused naming the setting.
+        writes.set_setting(self.connection, hoa_attach.LIGHT_KEY, None)
+        got = hoa_attach.listing(self.connection, {"asset": ["LGT-1"]})
+        self.assertEqual(got, {"asset": "LGT-1", "folder": "", "files": []})
+        self.assertEqual(self.drive.calls, [], "an unset light setting asks Drive nothing")
+        status, body = self.attach({"asset": "LGT-1", "link": "https://drive.google.com/file/d/X/view"})
+        self.assertEqual(status, 503)
+        self.assertIn("Nothing was written: hoa.light_system_folder is not set", body["error"])
+        self.assertEqual(self.drive.writes(), [])
+        self.assertIsInstance(hoa_attach.listing(self.connection, {"asset": ["TANK-01"]}), dict,
+                              "an unset light setting leaves the water assets read")
+
+    def test_a_light_pole_with_no_folder_is_named_and_never_made(self):
+        writes.set_setting(self.connection, hoa_attach.LIGHT_KEY, "LIGHTS")
+        self.drive.items["LIGHTS"] = [("LGT-2", "L2", FOLDER)]
+        status, body = hoa_attach.listing(self.connection, {"asset": ["LGT-1"]})
+        self.assertEqual(status, 503)
+        self.assertIn("The Light System folder has no folder named LGT-1.", body["error"])
+        self.assertEqual(self.drive.writes(), [], "a pole's folder is the operator's, never made")
 
 
 class TheUpload(Case):
