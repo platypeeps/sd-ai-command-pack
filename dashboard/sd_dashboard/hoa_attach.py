@@ -1,12 +1,13 @@
-"""HOA map attachments (sd:6690): an asset's documents and pictures, held in the water committee's Drive.
+"""HOA map attachments (sd:6690): an asset's documents and pictures, held in the HOA's Drive folders.
 
 No new store: an asset's attachments are its Drive folder's listing. The design is
 `docs/work/2026-10-30-hoa-attachments/design.md`; its failure table names each step's recovery.
 
-- **Where.** The `hoa.water_system_folder` setting holds the Water System folder id, and `hoa.google_account` the
-  account workspace-mcp reads it as. Subfolders are found by name (`place`): a valve or hydrant is `Main/<asset id>`,
-  made on its first attachment; `WELL-A1` and `WELL-A2` are `Well A1` and `Well A2`; the tank is `Cistern`; the booster
-  station is `Submarine`.
+- **Where.** The `hoa.water_system_folder` setting holds the Water System folder id, `hoa.light_system_folder` the
+  Light System folder id, and `hoa.google_account` the account workspace-mcp reads them as. Subfolders are found by
+  name (`place`): a valve or hydrant is `Main/<asset id>`, made on its first attachment; `WELL-A1` and `WELL-A2` are
+  `Well A1` and `Well A2`; the tank is `Cistern`; the booster station is `Submarine`; the irrigation system, point or
+  line, is `Irrigation` (sd:7667). A street light `LGT-n` is `LGT-n` under Light System, a folder the operator made.
 - **List**, `GET /api/hoa/attachments?asset=<id>`: the folder's items. A `.url` file is a Reference; its target is read
   from its text. A missing asset folder is an empty list, and nothing is made.
 - **Picture**, `GET /api/hoa/attachments/picture?id=<file id>`: one picture's bytes, through workspace-mcp's download
@@ -31,10 +32,13 @@ import urllib.request
 
 from . import hoa_screen, notes_screen, research_slides, source_intake
 
-__all__ = ["ACCOUNT_KEY", "FOLDER_KEY", "PICTURE_BYTES", "SUFFIXES", "UPLOAD_BYTES", "listing", "picture", "place",
+__all__ = ["ACCOUNT_KEY", "FOLDER_KEY", "LIGHT_KEY", "PICTURE_BYTES", "SUFFIXES", "UPLOAD_BYTES", "listing", "picture", "place",
            "request"]
 
 FOLDER_KEY = "hoa.water_system_folder"
+#: sd:7667: the street lights' folders sit under their own Light System folder, not under Water System.
+LIGHT_KEY = "hoa.light_system_folder"
+ROOTS = {FOLDER_KEY: "Water System", LIGHT_KEY: "Light System"}
 ACCOUNT_KEY = "hoa.google_account"
 #: What Upload takes: pictures and documents. The bytes ride base64 in one workspace-mcp call, so the cap is modest.
 SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".pdf", ".txt", ".md", ".doc", ".docx", ".xls", ".xlsx")
@@ -55,17 +59,22 @@ class Unknown(Exception):
 ATTACHING = threading.Lock()
 
 
-def place(asset: dict) -> tuple[str, str | None]:
-    """`(subfolder, asset folder or None)` under Water System; `ValueError` for an asset with no place."""
-    if asset.get("type") in ("valve", "hydrant"):
-        return "Main", asset["id"]
+def place(asset: dict) -> tuple[str, str, str | None]:
+    """`(root setting, subfolder, asset folder or None)`; `ValueError` for an asset with no place."""
+    kind = asset.get("type")
+    if kind in ("valve", "hydrant"):
+        return FOLDER_KEY, "Main", asset["id"]
     if asset.get("id") in ("WELL-A1", "WELL-A2"):
-        return f"Well {asset['id'][-2:]}", None
-    if asset.get("type") == "tank":
-        return "Cistern", None
-    if asset.get("type") == "booster":
-        return "Submarine", None
-    raise ValueError(f"{asset.get('id')} ({asset.get('type')}) has no Water System folder.")
+        return FOLDER_KEY, f"Well {asset['id'][-2:]}", None
+    if kind == "tank":
+        return FOLDER_KEY, "Cistern", None
+    if kind == "booster":
+        return FOLDER_KEY, "Submarine", None
+    if kind in ("irrigation", "irrline"):
+        return FOLDER_KEY, "Irrigation", None
+    if kind == "light":
+        return LIGHT_KEY, asset["id"], None
+    raise ValueError(f"{asset.get('id')} ({kind}) has no attachment folder.")
 
 
 def _call(tool: str, arguments: dict, what: str) -> str:
@@ -94,13 +103,14 @@ def _write(tool: str, arguments: dict, what: str) -> str:
     return made[1]
 
 
-def _settings(connection) -> tuple[str, str]:
+def _settings(connection, root: str = FOLDER_KEY) -> tuple[str, str]:
+    """`(the root folder id named by setting `root`, the account)`; `LookupError` naming each one unset."""
     from sd_db import writes
 
-    held = writes.read_settings(connection, [FOLDER_KEY, ACCOUNT_KEY])
-    folder, account = held.get(FOLDER_KEY), held.get(ACCOUNT_KEY)
+    held = writes.read_settings(connection, [root, ACCOUNT_KEY])
+    folder, account = held.get(root), held.get(ACCOUNT_KEY)
     if not folder or not account:
-        missing = " and ".join(key for key, value in ((FOLDER_KEY, folder), (ACCOUNT_KEY, account)) if not value)
+        missing = " and ".join(key for key, value in ((root, folder), (ACCOUNT_KEY, account)) if not value)
         raise LookupError(f"{missing} is not set: run sd config set {missing.split(' and ')[0]} <value>.")
     return folder, account
 
@@ -142,11 +152,11 @@ def _one(account: str, parent: str, name: str) -> str | None:
 def _folder(connection, ident: object, *, make: bool) -> tuple[dict, str, str | None]:
     """`(asset, account, folder id)`: the asset's folder, made when `make` and missing; None when missing."""
     asset = _asset(connection, ident)
-    sub, own = place(asset)
-    root, account = _settings(connection)
+    key, sub, own = place(asset)
+    root, account = _settings(connection, key)
     parent = _one(account, root, sub)
     if parent is None:
-        raise LookupError(f"The Water System folder has no folder named {sub}.")
+        raise LookupError(f"The {ROOTS[key]} folder has no folder named {sub}.")
     if own is None:
         return asset, account, parent
     folder = _one(account, parent, own)

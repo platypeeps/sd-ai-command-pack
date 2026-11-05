@@ -28,6 +28,8 @@ Add no store. An asset's attachments are its Drive folder's listing.
 - **Folders, found by name.** A valve or hydrant is `Main/<asset id>`, made on its first attachment.
   `WELL-A1` and `WELL-A2` are `Well A1` and `Well A2`; the tank is `Cistern`.
   The booster station is `Submarine` (sd:7516).
+  The irrigation system, point or line, is `Irrigation`; a street light `LGT-n` is `LGT-n` under Light System,
+  whose id `hoa.light_system_folder` holds (sd:7667).
 - **Credential.** Every Drive call goes through workspace-mcp over HTTP, as Import to Slides does.
   The dashboard holds no Google token, and nothing copies one.
 - **List.** `GET /api/hoa/attachments?asset=<id>` lists the folder.
@@ -49,7 +51,7 @@ Add no store. An asset's attachments are its Drive folder's listing.
 - No thumbnail cache: each Details read downloads the asset's pictures again.
   Add one when an asset holds enough pictures that Details is slow.
 - No delete or rename from the map: Drive does that.
-- No other Water System folders (Submarine, Diesel Generator): no map asset names them.
+- No other Water System folders (Diesel Generator): no map asset names it.
 
 ## Failure table
 
@@ -79,7 +81,7 @@ Add no store. An asset's attachments are its Drive folder's listing.
 
 ## Risks
 
-- The setting key must be declared in the hoa checkout's `sd-plugin.json` before `sd config set` takes it.
-  Until then the list answers 503 naming the key.
+- Each setting key must be declared in the hoa checkout's `sd-plugin.json` before `sd config set` takes it.
+  Until then the list answers 503 naming the key; an unset light key leaves the water assets read.
 - The listing's text shape is workspace-mcp's; a change there reads as an empty folder.
   The tests pin the shape the server printed on 2026-10-30.
