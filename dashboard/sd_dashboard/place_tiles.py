@@ -372,7 +372,35 @@ def _refresher(tile: dict, config: Path) -> list[str]:
             tile["realm"], tile["id"], str(config)]
 
 
+class _Ended(Exception):
+    """TERM or INT reached Refresh: its running step is ended and reaped before Refresh lets go of its lock."""
+
+    def __init__(self, signum: int):
+        super().__init__(signum)
+        self.signum = signum
+
+
+def _end_refresh(signum, _frame):
+    # One signal is enough: the rest are ignored, so ending the step is not cut short in turn.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, signal.SIG_IGN)
+    raise _Ended(signum)
+
+
 def refresh(realm: str, tile_id: str, config: str) -> int:
+    """`_refresh`, with TERM and INT ending its running step before it returns; the old handlers come back after."""
+    handlers = {sig: signal.signal(sig, _end_refresh) for sig in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        return _refresh(realm, tile_id, config)
+    except _Ended as ended:
+        print(f"Refresh was ended by signal {ended.signum}; its running step was ended first.", flush=True)
+        return 128 + ended.signum
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+
+
+def _refresh(realm: str, tile_id: str, config: str) -> int:
     """A tile's Refresh (sd:7665): its Stop, then its Update, then a start of Start through `run`, as its button does.
 
     Start runs under its own lock, so a foreground server is Start's: Start's button reads it running and refuses a
@@ -388,8 +416,11 @@ def refresh(realm: str, tile_id: str, config: str) -> int:
     - Update fails: nothing starts; the service stays stopped, and the output says to press Update, then Start.
     - Start is refused (a press of Start got there first: 409) or no longer named (400): named, exit 1 or 2.
 
-    A Refresh cut short leaves no lock: its process holds it. Its exit record names the cut, and the next Refresh runs
-    every step again. On a hosted tile the host runs this, writes no row for Start, and the hub's Start button reads
+    A Refresh cut short frees its lock only once no step of it runs (review round 3): TERM or INT ends and reaps the
+    running step first, and each step holds Refresh's lock too (`SD_RUN_LOCK_FD`), so after a KILL the step left
+    behind keeps Refresh running, and the next Refresh a 409, until it ends. Its exit record names the cut, and the
+    next Refresh runs every step again. The probe after a failed Stop is bounded by `PROBE_SECONDS`, as the Overview's
+    are; past it the service is not known to be stopped. On a hosted tile the host runs this, writes no row for Start, and the hub's Start button reads
     its own last request, not this start: a limit Refresh's hover says on the hub. The output goes to Refresh's
     `start.log`.
     """
@@ -412,7 +443,7 @@ def refresh(realm: str, tile_id: str, config: str) -> int:
         print(f"Stop ran past {STEP_SECONDS:g} s and was ended; whether {tile['label']} runs is not known, so Update "
               "did not run.", flush=True)
         return 124
-    if code and not (_held(start_state) is None and tile["url"] and _probe(tile["url"])["answers"] is False):
+    if code and not (_held(start_state) is None and tile["url"] and _probes([tile["url"]])[0]["answers"] is False):
         print(f"Stop exited {code} and {tile['label']} is not known to be stopped, so Update did not run.", flush=True)
         return code
     deadline = time.monotonic() + STOP_WAIT
@@ -440,23 +471,41 @@ def refresh(realm: str, tile_id: str, config: str) -> int:
 
 
 def _step(action: dict, folder: str) -> int | None:
-    """Refresh's Stop or Update, in its own session; its exit code, or None when it ran past `STEP_SECONDS` and it
-    and its children were ended (TERM, then KILL)."""
+    """Refresh's Stop or Update, in its own session and holding Refresh's lock too; its exit code, or None when it ran
+    past `STEP_SECONDS` and it and its children were ended. `_Ended` ends it the same way, then goes on up."""
     print(f"$ {action['command']}", flush=True)
+    lock = os.environ.get("SD_RUN_LOCK_FD", "")
+    fds = (int(lock),) if lock.isdigit() and _open(int(lock)) else ()
     child = subprocess.Popen(action["argv"], cwd=folder, stdin=subprocess.DEVNULL, start_new_session=True,
-                             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+                             pass_fds=fds, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
     try:
         return child.wait(timeout=STEP_SECONDS)
     except subprocess.TimeoutExpired:
-        # TERM, then KILL whatever of its group outlived TERM; the group is gone once killpg finds no member.
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            try:
-                os.killpg(child.pid, sig)
-            except ProcessLookupError:
-                break
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-        child.wait()
+        _end(child)
         return None
+    except _Ended:
+        _end(child)
+        raise
+
+
+def _open(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+    except OSError:
+        return False
+    return True
+
+
+def _end(child: subprocess.Popen) -> None:
+    """TERM, then KILL whatever of the step's group outlived TERM, and reap it; the group is gone once killpg finds
+    no member."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(child.pid, sig)
+        except ProcessLookupError:
+            break
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    child.wait()

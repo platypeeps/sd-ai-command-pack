@@ -428,8 +428,7 @@ class TheRefreshSteps(Case):
     def test_a_stop_that_fails_runs_no_update(self):
         self.tiles("sh -c 'echo stop >> runs; exit 3'")
         self.running_server()
-        with mock.patch.object(place_tiles, "START_WAIT", 0.2, create=True):
-            self.assertEqual(self.refresh(), 3)
+        self.assertEqual(self.refresh(), 3)
         self.assertEqual(self.runs(), "start\nstop\n", "Update ran over a server Stop did not stop")
 
     def test_a_failed_stop_of_a_stopped_service_whose_link_refuses_goes_on(self):
@@ -448,8 +447,7 @@ class TheRefreshSteps(Case):
     def test_a_stop_that_leaves_the_server_running_runs_no_update(self):
         self.tiles("sh -c 'echo stop >> runs'")
         self.running_server()
-        with mock.patch.object(place_tiles, "STOP_WAIT", 0.5, create=True), \
-                mock.patch.object(place_tiles, "START_WAIT", 0.2, create=True):
+        with mock.patch.object(place_tiles, "STOP_WAIT", 0.5):
             self.assertEqual(self.refresh(), 1)
         self.assertEqual(self.runs(), "start\nstop\n", "Update ran while Start's server still ran")
 
@@ -477,7 +475,7 @@ class TheRefreshSteps(Case):
         self.tiles("true")
         for answer, code in ((lambda payload, config: (lambda c: (409, {"error": "App Start is already running"})), 1),
                              (mock.Mock(side_effect=ValueError("Nothing ran: no action 'Start'")), 2)):
-            with mock.patch.object(place_tiles, "run", answer), mock.patch.object(place_tiles, "START_WAIT", 0.2, create=True):
+            with mock.patch.object(place_tiles, "run", answer):
                 self.assertEqual(self.refresh(), code)
 
     def test_a_refresh_cut_short_after_stop_leaves_its_lock_free_and_the_next_one_finishes(self):
@@ -492,6 +490,65 @@ class TheRefreshSteps(Case):
         self.assertEqual(self.wait_done("Refresh")["exit"], 0)
         self.servers()
         self.assertEqual(self.runs(), "start\nstop\nstop\nupdate\nstart\n")
+
+    def test_a_failed_stops_link_probe_that_does_not_answer_in_time_is_not_stopped(self):
+        # Review round 3: the probe after a failed Stop is bounded as the Overview's are; past the bound it is not
+        # known, and not known runs no Update.
+        def slow(url):
+            time.sleep(5)
+            return {"answers": False, "status": "nothing listens there"}
+
+        self.tiles("sh -c 'echo stop >> runs; exit 1'", url="http://slow.example.test:8740/")
+        began = time.monotonic()
+        with mock.patch.object(place_tiles, "_probe", slow), mock.patch.object(place_tiles, "PROBE_SECONDS", 0.2):
+            self.assertEqual(self.refresh(), 1)
+        self.assertLess(time.monotonic() - began, 3, "Refresh waited on the probe past its bound")
+        self.assertEqual(self.runs(), "stop\n")
+
+    def end_pid(self, name):
+        """Ends a test step left running, if any, so no process outlives the test."""
+        try:
+            os.kill(int((self.app / name).read_text(encoding="utf-8")), signal.SIGKILL)
+        except (FileNotFoundError, ValueError, ProcessLookupError):
+            pass
+
+    def alive(self, name):
+        """Whether the pid in file `name` still runs, read for up to 5 s for it to end."""
+        pid = int((self.app / name).read_text(encoding="utf-8"))
+        for _ in range(100):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return False
+            time.sleep(0.05)
+        return True
+
+    def test_a_refresh_killed_during_update_holds_its_lock_until_the_update_ends(self):
+        self.addCleanup(self.end_pid, "upd")
+        # Review round 3: a step ran in its own session, so a Refresh killed mid-Update freed its lock while the
+        # Update still edited the checkout, and the next Refresh could start the service over it. The step now holds
+        # Refresh's lock: the next Refresh is a 409 until that Update ends.
+        self.tiles("true", update="sh -c 'echo $$ > upd; kill -9 $PPID; sleep 3; echo update-done >> runs'")
+        self.assertEqual(self.start("Refresh")[0], 202)
+        for _ in range(200):
+            if (self.app / "upd").is_file():
+                break
+            time.sleep(0.05)
+        time.sleep(0.5)
+        self.assertEqual(self.last("Refresh")["state"], "running", "the orphaned Update does not show as Refresh's")
+        status, body = self.start("Refresh")
+        self.assertEqual(status, 409, f"a second Refresh started while the first one's Update ran: {body}")
+        self.assertFalse(self.alive("upd"), "the Update did not end")
+        self.assertEqual(self.runs(), "update-done\n")
+
+    def test_a_refresh_ended_by_term_ends_and_reaps_its_step_first(self):
+        self.addCleanup(self.end_pid, "upd")
+        self.tiles("true", update="sh -c 'echo $$ > upd; kill -TERM $PPID; exec sleep 30'")
+        self.assertEqual(self.start("Refresh")[0], 202)
+        last = self.wait_done("Refresh")
+        self.assertNotEqual(last["exit"], 0)
+        self.assertFalse(self.alive("upd"), "the Update outlived Refresh")
+        self.assertIn("ended by signal 15", last["output"])
 
     def test_a_hosted_refresh_says_the_start_button_here_does_not_show_its_start(self):
         # The host's Refresh starts Start there under its own lock and writes no Start row, so the hub's Start reads
