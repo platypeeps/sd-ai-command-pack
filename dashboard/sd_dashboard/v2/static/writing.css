@@ -45,6 +45,10 @@
 .ed-why { margin: 0 0 var(--space-md); }
 .dlg select { min-height: var(--row-touch); }
 .idea .t { font-size: var(--text-xs); color: var(--color-ink-2); }
+/* pack sd:7670: an idea's area beside its date, and the column's Area tiles under its header. */
+.idea .area { font: 500 var(--text-2xs)/1.4 var(--font-label); color: var(--color-ink-2); }
+.col.vault .idea-areas { padding: 0 var(--space-xs) var(--space-xs); }
+.col.vault .idea-areas .fseg { flex-wrap: wrap; }
 .tag { display: inline-block; padding: 0 4px; border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-sm); font: 500 var(--text-2xs)/1.4 var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-2); }
 
 /* Gate lamps: four fixed positions, D R F A. Glyph carries state; colour reinforces it. */
