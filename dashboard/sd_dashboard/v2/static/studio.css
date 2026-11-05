@@ -59,9 +59,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ledger .what button.expand .i { transition: none; }
 }
-/* A phone: the main row's time takes the right cell; a sub-row puts its name and time on one line, its actions below. */
+/* A phone: the main row's time takes the right cell and its ⋯ the one below (sd:7700); a sub-row puts its name and time
+ * on one line, its actions below. */
 @media (max-width: 899px) {
-  .ledger tbody tr[data-id] .when { grid-area: acts; align-self: center; text-align: right; }
+  .ledger tbody tr[data-id] { grid-template-areas: "g what when" ". meta acts"; }
+  .ledger tbody tr[data-id] .when { grid-area: when; align-self: center; text-align: right; }
   .ledger tbody tr.sub { grid-template-areas: "g what when" ". acts acts"; row-gap: var(--space-3xs); }
   .ledger tr.sub .what { grid-area: what; padding-left: var(--space-2xs); }
   .ledger tr.sub .when { grid-area: when; text-align: right; }

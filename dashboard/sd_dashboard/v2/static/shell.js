@@ -906,7 +906,8 @@
   // Row: the primary command as a button, then ⋯ for the menu. sd:5457: a command that declares an icon shows as that
   // icon, its label the button's name and the head of its tip; one without an icon keeps its text.
   // `{ icons: true }` shows every live command that declares an icon instead of the primary alone, so a row can offer
-  // what its Details offer (sd:5747).
+  // what its Details offer (sd:5747). A list of command ids shows only those live ones; `[]` leaves the row its ⋯ alone
+  // (sd:7700).
   function rowActions(id, { icons = false } = {}) {
     const o = OBJ.get(id); if (!o) return html``;
     const L = live(o), p = L.find(c => c.primary?.(o));
@@ -914,7 +915,7 @@
     const one = c => (c.icon
       ? html`<button class="icon-btn" type="button" data-cmd="${c.id}" data-obj="${id}" aria-label="${c.label}" aria-keyshortcuts="${c.key ? '. ' + c.key : ''}" data-tip="${`${c.label}${c.key ? ` (. ${c.key})` : ''}: ${tipOf(c, o)}`}">${ICON(c.icon)}</button>`
       : html`<button class="btn quiet sm" type="button" data-cmd="${c.id}" data-obj="${id}" data-tip="${tipOf(c, o)}">${c.label}</button>`);
-    const act = icons ? html`${L.filter(c => c.icon).map(one)}` : p ? one(p) : '';
+    const act = icons ? html`${L.filter(c => c.icon && (icons === true || icons.includes(c.id))).map(one)}` : p ? one(p) : '';
     return html`<span class="rowact">${act}<button class="icon-btn" type="button" data-menu-for="${id}" aria-haspopup="menu" aria-expanded="false" aria-label="Actions for ${o.label}">${ICON('ellipsis')}</button></span>`;
   }
   // Details: every command as a button; what it does and its line are the button's tip (sd:5287), its CLI line and the

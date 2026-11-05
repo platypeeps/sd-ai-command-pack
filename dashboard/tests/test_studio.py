@@ -707,8 +707,9 @@ class TheServer(BrowserSession):
         self.assertEqual(out["R"]["off"], ["", "not pinned", "", "not hidden"])
         self.assertIn(["/api/studio/view", {"file": "art/shirts/cat/media/clip.mp4", "pinned": True}, 64], out["posts"])
 
-    def rendered(self, body):
-        """studio.js on a shirt (no render verb) and a song (assemble), each with an input root and a result root."""
+    def rendered(self, body, pinned=(), store=None):
+        """studio.js on a shirt (no render verb) and a song (assemble), each with an input root and a result root; the
+        projects `pinned` names are pinned, and `store` is the view store as the document says it read."""
         def file(path, modified, hidden=False):
             return {"path": path, "name": path.rsplit("/", 1)[1], "bytes": 1, "type": "image", "ranged": False,
                     "modified": modified, "pinned": False, "hidden": hidden}
@@ -716,12 +717,12 @@ class TheServer(BrowserSession):
         def project(ident, kind, render, updated, roots):
             return {"id": f"art/{ident}", "repo": "art", "folder": ident, "kind": kind, "title": ident.rsplit("/", 1)[1],
                     "brief": "", "item": None, "problems": [], "error": "", "strip": list(studio.STAGES[kind]), "stage": "",
-                    "next": "", "revision": "", "updated": updated, "render": render,
+                    "next": "", "revision": "", "updated": updated, "render": render, "pinned": f"art/{ident}" in pinned,
                     "roots": [{"role": role, "path": role, "result": role != "candidates", "cut": False, "files": files}
                               for role, files in roots]}
 
         doc = {"read": "2026-11-04T07:00:00Z", "root": "/repos", "problems": [], "repositories": 1,
-               "store": {"available": True, "reason": ""}, "attention": {"state": "ok", "n": 0, "what": ""},
+               "store": store or {"available": True, "reason": ""}, "attention": {"state": "ok", "n": 0, "what": ""},
                "projects": [
                    project("shirts/cat", "shirt", "", "2026-11-02T09:00:00Z", [
                        ("candidates", [file("shirts/cat/candidates/one.png", "2026-11-02T09:00:00Z")]),
@@ -758,6 +759,67 @@ class TheServer(BrowserSession):
         self.assertNotIn('data-id="art/shirts/cat"', out["mp4"])
         self.assertIn('data-id="art/songs/tune"', out["mp4"])
         self.assertIn('data-id="art/shirts/cat"', out["off"])
+
+    PRESS = ("const press = (f, v, off) => ELS.filters.listeners.click.forEach(h => h({ target: { closest: s => "
+             "s === '[data-f]' ? { dataset: { f, v }, getAttribute: a => a === 'aria-disabled' && off ? 'true' : null } : null } }));")
+
+    def test_a_pinned_tile_leaves_the_pinned_projects_and_pinned_ones_sort_first(self):
+        # pack sd:7700: a Pinned tile beside the file types counts the pinned projects; pressed, it leaves only them,
+        # and pressed again it clears. A pinned project leads the list whatever the sort, and its row says it is pinned.
+        out = self.rendered(self.PRESS + "R.rows = ELS.rows.html; R.filters = ELS.filters.html; press('pinned', '1');"
+                            "R.pinned = ELS.rows.html; R.on = ELS.filters.html; press('pinned', '1'); R.off = ELS.rows.html;",
+                            pinned={"art/songs/tune"})
+        self.assertIn('aria-label="Pinned"', out["filters"])
+        self.assertIn('data-f="pinned" data-v="1" aria-pressed="false" title="Pinned: 1 project"', out["filters"])
+        self.assertLess(out["filters"].index('data-f="type"'), out["filters"].index('data-f="pinned"'))
+        self.assertLess(out["rows"].index('data-id="art/songs/tune"'), out["rows"].index('data-id="art/shirts/cat"'))
+        tune = out["rows"][out["rows"].index('data-id="art/songs/tune"'):out["rows"].index('data-id="art/shirts/cat"')]
+        self.assertIn('<span class="pinmark" title="Pinned">', tune)
+        self.assertNotIn("pinmark", out["rows"][out["rows"].index('data-id="art/shirts/cat"'):])
+        self.assertIn('data-f="pinned" data-v="1" aria-pressed="true"', out["on"])
+        self.assertIn('data-id="art/songs/tune"', out["pinned"])
+        self.assertNotIn('data-id="art/shirts/cat"', out["pinned"])
+        self.assertIn('data-id="art/shirts/cat"', out["off"])
+
+    def test_a_view_store_that_did_not_read_says_why_and_its_pinned_tile_does_not_filter(self):
+        # pack sd:7700: no silent empty filter. The tile is off and names the reason, a press leaves the list whole,
+        # and Details says why the pin is unknown.
+        out = self.rendered(self.PRESS + "R.filters = ELS.filters.html; press('pinned', '1', true); R.rows = ELS.rows.html;"
+                            "window.PAGE_LIST.select('art/shirts/cat'); R.details = ELS.details.html; R.states = OUT.states;",
+                            store={"available": False, "reason": "database is locked"})
+        self.assertIn('data-f="pinned" data-v="1" aria-pressed="false" aria-disabled="true" '
+                      'title="Pinned: the view store was not read: database is locked"', out["filters"])
+        self.assertIn('data-id="art/shirts/cat"', out["rows"])
+        self.assertIn('data-id="art/songs/tune"', out["rows"])
+        self.assertIn("not read: database is locked", out["details"])
+        self.assertNotIn('data-cmd="studio.project-pin"', out["details"])
+        self.assertIn("Pins and hides were not read: database is locked", json.dumps(out["states"]))
+
+    def test_pin_is_a_project_row_action_and_a_details_button_and_each_posts_the_projects_view(self):
+        # pack sd:7700: the row's ⋯ menu holds the project commands (rowActions with no icon shown), Details holds a
+        # Pin or Unpin button, and each posts /api/studio/view with the project; Undo posts the other way.
+        out = self.rendered(
+            "OUT.rowActs = []; C.rowActions = (id, o) => { OUT.rowActs.push([id, o || null]); return mk`<span class=\"rowact\"></span>`; };"
+            # Clear all draws the rows again, now through the recording rowActions.
+            "ELS.filters.listeners.click.forEach(h => h({ target: { closest: s => s === '[data-fclear]' ? {} : null } })); R.rows = ELS.rows.html;"
+            "R.acts = OUT.rowActs;"
+            "const c = id => REG.find(x => x.id === id), cat = OBJ.get('art/shirts/cat'), tune = OBJ.get('art/songs/tune');"
+            "R.decl = ['studio.project-pin', 'studio.project-unpin'].map(id => [c(id).on, c(id).menu !== false, c(id).bar, c(id).risk, typeof c(id).undo]);"
+            "R.off = [C.offWhy(c('studio.project-pin'), cat), C.offWhy(c('studio.project-unpin'), cat), C.offWhy(c('studio.project-pin'), tune)];"
+            "window.PAGE_LIST.select('art/shirts/cat'); R.cat = ELS.details.html; window.PAGE_LIST.select('art/songs/tune'); R.tune = ELS.details.html;"
+            "C.run(c('studio.project-pin'), cat); await flush(); C.run(c('studio.project-unpin'), tune); await flush();"
+            "c('studio.project-pin').undo(cat); await flush(); R.posts = OUT.posts;",
+            pinned={"art/songs/tune"})
+        self.assertIn(["art/shirts/cat", {"icons": []}], out["acts"])
+        self.assertIn('<td class="acts"><span class="rowact"></span></td>', out["rows"])
+        self.assertEqual(out["decl"], [["project", True, False, "undo", "function"]] * 2)
+        self.assertEqual(out["off"], ["", "not pinned", "already pinned"])
+        self.assertIn('data-cmd="studio.project-pin" data-obj="art/shirts/cat">Pin</button>', out["cat"])
+        self.assertIn('data-cmd="studio.project-unpin" data-obj="art/songs/tune">Unpin</button>', out["tune"])
+        posts = [p[:2] for p in out["posts"]]
+        self.assertEqual(posts, [["/api/studio/view", {"project": "art/shirts/cat", "pinned": True}],
+                                 ["/api/studio/view", {"project": "art/songs/tune", "pinned": False}],
+                                 ["/api/studio/view", {"project": "art/shirts/cat", "pinned": False}]])
 
     def test_a_project_row_expands_and_only_one_is_expanded_at_a_time(self):
         # pack sd:7490: a disclosure button per row; opening one closes the other, a second press closes it.
@@ -876,6 +938,26 @@ class TheServer(BrowserSession):
         before = self.unjournalled()
         for payload in ({"file": "art/shirts/cat/stray.png", "hidden": True}, {"file": "art/shirts/cat/candidates/out.png", "hidden": True},
                         {"file": path}, {"file": path, "hidden": "yes"}, {"file": path, "tags": ["x"]}, {"hidden": True}):
+            with self.subTest(payload=payload):
+                status, _, out = self.post("/api/studio/view", payload)
+                self.assertEqual(status, 400, out)
+                self.assertEqual(self.unjournalled(), before)
+
+    def test_pin_and_unpin_write_the_projects_view_and_a_project_not_listed_writes_nothing(self):
+        # pack sd:7700: a project pins in the files' view state, under a key no gallery file can take.
+        status, _, out = self.post("/api/studio/view", {"project": "art/shirts/cat", "pinned": True})
+        self.assertEqual((status, out["project"], out["pinned"]), (200, "art/shirts/cat", True), out)
+        doc = json.loads(self.fetch("/api/studio")[2])
+        self.assertEqual({p["id"]: p["pinned"] for p in doc["projects"]}, {"art/shirts/cat": True, "art/songs/broken": False})
+        self.assertFalse(any(f["pinned"] for p in doc["projects"] for r in p["roots"] for f in r["files"]))
+        status, _, out = self.post("/api/studio/view", {"project": "art/shirts/cat", "pinned": False})
+        self.assertEqual((status, out["pinned"]), (200, False), out)
+        doc = json.loads(self.fetch("/api/studio")[2])
+        self.assertFalse(doc["projects"][0]["pinned"])
+        before = self.unjournalled()
+        for payload in ({"project": "art/shirts/none", "pinned": True}, {"project": "art/shirts/cat", "hidden": True},
+                        {"project": "art/shirts/cat", "pinned": "yes"}, {"project": "art/shirts/cat"}, {"project": 7, "pinned": True},
+                        {"project": "art/shirts/cat", "file": "art/shirts/cat/candidates/one.png", "pinned": True}):
             with self.subTest(payload=payload):
                 status, _, out = self.post("/api/studio/view", payload)
                 self.assertEqual(status, 400, out)
