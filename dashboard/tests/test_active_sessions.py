@@ -443,7 +443,8 @@ class TodayDraws(ScreenCase):
         # pack sd:7222, now the Queue view's: one parent row per repo; an item with no repo is Unassociated, last.
         self.grouped()
         out = self.draw("R.repos = repos(); open('alpha'); R.alpha = ELS.queue.html; open(''); R.none = ELS.queue.html;")
-        self.assertEqual(out["R"]["repos"], ["alpha", "beta", ""])
+        # pack sd:7679: both work one; beta's three suggested rows (counted while hidden) put it first.
+        self.assertEqual(out["R"]["repos"], ["beta", "alpha", ""])
         self.assertIn('data-type="working" data-item="7"', out["R"]["alpha"])
         self.assertNotIn('data-item="9"', out["R"]["alpha"])
         self.assertIn("Unassociated", out["R"]["none"])
@@ -456,8 +457,8 @@ class TodayDraws(ScreenCase):
         out = self.draw("R.before = repos(); press('suggested'); R.after = repos(); R.bar = ELS['queue-filters'].html;"
                         " open('beta'); R.beta = ELS.queue.html; open('alpha'); R.alpha = ELS.queue.html;")
         r = out["R"]
-        self.assertEqual(r["before"], ["alpha", "beta", ""])
-        self.assertEqual(r["after"], ["alpha", "beta", "gamma", ""])
+        self.assertEqual(r["before"], ["beta", "alpha", ""])
+        self.assertEqual(r["after"], ["beta", "alpha", "gamma", ""])
         self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="true"', r["bar"])
         self.assertEqual([f"#{n} Ready {n}" in r["beta"] for n in (31, 32, 33, 34)], [True, True, True, False])
         self.assertIn("#21 Ready 21", r["alpha"])

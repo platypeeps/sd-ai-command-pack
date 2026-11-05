@@ -1164,6 +1164,17 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["R"]["again"], [["system:false", "alpha:false", "sd:false"], []])
         self.assertEqual(out["gets"], ["/api/now", "/api/queue", "/api/queue/builds?show=all", "/api/queue/runner"])
 
+    def test_repos_order_by_merging_then_the_other_counts_then_name(self):
+        # pack sd:7679 (operator 2026-11-05): the busiest repo first, compared box by box in the boxes' order (merging,
+        # working, next, blocked, suggested), each most first; a tie goes by repo name. A row's state does not order it.
+        def asg(n, repo):
+            return {**self.RUNNER["live"][0], "id": n, "item": n, "repo": repo}
+        runner = {"live": self.RUNNER["live"] + [asg(n, "/repos/many") for n in (81, 82, 83, 84)]
+                  + [asg(n, "/repos/aaa") for n in (91, 92)]}
+        out = self.run_view("R.repos = repos();", answers={"/api/queue/runner": [200, runner]})
+        # system merges one and works three; many works four, aaa two; alpha (a stalled build) and sd work one each.
+        self.assertEqual(out["R"]["repos"], ["system:false", "many:false", "aaa:false", "alpha:false", "sd:false"])
+
     def test_opening_a_repo_closes_the_one_that_was_open(self):
         out = self.run_view("open('system'); open('alpha'); R.repos = repos(); R.kids = kids(); R.html = ELS.queue.html;")
         self.assertEqual(out["R"]["repos"], ["system:false", "alpha:true", "sd:false"])

@@ -342,6 +342,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // blocked or cancelled bundle's Retry and Send to builder post /api/queue/builds/retry (pack sd:6020). The view reads its
   // three documents when it first shows and on each Today read after; a source that was not read is said under the table.
   const QTYPES = ['working', 'merging', 'next', 'blocked', 'suggested', 'open', 'ended'], QSHOW = ['suggested', 'open', 'ended'], NEXT = 3;
+  const BOXES = ['merging', 'working', 'next', 'blocked', 'suggested']; // a repo row's boxes, left to right (pack sd:7470)
   const QV = { lanes: null, lanesErr: '', built: null, builtErr: '', runner: null, runnerErr: '', tasks: null, tasksErr: '', seen: false, busy: false };
   const QOTHER = new Map(); // the lane entries, selectable as Today's other rows are
   const qShow = new Set();
@@ -477,10 +478,13 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     OPENI.forEach(t => add(t.repo_path, openRow(t)));
     B.recent.forEach(r => add(r.repo, endedRun(r)));
     const RANK = { warning: 0, caution: 1, unknown: 2, ok: 3, queued: 4 };
+    // pack sd:7679: the busiest repo first, box by box in the boxes' order, each most first; then the name. Unassociated last.
+    const busy = (a, b) => BOXES.reduce((d, t) => d || b.n[t] - a.n[t], 0);
     return [...G.values()].map(g => {
       const shown = g.rows.filter(c => !QSHOW.includes(c.type) || qShow.has(c.type)).sort((a, b) => QTYPES.indexOf(a.type) - QTYPES.indexOf(b.type));
-      return { ...g, shown, s: shown.reduce((w, c) => RANK[c.s] < RANK[w] ? c.s : w, 'queued') };
-    }).sort((a, b) => (a.key === '') - (b.key === '') || RANK[a.s] - RANK[b.s] || a.key.localeCompare(b.key));
+      const n = Object.fromEntries(BOXES.map(t => [t, g.rows.filter(c => c.type === t).length]));
+      return { ...g, shown, n, s: shown.reduce((w, c) => RANK[c.s] < RANK[w] ? c.s : w, 'queued') };
+    }).sort((a, b) => (a.key === '') - (b.key === '') || busy(a, b) || a.key.localeCompare(b.key));
   }
   const tally = rows => QTYPES.map(t => [t, rows.filter(c => c.type === t).length]).filter(([, n]) => n);
   // A repo row's five boxes: merging, next and blocked (pack sd:7272, Queue's lane ledger until #1768), with working
@@ -492,7 +496,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (g.key && (!QV.lanes || QV.lanes.problems.some(p => repoKey(p.repo) === g.key)))
       return html`<td class="detail"><span class="g-unknown" aria-hidden="true">${GLYPH.unknown}</span> lane not read</td>`;
     // pack sd:7470: merging is the leftmost box.
-    const [w, m, n, b, s] = ['working', 'merging', 'next', 'blocked', 'suggested'].map(t => g.rows.filter(c => c.type === t).length);
+    const { working: w, merging: m, next: n, blocked: b, suggested: s } = g.n;
     // Each box says its count and what it counts, in its title (pack sd:7383); the label above says all five at once.
     return html`<td class="detail pipe" aria-label="${m} merging, ${w} working, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane until someone acts')}${pip(s, ' on', 'suggested: up to 3 ready or planned tasks to do next')}</td>`;
   }
