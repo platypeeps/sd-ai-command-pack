@@ -36,8 +36,8 @@ named pid is gone. Nothing goes by age, so every other entry stays; macOS purges
 
 On the hub the gate's folder goes on the RAM disk once it is ready (`sd_tmpdisk`, sd:7557), and the check's
 `TMPDIR` with it. A gate start then cleans both places: the disk, and the inherited temp dir that older gates
-and runs used. A commit that tracks a `Cargo.toml` keeps the inherited temp dir: with no warm folder free its
-build goes cold into the worktree's `target/`, about 4.5 GB, more than the 4 GiB disk.
+and runs used. A commit that tracks a `Cargo.toml` stays off the disk, even from a temp dir on it: with no warm
+folder free its build goes cold into the worktree's `target/`, about 4.5 GB, more than the 4 GiB disk.
 """
 
 from __future__ import annotations
@@ -136,7 +136,8 @@ def worktree_place(root: pathlib.Path, head: str) -> Place:
     whose gate process is gone and the temp dirs' leftovers (`reap_temporary`).
 
     The folder goes on the RAM disk when `sd_tmpdisk` reads it ready, unless `head` may track a `Cargo.toml`;
-    a read of `head` that fails counts as one that does. Both places are cleaned first, the inherited one too
+    a read of `head` that fails counts as one that does. Such a head, or a disk not ready, never goes on the disk,
+    even from a temp dir that lies on it (`gate_temporary`). Both places are cleaned first, the inherited one too
     (older gates and runs left their folders there), and the disk whatever its free space (`reap_places`).
     """
     inherited = str(pathlib.Path(tempfile.gettempdir()).resolve())
@@ -155,9 +156,8 @@ def worktree_place(root: pathlib.Path, head: str) -> Place:
                 and tree.parent.parent.resolve() in resolved and not running(int(named[1])):
             sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
             shutil.rmtree(tree.parent, ignore_errors=True)  # and the check's `TMPDIR` beside it (sd:3032)
-    # Placed after the reap, so the room it freed counts; the inherited dir when the disk is not ready.
-    chosen = inherited if rust else sd_tmpdisk.temporary(inherited)
-    return {"dir": chosen, "prefix": f"{GATE_PREFIX}{os.getpid()}-"}
+    # Placed after the reap, so the room it freed counts; never on the disk for a Rust head or a disk not ready.
+    return {"dir": sd_tmpdisk.gate_temporary(inherited, rust=rust), "prefix": f"{GATE_PREFIX}{os.getpid()}-"}
 
 
 def check_temporary(parent: str) -> str:

@@ -1458,6 +1458,55 @@ class RamDiskGate(Repository):
         tree, _ = self.places()
         self.assertEqual((dead.exists(), tree.is_relative_to(self.disk)), (False, True), tree)
 
+    def nested_on_disk(self) -> pathlib.Path:
+        """The inherited temp dir on the disk, as in a test run or a check's `t/` there; the system's per-user temp dir
+        a fake folder."""
+        nested = self.disk / f"sd-tests-{os.getpid()}-ab"
+        nested.mkdir()
+        self.system = self.root.parent / "system"
+        self.system.mkdir()
+        for patch in (mock.patch.dict(os.environ, {"TMPDIR": str(nested)}),
+                      mock.patch.object(tempfile, "tempdir", str(nested)),
+                      mock.patch.object(os, "confstr", lambda name: str(self.system))):
+            patch.start()
+            self.addCleanup(patch.stop)
+        return nested
+
+    def test_a_cargo_head_under_a_temp_dir_on_the_disk_builds_off_it(self) -> None:
+        """Lane review: the Rust exclusion kept the inherited dir, and a nested run's is on the disk, so a cold
+        `target/` of about 4.5 GB still landed on the 4 GiB disk."""
+        self.nested_on_disk()
+        (self.root / "Cargo.toml").write_text('[package]\nname = "f"\nversion = "0.1.0"\n', encoding="utf-8")
+        head = self.commit(self.recipe())
+        env = {**os.environ, sd_gate_cache.CARGO_TARGETS_VARIABLE: "0"}
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head, environ=env)["status"], "success")
+        self.assertEqual([place.is_relative_to(self.system) for place in self.places()], [True, True])
+
+    def test_a_head_git_cannot_list_under_a_temp_dir_on_the_disk_goes_off_it(self) -> None:
+        self.nested_on_disk()
+        self.commit(self.recipe())
+        self.assertEqual(sd_gate_cache.worktree_place(self.root, "0" * 40)["dir"], str(self.system))
+
+    def test_a_gate_nested_on_a_disk_that_is_not_ready_goes_off_it(self) -> None:
+        """Not ready kept the inherited dir, which a nested run has on the disk itself."""
+        self.nested_on_disk()
+        with mock.patch.object(shutil, "disk_usage", return_value=mock.Mock(free=sd_tmpdisk.FREE - 1)):
+            place = sd_gate_cache.worktree_place(self.root, self.commit(self.recipe()))["dir"]
+        self.assertEqual(place, str(self.system))
+
+    def test_a_gate_nested_on_a_ready_disk_stays_in_its_runs_folder(self) -> None:
+        nested = self.nested_on_disk()
+        self.assertEqual(sd_gate_cache.worktree_place(self.root, self.commit(self.recipe()))["dir"], str(nested))
+
+    def test_the_system_temp_dir_ignores_tmpdir(self) -> None:
+        """Without the per-user name (Linux), the first usable fixed temp dir, never `TMPDIR` on the disk."""
+        self.nested_on_disk()
+        self.assertEqual(sd_tmpdisk.system_temporary(), str(self.system))
+        with mock.patch.object(os, "confstr", side_effect=ValueError("unrecognized configuration name")):
+            fallback = sd_tmpdisk.system_temporary()
+        self.assertFalse(sd_tmpdisk.within(fallback), fallback)
+        self.assertIn(fallback, ("/tmp", "/var/tmp", "/usr/tmp"))
+
     def test_a_test_run_puts_its_temp_dir_on_a_ready_disk(self) -> None:
         code = ("import os, pathlib, sys; sys.path.insert(0, 'bin'); import sd_tmpdisk; "
                 f"sd_tmpdisk.ROOT = pathlib.Path({str(self.disk)!r}); sd_tmpdisk.ismount = lambda path: True; "

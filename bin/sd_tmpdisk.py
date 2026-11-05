@@ -4,7 +4,8 @@ The system repository's `tmpdisk` stage keeps an HFS+ RAM disk at `ROOT`, with F
 Spotlight off, and writes `READY` there only after its remount (system sd:7092). Gate trees and test
 runs made about 13k of 55k file writes in 30 s under the inherited `TMPDIR`, and fseventsd grew to 17 GB.
 
-`temporary` is the one place both callers ask: `sd_gate_cache.worktree_place` and `tests/__init__.py`;
+`temporary` is the one place both callers ask: `sd_gate_cache.worktree_place` (through `gate_temporary`)
+and `tests/__init__.py`;
 `reap_places` names where a gate start cleans up.
 The disk is ready when `ROOT` is a mount point, holds `READY`, is writable and has `FREE` bytes free.
 Any failed probe reads "not ready", never an error, and the inherited temp dir stays: a satellite has
@@ -84,3 +85,29 @@ def temporary(inherited: str | None = None) -> str:
     if within(inherited) or owned_inside(inherited) or not disk_ready():
         return inherited
     return str(ROOT)
+
+
+def system_temporary() -> str:
+    """The per-user system temp dir, whatever `TMPDIR` says: macOS names it (`CS_DARWIN_USER_TEMP_DIR`);
+    elsewhere the first fixed temp dir there is. Never on the disk."""
+    try:
+        named = os.confstr("CS_DARWIN_USER_TEMP_DIR")
+    except (ValueError, OSError):
+        named = None
+    for folder in (named, "/tmp", "/var/tmp", "/usr/tmp"):
+        if folder and os.path.isdir(folder) and not within(folder):
+            return os.path.normpath(folder)
+    return "/tmp"
+
+
+def gate_temporary(inherited: str, *, rust: bool) -> str:
+    """Where a gate places its folder: `temporary`, but off the disk for a head that may track a `Cargo.toml`
+    and when the disk is not ready: `inherited` as before, or, where it lies on the disk itself (a nested run's),
+    the system's own temp dir (sd:7557 review).
+
+    A cold `target/` is about 4.5 GB, more than the 4 GiB disk.
+    """
+    placed = temporary(inherited)
+    if within(placed) and (rust or not disk_ready()):
+        return system_temporary() if within(inherited) else inherited
+    return placed
