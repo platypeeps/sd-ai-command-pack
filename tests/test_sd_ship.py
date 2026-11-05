@@ -5660,7 +5660,8 @@ roles:
         """sd:2147. Every reviewer failed and none left a finding: the request stays unspent."""
         provider, working, prior = self.spent_reviews()
         head = _git(self.root, "rev-parse", "HEAD")
-        with self.assertRaisesRegex(ship.Refusal, "0/1 completed.*nothing was reviewed, so the operator request was not consumed"):
+        # The fixture registry holds two reviewers, so the pass asks both (sd:7519).
+        with self.assertRaisesRegex(ship.Refusal, "0/2 completed.*nothing was reviewed, so the operator request was not consumed"):
             self.additional()
         state = self.operation().state
         self.assertEqual(state["passes"], prior)
@@ -6043,9 +6044,10 @@ roles:
         state = self.operation().state
         # sd:2611: the execution watchdog also counts the gate-slot phase.
         self.assertEqual(stages, [(True, 3600), (False, 10800 + sd_review.sd_lib.GATE_SLOT_SECONDS)])
-        self.assertEqual(trace, ["provider", "check"])  # sd:2605: the reviewers run before the gate
+        # sd:2605: the reviewers run before the gate; sd:7519: two of them.
+        self.assertEqual(trace, ["provider", "provider", "check"])
         self.assertEqual(len(state["passes"]), 1)
-        self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 1)
+        self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 2)
 
     def test_planning_timeout_saves_diagnostics_without_dispatch_or_reservation(self):
         diagnostic = {"kind": "watchdog_expired", "allowed_seconds": 3600,

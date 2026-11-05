@@ -67,6 +67,8 @@ class FakeMeter:
 
 
 class MeterFixture(LedgerFixture):
+    reviewing_depth = 1  # one metered url call per review
+
     def setUp(self) -> None:
         super().setUp()
         self.registry_path.write_text(REGISTRY, encoding="utf-8")

@@ -29,6 +29,8 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, NamedTuple
 
 if TYPE_CHECKING:  # `sd_review_slots` imports this module; see `review_slot`.
+    import threading  # the group helpers import it where they run
+
     import sd_review_slots
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
@@ -3850,6 +3852,159 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
 
 
+class ThreadGroups:
+    """sd:7519. The process groups worker threads lead, so a SIGTERM the main thread hears ends them.
+
+    Only the main thread runs a signal handler, so `term_ends_group` in a
+    worker installs none: a group a thread started outlived a killed parent,
+    the orphan sd:3203 fixed for one thread. `end_groups` runs as `first` in
+    the main thread's handler. A group that registers after it began is ended then.
+    """
+
+    def __init__(self) -> None:
+        import threading  # noqa: PLC0415 - only the group helpers need it
+
+        self._lock = threading.Lock()
+        self._live: set[int] = set()
+        self._holders: set[threading.Thread] = set()
+        self._ending = False
+
+    def group_hook(self) -> Callable[[int | None], None]:
+        """`run_group`'s `started`: the group's id once it runs, then None as `run_group` ends it."""
+        import signal  # noqa: PLC0415 - only the group helpers need it
+        import threading  # noqa: PLC0415
+
+        mine: list[int] = []
+
+        def heard_group(pid: int | None) -> None:
+            with self._lock:
+                if pid is None:
+                    self._live.difference_update(mine)
+                    return mine.clear()
+                mine.append(pid)
+                self._live.add(pid)
+                self._holders.add(threading.current_thread())
+                ending = self._ending
+            if ending:
+                _signal_group(pid, signal.SIGTERM)
+        return heard_group
+
+    def reopen_groups(self) -> None:
+        """After `end_groups` and every reader thread has stopped: a later dispatch's groups run.
+
+        Left set while a thread may still start a group (a retry), which is
+        then ended as it registers; a second Ctrl-C during the wait leaves it
+        so, and so does an abandoned url reader still in its read."""
+        with self._lock:
+            self._ending = False
+            self._holders.clear()
+
+    def holding_threads(self) -> list[threading.Thread]:
+        """The threads that led a group since the last `reopen_groups`, still running."""
+        with self._lock:
+            return [thread for thread in self._holders if thread.is_alive()]
+
+    def end_groups(self) -> None:
+        """SIGTERM each live group, then SIGKILL one still registered after `GROUP_CLEANUP_SECONDS`.
+
+        A group leaves the set when its own `run_group` starts ending it, so
+        what is left at the deadline is a group nothing else will end."""
+        import signal  # noqa: PLC0415 - only the group helpers need it
+
+        with self._lock:
+            self._ending, live = True, set(self._live)
+        for pid in live:
+            _signal_group(pid, signal.SIGTERM)
+        deadline, left = time.monotonic() + GROUP_CLEANUP_SECONDS, live
+        while left and time.monotonic() < deadline:
+            time.sleep(0.05)
+            with self._lock:
+                left = live & self._live
+        for pid in left:
+            _signal_group(pid, signal.SIGKILL)
+
+
+def _signal_group(pid: int, number: int) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError):  # already gone
+        os.killpg(pid, number)
+
+
+def fill_slots(items: Any, slots: int, run: Callable[[Any], Any], counted: Callable[[Any], bool],
+               groups: ThreadGroups) -> list[Any]:
+    """sd:7519. Run the first `slots` items at once; a slot whose answer did not count takes the next item.
+
+    The items started are the ones a serial loop that stops at `slots` counted
+    answers starts: the next starts only once a slot's answer is known not to
+    count, and only while counted and running answers are fewer than `slots`.
+    Answers return in item order, whatever order they finished in. `run`
+    starts its processes through `run_group(started=groups.group_hook())`, so a
+    SIGTERM ends each one's group, then unwinds here. Any other exception ends
+    them too. Either way this returns once every thread that led a group has
+    stopped; a url reader leads none, so its daemon thread is left to its read.
+    """
+    import queue  # noqa: PLC0415 - only the slot runner needs it
+    import threading  # noqa: PLC0415
+
+    answers: dict[int, Any] = {}
+    if slots <= 0:
+        return []
+    finished: queue.Queue[tuple[int, BaseException | None, Any]] = queue.Queue()
+
+    def answer_one(index: int) -> None:
+        try:
+            finished.put((index, None, run(items[index])))
+        except BaseException as error:  # noqa: BLE001 - re-raised in the main thread
+            finished.put((index, error, None))
+    running: dict[int, threading.Thread] = {}
+    with term_ends_group(first=groups.end_groups):
+        try:
+            following = done = 0
+            while following < len(items) and done + len(running) < slots or running:
+                while following < len(items) and done + len(running) < slots:
+                    running[following] = threading.Thread(target=answer_one, args=(following,),
+                                                          name=f"sd-slot-{following}", daemon=True)
+                    running[following].start()
+                    following += 1
+                try:  # bounded, so the main thread runs a SIGTERM's handler promptly
+                    index, error, answer = finished.get(timeout=1)
+                except queue.Empty:
+                    continue
+                running.pop(index).join()
+                if error is not None:
+                    raise error
+                answers[index] = answer
+                done += bool(counted(answer))
+        except BaseException:
+            # Ctrl-C, a reader or `counted` that raised, or SIGTERM: end the
+            # groups, then wait for the threads that led one, so the caller's
+            # `finally` gives the gate slot back after they stop. A url reader
+            # is abandoned: its daemon thread holds no process and no exit.
+            groups.end_groups()
+            for thread in groups.holding_threads():
+                thread.join()
+            if not any(thread.is_alive() for thread in running.values()):
+                groups.reopen_groups()
+            raise
+    groups.reopen_groups()
+    return [answers[index] for index in sorted(answers)]
+
+
+def distinct_findings(findings: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """sd:7519. Each finding once: one two readers both report keeps the first reader's `backend`.
+
+    Identical means every key but `backend` is equal. Adjudication takes a
+    row per blocking finding, so a copy was a second row to dispute.
+    """
+    seen: set[str] = set()
+    kept = []
+    for finding in findings:
+        key = json.dumps({name: value for name, value in finding.items() if name != "backend"}, sort_keys=True, default=str)
+        if key not in seen:
+            seen.add(key)
+            kept.append(dict(finding))
+    return kept
+
+
 # Review lenses (#1194)
 #
 # A lens re-aims the review lane's prompt at a subject that is not code. It
@@ -3889,6 +4044,26 @@ REVIEW_LENSES: dict[str, str] = {
         "respond only with JSON matching the output schema."
     ),
 }
+
+
+#: sd:7519. What one reader alone is asked on top of the shared review prompt:
+#: the "ranked" arm of code-review-research SPIKE-recall-fix §8, for Claude.
+#: The findings schema has no rank key (`additionalProperties` is false, and
+#: codex's strict schema is the same one), so the array's order is the rank.
+#: The codex prompt stays as it was: the same addition bought codex nothing.
+READER_PROMPTS: dict[str, str] = {
+    "claude-json": (
+        "\n\nBefore you report, trace each changed function to its callers, and each changed setting "
+        "or config value to the code and deploy files that read it. Rank findings by likely production "
+        "impact: rank 1 is the problem most likely to break production after merge. Return the findings "
+        "array in rank order, rank 1 first; add no rank key."
+    ),
+}
+
+
+def reader_prompt(prompt: str, reader: str | None) -> str:
+    """The shared review prompt plus what this reader alone is asked."""
+    return prompt + READER_PROMPTS.get(reader or "", "")
 
 
 def review_lens(name: str | None) -> str:

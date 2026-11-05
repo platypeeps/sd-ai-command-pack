@@ -42,6 +42,8 @@ class ReviewRunFixture(ReviewFixture):
 
 
 class FallbackTests(ReviewRunFixture):
+    reviewing_depth = 1  # fallthrough, one reader per tier
+
     def alternatives(self, root: pathlib.Path, first: str, second: str) -> None:
         registry = self.registry_home / ".local/share/sd/providers.yaml"
         registry.write_text("bills:\n  fixture: {cost: subscription}\nproviders:\n"
@@ -243,6 +245,8 @@ class ProviderEnvironmentTests(ReviewFixture):
 
 
 class DatabaseProviderStateTests(ReviewRunFixture):
+    reviewing_depth = 1  # the chain's order, one reader per tier
+
     def prepare_state(self) -> tuple[pathlib.Path, pathlib.Path]:
         root = self.prepare()
         path = self.registry_home / ".local/share/sd/providers.yaml"

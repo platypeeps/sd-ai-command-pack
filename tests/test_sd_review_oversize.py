@@ -21,6 +21,8 @@ from tests.test_sd_review_readiness import read_only_connections
 
 
 class OversizeTests(ReviewFixture):
+    reviewing_depth = 1  # fallthrough past an oversized reader, one per tier
+
     def test_gate_mutation_cannot_dispatch_an_unmeasured_subject(self):
         for target in ("introduced.py", "change.py"):
             with self.subTest(target=target):
@@ -152,7 +154,7 @@ class OversizeTests(ReviewFixture):
                 self.assertEqual(outcome.status, sd_review.CLEAN)
                 sent = client.sent[0]["prompt"] if remote else captured[0]
                 overhead = (f"\nSchema: {json.dumps(sd_review.CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{sd_review.URL_OUTPUT_CONTRACT}"
-                            if remote else "\n\nReview input:\n")
+                            if remote else sd_review.sd_lib.READER_PROMPTS["claude-json"] + "\n\nReview input:\n")  # sd:7519
                 manifest = sd_review.sd_review_material.input_manifest(inventory, prompt, {"fixture": overhead}, sd_review.MAX_OUTPUT_BYTES)
                 self.assertEqual(manifest["transport_bytes"]["fixture"], len(sent.encode()))
                 limit = len(sent.encode()) - 1
@@ -297,6 +299,7 @@ class OversizeTests(ReviewFixture):
 
 class BinaryMaterialTests(ReviewFixture):
     """sd:2181: a binary path contributes a short summary, never its bytes."""
+    reviewing_depth = 1  # one reader per tier
 
     SHOT = b"\x89PNG\r\n\x1a\n" + os.urandom(2_100_000)
 
