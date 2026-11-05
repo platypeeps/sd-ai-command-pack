@@ -822,6 +822,15 @@ class PieceMirror(ScreenCase):
                                "fact-check.md": [],
                                "adversarial.md": [("drive", "published", DRIVE_URL + "?a")]})
 
+    def test_a_long_slug_reads_the_bounded_names_the_pack_queues(self):
+        # Lead review: the page looks a copy up by the name the pack writes, bounded the same way (`piece_out`).
+        from sd_db import writing
+
+        slug = "2026/" + "a" * 240
+        outs = publishing._piece_outs(slug)
+        self.assertEqual(outs["index.md"], writing.piece_out(slug, "draft"))
+        self.assertTrue(all(len(out.encode()) <= writing.OUT_BYTES for out in outs.values()), outs)
+
     def test_queue_piece_asks_the_pack_for_that_piece(self):
         enqueue = mock.Mock(return_value=["mirror: queued 2026-a-piece-draft -> the Writing/Drafts Drive folder"])
         with mock.patch.object(publishing.kit(), "enqueue_pieces", enqueue):

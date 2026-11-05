@@ -3497,17 +3497,18 @@ class PieceTests(Fixture):
                          ["2026-a-piece-draft"], edited)
 
     def test_a_stop_part_way_is_finished_by_the_next_run(self) -> None:
-        # Failure table, "Enqueue: per file": two requests written, then the process stops.
+        # Failure table, "Enqueue: per file": two requests written, then the process stops. A stop is SystemExit: a
+        # write error holds only its file and goes on (test_a_request_that_cannot_be_written_holds_that_file...).
         real, written = PUBLISH.write_request, []
 
         def stop_after_two(path, request, digest):
             if len(written) == 2:
-                raise OSError("stopped")
+                raise SystemExit("stopped")
             written.append(path.name)
             real(path, request, digest)
 
         with unittest.mock.patch.object(PUBLISH, "write_request", stop_after_two):
-            with self.assertRaises(OSError):
+            with self.assertRaises(SystemExit):
                 PUBLISH.enqueue_pieces(self.connection)
         self.assertEqual(len(self.queued()), 2)
         again = PUBLISH.enqueue_pieces(self.connection)
@@ -3543,6 +3544,45 @@ class PieceTests(Fixture):
         self.assertTrue(any("fact-check.md" in line and "sd:%d" % self.item in line for line in reports), reports)
         self.assertNotIn(self.name("fact-check"), self.queued())
         self.assertEqual(len(self.queued()), 3)
+
+    def test_a_long_slug_queues_names_that_fit_and_the_page_reads_the_same(self) -> None:
+        # Lead review: a 240-character slug fits its folder, but its queue names ran to 270-276 bytes.
+        slug = "2026/" + "a" * 240
+        folder = self.repo / "content" / slug
+        folder.mkdir(parents=True)
+        (folder / "index.md").write_text(self.INDEX, encoding="utf-8")
+        long = self.writing.import_piece(self.connection, self.key, slug, who="test")["item"]["id"]
+        self.connection.execute("UPDATE item SET stage = 'review' WHERE id = ?", (long,))
+        self.connection.commit()
+        reports = PUBLISH.enqueue_pieces(self.connection, {long})
+        out = self.writing.piece_out(slug, "draft")
+        self.assertEqual(self.queued(), ["my-research.%s.drive.json" % out], reports)
+        self.assertLessEqual(len(out.encode()), self.writing.OUT_BYTES)
+        self.assertEqual(self.writing.piece_out(self.PIECE, "draft"), "2026-a-piece-draft")  # a short name stays
+
+    def test_a_request_that_cannot_be_written_holds_that_file_and_the_rest_queue(self) -> None:
+        real, calls = PUBLISH.write_request, []
+
+        def write(path: Path, request: dict, digest: str) -> None:
+            calls.append(path.name)
+            if len(calls) == 1:
+                raise OSError(63, "File name too long")
+            real(path, request, digest)
+        with unittest.mock.patch.object(PUBLISH, "write_request", write):
+            reports = PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(len(self.queued()), 3, reports)
+        self.assertTrue(any(calls[0].split(".")[1] in line and "File name too long" in line and "not queued" in line
+                            for line in reports), reports)
+
+    def test_a_repository_that_fails_to_queue_holds_it_and_the_next_is_queued(self) -> None:
+        from sd_db.writes import upsert_repo  # noqa: PLC0415
+        other = self.root / "other-repo"
+        other.mkdir()
+        upsert_repo(self.connection, str(other))
+        with unittest.mock.patch.object(PUBLISH, "enqueue", side_effect=[OSError("disk full"), ["mirror: queued b"]]):
+            reports = PUBLISH.enqueue_rows(self.connection, {self.key: [{}], str(other): [{}]}, [], "piece")
+        self.assertIn("mirror: queued b", reports)
+        self.assertTrue(any("disk full" in line and "no piece of it queued" in line for line in reports), reports)
 
     def test_only_the_named_items_are_queued(self) -> None:
         self.assertEqual(PUBLISH.enqueue_pieces(self.connection, items={self.item + 1}), [])

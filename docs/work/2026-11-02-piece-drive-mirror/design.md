@@ -132,6 +132,8 @@ option C, a hub cron job with a new verb, one more verb and job.
 | --- | --- | --- | --- | --- |
 | Enqueue: read realm and account | none | realm list or account unread | that piece held and named; others queue; the next trigger queues it | unread realms hold the piece; unread account holds it |
 | Enqueue: per file | one request and its receipt per file, under the queue lock | stop after two of four files | the next enqueue finds two `already queued` and writes two | stop after file two; rerun writes two, skips two |
+| Enqueue: write a file's request | none for that file | the write or a read of its queue file fails (a name too long, a full disk) | that file held, named; the next files and repositories still queue; the next trigger retries | first write fails: three queued, one named; a failing repository holds it and the next queues |
+| Enqueue: name a file | none | a slug up to 240 bytes makes a queue name past 255 | `writing.piece_out` bounds the name to 160 bytes with a digest; the page looks up the same name | a 240-byte slug queues a name that fits; the page reads the same name |
 | Enqueue: read file | none | a file unreadable or outside the repo | that file skipped and named; others queue | symlink out of the repo: three requests, one reason |
 | Enqueue: refusal | none | linked worktree, or main off its branch | nothing queued; the line says why | files come from the registered checkout |
 | Stage to published | request rewritten to `Writing/Published` with the carried file id | receipt from another account or item | no id carried; the drain adopts by its pointer, else creates | published piece carries `file`; another account carries none |

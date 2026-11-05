@@ -2226,39 +2226,43 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
     with queue_locked():
         for cfg, target in wanted:
             out = str(cfg.get("out", "")).strip()
-            request = mirror_request(repo, home, vault, cfg, target, rev)
-            name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
-            path = QUEUE / name
-            what = BY_NAME[target["destination"]].what
-            identity = mirror_identity(request, target, what)
-            digest = mirror_fingerprint(request, target, what)
-            state = "" if force else already_queued(path, receipts() / name, digest, identity,
-                                                    bool(request[what]))
-            if state:
-                reports.append(unchanged_report(state, out, target["target"], rev))
-                continue
-            # The designation is the answer where it gives one; the queue records
-            # what a drain did, and never overrides what the document says.
-            # A writing piece's file keeps its copy across its two folders
-            # (pack sd:7243): the drain moves it from Drafts to Published.
-            carry = carried_identity(identity, cfg, BY_NAME[target["destination"]].where)
-            carried = "" if request[what] else (recorded(path, carry, what)
-                                                or delivered_url(receipts() / name, carry, cfg))
-            request[what] = request[what] or carried
-            reverted = not force and reverts_to_delivered(path, name, digest)
-            if dry:
-                reports.append(queued_report(out, target["target"], what, carried, reverted,
-                                             "would queue") + " (%s)" % MIRROR_DRY_RUN)
-                continue
-            failed = drawn(request)
-            if failed:
-                reports.append("mirror: %s: %s; not queued" % (out, failed))
-                continue
-            write_request(path, request, digest)
-            reports += record_queued(name, dict(
-                queued=digest, revision=rev, repo=str(home), document=out,
-                destination=target["destination"], identity=identity if isinstance(cfg.get("content"), str) else None))
-            reports.append(queued_report(out, target["target"], what, carried, reverted))
+            try:
+                request = mirror_request(repo, home, vault, cfg, target, rev)
+                name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
+                path = QUEUE / name
+                what = BY_NAME[target["destination"]].what
+                identity = mirror_identity(request, target, what)
+                digest = mirror_fingerprint(request, target, what)
+                state = "" if force else already_queued(path, receipts() / name, digest, identity,
+                                                        bool(request[what]))
+                if state:
+                    reports.append(unchanged_report(state, out, target["target"], rev))
+                    continue
+                # The designation is the answer where it gives one; the queue records
+                # what a drain did, and never overrides what the document says.
+                # A writing piece's file keeps its copy across its two folders
+                # (pack sd:7243): the drain moves it from Drafts to Published.
+                carry = carried_identity(identity, cfg, BY_NAME[target["destination"]].where)
+                carried = "" if request[what] else (recorded(path, carry, what)
+                                                    or delivered_url(receipts() / name, carry, cfg))
+                request[what] = request[what] or carried
+                reverted = not force and reverts_to_delivered(path, name, digest)
+                if dry:
+                    reports.append(queued_report(out, target["target"], what, carried, reverted,
+                                                 "would queue") + " (%s)" % MIRROR_DRY_RUN)
+                    continue
+                failed = drawn(request)
+                if failed:
+                    reports.append("mirror: %s: %s; not queued" % (out, failed))
+                    continue
+                write_request(path, request, digest)
+                reports += record_queued(name, dict(
+                    queued=digest, revision=rev, repo=str(home), document=out,
+                    destination=target["destination"], identity=identity if isinstance(cfg.get("content"), str) else None))
+                reports.append(queued_report(out, target["target"], what, carried, reverted))
+            except OSError as problem:  # one file's request held, named; the rest still queue (pack sd:7243 review)
+                reports.append("mirror: %s: the request was not written: %s; not queued"
+                               % (out, problem.strerror or problem))
         if not dry:
             prune_images()
     return reports
@@ -2757,10 +2761,9 @@ def piece_docs(
             problems.append("mirror: sd:%s: %s; not queued" % (row["id"], problem or type(problem).__name__))
             continue
         problems += ["mirror: sd:%s: %s; not queued" % (row["id"], why) for why in unread]
-        stem = row["piece"].replace("/", "-")
         for part, (name, text) in texts.items():
             docs.setdefault(row["repo"], []).append({
-                "out": "%s-%s" % (stem, part), "title": "%s · %s" % (row["title"], part),
+                "out": writing.piece_out(row["piece"], part), "title": "%s · %s" % (row["title"], part),
                 "item": row["id"], "content": text, "source": "sd:%s/%s" % (row["id"], name),
                 "moves": True, "drive": {"folder": PIECE_FOLDERS[row["stage"]], "account": address}})
     return docs, problems
@@ -2787,7 +2790,11 @@ def enqueue_rows(connection: Any, docs: dict[str, list[dict[str, Any]]], reports
             reports.append("%s: %s: %s; no %s of it queued"
                            % (HELD, repo, problem or type(problem).__name__, what))
             continue
-        reports += enqueue(paths.expand(repo), entries, setting)
+        try:
+            reports += enqueue(paths.expand(repo), entries, setting)
+        except Exception as problem:  # one repository's failure holds it, not the next (pack sd:7243 review)
+            reports.append("%s: %s: %s; no %s of it queued"
+                           % (HELD, repo, problem or type(problem).__name__, what))
     return reports
 
 

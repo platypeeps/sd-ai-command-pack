@@ -269,6 +269,19 @@ def piece_files(row) -> dict[str, dict | None]:
 
 #: The files a piece mirrors to Drive (pack sd:7243), by the stem its request is named with: the draft, then each report.
 MIRRORED = {"draft": "index.md", **REPORTS}
+#: The longest name a piece document takes, in bytes. Its queue file is `<repo key>.<name>.<destination>.json`, and a
+#: file name holds 255 bytes, but a slug may run to 240 (`_key`): a longer name keeps its head and a digest of the
+#: whole, so the pack's queue and the dashboard's lookup name one file (pack sd:7243 review).
+OUT_BYTES = 160
+
+
+def piece_out(piece: str, stem: str) -> str:
+    """A piece file's document name, `<year>-<slug>-<stem>`, bounded to OUT_BYTES."""
+    out = f"{piece.replace('/', '-')}-{stem}"
+    if len(out.encode()) <= OUT_BYTES:
+        return out
+    digest = hashlib.sha256(out.encode()).hexdigest()[:16]
+    return f"{out.encode()[:OUT_BYTES - len(digest) - len(stem) - 2].decode(errors='ignore')}-{digest}-{stem}"
 
 
 def mirror_texts(row) -> tuple[dict[str, tuple[str, str]], list[str]]:

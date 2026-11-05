@@ -224,7 +224,8 @@ copy already made stays where it is.
 Each file that exists is its own document: the draft `index.md`, `research.md`,
 `fact-check.md` and `adversarial.md`, as `<year>-<slug>-<stem>` with stem
 `draft`, `research`, `fact-check` or `adversarial`, titled
-`<piece title> · <stem>`. The request carries the file's text, read from the
+`<piece title> · <stem>`. A name past 160 bytes keeps its head, a digest of
+the whole and the stem (`writing.piece_out`), so its queue file fits. The request carries the file's text, read from the
 registered checkout and never a linked worktree's, as `content`, the piece's
 item as `item`, and `sd:<item>/<file>` as its `source`. It names no vault copy.
 

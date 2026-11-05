@@ -873,10 +873,10 @@ def designate_brief(connection, item: int, channel: str, *, enqueue=None) -> dic
 
 
 def _piece_outs(piece: str) -> dict[str, str]:
-    """Each mirrored file's name -> its document, `<year>-<slug>-<stem>`, as the pack's `piece_docs` names it."""
+    """Each mirrored file's name -> its document, `writing.piece_out`, as the pack's `piece_docs` names it."""
     from sd_db import writing
 
-    return {name: f"{piece.replace('/', '-')}-{stem}" for stem, name in writing.MIRRORED.items()}
+    return {name: writing.piece_out(piece, stem) for stem, name in writing.MIRRORED.items()}
 
 
 def piece_mirror(checkout: Path, piece: str, folder: str | None, fields: dict, *, queue: Path | None,
