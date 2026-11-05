@@ -104,7 +104,18 @@ def _write(tool: str, arguments: dict, what: str) -> str:
     return made[1]
 
 
-def _settings(connection, root: str = FOLDER_KEY) -> tuple[str, str]:
+def _account(connection) -> str:
+    """The account alone (sd:7680): a picture is named by its file id, so no folder setting gates it; `LookupError`
+    when unset."""
+    from sd_db import writes
+
+    account = writes.read_settings(connection, [ACCOUNT_KEY]).get(ACCOUNT_KEY)
+    if not account:
+        raise LookupError(f"{ACCOUNT_KEY} is not set: run sd config set {ACCOUNT_KEY} <value>.")
+    return account
+
+
+def _settings(connection, root: str) -> tuple[str, str]:
     """`(the root folder id named by setting `root`, the account)`; `LookupError` naming each one unset."""
     from sd_db import writes
 
@@ -216,7 +227,7 @@ def picture(connection, parameters: dict):
     if not isinstance(ident, str) or not ID.fullmatch(ident):
         return 400, {"error": "Name the picture by its Drive file id."}
     try:
-        _, account = _settings(connection)
+        account = _account(connection)
         said = _call("get_drive_file_download_url", {"user_google_email": account, "file_id": ident}, "the download")
         found, mime = re.search(r"Download URL:\s*(http\S+)", said), re.search(r"MIME Type:\s*(image/[\w.+-]+)", said)
         if not mime:
