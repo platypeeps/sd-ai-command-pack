@@ -397,10 +397,12 @@ def document(connection, *, now: str = "") -> dict:
     """The page's document: the header readings and one section per repository lane."""
     from sd_db import repos
 
+    from .hoa_screen import checkout
     from .places import realm_of, realms
 
     found = realms(connection)
     rules = found["list"] if found["state"] in ("read", "partial") else None
+    hoa = checkout(connection)[0]
     clock = _when(now) or time.time()
     managed = {os.path.expanduser(row["path"]): row for row in repos.registered(connection) if row["managed"]}
     here = [path for path in managed if os.path.isdir(path)]
@@ -422,7 +424,7 @@ def document(connection, *, now: str = "") -> dict:
         root = root or lane.parent.parent
         entries = answer.get("entries") or []
         # pack sd:6016: the realm tab that lists the lane, its checkout's realm (None: the realm list was not read).
-        lanes.append({"repo": Path(path).name, "path": path, "realm": realm_of(path, "lane", rules), "lane": str(lane),
+        lanes.append({"repo": Path(path).name, "path": path, "realm": realm_of(path, "lane", rules, hoa), "lane": str(lane),
                       "revision": revision(entries),
                       "runner_merge": repos.policy_merge(managed[path]["declarations"]), "host": managed[path]["lane_host"] or "hub",
                       "rows": rows(entries, path=path, lane=lane, now=clock, done=closed(connection, entries))})

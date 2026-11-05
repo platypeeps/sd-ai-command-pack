@@ -35,7 +35,7 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
-from sd_dashboard import now_screen, pack_bin, places, queue_screen, v2
+from sd_dashboard import hoa_screen, now_screen, pack_bin, places, queue_screen, v2
 from sd_db import upsert_repo
 from support import NOW, ScreenCase
 from test_v2_registry import GROUP_BLOCK
@@ -166,6 +166,17 @@ class TheRows(Lane, ScreenCase):
                 conf.write_text(text)
             with self.subTest(realm=realm), mock.patch.object(places, "REALMS_CONFIG", conf):
                 self.assertEqual([lane["realm"] for lane in queue_screen.document(self.connection, now=NOW)["lanes"]], [realm])
+
+    def test_the_hoa_checkouts_lane_is_realm_hoa_before_a_glob_that_claims_it(self):
+        """pack sd:7687: the hoa checkout's lane is HOA's, as its items are on Tasks, with or without a realm list."""
+        conf = Path(self.tmp.name) / "realms.conf"
+        hoa = mock.patch.object(hoa_screen, "checkout", return_value=(str(self.checkout), self.checkout, []))
+        for text in (f"realm|work|Work|{self.checkout.parent}/*\n", None):
+            conf.unlink(missing_ok=True)
+            if text:
+                conf.write_text(text)
+            with self.subTest(text=text), hoa, mock.patch.object(places, "REALMS_CONFIG", conf):
+                self.assertEqual([lane["realm"] for lane in queue_screen.document(self.connection, now=NOW)["lanes"]], ["hoa"])
 
     def test_a_row_links_each_screenshot_the_lane_drew_and_says_why_it_drew_none(self):
         self.shot_entries()
