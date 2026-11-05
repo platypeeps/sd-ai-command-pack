@@ -827,8 +827,10 @@ def intake_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
     status and any letter case. Pull requests stay out, as in `mine_issues`.
 
     A repository whose `issues_scope` is `mine` (pack sd:7672) keeps only the
-    rows whose reason is in `SCOPE_MINE`: a row only the open sweep saw has
-    no reason, so an issue that never reached the operator stays out.
+    rows whose reason is in `SCOPE_MINE`. The windowed buckets alone would
+    leave an older issue without one, so `sd shadow sync` searches such a
+    repository unwindowed and restates every open row's reason
+    (`shadow_sync.MINE_SWEEPS`, `writes.restate_reasons`).
     """
     from .review import REF_SOURCE
 

@@ -1482,6 +1482,99 @@ class TheIntakeSearch(SyncCase):
         self.assertFalse(any("repo:" in query for query in runner.queries))
 
 
+def scoped(qualifier):
+    """The unwindowed `qualifier` search a `mine` intake repository gets (pack sd:7672)."""
+    return lambda query: qualifier in query and "is:open" in query and "updated:" not in query
+
+
+class TheMineScopeSearch(SyncCase):
+    """pack sd:7672 lane review. A repository whose intake scope is `mine` decides
+    membership from `shadow.reason`, so the sync must give that reason to every
+    open issue there, not only the ones its window saw, and take back one that
+    no longer holds. Class: membership derived from a windowed reason."""
+
+    REPO = "example-org/benchmark"
+    OLD = "2025-01-01T00:00:00Z"
+
+    def setUp(self):
+        super().setUp()
+        from sd_db.writes import upsert_repo
+
+        upsert_repo(self.connection, "/srv/example/benchmark", remote=f"git@github.com:{self.REPO}.git")
+        upsert_repo(self.connection, "/srv/example/other", remote="https://github.com/example-org/other")
+        self.connection.execute(
+            "UPDATE repo SET declarations = '{\"policy\":{\"issues\":\"ask\",\"issues_scope\":\"mine\"}}' "
+            "WHERE path = '/srv/example/benchmark'")
+        self.connection.execute(
+            "UPDATE repo SET declarations = '{\"policy\":{\"issues\":\"ask\"}}' WHERE path = '/srv/example/other'")
+
+    def old(self, number):
+        return {**node(number), "updatedAt": self.OLD}
+
+    def reasons(self):
+        return {row["url"].rsplit("/", 1)[1]: row["reason"] for row in self.shadow().values()}
+
+    def intake(self):
+        from sd_db.repos import intake_issues
+
+        return [row["number"] for row in intake_issues(self.connection).get("/srv/example/benchmark", [])]
+
+    def test_an_issue_assigned_or_mentioning_before_the_window_gets_its_reason(self):
+        """Issues 1 and 2 were last updated before the 90-day window, so no
+        windowed bucket returns them; the scoped searches do, for this
+        repository alone. Issue 3 reached nobody and stays without one."""
+        answer = {"assignee:@me": [self.old(1)], "mentions:@me": [self.old(2)]}
+        runner = QueryGh(lambda query: (
+            next((nodes for word, nodes in answer.items() if scoped(word)(query)), None)
+            or ([self.old(1), self.old(2), self.old(3)] if sweep(query) else [])))
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": "assigned", "2": "watched", "3": None})
+        self.assertEqual(sorted(self.intake()), [1, 2])
+        mine = [query for query in runner.queries if "updated:" not in query and "@me" in query]
+        self.assertEqual(sorted(mine), [f"is:issue is:open assignee:@me repo:{self.REPO}",
+                                        f"is:issue is:open mentions:@me repo:{self.REPO}"])
+
+    def test_a_reason_that_no_longer_holds_is_taken_back(self):
+        """Older state: issue 1 was assigned and issue 2 mentioned the operator;
+        both since lost it. Issue 4 the operator opened keeps `filed`. A
+        repository outside the scope keeps its stored reason."""
+        self.connection.execute(
+            "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, reason, filed, first_seen, "
+            "last_seen) VALUES ('github', 'example-org/other', 'https://github.com/example-org/other/issues/9', 9, "
+            "'issue', 'other', 'open', 'assigned', 0, 't1', 't1')")
+        first = QueryGh(lambda query: [self.old(1)] if scoped("assignee:@me")(query)
+                        else [self.old(2)] if scoped("mentions:@me")(query)
+                        else [self.old(1), self.old(2), self.old(4)] if sweep(query) else [])
+        sync(self.connection, now=self.now, runner=first)
+        self.connection.execute("UPDATE shadow SET reason = 'assigned', filed = 1 WHERE number = 4")
+        self.assertEqual(self.reasons(), {"1": "assigned", "2": "watched", "4": "assigned", "9": "assigned"})
+        later = QueryGh(lambda query: [self.old(1), self.old(2), self.old(4)]
+                        if sweep(query) and not scoped("@me")(query) else [],
+                        read=lambda path: issue(9))
+        result = sync(self.connection, now=self.now + timedelta(hours=1), runner=later)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": None, "2": None, "4": "filed", "9": "assigned"})
+        self.assertEqual(self.intake(), [])
+
+    def test_a_failed_scoped_search_takes_back_nothing_and_is_named(self):
+        """A failed or capped search is unknown, not "no longer the operator's"."""
+        first = QueryGh(lambda query: [self.old(1)] if scoped("assignee:@me")(query)
+                        else [self.old(1)] if sweep(query) else [])
+        sync(self.connection, now=self.now, runner=first)
+        for name, runner in (
+                ("failed", QueryGh(lambda query: [self.old(1)] if sweep(query) and not scoped("@me")(query) else [],
+                                   failing=scoped("mentions:@me"))),
+                ("capped", QueryGh(lambda query: [self.old(1)] if sweep(query) and not scoped("@me")(query) else [],
+                                   count=lambda query: 1001 if scoped("assignee:@me")(query) else None))):
+            with self.subTest(name):
+                result = sync(self.connection, now=self.now + timedelta(hours=1), runner=runner)
+                self.assertTrue(result.ok, result.reason)
+                self.assertEqual(self.reasons(), {"1": "assigned"})
+                self.assertTrue(any("intake sweep incomplete" in line and "@me" in line
+                                    for line in result.report()), result.report())
+
+
 class TheStaleRead(SyncCase):
     """Pack sd:5415. An open issue row of a repository outside intake came
     from the operator's windowed buckets, and a closure no window saw, such as

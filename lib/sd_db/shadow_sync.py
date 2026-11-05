@@ -55,6 +55,7 @@ from .writes import (
     open_shadow_issues,
     record_state,
     resolve_state,
+    restate_reasons,
     see_shadow,
     settle_shadow,
     stale_shadow_rows,
@@ -108,6 +109,10 @@ BUCKETS = (
 INTAKE = "intake"
 #: Repositories per intake sweep: GitHub refuses a long search query.
 INTAKE_GROUP = 5
+#: `(why, qualifier)`: the unwindowed searches an intake repository whose `issues_scope` is `mine` gets (pack
+#: sd:7672). Its intake list decides membership from `reason`, and a windowed bucket never sees an issue last
+#: updated before its window, so these list every open issue there assigned to the operator or mentioning them.
+MINE_SWEEPS = (("assigned", "assignee:@me"), ("mentioned", "mentions:@me"))
 #: How long an open row goes unseen before `sync` reads it directly: an
 #: issue outside intake (pack sd:5415) or a pull request (sd:6091). A bucket
 #: sees a closure in its window; a week unseen means no bucket will, and an
@@ -587,10 +592,15 @@ class Collected:
     #: (sd:4880).
     incomplete: list[str] = field(default_factory=list)
     swept: list[tuple[tuple[str, ...], set[str]]] = field(default_factory=list)
+    #: The `mine` repositories whose `MINE_SWEEPS` all completed, and the urls this run found assigned to the
+    #: operator and mentioning them, in any search (pack sd:7672): `restate_reasons` decides from these.
+    reached: list[tuple[str, ...]] = field(default_factory=list)
+    assigned: set[str] = field(default_factory=set)
+    mentioned: set[str] = field(default_factory=set)
 
 
 def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
-            max_requests=MAX_REQUESTS, max_seconds=MAX_SECONDS, budget=None, intake=()) -> Collected:
+            max_requests=MAX_REQUESTS, max_seconds=MAX_SECONDS, budget=None, intake=(), mine=()) -> Collected:
     """Every bucket, unioned by URL.
 
     A bucket that errors makes the whole collect unsuccessful, and the caller
@@ -609,6 +619,14 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     directly (`confirm_absent`), which is how a closure is seen. Every run
     repeats the sweep whole and it reads no window, so its failure or cap
     holds no cursor: it is named in `incomplete`, and closes nothing.
+
+    `mine` names the intake repositories whose `issues_scope` is `mine` (pack
+    sd:7672). Before the sweep, `MINE_SWEEPS` list their open issues assigned
+    to the operator or mentioning them, unwindowed. A row only these found
+    gets `assigned` or no reason, and no `filed`: they cannot say who opened
+    it. A group whose searches all completed lands in `reached`, and `sync`
+    restates its rows' reasons from them; a failed or capped one is named in
+    `incomplete` and restates nothing.
     """
     _validate_limits(max_requests, max_seconds)
     end = _utc_second(now, "now")
@@ -647,6 +665,31 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     swept_only: set[str] = set()
     listings = []
     incomplete = []
+    windowless: set[str] = set()
+    unknown_mine: set[str] = set()
+    reached = []
+    for at in range(0, len(mine), INTAKE_GROUP):
+        slugs = tuple(mine[at:at + INTAKE_GROUP])
+        scope = " ".join(f"repo:{slug}" for slug in slugs)
+        complete = True
+        for why, qualifier in MINE_SWEEPS:
+            nodes, cut, error = search(f"is:issue is:open {qualifier} {scope}", runner, budget=budget)
+            if error or cut:
+                complete = False
+                unknown_mine.add(why)
+                incomplete.append(f"{qualifier} {scope}: {error or 'more open issues than one search returns'}")
+            for node in nodes:
+                row = normalize(node, why)
+                if row is None:
+                    continue
+                found = merged.get(row["url"])
+                if found is None:
+                    merged[row["url"]] = row
+                    windowless.add(row["url"])
+                elif why not in found["why"]:
+                    found["why"].append(why)
+        if complete:
+            reached.append(slugs)
     for at, group in enumerate(groups):
         nodes, cut, error = search(f"is:issue is:open {group}", runner, budget=budget)
         if error or cut:
@@ -668,10 +711,13 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     rows = sorted(merged.values(), key=lambda row: row["updated_at"], reverse=True)
     for row in rows:
         row["why"].sort()
-        row["reason"] = None if row["url"] in swept_only else reason_of(row["why"], truncated)
+        # A row only the `mine` searches found is outside the window, so whether the operator opened it is unknown.
+        row["reason"] = (None if row["url"] in swept_only
+                         else reason_of(row["why"], unknown_mine | {"author"}) if row["url"] in windowless
+                         else reason_of(row["why"], truncated))
         # Apart from `reason`, which names an assigned row assigned. A row `author:@me` returned is filed, even from
         # a cut search; absence from a cut one is unknown, as `reason_of` reads it.
-        row["filed"] = (None if row["url"] in swept_only else True if "author" in row["why"]
+        row["filed"] = (None if row["url"] in swept_only | windowless else True if "author" in row["why"]
                         else None if "author" in truncated else False)
     return Collected(
         ok=not errors and not truncated,
@@ -684,6 +730,9 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
         coverage=coverage,
         incomplete=incomplete,
         swept=listings,
+        reached=reached,
+        assigned={row["url"] for row in rows if "assigned" in row["why"]},
+        mentioned={row["url"] for row in rows if {"mentioned", "review-requested"} & set(row["why"])},
     )
 
 
@@ -1079,9 +1128,11 @@ def _sync(
     search_budget = _SearchBudget(max_requests - reserve,
                                  budget.deadline - (min(120, max_seconds / 2) if reserve else 0))
     previous = read_watermark(connection, tracker)
-    intake = tuple(dict.fromkeys(repos.intake_repos(connection).values()))
-    result = collect(previous, moment, runner, since=since,
-                     max_requests=max_requests, max_seconds=max_seconds, budget=search_budget, intake=intake)
+    taking = repos.intake_repos(connection)
+    intake = tuple(dict.fromkeys(taking.values()))
+    mine = tuple(dict.fromkeys(slug for path, slug in taking.items() if repos.issues_scope(connection, path) == "mine"))
+    result = collect(previous, moment, runner, since=since, max_requests=max_requests,
+                     max_seconds=max_seconds, budget=search_budget, intake=intake, mine=mine)
     # Stale rows wait for a run whose buckets completed: one that failed may fail these reads too.
     reader = Client(search_budget, runner=runner)
     closing, unconfirmed, opened = confirm_absent(connection, result.swept, reader, tracker=tracker)
@@ -1154,6 +1205,9 @@ def _sync(
         close_shadow(connection, tracker=tracker, closed=closing)
         settle_shadow(connection, tracker=tracker, settled=settled)
         see_shadow(connection, tracker=tracker, urls=opened)
+        for slugs in result.reached:
+            restate_reasons(connection, tracker=tracker, repos=slugs,
+                            assigned=result.assigned, mentioned=result.mentioned)
         previous_time = parse_iso(read_watermark(connection, tracker))
         # A complete explicit recovery can still leave an uncovered prefix.
         moved = search_complete and detail["staged"] and (previous_time is None or (
