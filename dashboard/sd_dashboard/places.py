@@ -122,13 +122,14 @@ def realm_of(repo: str | None, kind: str, rules: list | None, hoa: str | None = 
 def area_of(repo: str | None, kind: str, hoa: str | None) -> str | None:
     """The area an item belongs to: `hoa` for the hoa checkout's, `home` for one with no repo, else None.
 
-    A report is in no area's Tasks: the area's Reports view lists it by its job.
+    A report is in no area's Tasks: the area's Reports view lists it by its job. Both paths have `~` expanded, as
+    `realm_of` expands it, so a row stored as `~/...` against an absolute registered path is still HOA's (sd:7707).
     """
     if kind == "report":
         return None
     if not repo:
         return "home"
-    return "hoa" if hoa is not None and repo == hoa else None
+    return "hoa" if hoa is not None and os.path.expanduser(repo) == os.path.expanduser(hoa) else None
 
 
 def series_job(series: str) -> str:
