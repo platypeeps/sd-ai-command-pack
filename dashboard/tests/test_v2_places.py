@@ -1338,6 +1338,13 @@ class TheRule(unittest.TestCase):
         self.assertIsNone(places.area_of("/repos/system", "task", "/repos/hoa"))
         self.assertIsNone(places.area_of("/repos/hoa", "task", None))
 
+    def test_area_of_expands_a_tilde_on_either_side_as_realm_of_does(self):
+        # sd:7707: a row stored as ~/repos/hoa against an absolute registered path (or the reverse) is still HOA's.
+        home = str(Path.home() / "repos/hoa")
+        self.assertEqual(places.area_of("~/repos/hoa", "task", home), "hoa")
+        self.assertEqual(places.area_of(home, "task", "~/repos/hoa"), "hoa")
+        self.assertIsNone(places.area_of("~/repos/hoa-two", "task", home))
+
     def test_a_series_names_a_job_lower_cased_with_hyphens(self):
         self.assertEqual(places.series_job("HOA Morning Digest"), "hoa-morning-digest")
         self.assertEqual(places.series_job("  Fun  Events Nightly "), "fun-events-nightly")
