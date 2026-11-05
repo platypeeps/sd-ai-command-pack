@@ -872,11 +872,12 @@ def designate_brief(connection, item: int, channel: str, *, enqueue=None) -> dic
 # -- a writing piece's mirror (pack sd:7243) ------------------------------------------------------------------------
 
 
-def _piece_outs(piece: str) -> dict[str, str]:
-    """Each mirrored file's name -> its document, `writing.piece_out`, as the pack's `piece_docs` names it."""
+def _piece_outs(checkout: Path, piece: str) -> dict[str, str]:
+    """Each mirrored file's name -> its document, `writing.piece_out` under `checkout`'s queue key, as the pack's
+    `piece_docs` names it (pack sd:7565)."""
     from sd_db import writing
 
-    return {name: writing.piece_out(piece, stem) for stem, name in writing.MIRRORED.items()}
+    return {name: writing.piece_out(piece, stem, key=repo_key(checkout)) for stem, name in writing.MIRRORED.items()}
 
 
 def piece_mirror(checkout: Path, piece: str, folder: str | None, fields: dict, *, queue: Path | None,
@@ -886,7 +887,7 @@ def piece_mirror(checkout: Path, piece: str, folder: str | None, fields: dict, *
     published = fields.get("published") if isinstance(fields.get("published"), dict) else {}
     copies = {name: [copy for copy in document_copies(checkout, out, setting=None, unread="", fields=published,
                                                       queue=queue, receipts=receipts)["copies"] if copy["channel"] == "drive"]
-              for name, out in _piece_outs(piece).items()}
+              for name, out in _piece_outs(checkout, piece).items()}
     return {"folder": folder, "copies": copies}
 
 

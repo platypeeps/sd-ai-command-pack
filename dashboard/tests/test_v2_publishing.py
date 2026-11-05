@@ -827,9 +827,18 @@ class PieceMirror(ScreenCase):
         from sd_db import writing
 
         slug = "2026/" + "a" * 240
-        outs = publishing._piece_outs(slug)
-        self.assertEqual(outs["index.md"], writing.piece_out(slug, "draft"))
+        outs = publishing._piece_outs(self.checkout, slug)
+        self.assertEqual(outs["index.md"], writing.piece_out(slug, "draft", key="writing"))
         self.assertTrue(all(len(out.encode()) <= writing.OUT_BYTES for out in outs.values()), outs)
+
+    def test_a_long_repository_name_reads_queue_names_that_fit(self):
+        # pack sd:7565: a 100-character repository and a 240-character slug made a 272-byte queue name.
+        from sd_db import writing
+
+        checkout, slug = Path(self.tmp.name) / ("r" * 100), "2026/" + "a" * 240
+        names = [f"{'r' * 100}.{out}.drive.json" for out in publishing._piece_outs(checkout, slug).values()]
+        self.assertEqual([len(name.encode()) <= 255 for name in names], [True] * len(writing.MIRRORED), names)
+        self.assertEqual(names[0], f"{'r' * 100}.{writing.piece_out(slug, 'draft', key='r' * 100)}.drive.json")
 
     def test_queue_piece_asks_the_pack_for_that_piece(self):
         enqueue = mock.Mock(return_value=["mirror: queued 2026-a-piece-draft -> the Writing/Drafts Drive folder"])

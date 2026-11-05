@@ -3555,10 +3555,39 @@ class PieceTests(Fixture):
         self.connection.execute("UPDATE item SET stage = 'review' WHERE id = ?", (long,))
         self.connection.commit()
         reports = PUBLISH.enqueue_pieces(self.connection, {long})
-        out = self.writing.piece_out(slug, "draft")
+        out = self.writing.piece_out(slug, "draft", key="my-research")
         self.assertEqual(self.queued(), ["my-research.%s.drive.json" % out], reports)
         self.assertLessEqual(len(out.encode()), self.writing.OUT_BYTES)
-        self.assertEqual(self.writing.piece_out(self.PIECE, "draft"), "2026-a-piece-draft")  # a short name stays
+        self.assertEqual(self.writing.piece_out(self.PIECE, "draft", key="my-research"), "2026-a-piece-draft")
+
+    def test_a_long_repository_name_and_slug_queue_a_name_that_fits(self) -> None:
+        """pack sd:7565: the name bound left out the key, so a 100-byte key and a 240-byte slug made 272 bytes."""
+        from sd_db.writes import upsert_repo  # noqa: PLC0415
+
+        repo = self.root / ("r" * 100)
+        slug = "2026/" + "a" * 240
+        (repo / "content" / slug).mkdir(parents=True)
+        (repo / "content" / slug / "index.md").write_text(self.INDEX, encoding="utf-8")
+        key = sd_lib.import_sd_db().module.paths.key(str(repo.resolve()))
+        upsert_repo(self.connection, key)
+        long = self.writing.import_piece(self.connection, key, slug, who="test")["item"]["id"]
+        self.connection.execute("UPDATE item SET stage = 'review' WHERE id = ?", (long,))
+        self.connection.commit()
+        reports = PUBLISH.enqueue_pieces(self.connection, {long})
+        self.assertEqual([(name.startswith("r" * 100 + "."), len(name.encode()) <= 255) for name in self.queued()],
+                         [(True, True)], reports)
+
+    def test_every_key_and_slug_length_names_a_queue_file_that_fits(self) -> None:
+        """pack sd:7565: any key that leaves room for the digest and the stem, any slug, two-byte letters too."""
+        for key in ("", "k", "k" * 100, "k" * 200, "k" * 210):
+            for slug in ("2026/a", "2026/" + "a" * 155, "2026/" + "a" * 240, "2026/" + "é" * 120):
+                for stem in self.STEMS:
+                    out = self.writing.piece_out(slug, stem, key=key)
+                    name = "%s.%s.drive.json" % (key, out)
+                    self.assertLessEqual((len(name.encode()), len(out.encode())), (255, self.writing.OUT_BYTES), name)
+                    self.assertTrue(out.endswith("-" + stem), out)
+        self.assertNotEqual(self.writing.piece_out("2026/" + "a" * 240, "draft", key="k" * 100),
+                            self.writing.piece_out("2026/" + "a" * 239 + "b", "draft", key="k" * 100))
 
     def test_a_request_that_cannot_be_written_holds_that_file_and_the_rest_queue(self) -> None:
         real, calls = PUBLISH.write_request, []

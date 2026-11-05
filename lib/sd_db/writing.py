@@ -273,15 +273,26 @@ MIRRORED = {"draft": "index.md", **REPORTS}
 #: file name holds 255 bytes, but a slug may run to 240 (`_key`): a longer name keeps its head and a digest of the
 #: whole, so the pack's queue and the dashboard's lookup name one file (pack sd:7243 review).
 OUT_BYTES = 160
+#: The most a file name holds, and the end of a piece's queue file name: the key and the name share the rest, so a
+#: 100-byte key and a 240-byte slug no longer make a 272-byte name (pack sd:7565).
+NAME_BYTES = 255
+QUEUE_SUFFIX = ".drive.json"
 
 
-def piece_out(piece: str, stem: str) -> str:
-    """A piece file's document name, `<year>-<slug>-<stem>`, bounded to OUT_BYTES."""
+def piece_out(piece: str, stem: str, *, key: str) -> str:
+    """A piece file's document name, `<year>-<slug>-<stem>`, bounded to OUT_BYTES and so that its queue file,
+    `<key>.<name>.drive.json`, fits NAME_BYTES. A longer name keeps its head and a digest of the whole name.
+
+    `key` is the repository's queue key; the pack's `piece_docs` and the dashboard's `_piece_outs` both pass it.
+    A key too long to leave room for the digest and the stem gets just those two.
+    """
     out = f"{piece.replace('/', '-')}-{stem}"
-    if len(out.encode()) <= OUT_BYTES:
+    room = min(OUT_BYTES, NAME_BYTES - len(key.encode()) - 1 - len(QUEUE_SUFFIX))
+    if len(out.encode()) <= room:
         return out
     digest = hashlib.sha256(out.encode()).hexdigest()[:16]
-    return f"{out.encode()[:OUT_BYTES - len(digest) - len(stem) - 2].decode(errors='ignore')}-{digest}-{stem}"
+    head = out.encode()[:max(room - len(digest) - len(stem) - 2, 0)].decode(errors="ignore")
+    return f"{head}-{digest}-{stem}"
 
 
 def mirror_texts(row) -> tuple[dict[str, tuple[str, str]], list[str]]:
