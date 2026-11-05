@@ -9,6 +9,7 @@ import random
 import subprocess
 from unittest import mock
 
+from tests.clean_env import clean_environment
 from tests.test_sd_review import (
     FakeClient,
     FakeRunner,
@@ -222,6 +223,30 @@ class OversizeTests(ReviewFixture):
                 # The unchanged lines are not sent, so both sides are summarized and coverage is partial (sd:2181).
                 self.assertEqual({entry["path"] for entry in entries if entry.get("summarized")}, expected)
                 self.assertEqual(set(sd_review.sd_review_material.coverage(entries, {"r": "x"})["omitted_paths"]), expected)
+
+    def test_a_rename_that_fits_is_sent_whole_and_counts_as_read(self):
+        """sd:7598: a renamed, edited file within the limit goes with every line, so no reader is partial."""
+        for scope in ("worktree", "branch"):
+            with self.subTest(scope=scope):
+                root = self.make_repo(scope)
+
+                def git(*args: str, root=root) -> None:
+                    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, env=clean_environment())
+
+                (root / "up_wall.rs").write_text("".join(f"fn step_{index}() {{}}\n" for index in range(200)))
+                git("add", "-A")
+                git("commit", "--quiet", "-m", "wall")
+                if scope == "branch":
+                    git("checkout", "--quiet", "-b", "move")
+                git("mv", "up_wall.rs", "up_no_accounts.rs")
+                with (root / "up_no_accounts.rs").open("a") as stream:
+                    stream.write("fn edited() {}\n")
+                if scope == "branch":
+                    git("commit", "--quiet", "-am", "move")
+                material, entries = sd_review.sd_review_material.collect_review_material(root, sd_review.resolve_subject(root, scope))
+                self.assertIn("rename to up_no_accounts.rs\n", material)
+                self.assertIn("+fn step_3() {}\n", material)  # an unchanged line, sent with the new file
+                self.assertEqual(sd_review.sd_review_material.coverage(entries, {"r": "x"})["omitted_paths"], [])
 
     def test_a_renamed_and_modified_binary_is_sent_as_its_rename_delta(self):
         """sd:2432: the `--binary` fallback detects the rename, so a moved, edited blob is not sent as full base64."""
