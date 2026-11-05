@@ -23,8 +23,8 @@ with that reason. Render (sd:5632) and Review
 (sd:5655) run `sd-research-kit` in the checkout through `POST /api/research/render` and `/api/research/review`, and Details show
 the report. Start research's Run (sd:5887) files the task the line names, `Research: <question>`, through
 `POST /api/items` as Capture does, under the project the line names (`repo:`); Undo closes it with `cancel-task`. The field also
-shows the `sd task add` line for Copy. The old view stays in the palette as Resources (classic), with Toolbox,
-Vault and Queues. The board reads through the
+shows the `sd task add` line for Copy. The old Resources > Research view is Management's Repos filter
+`?research=yes` since pack sd:7527. The board reads through the
 shell's reader, `read.js` (sd:2491): only the newest read draws, a project
 the read no longer lists runs no command, and a failed read clears the board
 and the ledger. The child's deadline counts from the page's start (sd:2501).

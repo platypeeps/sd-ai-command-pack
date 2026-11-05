@@ -6,7 +6,8 @@
   protection reading and runtime pins, the fleet's git state and sessions, this Mac's Claude sessions (claude_sessions, sd:5106), launchd
   services and jobs; the ship lane's assignments are on Queue's Overview, pack sd:7115 and sd:7217), read when the page opens and after a write. Repos' settings columns (?cols=settings,
   sd:1629) are the condensed overview: one row per repo. Writes: the sd-db repo verbs, job retry and cancel, service start,
-  stop and restart. Nothing here is sample data.
+  stop and restart. Machine (pack sd:7527) reads /api/management/machine, sd_tile.py toolbox, when it opens.
+  Nothing here is sample data.
 -->
 <html lang="en">
 <head>
@@ -41,6 +42,7 @@
     <section id="view-sessions" aria-label="Sessions" hidden></section>
     <section id="view-deploys" aria-label="Deploys" hidden></section>
     <section id="view-schedules" aria-label="Schedules" hidden></section>
+    <section id="view-machine" aria-label="Machine" hidden></section>
   </main>
 
   <div class="details" id="details"></div>

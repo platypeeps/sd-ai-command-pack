@@ -338,6 +338,43 @@ class TheDocument(ScreenCase):
         jobs = {job["name"]: job for job in doc["jobs"]}
         self.assertEqual((jobs["nightly-sync"]["state"], jobs["nightly-sync"]["capabilities"]["retry"]["allowed"]), ("failed", True))
 
+    def test_sessions_carry_each_worktree_abandoned_first(self):
+        """pack sd:7517: the rows Operations > Sessions listed, so Management can carry them alone."""
+        unread = dict(tree("odd", live=False), state="unknown", path="")
+        doc = self.document(read=lambda area: fleet(area) if area == "repos"
+                            else fleet_document(area, trees=[tree("here"), unread, tree("gone", live=False)]))
+        rows = doc["sessions"]["worktrees"]
+        self.assertEqual([(row["name"], row["state"]) for row in rows],
+                         [("gone", "abandoned"), ("odd", "unknown"), ("here", "live")])
+        self.assertEqual(rows[0], {"repo": "system", "name": "gone", "branch": "gone", "path": "/wt/gone",
+                                   "state": "abandoned"})
+        # An unreadable registration is not known to be abandoned (fleet.STATES): Prune would not clear it.
+        self.assertEqual((doc["sessions"]["registered"], doc["sessions"]["abandoned"], doc["sessions"]["unreadable"]),
+                         (3, 1, 1))
+
+    def test_sessions_say_a_cut_process_table_and_a_missing_root(self):
+        """pack sd:7517: the guards Operations > Sessions kept: a cut ps table is a floor; a missing root is no count."""
+        def read(area):
+            if area == "repos":
+                return fleet(area)
+            return dict(fleet_document(area, trees=[]), processes_truncated=True, rootExists=False, root="/nowhere")
+        sess = self.document(read=read)["sessions"]
+        self.assertEqual((sess["processes_truncated"], sess["root_exists"], sess["root"]), (True, False, "/nowhere"))
+        self.assertEqual((self.document()["sessions"]["processes_truncated"], self.document()["sessions"]["root_exists"]),
+                         (False, True))
+
+    def test_a_service_carries_its_last_request(self):
+        """pack sd:7517: Operations > Services showed each service's last request; Management's Details now does."""
+        from sd_db import services
+
+        request = {"action": "restart", "status": "accepted", "at": NOW, "who": "dashboard", "message": "ok"}
+        row = {"name": "svc", "label": "local.example.svc", "scope": "user", "domain": "gui/501", "category": "tool",
+               "state": "running", "pid": 1, "last_exit": 0, "last_signal": None, "revision": "0" * 64,
+               "capabilities": {}, "last_request": request}
+        with patch.object(services, "inventory", lambda connection, backend=None: {"services": [row]}):
+            doc = self.document()
+        self.assertEqual(doc["services"][0]["last_request"], request)
+
     def test_a_source_that_fails_is_a_reason_and_the_others_still_answer(self):
         doc = self.document(read=dark_fleet)
         self.assertIsNone(doc["git"])
@@ -2129,7 +2166,8 @@ class TheViews(PageScript):
         out = self.run_page("R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key || null]);")
         # pack sd:7115: the Ship lane view folded into Queue (its Overview since pack sd:7217).
         self.assertEqual(out["R"]["views"], [["repos", "Repos", None], ["sessions", "Sessions", None],
-                                             ["deploys", "Deploys", None], ["schedules", "Schedules", "c"]])
+                                             ["deploys", "Deploys", None], ["schedules", "Schedules", "c"],
+                                             ["machine", "Machine", None]])
         self.assertNotIn('id="view-lane"', page)
 
     def test_a_lamp_shows_its_view_and_says_its_state(self):
@@ -2138,7 +2176,8 @@ ELS.annunciator.listeners.click.forEach(f => f({ target: { closest: s => s === '
 await flush(); R.shown = OUT.shown.slice(); R.view = view; R.after = ELS.annunciator.html;""")
         self.assertEqual(re.findall(r'data-view="(\w+)" data-state="(\w+)" aria-pressed="(\w+)"', out["R"]["before"]),
                          [("repos", "ok", "true"), ("sessions", "caution", "false"),
-                          ("deploys", "unknown", "false"), ("schedules", "warning", "false")])
+                          ("deploys", "unknown", "false"), ("schedules", "warning", "false"),
+                          ("machine", "unknown", "false")])
         self.assertNotIn('id="refresh"', out["R"]["before"])
         self.assertEqual((out["R"]["shown"], out["R"]["view"]), (["schedules"], "schedules"))
         self.assertIn('data-view="schedules" data-state="warning" aria-pressed="true"', out["R"]["after"])
@@ -2149,6 +2188,115 @@ await flush(); R.shown = OUT.shown.slice(); R.view = view; R.after = ELS.annunci
         self.assertFalse(any("view=" in q for q in out["qs"]), out["qs"])
         out = self.run_page("R.view = view;", search="?view=deploys", hash="#view=sessions")
         self.assertEqual((out["R"]["view"], out["shown"]), ("sessions", []))
+
+
+#: A Machine read as `reports_screen.view("toolbox")` answers it: sd_tile.py's sections and the rows that want attention.
+MACHINE = {"title": "Toolbox", "rows": [{"what": "cron <script>x</script> exited 7", "detail": "daily · last log 02:15"}],
+           "sections": [{"figures": [["jobs", "2"], ["failing", "1"]]}, {"heading": "Cron jobs"},
+                        {"table": {"columns": [["Job", "text"], ["Exit", "num"]], "search": "filter jobs",
+                                   "rows": [[{"text": "nightly-sync", "title": "Sync the fleet"}, {"text": "7", "num": True}]]}},
+                        {"listing": ["<b>drift</b> in brew"]}]}
+
+
+class TheMachineView(PageScript):
+    """pack sd:7527: Operations > Resources > Toolbox is Management's Machine view, read when it opens."""
+
+    ANSWER = """(path) => path === '/api/management/machine' ? (OUT.machine = (OUT.machine || 0) + 1, MACHINE_ANSWER) : [200, {}]"""
+
+    def test_the_view_reads_the_toolbox_tile_once_and_draws_it_escaped(self):
+        out = self.run_page("""R.before = OUT.machine || 0;
+window.shell.view.show('machine'); await flush(); await flush();
+R.html = ELS['view-machine'].html; R.reads = OUT.machine; R.lamps = ELS.annunciator.html;
+window.shell.view.show('repos'); await flush(); window.shell.view.show('machine'); await flush(); R.again = OUT.machine;""",
+                            answer=self.ANSWER, extra=f"var MACHINE_ANSWER = [200, {json.dumps(MACHINE)}];\n")
+        html = out["R"]["html"]
+        self.assertEqual((out["R"]["before"], out["R"]["reads"], out["R"]["again"]), (0, 1, 1))
+        self.assertIn("<h3>Needs attention</h3>", html)
+        self.assertIn("cron &lt;script&gt;x&lt;/script&gt; exited 7", html)
+        self.assertNotIn("<script", html)
+        self.assertIn("<dt>failing</dt><dd>1</dd>", html)
+        self.assertIn('<th scope="col" class="n">Exit</th>', html)
+        self.assertIn('<td title="Sync the fleet">nightly-sync</td><td class="n">7</td>', html)
+        self.assertIn("<li>&lt;b&gt;drift&lt;/b&gt; in brew</li>", html)
+        self.assertIn('data-view="machine" data-state="caution"', out["R"]["lamps"])
+
+    def test_a_failed_read_says_why_and_the_address_opens_the_view(self):
+        failed = [503, {"error": "Toolbox could not be observed: resource inspection was stopped at its budget"}]
+        out = self.run_page("await flush(); R.html = ELS['view-machine'].html; R.lamps = ELS.annunciator.html;",
+                            answer=self.ANSWER, extra=f"var MACHINE_ANSWER = {json.dumps(failed)};\n", hash="#view=machine")
+        self.assertIn("The machine was not read", out["R"]["html"])
+        self.assertIn("stopped at its budget", out["R"]["html"])
+        self.assertIn('data-view="machine" data-state="unknown"', out["R"]["lamps"])
+
+    def test_the_route_answers_the_toolbox_tile_or_its_refusal(self):
+        page = next(entry for entry in v2.registry.PAGES if entry.section == "Management")
+        route = next(api for api in page.api if api.path == "/api/management/machine")
+        with patch("sd_dashboard.reports_screen.collect", return_value=MACHINE) as collect:
+            self.assertEqual(route.read(None), MACHINE)
+        collect.assert_called_once_with("toolbox")
+        with patch("sd_dashboard.reports_screen.collect", side_effect=ValueError("budget")):
+            self.assertEqual(route.read(None), (503, {"error": "Toolbox could not be observed: budget"}))
+
+
+class TheResearchFilter(PageScript):
+    """pack sd:7527: Operations > Resources > Research is the Repos filter ?research=yes|no."""
+
+    ANSWER = """(path) => path === '/api/management/research' ? (OUT.research = (OUT.research || 0) + 1, RESEARCH_ANSWER) : [200, {}]"""
+
+    def research(self, search, answer=None):
+        checkout = str(Path(self.tmp.name).resolve() / "checkout")
+        doc = answer or [200, {"title": "Research", "paths": [checkout], "rows": [],
+                               "sections": [{"heading": "Documents"}, {"table": {"columns": [["Document", "text"]], "search": "",
+                                                                                "rows": [[{"text": "<i>Reading</i>"}]]}}]}]
+        out = self.run_page("await flush(); R.html = ELS['view-repos'].html; R.reads = OUT.research || 0;",
+                            answer=self.ANSWER, search=search, extra=f"var RESEARCH_ANSWER = {json.dumps(doc)};\n")
+        return checkout, out["R"], re.findall(r'data-repo="([^"]+)"', out["R"]["html"])
+
+    def test_yes_keeps_the_research_checkouts_and_draws_their_documents(self):
+        checkout, got, rows = self.research("?research=yes")
+        self.assertEqual((rows, got["reads"]), ([checkout], 1))
+        self.assertIn("<h3>Research documents</h3>", got["html"])
+        self.assertIn("<td>&lt;i&gt;Reading&lt;/i&gt;</td>", got["html"])
+        self.assertIn('data-f="research" data-v="yes" aria-pressed="true"', got["html"])
+
+    def test_no_keeps_the_rest_and_a_failed_read_says_no_row_is_either(self):
+        checkout, got, rows = self.research("?research=no")
+        self.assertTrue(rows)
+        self.assertNotIn(checkout, rows)
+        self.assertNotIn("Research documents", got["html"])
+        _, got, rows = self.research("?research=yes", [503, {"error": "Research could not be observed: budget"}])
+        self.assertEqual(rows, [])
+        self.assertIn("The research checkouts were not read", got["html"])
+        self.assertIn("Research could not be observed: budget", got["html"])
+
+    def test_without_the_filter_nothing_is_read(self):
+        _, got, rows = self.research("")
+        self.assertEqual(got["reads"], 0)
+        self.assertGreater(len(rows), 1)
+
+    def test_read_again_reads_the_research_checkouts_again_while_the_filter_is_on(self):
+        """Lead review of 960414d82: a failed read stayed cached, so the filter stayed unusable until a reload."""
+        checkout = str(Path(self.tmp.name).resolve() / "checkout")
+        good = {"title": "Research", "paths": [checkout], "rows": [], "sections": []}
+        answer = ("(path) => path === '/api/management/research' ? (OUT.research = (OUT.research || 0) + 1,"
+                  " OUT.research === 1 ? [503, {error: 'Research could not be observed: budget'}] : [200, GOOD]) : [200, {}]")
+        body = ("await flush(); R.first = ELS['view-repos'].html; window.PAGE_AGAIN.run(); await flush(); await flush();"
+                " R.html = ELS['view-repos'].html; R.reads = OUT.research || 0;")
+        got = self.run_page(body, answer=answer, search="?research=yes", extra=f"var GOOD = {json.dumps(good)};\n")["R"]
+        self.assertIn("The research checkouts were not read", got["first"])
+        self.assertEqual(got["reads"], 2)
+        self.assertEqual(re.findall(r'data-repo="([^"]+)"', got["html"]), [checkout])
+        self.assertIn("<h3>Research documents</h3>", got["html"])
+        got = self.run_page("await flush(); window.PAGE_AGAIN.run(); await flush(); R.reads = OUT.research || 0;",
+                            answer=self.ANSWER, extra=f"var RESEARCH_ANSWER = {json.dumps([200, good])};\n")["R"]
+        self.assertEqual(got["reads"], 0)
+
+    def test_the_route_answers_the_research_tile(self):
+        page = next(entry for entry in v2.registry.PAGES if entry.section == "Management")
+        route = next(api for api in page.api if api.path == "/api/management/research")
+        with patch("sd_dashboard.reports_screen.collect", return_value={"paths": []}) as collect:
+            self.assertEqual(route.read(None), {"paths": []})
+        collect.assert_called_once_with("research")
 
 
 class TheMinuteMarks(PageScript):
@@ -2313,6 +2461,69 @@ class TheJobLogAndCancel(PageScript):
         self.assertIn("svc-19", out["R"]["a"])
 
 
+class TheOperationsRows(PageScript):
+    """pack sd:7517: the rows Operations > Sessions and > Services showed, drawn on Management alone."""
+
+    def test_sessions_list_each_worktree_with_its_branch_and_path_abandoned_first(self):
+        out = self.run_page("R.sess = ELS['view-sessions'].html; selectRow('tree:0', false); R.det = ELS.details.html;",
+                            search="?view=sessions")
+        sess = out["R"]["sess"]
+        self.assertIn("<dt>Path</dt><dd class=\"mono\">/wt/gone</dd>", out["R"]["det"])
+        table = sess[sess.index('id="wts-h"'):]
+        self.assertIn("<th scope=\"col\">Branch</th>", table)
+        rows = re.findall(r'<tr data-id="tree:(\d+)">(.*?)</tr>', table)
+        self.assertEqual([index for index, _ in rows], ["0", "1"])
+        self.assertIn("/wt/gone", rows[0][1])
+        self.assertIn("/wt/here", rows[1][1])
+        self.assertIn("abandoned", rows[0][1])
+        self.assertIn("system", rows[0][1])
+        self.assertIn('<td class="d mono">gone</td>', rows[0][1])
+
+    def test_a_cut_process_table_is_a_floor_and_never_says_nothing_runs(self):
+        """The guard sessions_screen held (Codex review of PR #500): a cut table cannot support an absence."""
+        cases = [([], "≥ 0 running", "The table was cut at 64 KB, so no command below the cut was read."),
+                 ([{"pid": "4242", "elapsed": "01:02", "command": "sd-review --json"}], "≥ 1 running", "sd-review --json")]
+        for procs, tally, said in cases:
+            with self.subTest(rows=len(procs)):
+                doc = json.loads(json.dumps(self.doc))
+                doc["sessions"].update(processes=list(procs), processes_truncated=True)
+                sess = self.run_page("R.sess = ELS['view-sessions'].html;", doc=doc, search="?view=sessions")["R"]["sess"]
+                self.assertIn(tally, sess)
+                self.assertIn(said, sess)
+                self.assertNotIn("No sd-* command is running.", sess)
+
+    def test_a_missing_root_is_said_and_counts_no_worktrees(self):
+        doc = json.loads(json.dumps(self.doc))
+        doc["sessions"].update(root_exists=False, root="/nowhere", registered=0, abandoned=0, unreadable=0, worktrees=[])
+        sess = self.run_page("R.sess = ELS['view-sessions'].html;", doc=doc, search="?view=sessions")["R"]["sess"]
+        self.assertIn("The checkout root /nowhere does not exist", sess)
+        self.assertNotIn("0 live worktrees", sess)
+
+    def test_an_unreadable_worktree_is_neither_abandoned_nor_live(self):
+        doc = json.loads(json.dumps(self.doc))
+        doc["sessions"].update(registered=3, abandoned=1, unreadable=1)
+        sess = self.run_page("R.sess = ELS['view-sessions'].html;", doc=doc, search="?view=sessions")["R"]["sess"]
+        self.assertIn("1 live worktrees", sess)
+        self.assertIn("1 unreadable", sess)
+
+    def test_a_worktree_with_no_readable_path_says_so(self):
+        doc = json.loads(json.dumps(self.doc))
+        doc["sessions"]["worktrees"][0]["path"] = ""
+        out = self.run_page("R.sess = ELS['view-sessions'].html;", doc=doc, search="?view=sessions")
+        self.assertIn("(unreadable registration)", out["R"]["sess"])
+
+    def test_a_services_details_show_its_last_request(self):
+        doc = dict(self.doc, services=[{
+            "name": "svc", "label": "local.example.svc", "scope": "user", "domain": "gui/501", "category": "tool",
+            "state": "running", "pid": 1, "last_exit": 0, "last_signal": None, "revision": "0" * 64, "capabilities": {},
+            "last_request": {"action": "restart", "status": "accepted", "at": "2026-09-06T02:20:00Z", "who": "dashboard",
+                             "message": "launchctl accepted the request"}}])
+        out = self.run_page("selectRow('svc:local.example.svc', false); R.det = ELS.details.html;", doc=doc,
+                            search="?view=deploys")
+        self.assertIn("<dt>Last request</dt><dd>restart · accepted · dashboard · 2026-09-06T02:20:00Z"
+                      " · launchctl accepted the request</dd>", out["R"]["det"])
+
+
 
 class TheSatellites(PageScript):
     """sd:5108: Deploys lists each satellite's last refresh result and sends Refresh satellites."""
@@ -2432,5 +2643,5 @@ class TheSharedUpload(PageScript):
 
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route, api = ("management", "Management", "/management",
-                                 ("/api/management", "/api/repos/land/preview", "/api/repos/land",
+                                 ("/api/management", "/api/management/machine", "/api/management/research", "/api/repos/land/preview", "/api/repos/land",
                                   "/api/repos/standard/preview", "/api/repos/standard", "/api/claude-sessions/end"))

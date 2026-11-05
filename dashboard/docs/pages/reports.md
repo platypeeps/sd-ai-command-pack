@@ -27,4 +27,4 @@ The bulk bar acknowledges picked reports one by one. A clean run files no
 report since the quiet-run rule, so the page has no clean preview or batch;
 `sd reports acknowledge --all-clean` stays a CLI verb.
 Retry posts the job route, as Management does. The old Reports area was
-retired in sd:3402; the Resources views stay in the palette as Resources (classic).
+retired in sd:3402; the Resources views moved to Management, Notes and Tasks in pack sd:7527.

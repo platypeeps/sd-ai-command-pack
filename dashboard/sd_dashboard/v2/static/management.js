@@ -1,11 +1,11 @@
 // Management (sd:2118): the design source's products/system/designs/v2/management.js at d82daa1, ported. Each change from the
 // reference is marked "build:". The rows are /api/management (management_screen.py), never sample data. A command that
 // executes posts to a route server.action_route answers, and its toast comes after the write lands, not before.
-const { html, put, plural, cells } = window.markup;
+const { html, put, plural, cells, tile } = window.markup;
 // sd:5080: the four areas are the shell's views (shell.js, view:start): the shell draws the tabs, keeps #view=<id> and the
 // last choice, and fires 'shell:view'. Each lamp shows its view. Set before shell.js reads it.
 window.PAGE_VIEWS = [{ id: 'repos', label: 'Repos' }, { id: 'sessions', label: 'Sessions' },
-  { id: 'deploys', label: 'Deploys' }, { id: 'schedules', label: 'Schedules', key: 'c' }];
+  { id: 'deploys', label: 'Deploys' }, { id: 'schedules', label: 'Schedules', key: 'c' }, { id: 'machine', label: 'Machine' }];
 // Chat scope = the selected repo. Set before shell.js reads it; a repo page is its own URL, so the scope is right on load.
 (() => { const r = new URLSearchParams(location.search).get('repo'); if (r) document.body.dataset.scope = r.replace(/^~\/(repos\/)?/, ''); })();
 
@@ -136,7 +136,7 @@ function setURL() {
   if (text.q) p.set('q', text.q);
   const L = LIST_STATE();
   if (L) { const [st, sort, dir] = L; shell.list.listQuery(p, st, { sort, dir, size: 25 }); }
-  if (view === 'repos') ['managed', 'merge'].forEach(k => RS[k] && p.set(k, RS[k]));
+  if (view === 'repos') ['managed', 'merge', 'research'].forEach(k => RS[k] && p.set(k, RS[k]));
   if (view === 'repos' && RS.cols === 'settings') p.set('cols', 'settings');
   shell.url(p);
 }
@@ -149,7 +149,7 @@ function readURL() {
   // An older link's ?p= and ?n= still open their page and size.
   if (!params.get('page') && /^[1-9]\d*$/.test(params.get('p') || '')) st.page = +params.get('p');
   if (!params.get('size') && [25, 50, 100].includes(+params.get('n'))) st.size = +params.get('n');
-  if (view === 'repos') ['managed', 'merge'].forEach(k => { if (params.get(k)) RS[k] = params.get(k); });
+  if (view === 'repos') ['managed', 'merge', 'research'].forEach(k => { if (params.get(k)) RS[k] = params.get(k); });
 }
 function swap() { details.setAttribute('data-swap', ''); requestAnimationFrame(() => details.removeAttribute('data-swap')); }
 const ACT = id => html`<td class="act end">${shell.commands.rowActions(id)}</td>`;
@@ -160,12 +160,13 @@ const unknown = (what, reason, read) => html`<div class="unknown"><span><span cl
 // ---------- Views (sd:5080: the shell's tabs) ----------
 function showView(v) {
   view = v;
+  if (v === 'machine' && !MACHINE) readMachine();
   const row = shell.row(); if (row && !document.querySelector(`#view-${v} tr[data-id="${CSS.escape(row)}"]`)) shell.row(null);
   applyText();
   defaultDetails();
 }
 // build: the four lamps count from the reading; a source that failed is unknown and says so. A lamp shows its view.
-const LOOK = { repos: 'folder-code', sessions: 'bot', deploys: 'rocket', schedules: 'calendar-clock' };
+const LOOK = { repos: 'folder-code', sessions: 'bot', deploys: 'rocket', schedules: 'calendar-clock', machine: 'monitor' };
 function lamps() {
   const L = {};
   const set = (v, state, val) => { L[v] = { state, val }; };
@@ -186,9 +187,23 @@ function lamps() {
   else set('deploys', 'unknown', html`▨ no deploy source`);
   if (DOC?.jobs) { const failed = CRON.filter(c => c.rank === 'warning').length; set('schedules', failed ? 'warning' : 'ok', html`<b>${failed}</b> failed ${failed ? '■ ' : ''}of ${CRON.length}`); }
   else set('schedules', 'unknown', html`▨ not read`);
+  if (MACHINE?.rows) set('machine', MACHINE.rows.length ? 'caution' : 'ok', MACHINE.rows.length ? html`<b>${MACHINE.rows.length}</b> ▲ ${MACHINE.rows.length === 1 ? 'wants' : 'want'} you` : html`nothing wants you`);
+  else set('machine', 'unknown', MACHINE ? html`▨ not read` : html`▨ read when shown`);
   put(document.getElementById('annunciator'), cells([...window.PAGE_VIEWS.map(v => ({ button: true, state: L[v.id].state, pressed: v.id === view,
     attrs: html` data-view="${v.id}"`, label: v.label, mark: I(LOOK[v.id]), val: L[v.id].val, sr: `state ${L[v.id].state} · shows ${v.label}` }))]));
 }
+
+// ---------- Machine (pack sd:7527): Operations > Resources > Toolbox, sd_tile.py toolbox, read when the view opens ----------
+// The launchd jobs, other agents, containers and machine-setup drift, as markup.tile draws them; a failed read says why.
+let MACHINE = null;
+function renderMachine() {
+  const el = document.getElementById('view-machine');
+  put(el, html`<div class="sec-head"><h2 id="machine-h">Machine</h2><p class="tally">launchd's record of the local-* jobs, other agents, containers and machine-setup drift</p></div>
+    ${!MACHINE ? html`<p class="why">Reading the machine…</p>` : MACHINE.rows ? tile(MACHINE)
+      : unknown('The machine was not read', MACHINE.error, '/api/management/machine')}`);
+}
+const readMachine = () => { MACHINE = null; renderMachine();
+  return shell.getJSON('/api/management/machine').then(d => { MACHINE = d; }, e => { MACHINE = { error: e.message }; }).then(() => { renderMachine(); lamps(); }); };
 
 // ---------- Lists: sort, filter, page (shell.list, sd:2682) ----------
 // build: a page from the URL or an older reading can pass the last page; shell.list clamps it before the slice, and the URL follows.
@@ -211,7 +226,7 @@ const filterSeg = (k, name, vals, on) => html`<div class="fgroup"><span class="l
 const filterBar = (parts, clear) => { const free = text.q.split(/\s+/).filter(w => w && !FIELD.test(w)).join(' ');
   return shell.list.fbar(html`${parts}${free ? shell.list.tok('q', '', `“${free}”`) : ''}`, { clear: !!clear }); };
 const hides = (n, all, noun) => n < all ? html`<span>${shell.list.count(n, all, noun)}</span>` : '';
-const repoChips = () => [RS.managed && { key: 'managed', label: `Managed: ${RS.managed}` }, RS.merge && { key: 'merge', label: `Lane merge: ${RS.merge}` }, ...textChip()].filter(Boolean);
+const repoChips = () => [RS.managed && { key: 'managed', label: `Managed: ${RS.managed}` }, RS.merge && { key: 'merge', label: `Lane merge: ${RS.merge}` }, RS.research && { key: 'research', label: `Research: ${RS.research}` }, ...textChip()].filter(Boolean);
 const text = { q: '' };
 function tokens() {
   const chips = {}, free = [];
@@ -220,11 +235,28 @@ function tokens() {
 }
 
 // ---------- Repos list ----------
-const RS = { sort: 'name', dir: 1, page: 1, size: 25, managed: null, merge: null, cols: 'git' };
+const RS = { sort: 'name', dir: 1, page: 1, size: 25, managed: null, merge: null, research: null, cols: 'git' };
+// Research (pack sd:7527): Operations > Resources > Research as a Repos filter. yes keeps the sd-research-kit checkouts
+// and draws their documents below the table, no keeps the rest; /api/management/research (sd_tile.py research) is read
+// the first time the filter is set, and again on Read again. Until it answers, or when it fails, no row is said to be
+// one or not.
+let RESEARCH = null;
+const researchPaths = () => RESEARCH?.paths ? new Set(RESEARCH.paths.map(tilde)) : null;
+const readResearch = () => { RESEARCH = { reading: true };
+  return shell.getJSON('/api/management/research').then(d => { RESEARCH = d; }, e => { RESEARCH = { error: e.message }; }).then(() => { if (view === 'repos') renderRepos(); }); };
+function researchPart() {
+  if (!RS.research) return '';
+  if (!RESEARCH || RESEARCH.reading) return html`<p class="why">Reading the research checkouts…</p>`;
+  if (!RESEARCH.paths) return unknown('The research checkouts were not read', RESEARCH.error, '/api/management/research');
+  return RS.research === 'yes' ? html`<h3>Research documents</h3>${tile(RESEARCH)}` : '';
+}
 function repoRows() {
   const { chips, free } = tokens();
-  const managed = chips.managed || RS.managed, merge = chips.merge || RS.merge;
-  return ALL.filter(r => (!managed || r.managed === managed) && (!merge || r.merge === merge) && free.every(f => (r.path + ' ' + r.remote).toLowerCase().includes(f)))
+  const managed = chips.managed || RS.managed, merge = chips.merge || RS.merge, research = RS.research && researchPaths();
+  if (RS.research && !RESEARCH) readResearch();
+  return ALL.filter(r => (!managed || r.managed === managed) && (!merge || r.merge === merge)
+      && (!RS.research || (!!research && research.has(r.path) === (RS.research === 'yes')))
+      && free.every(f => (r.path + ' ' + r.remote).toLowerCase().includes(f)))
     .sort((a, b) => String(a[RS.sort]).localeCompare(String(b[RS.sort]), 'en', { numeric: true }) * RS.dir);
 }
 function gitCells(r) {
@@ -273,7 +305,7 @@ function renderRepos() {
       <p class="tally">${hides(rows.length, ALL.length, 'repo')}<span>${REPOS.length} registered</span><span>${managed} managed</span><span>${auto} lane merge auto</span></p>
       <p class="tally" id="git-tally">${GIT ? html`${c.repos ?? 0} checkouts under ${tilde(GIT.root || '') || 'the fleet root'} · ${c.dirty ?? 0} dirty · ${c.ahead ?? 0} ahead · ${GIT.repos.filter(g => g.state === 'behind').length} behind default · git read ${seen(GIT)}` : html`<span class="g-unknown">▨</span> git state not read: ${why('git')}`}</p>
       <div class="tools"><button class="btn quiet sm" type="button" data-cmd="repos.refresh" data-obj="repos:git">${I('rotate-ccw')}<span>Refresh git state</span></button></div></div>
-    <div class="filters toolbar-2">${filterBar(html`${filterSeg('managed', 'Managed', ['yes', 'no'], RS.managed)}${filterSeg('merge', 'Lane merge', ['auto', 'manual'], RS.merge)}${filterSeg('cols', 'Columns', ['git', 'settings'], RS.cols)}`, repoChips().length)}</div>
+    <div class="filters toolbar-2">${filterBar(html`${filterSeg('managed', 'Managed', ['yes', 'no'], RS.managed)}${filterSeg('merge', 'Lane merge', ['auto', 'manual'], RS.merge)}${filterSeg('research', 'Research', ['yes', 'no'], RS.research)}${filterSeg('cols', 'Columns', ['git', 'settings'], RS.cols)}`, repoChips().length)}</div>
     ${rows.length ? html`<table class="ledger" aria-labelledby="repos-h" data-tfilter="page" data-toolbar="toolbar"><thead>${shell.list.sortHead(repoCols(), RS)}</thead>
       <tbody>${shown.map(r => html`<tr data-id="${'repo:' + r.path}" data-repo="${r.path}">
         <td class="g" aria-hidden="true">${I(r.registered ? 'settings' : 'folder-code')}</td>
@@ -284,6 +316,7 @@ function renderRepos() {
         ${RS.cols === 'settings' ? settingCells(r) : gitCells(r)}
         <td class="act end">${shell.commands.rowActions('repo:' + r.path)}</td></tr>`)}</tbody></table>${shell.list.pager(rows.length, RS, 'repos')}`
       : html`<p class="empty">No repo matches ${text.q ? `“${text.q}”` : 'these filters'}. <button class="linkbtn" type="button" data-clear>Clear filters</button></p>`}
+    ${researchPart()}
     ${RS.cols === 'settings' ? html`<p class="note">Managed and Merge switch from a row's actions, each one sd-db repo verb on the hub. Floor and Copilot are read-only here: they change through the row's review declaration, drafted from its ${I('settings')} settings page. Required checks are the nightly protection reading; Python and Node are the versions the checkout pins.</p>` : ''}`);
 }
 // Refresh git state (sd:5614, sd:6697): the post writes nothing, but an answered post makes the next read wait for a new git reading (sd:4955).
@@ -292,8 +325,8 @@ document.getElementById('view-repos').addEventListener('click', e => {
   if (e.target.closest('.rowact')) return;
   const cols = e.target.closest('[data-f="cols"]');
   if (cols) { RS.cols = cols.dataset.v === 'settings' ? 'settings' : 'git'; if (!repoCols().some(c => c[0] === RS.sort)) RS.sort = 'name'; renderRepos(); return setURL(); }
-  const f = e.target.closest('[data-f="managed"], [data-f="merge"]'), tr = e.target.closest('tr[data-repo]');
-  if (e.target.closest('[data-clear]')) { RS.managed = RS.merge = null; text.q = ''; shell.filter(''); RS.page = 1; renderRepos(); return setURL(); }
+  const f = e.target.closest('[data-f="managed"], [data-f="merge"], [data-f="research"]'), tr = e.target.closest('tr[data-repo]');
+  if (e.target.closest('[data-clear]')) { RS.managed = RS.merge = RS.research = null; text.q = ''; shell.filter(''); RS.page = 1; renderRepos(); return setURL(); }
   if (shell.list.sortBy(e, RS) || shell.list.paging(e, RS)) { shell.list.keepFocus(e, renderRepos); return setURL(); }
   if (f) { RS[f.dataset.f] = RS[f.dataset.f] === f.dataset.v ? null : f.dataset.v; RS.page = 1; renderRepos(); return setURL(); }
   if (tr) selectRow(tr.dataset.id, true);
@@ -616,8 +649,9 @@ function objects() {
   const out = ALL.map(r => ({ id: `repo:${r.path}`, type: 'repo', label: r.name, path: r.path, row: r }));
   (CLAUDE?.sessions || []).forEach(r => out.push({ id: `cs:${r.id}`, type: 'claude session', label: r.name || r.id, sid: r.id, pid: r.pid, row: r }));
   if (SESS) out.push({ id: 'wt:abandoned', type: 'worktrees', label: `${SESS.abandoned} abandoned worktrees`, n: SESS.abandoned },
-    { id: 'wt:live', type: 'live worktrees', label: `${SESS.registered - SESS.abandoned} live worktrees` },
-    ...SESS.processes.map((p, i) => ({ id: `proc:${i}`, type: 'process', label: p.command })));
+    { id: 'wt:live', type: 'live worktrees', label: `${liveTrees()} live worktrees` },
+    ...SESS.processes.map((p, i) => ({ id: `proc:${i}`, type: 'process', label: p.command })),
+    ...(SESS.worktrees || []).map((t, i) => ({ id: `tree:${i}`, type: 'worktree', label: t.name })));
   SERVICES.forEach(s => out.push({ id: `svc:${s.label}`, type: 'service', label: s.name, name: s.label, running: s.state === 'running', revision: s.revision, caps: s.capabilities || {} }));
   out.push({ id: 'repos:git', type: 'git state', label: 'Git state' });
   if (SATS) out.push({ id: 'sats:request', type: 'satellite refresh', label: 'Refresh satellites', request: SATS.request },
@@ -905,18 +939,27 @@ function renderSessions() {
     <div class="sec-head"><h2 id="claude-h">Claude sessions <button class="help" type="button" aria-label="Help: Claude sessions" data-help="<b>This Mac's Claude sessions.</b> From claude agents --json, each session's transcripts, ps and git. Safe to exit means idle, no agent or lane watch under it, and no unpushed work in its checkouts. A stalled or unread agent counts as running until it gives a final answer.">${I('circle-help')}</button></h2><p class="tally">${CLAUDE ? html`<span>${plural(CLAUDE.sessions.length, 'session')}</span><span>${CLAUDE.builders.running == null ? html`<span class="g-unknown" aria-hidden="true">▨</span> builders not counted` : plural(CLAUDE.builders.running, 'builder') + ' running'}</span><span>claude agents · ${hhmm(CLAUDE.read)} UTC</span>` : ''}</p></div>
     ${renderClaude()}
 
-    <div class="sec-head"><h2 id="agents-h">sd-* processes <button class="help" type="button" aria-label="Help: processes" data-help="<b>The fleet's process read.</b> The sd-* commands running on this Mac, as Operations › Sessions lists them. Claude sessions are listed above; codex processes are not read.">${I('circle-help')}</button></h2><p class="tally">${SESS ? html`<span>${SESS.processes.length} running</span><span>fleet · ${seen(SESS)}</span>` : ''}</p></div>
+    <div class="sec-head"><h2 id="agents-h">sd-* processes <button class="help" type="button" aria-label="Help: processes" data-help="<b>The fleet's process read.</b> The sd-* commands running on this Mac, from the process table at this read. Claude sessions are listed above; codex processes are not read.">${I('circle-help')}</button></h2><p class="tally">${SESS ? html`<span>${SESS.processes_truncated ? '≥ ' : ''}${SESS.processes.length} running</span><span>fleet · ${seen(SESS)}</span>` : ''}</p></div>
     ${!SESS ? unknown('Sessions were not read', why('sessions'), 'fleet sessions')
       : SESS.processes.length ? html`<table class="ledger" aria-labelledby="agents-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Command</th><th scope="col">Running for</th><th scope="col">PID</th></tr></thead>
-      <tbody>${SESS.processes.map((p, i) => html`<tr data-id="proc:${i}"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${p.command}</button></td><td class="d mono" data-k="up">${p.elapsed}</td><td class="d num">${p.pid}</td></tr>`)}</tbody></table>`
-      : html`<p class="empty">${SESS.processes_error ? html`<span class="g-unknown" aria-hidden="true">▨</span> ${SESS.processes_error}` : 'No sd-* command is running.'}</p>`}
+      <tbody>${SESS.processes.map((p, i) => html`<tr data-id="proc:${i}"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${p.command}</button></td><td class="d mono" data-k="up">${p.elapsed}</td><td class="d num">${p.pid}</td></tr>`)}</tbody></table>${SESS.processes_truncated ? html`<p class="why">The table was cut at ${SESS.processes_ceiling}, so these are a floor.</p>` : ''}`
+      : html`<p class="empty">${SESS.processes_error ? html`<span class="g-unknown" aria-hidden="true">▨</span> ${SESS.processes_error}`
+        : SESS.processes_truncated ? html`<span class="g-unknown" aria-hidden="true">▨</span> The table was cut at ${SESS.processes_ceiling}, so no command below the cut was read.` : 'No sd-* command is running.'}</p>`}
 
     <div class="sec-head"><h2 id="wt-h">Worktrees</h2><p class="tally">fleet sessions · ${SESS ? seen(SESS) : `${hhmm(READ)} UTC`}</p></div>
-    ${SESS ? html`<table class="ledger" aria-labelledby="wt-h"><tbody>
+    ${SESS && !SESS.root_exists ? html`<p class="empty"><span class="g-unknown" aria-hidden="true">▨</span> The checkout root ${SESS.root} does not exist. REPO_ROOT names it; ~/repos is the default.</p>`
+      : SESS ? html`<table class="ledger" aria-labelledby="wt-h"><tbody>
       <tr data-id="wt:abandoned"><td class="g g-${SESS.abandoned ? 'caution' : 'ok'}">${SESS.abandoned ? '▲' : '●'}<span class="sr">${SESS.abandoned ? 'caution' : 'ok'}</span></td><td class="what"><button type="button">${SESS.abandoned} abandoned worktrees</button></td><td class="d mono">registered, directory gone</td>${ACT('wt:abandoned')}</tr>
-      <tr data-id="wt:live"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${SESS.registered - SESS.abandoned} live worktrees</button></td><td class="d mono">of ${SESS.registered} registered</td><td class="act end"></td></tr>
-    </tbody></table>` : unknown('Worktrees were not read', why('sessions'))}`);
+      <tr data-id="wt:live"><td class="g g-ok">●<span class="sr">ok</span></td><td class="what"><button type="button">${liveTrees()} live worktrees</button></td><td class="d mono">of ${SESS.registered} registered${SESS.unreadable ? ` · ${SESS.unreadable} unreadable` : ''}</td><td class="act end"></td></tr>
+    </tbody></table>${treeTable()}` : unknown('Worktrees were not read', why('sessions'))}`);
 }
+// pack sd:7517: an unreadable registration is neither abandoned nor live.
+const liveTrees = () => SESS.registered - SESS.abandoned - (SESS.unreadable || 0);
+// pack sd:7517: each registered worktree, abandoned first, as Operations > Sessions listed them before it was retired.
+const TREESTATE = { abandoned: 'caution', unknown: 'unknown', live: 'ok' };
+const treeTable = () => !(SESS.worktrees || []).length ? '' : html`<div class="sec-head"><h2 id="wts-h">Each worktree</h2><p class="tally"><span>${plural(SESS.worktrees.length, 'worktree')}</span><span>abandoned first</span></p></div>
+    <table class="ledger" aria-labelledby="wts-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Worktree</th><th scope="col">Repository</th><th scope="col">Branch</th><th scope="col">Path</th></tr></thead>
+    <tbody>${SESS.worktrees.map((t, i) => { const st = TREESTATE[t.state] || 'unknown'; return html`<tr data-id="tree:${i}"><td class="g g-${st}">${GLYPH[st]}<span class="sr">${t.state}</span></td><td class="what"><button type="button">${t.name}</button></td><td class="d mono">${t.repo}</td><td class="d mono">${t.branch || '—'}</td><td class="d mono">${t.path || '(unreadable registration)'}</td></tr>`; })}</tbody></table>`;
 document.getElementById('view-sessions').addEventListener('click', e => {
   if (e.target.closest('.rowact')) return;
   const tr = e.target.closest('tr[data-id]'); if (tr) selectRow(tr.dataset.id, true);
@@ -1020,7 +1063,7 @@ document.querySelector('main').addEventListener('click', e => {
   // The filter bar (shell.list.fbar): the text token removes the text, Clear all every filter; applyText draws the view once
   // and writes the URL.
   const q = e.target.closest('[data-f="q"]'), all = e.target.closest('[data-fclear]'); if (!q && !all) return;
-  if (all) RS.managed = RS.merge = null;
+  if (all) RS.managed = RS.merge = RS.research = null;
   applyText(shell.filter(all ? '' : text.q.split(/\s+/).filter(w => FIELD.test(w)).join(' ')));
 });
 
@@ -1095,10 +1138,15 @@ function selectRow(id, open) {
     const p = SESS.processes[+key]; if (!p) return;
     h = html`<p class="kind"><span class="g-ok">●</span> sd-* process</p><h2>${p.command}</h2><dl><dt>PID</dt><dd>${p.pid}</dd><dt>Running for</dt><dd>${p.elapsed}</dd></dl>
       <p class="why">A process has no command here; stop it from its own terminal.</p>`;
+  } else if (kind === 'tree') {
+    const t = (SESS?.worktrees || [])[+key]; if (!t) return;
+    const st = TREESTATE[t.state] || 'unknown';
+    h = html`<p class="kind"><span class="g-${st}">${GLYPH[st]}</span> Worktree · ${t.state}</p><h2>${t.name}</h2><dl><dt>Repository</dt><dd>${t.repo}</dd><dt>Branch</dt><dd>${t.branch || '—'}</dd><dt>Path</dt><dd class="mono">${t.path || '(unreadable registration)'}</dd><dt>Source</dt><dd>fleet sessions</dd></dl>
+      ${t.state === 'abandoned' ? html`<p class="why">Its directory is gone and it still holds its branch; Prune on the abandoned row clears it.</p>` : ''}`;
   } else if (kind === 'wt') {
     h = key === 'abandoned'
       ? html`<p class="kind"><span class="g-caution">▲</span> Worktrees · abandoned</p><h2>${SESS.abandoned} abandoned worktrees</h2><dl><dt>What</dt><dd>registered, directory gone</dd><dt>Source</dt><dd>fleet sessions</dd></dl>${act}`
-      : html`<p class="kind"><span class="g-ok">●</span> Worktrees · live</p><h2>${SESS.registered - SESS.abandoned} live worktrees</h2><dl><dt>Registered</dt><dd>${SESS.registered}</dd></dl>`;
+      : html`<p class="kind"><span class="g-ok">●</span> Worktrees · live</p><h2>${liveTrees()} live worktrees</h2><dl><dt>Registered</dt><dd>${SESS.registered}</dd></dl>`;
   } else if (kind === 'sats') {
     const q = SATS?.request;
     h = html`<p class="kind">${I('rotate-ccw')} Refresh satellites</p><h2>Refresh satellites</h2><dl><dt>Last request</dt><dd>${q ? q.id : 'none sent'}</dd><dt>Sent</dt><dd><time class="rel" datetime="${q?.at || ''}" data-long data-empty="never"></time></dd></dl>
@@ -1121,7 +1169,7 @@ function selectRow(id, open) {
   } else if (kind === 'svc') {
     const s = SERVICES.find(x => x.label === key); if (!s) return;
     const st = SVCSTATE(s);
-    h = html`<p class="kind"><span class="g-${st}">${GLYPH[st]}</span> Service · ${s.state}</p><h2>${s.name}</h2><dl><dt>Label</dt><dd>${s.label}</dd><dt>What</dt><dd>${s.category} · ${s.scope} · ${s.domain}</dd><dt>PID</dt><dd>${s.pid ?? '—'}</dd><dt>Previous exit</dt><dd>${s.last_exit ?? '—'}</dd><dt>Deployed at</dt><dd>▨ not recorded</dd></dl>${act}`;
+    h = html`<p class="kind"><span class="g-${st}">${GLYPH[st]}</span> Service · ${s.state}</p><h2>${s.name}</h2><dl><dt>Label</dt><dd>${s.label}</dd><dt>What</dt><dd>${s.category} · ${s.scope} · ${s.domain}</dd><dt>PID</dt><dd>${s.pid ?? '—'}</dd><dt>Previous exit</dt><dd>${s.last_exit ?? '—'}</dd><dt>Last request</dt><dd>${requestDetail(s.last_request)}</dd><dt>Deployed at</dt><dd>▨ not recorded</dd></dl>${act}`;
   }
   put(details, h); swap();
   if (shell.commands.get(id)) shell.commands.select(id); else shell.setContext(details.querySelector('h2')?.textContent || '');
@@ -1132,7 +1180,7 @@ function selectRow(id, open) {
 
 // ---------- Filter: the shell's Shapeshift bar (sd:5539) ----------
 // Its text is this view's filter: free words and the managed:, merge: and state: chips. A chip control sets the bar's text.
-const RENDER = new Map([['repos', renderRepos], ['sessions', renderSessions], ['deploys', renderDeploys], ['schedules', renderSchedules]]);
+const RENDER = new Map([['repos', renderRepos], ['sessions', renderSessions], ['deploys', renderDeploys], ['schedules', renderSchedules], ['machine', renderMachine]]);
 function render() {
   const draw = RENDER.get(view);
   if (!draw) throw new Error(`no such view: ${view}`);
@@ -1162,8 +1210,13 @@ window.PAGE_COMMANDS = [
 // reread after a write keeps the rows and says the write landed.
 let reading = null, FAILED = '';
 const load = () => reading.load();
-// Read again (sd:5638): the shell's head button reads the management document again.
-window.PAGE_AGAIN = { title: 'Read the management document again', run: load };
+// Read again (sd:5638): the shell's head button reads the management document again, and the Research reading while
+// its filter is on: a failed read is kept until then (lead review of 960414d82).
+window.PAGE_AGAIN = { title: 'Read the management document again', run: () => {
+  if (view === 'machine') return readMachine();
+  if (RS.research) RESEARCH = null;
+  return load();
+} };
 const reread = () => reading.reread();
 function adopt(doc) {
   absorb(doc);
@@ -1177,7 +1230,7 @@ function clear(err) {
 function draw() {
   lamps();
   pageAttention();
-  if (!DOC) { VIEWS.forEach(v => put(document.getElementById(`view-${v}`), unknown('Management was not read', FAILED, '/api/management'))); return; }
+  if (!DOC) { VIEWS.filter(v => v !== 'machine').forEach(v => put(document.getElementById(`view-${v}`), unknown('Management was not read', FAILED, '/api/management'))); return; }
   renderSessions(); renderDeploys(); renderSchedules(); renderRepos();
   document.getElementById('subhead').textContent = repoParam ? `Settings for ${repoParam}. Chat is scoped to this repo.`
     : `Every repo setting, sessions, services and schedules. Read ${hhmm(READ)} UTC.`;
@@ -1197,6 +1250,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const asked = repoParam ? 'repos' : VIEWS.includes(params.get('view')) && !/^#view=/.test(location.hash) ? params.get('view') : null;
   if (asked && shell.view.current() !== asked) shell.view.show(asked);
   view = VIEWS.includes(shell.view.current()) ? shell.view.current() : 'repos';
+  if (view === 'machine') readMachine();
   registerCommands();
   readURL();
   document.addEventListener('shell:view', e => { if (e.detail.id !== view) { showView(e.detail.id); lamps(); } });
