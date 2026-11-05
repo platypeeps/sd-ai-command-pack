@@ -12,7 +12,7 @@ the design source at d82daa1.
 
 `activity.js` runs under JavaScriptCore (osascript), against the stand-in
 page and shell `test_v2_tasks` uses, with the real reader (`read.js`,
-sd:2418; adopted by sd:2489) and the document above as its fetch answer. The browser half -- focus, the look at 375 px, the lane chart -- is a
+sd:2418; adopted by sd:2489) and the document above as its fetch answer. The browser half -- focus, the look at 375 px -- is a
 manual check recorded on the pull request.
 """
 
@@ -117,6 +117,18 @@ class TheDocument(ScreenCase):
         self.assertEqual(self.doc["kinds"], ["merge", "run", "review", "command"])
         stamps = [event["at"] for event in self.doc["events"]]
         self.assertEqual(stamps, sorted(stamps, reverse=True))
+
+    def test_a_7_day_read_holds_the_older_merge_and_its_badge_stays_on_24_hours(self):
+        """pack sd:7681: Today's Timeline reads 7 days; the merge 28 hours old is in it, and the rail badge still counts
+        the 24 hours, so the 7-day read never lights it with an older event."""
+        week = activity_screen.document(self.connection, now=NOW, jobs_backend=backend(self),
+                                        window=activity_screen.RANGES["7d"])
+        self.assertEqual(week["from"], "2026-08-30T12:00:00Z")
+        older = f"merge:{self.ids['merge'] + 1}"
+        self.assertNotIn(older, self.by_id)
+        self.assertIn(older, {event["id"] for event in week["events"]})
+        self.assertIn(f"run:{self.ids['stale']}", {event["id"] for event in week["events"]})
+        self.assertEqual(week["attention"], self.doc["attention"])
 
     def test_a_merge_is_a_delivery_note_in_the_window(self):
         merges = [event for event in self.doc["events"] if event["k"] == "merge"]
@@ -267,13 +279,21 @@ class ThePage(BrowserSession):
         for path in re.findall(r'(?:src|href)="(/ui/[^"]+)"', body):
             self.assertEqual(self.request(path)[0], 200, path)
 
-    def test_the_data_route_needs_a_session_and_takes_no_query(self):
+    def test_the_data_route_needs_a_session_and_takes_only_a_range(self):
         self.assertEqual(self.request("/api/activity")[0], 403)
         cookie = {"Cookie": self.cookie}
-        self.assertEqual(self.request("/api/activity?kind=merge", headers=cookie)[0], 400)
+        for query in ("kind=merge", "range=30d", "range=24h&range=7d", "range=7d&kind=merge"):
+            with self.subTest(query=query):
+                self.assertEqual(self.request(f"/api/activity?{query}", headers=cookie)[0], 400)
         status, _, body = self.request("/api/activity", headers=cookie)
         self.assertEqual(status, 200)
         self.assertIn("events", json.loads(body))
+        # pack sd:7681: Today's Timeline reads 7 days.
+        status, _, body = self.request("/api/activity?range=7d", headers=cookie)
+        self.assertEqual(status, 200)
+        doc = json.loads(body)
+        self.assertEqual(datetime.fromisoformat(doc["to"].replace("Z", "+00:00"))
+                         - datetime.fromisoformat(doc["from"].replace("Z", "+00:00")), activity_screen.RANGES["7d"])
 
 
 #: A retry's 200 carries launchctl's answer (operations._act); only `accepted` started the run.
@@ -333,19 +353,16 @@ class TheScript(ScreenCase):
         ])
 
     def test_the_page_reads_the_document_once_and_draws_no_hatched_kind(self):
-        out = self.run_page("R.lanes = ELS.lanes.html; R.ann = ELS.annunciator.html; R.rows = ELS.rows.html; R.sub = ELS.sub.html;"
-                            " R.filters = ELS.filters.html; R.table = ELS['chart-table'].html;")
+        out = self.run_page("R.ann = ELS.annunciator.html; R.rows = ELS.rows.html; R.sub = ELS.sub.html;"
+                            " R.filters = ELS.filters.html;")
         self.assertEqual(out["gets"], ["/api/activity"])
         self.assertEqual(out["states"][0]["kind"], "loading")
         self.assertIsNone(out["states"][-1])
-        lanes = out["R"]["lanes"]
         for kind in ("deploy", "mail"):
-            for part in ("lanes", "ann", "filters"):
+            for part in ("ann", "filters"):
                 self.assertNotIn(f'"{kind}"', out["R"][part], part)
-        self.assertNotIn("Deploys", out["R"]["table"])
         self.assertNotIn('data-state="unknown"', out["R"]["ann"], "every source read, so no lamp is hatched")
-        self.assertNotIn("track unknown", lanes)
-        self.assertEqual(re.findall(r'class="lane-btn" type="button" data-kind="(\w+)"', lanes), ["merge", "run", "review", "command"])
+        self.assertEqual(re.findall(r'data-kind="(\w+)"', out["R"]["ann"]), ["merge", "run", "review", "command"])
         self.assertIn('data-kind="command" data-state="warning"', out["R"]["ann"])
         self.assertIn("Port the page", out["R"]["rows"])
         self.assertIn("nightly-sync failed with exit 7", out["R"]["rows"])
@@ -359,16 +376,12 @@ class TheScript(ScreenCase):
         self.assertEqual(out["urls"][-1], ["merge", None])
         self.assertIn("Port the page<small>", out["R"]["rows"])
 
-    def test_a_kind_whose_every_source_failed_is_hatched_with_the_reason(self):
+    def test_a_kind_whose_every_source_failed_is_a_hatched_lamp(self):
+        """Its lane, hatched with the reason, is on Today's Timeline now (pack sd:7681)."""
         with patch.object(activity_screen, "reviews", side_effect=sqlite3.OperationalError("database locked")):
             doc = activity_screen.document(self.connection, now=NOW, jobs_backend=backend(self))
-        out = self.run_page("""R.ann = ELS.annunciator.html; R.lanes = ELS.lanes.html;
-ELS.lanes.listeners.click[0]({ target: { closest: s => s === '.lane-btn' ? { dataset: { kind: 'review' } } : null } });
-R.details = ELS.details.html;""", doc=doc)
+        out = self.run_page("R.ann = ELS.annunciator.html;", doc=doc)
         self.assertIn('<div class="cell" data-kind="review" data-state="unknown">', out["R"]["ann"])
-        self.assertIn("▨ unknown · reviews not read", out["R"]["lanes"])
-        self.assertIn("Reviews not read", out["R"]["details"])
-        self.assertIn("The read failed: database locked.", out["R"]["details"])
         self.assertIn('data-kind="merge" data-state="', out["R"]["ann"])
         self.assertNotIn('data-kind="merge" data-state="unknown"', out["R"]["ann"], "merges read, so merges are not hatched")
 
@@ -436,8 +449,7 @@ shellRun(cmd('asg.get'), C.get('run:{n}')); await flush(); R.details = ELS.detai
         self.assertEqual(out["posts"], [])
 
     def test_reviews_draw_as_a_kind_with_a_source_not_hatched(self):
-        out = self.run_page("R.lanes = ELS.lanes.html; R.ann = ELS.annunciator.html; R.rows = ELS.rows.html;")
-        self.assertRegex(out["R"]["lanes"], r'data-kind="review"[^>]*><svg[^>]*></svg><span>Reviews</span><span class="n">1</span>')
+        out = self.run_page("R.ann = ELS.annunciator.html; R.rows = ELS.rows.html;")
         self.assertIn('<button class="cell" type="button" data-kind="review" data-state="ok"', out["R"]["ann"])
         self.assertNotIn("Observed", out["R"]["ann"])  # sd:6697: the lamps alone; Read again re-reads
         self.assertIn("<b>0</b> adjudicated</span> · <span class=\"ph\">1 clean</span>", out["R"]["ann"])
@@ -460,36 +472,27 @@ shellRun(cmd('asg.get'), C.get('run:{n}')); await flush(); R.details = ELS.detai
         out = self.run_page("R.ann = ELS.annunciator.html;", doc=doc)
         self.assertIn("1 clean · 2 merges unrecorded", re.sub(r"<[^>]+>", "", out["R"]["ann"]))
 
-    def test_a_lamp_its_chip_and_its_lane_add_to_one_kind_set(self):
+    def test_two_lamps_add_to_one_kind_set(self):
         click = "ELS.%s.listeners.click[0]({ target: { closest: s => s === '%s' ? { dataset: { kind: '%s' } } : null } });"
-        out = self.run_page(click % ("lanes", ".lane-btn", "run") + click % ("annunciator", "button.cell", "merge")
-                            + "R.ann = ELS.annunciator.html; R.lanes = ELS.lanes.html; R.filters = ELS.filters.html;")
+        out = self.run_page(click % ("annunciator", "button.cell", "run") + click % ("annunciator", "button.cell", "merge")
+                            + "R.ann = ELS.annunciator.html; R.filters = ELS.filters.html;")
         self.assertEqual(out["urls"][-1], ["run,merge", None], "a lamp adds to the set, never replaces it")
         for kind in ("merge", "run"):
-            self.assertIn(f'data-kind="{kind}" data-state="', out["R"]["ann"])
             self.assertRegex(out["R"]["ann"], rf'data-kind="{kind}" data-state="\w+" aria-pressed="true"')
-            self.assertRegex(out["R"]["lanes"], rf'data-kind="{kind}" aria-pressed="true"')
-            # The bar shows each picked kind as a removable token; the lamps and lanes are its pressable controls.
+            # The bar shows each picked kind as a removable token; the lamps are its pressable controls.
             self.assertRegex(out["R"]["filters"], rf'<button type="button" class="tok" data-f="kind" data-v="{kind}" aria-label="Remove filter: ')
-        # sd:5064: the lanes are the Cadence view and the lamps sit above both, so each shows the Timeline it filtered.
         self.assertEqual(out["shown"], ["timeline", "timeline"])
 
-    def test_a_tick_on_the_cadence_chart_stays_and_shows_its_event_with_its_commands(self):
-        # sd:6681: a tick no longer leaves for the Timeline; Details shows the event and its commands (Run now on a job run).
-        tick = "ELS.lanes.listeners.click[0]({ target: { closest: s => s === 'rect.tick' ? { dataset: { id: '%s' } } : null } });"
-        bar = "C.bar = id => mk`<div class=\"bar\">${REG.filter(c => c.on === C.get(id).type).map(c => c.label).join(' | ')}</div>`;"
-        merge = next(e["id"] for e in self.doc["events"] if e["k"] == "merge")
-        out = self.run_page(tick % merge + "R.details = ELS.details.html;" + tick % "job:nightly-sync" + "R.job = ELS.details.html;", pre=bar)
-        self.assertEqual(out["shown"], [])
-        self.assertIn("system#41", out["R"]["details"])
-        self.assertIn("Open on GitHub", out["R"]["details"])
-        self.assertIn("Run now", out["R"]["job"])  # jobs.retry
-        self.assertIn("Show log", out["R"]["job"])
-
-    def test_the_timeline_is_the_first_view_and_the_lane_chart_the_cadence_view(self):
+    def test_activity_has_no_cadence_view(self):
+        """pack sd:7681: the lane chart moved to Today's Timeline. Activity is its Timeline alone: no Cadence view, no
+        lane chart, no hourly table, and no script that draws them."""
         page = (V2 / "activity.html").read_text(encoding="utf-8")
-        self.assertIn("window.PAGE_VIEWS = [{ id: 'timeline', label: 'Timeline' }, { id: 'cadence', label: 'Cadence' }];", ACTIVITY_JS)
-        self.assertLess(page.index('<section id="view-timeline"'), page.index('<section class="chart" id="view-cadence"'))
+        self.assertIn("window.PAGE_VIEWS = [{ id: 'timeline', label: 'Timeline' }];", ACTIVITY_JS)
+        for gone in ('id="view-cadence"', 'id="lanes"', 'id="chart-table"'):
+            self.assertNotIn(gone, page)
+        for gone in ("cadence", "renderLanes", "#lanes", "chart-table"):
+            self.assertNotIn(gone, ACTIVITY_JS)
+        self.assertNotIn(".lane-btn", (V2 / "static" / "activity.css").read_text(encoding="utf-8"))
         self.assertNotIn('id="views"', page)
         self.assertNotIn("shell.views", ACTIVITY_JS)
 
@@ -497,9 +500,8 @@ shellRun(cmd('asg.get'), C.get('run:{n}')); await flush(); R.details = ELS.detai
         """The 7d, 30d and All chips are gone; palette.py's range=all link still opens the older records."""
         older = self.ids["older"]
         tok = "ELS.filters.listeners.click[0]({ target: { closest: s => s === '[data-f=\"range\"]' ? { dataset: { f: 'range', v: 'all' } } : null } });"
-        day = self.run_page("R.day = ELS.rows.html; R.lanes = ELS.lanes.html; R.note = ELS['journal-note'].html; R.hid = ELS['journal-note'].hidden;")
+        day = self.run_page("R.day = ELS.rows.html; R.note = ELS['journal-note'].html; R.hid = ELS['journal-note'].hidden;")
         self.assertNotIn(f'data-id="cmd:{older}"', day["R"]["day"])
-        self.assertNotIn(f'data-id="cmd:{older}"', day["R"]["lanes"], "the chart is the 24 hours")
         self.assertEqual(day["R"]["note"], "1 exec note no known writer left is skipped.")
         self.assertFalse(day["R"]["hid"])
         out = self.run_page("R.all = ELS.rows.html; R.bar = ELS.filters.html;" + tok + "R.back = ELS.rows.html;",
@@ -536,16 +538,6 @@ shellRun(cmd('asg.get'), C.get('run:{n}')); await flush(); R.details = ELS.detai
         next(e for e in doc["events"] if e["id"] == f"cmd:{self.ids['older']}")["s"] = "warning"
         out = self.run_page("", doc=doc)
         self.assertEqual(out["attention"][-1], {"state": "warning", "n": 2, "what": "failed events in 24 h"})
-
-    def test_the_hourly_table_applies_the_repo_filter_the_lanes_apply(self):
-        out = self.run_page("""ELS.filters.listeners.click[0]({ target: { closest: s => s === '[data-f]' ? { dataset: { f: 'repo', v: 'system' } } : null } });
-R.table = ELS['chart-table'].html; R.lanes = ELS.lanes.html;""")
-        cells = [int(n) for n in re.findall(r"<td>(\d+)</td>", out["R"]["table"])]
-        self.assertEqual(sum(cells), len(re.findall(r'<rect class="tick', out["R"]["lanes"])))
-        inside = [e for e in self.doc["events"] if e["repo"] == "system" and e["at"] >= self.doc["from"]]
-        self.assertEqual(sum(cells), len(inside))
-        self.assertEqual(sorted(e["k"] for e in inside), ["merge", "review", "run", "run"],
-                         "the merge, the review it carried and the item's two runs")
 
     def test_the_runs_cell_counts_failed_jobs_and_blocked_assignments_apart(self):
         doc = json.loads(json.dumps(self.doc))

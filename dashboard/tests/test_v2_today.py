@@ -195,7 +195,7 @@ class TheAssets(BrowserSession):
             self.assertIn(".track-plot", sel, f"{sel} also matches svg.i in the track table")
         self.assertTrue(any("width: 100%" in body for _, body in svg_rules), "the chart no longer fills its plot")
         self.assertIn('class="track-plot"', (V2 / "today.html").read_text(encoding="utf-8"))
-        self.assertIn("put($('track-plot'), marks.length ? html`<svg ", TODAY_JS)
+        self.assertIn("put($('track-plot'), marks.length || events.length ? html`<svg ", TODAY_JS)
 
 
     def test_the_queue_table_carries_its_caption(self):

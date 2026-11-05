@@ -311,6 +311,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (QV.seen) loadQueue();
     digest();
     dayTrack();
+    if (AV.seen) loadActivity();
     spendLine();
     window.snooze.draw($('snoozed'), SNOOZED);
   }
@@ -669,41 +670,86 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     await loadQueue();
   }
 
-  // The day track (sd:5921): the document's `track`, the last 24 hours as marks in four lanes, each linked to its row, with
-  // the same marks as a table in a details and a key of four counts linked to Tasks. A track that was not read says so;
-  // a day with no mark says that in one line, never an empty axis. Landed links the items done less than a day ago
-  // (sd:5934): Tasks' In status bucket 0, as a task has no merged or delivered status.
+  // The Timeline (sd:5921, pack sd:7681): one chart on one time axis. First Today's four lanes, the document's `track`
+  // (7 days of marks); then one lane per Activity kind, /api/activity?range=7d, read when the view first shows and on each
+  // Read again after. The 24h / 7d tiles pick the window the chart and its table draw; ?range=7d keeps the longer one.
+  // Each mark links to its row, the same marks are a table in a details, and the key's four counts link to Tasks. A track
+  // that was not read says so; a window with no mark says that in one line, never an empty axis. Landed links the items
+  // done less than a day ago (sd:5934): Tasks' In status bucket 0, as a task has no merged or delivered status.
   const LANES = [['landed', 'Landed', 18], ['jobs', 'Jobs', 40], ['briefs', 'Briefs', 58], ['live', 'Live', 74]];
+  // The Activity kinds and their lanes, moved from Activity's Cadence view (sd:5064). A kind is unknown when every source
+  // behind it failed to read: its lane is hatched with the reason, as unknown is not zero.
+  const KINDS = [{ id: 'merge', name: 'Merges', src: ['merge'] }, { id: 'run', name: 'Runs', src: ['run', 'job'] },
+    { id: 'review', name: 'Reviews', src: ['review'] }, { id: 'command', name: 'Commands', src: ['command'] }];
+  const KIND_Y = 92, KIND_STEP = 18, TRACK_H = KIND_Y + KIND_STEP * KINDS.length + 12;
+  const SPAN = { '24h': 864e5, '7d': 7 * 864e5 }, SPAN_SAID = { '24h': 'Last 24 hours', '7d': 'Last 7 days' };
+  let span = new URLSearchParams(location.search).get('range') === '7d' ? '7d' : '24h';
+  const AV = { seen: false, doc: null, error: '', n: 0 };
+  const kindWhy = k => AV.error || (AV.doc ? (k.src.every(s => AV.doc.sources[s]) ? k.src.map(s => AV.doc.sources[s]).join('; ') : '') : '');
+  // Of overlapping reads only the newest draws; a failed one leaves no event from the last read.
+  function loadActivity() {
+    const n = ++AV.n; AV.seen = true;
+    return shell.getJSON('/api/activity?range=7d').then(doc => { if (n === AV.n) { AV.doc = doc; AV.error = ''; } },
+      err => { if (n === AV.n) { AV.doc = null; AV.error = err.message || 'the read failed'; } }).then(() => { if (n === AV.n && DOC) dayTrack(); });
+  }
   const markHref = (lane, m) => lane === 'landed' || lane === 'live' ? shell.itemHref(m.item) : `?row=${encodeURIComponent(m.id)}`;
+  const eventHref = e => `/activity?kind=${e.k}&row=${encodeURIComponent(e.id)}`;
+  function rangeTiles() {
+    put($('track-range'), html`${Object.keys(SPAN).map(v => html`<button type="button" data-range="${v}" aria-pressed="${String(span === v)}">${v}</button>`)}`);
+    $('track-h').textContent = `The ${SPAN_SAID[span].toLowerCase()}`;
+  }
   function dayTrack() {
+    rangeTiles();
     const T = DOC.track || { error: 'the document carried no track' };
     if (T.error) {
       put($('track-plot'), html`<p class="why">The day track was not read: ${T.error}. Read again tries again.</p>`);
       put($('flowkey'), html``); put($('track-rows'), html``); $('track-table').hidden = true; return;
     }
-    const t0 = Date.parse(T.since), t1 = Date.parse(T.until), X0 = 64, W = 900, x = at => (X0 + (W - X0 - 8) * (Date.parse(at) - t0) / (t1 - t0)).toFixed(1);
-    const marks = LANES.flatMap(([k, label]) => T[k].map(m => ({ ...m, lane: k, label })));
-    const said = `Last 24 hours: ${T.landed.length} landed, ${plural(T.jobs.length, 'job')} failed, ${plural(T.briefs.length, 'brief')} filed, ${plural(T.live.length, 'session')} live`;
+    const t1 = Date.parse(T.until), t0 = t1 - SPAN[span], X0 = 84, W = 900;
+    const x = at => (X0 + (W - X0 - 8) * (Math.max(Date.parse(at), t0) - t0) / (t1 - t0)).toFixed(1);
+    const inside = at => Date.parse(at) >= t0 && Date.parse(at) <= t1;
+    // A live session spans from its start or the window's, whichever is later, so Live keeps every session running now.
+    const marks = LANES.flatMap(([k, label]) => T[k].filter(m => k === 'live' || inside(m.at)).map(m => ({ ...m, lane: k, label })));
+    const of = k => marks.filter(m => m.lane === k).length;
+    const events = AV.doc ? AV.doc.events.filter(e => inside(e.at)) : [];
+    const evs = k => events.filter(e => e.k === k.id);
+    const said = `${SPAN_SAID[span]}: ${of('landed')} landed, ${plural(of('jobs'), 'job')} failed, ${plural(of('briefs'), 'brief')} filed, ${plural(of('live'), 'session')} live`
+      + (AV.doc ? `; ${KINDS.map(k => kindWhy(k) ? `${k.name.toLowerCase()} not read` : `${evs(k).length} ${k.name.toLowerCase()}`).join(', ')}` : '');
     const ticks = [];
-    for (let t = Math.ceil(t0 / 36e5) * 36e5; t <= t1; t += 36e5) if (new Date(t).getHours() % 3 === 0) ticks.push(t);
+    // A day tick is each local midnight, stepped by the calendar, so a day of 23 or 25 hours (DST) keeps one tick a day.
+    if (span === '7d') for (const d = new Date(t0); d.setHours(24, 0, 0, 0) <= t1;) ticks.push([d.getTime(), d.toLocaleDateString([], { weekday: 'short', day: 'numeric' })]);
+    else for (let t = Math.ceil(t0 / 36e5) * 36e5; t <= t1; t += 36e5) if (new Date(t).getHours() % 3 === 0) ticks.push([t, `${String(new Date(t).getHours()).padStart(2, '0')}:00`]);
     const mark = m => { const at = x(m.at), tip = html`<title>${hm(m.at)} UTC · ${m.what}</title>`;
       return html`<a href="${markHref(m.lane, m)}" data-id="${markId(m)}">${m.lane === 'landed' ? html`<line class="land" x1="${at}" y1="10" x2="${at}" y2="26">${tip}</line>`
         : m.lane === 'jobs' ? html`<rect class="fail" x="${(at - 4).toFixed(1)}" y="36" width="8" height="8">${tip}</rect>`
         // sd:6232: a solid dot, a shape no other lane uses, inside a clear 24-unit square that takes the press.
         : m.lane === 'briefs' ? html`<rect class="hit" x="${(at - 12).toFixed(1)}" y="46" width="24" height="24">${tip}</rect><circle class="brief" cx="${at}" cy="58" r="4.5"/>`
         : html`<rect class="sess" x="${at}" y="72" width="${Math.max(2, W - 8 - at).toFixed(1)}" height="3">${tip}</rect>`}</a>`; };
-    put($('track-plot'), marks.length ? html`<svg viewBox="0 0 ${W} 100" role="img" aria-label="${said}">
-      ${ticks.map(t => html`<line class="grid" x1="${x(new Date(t).toISOString())}" y1="6" x2="${x(new Date(t).toISOString())}" y2="80"/><text class="axis" x="${x(new Date(t).toISOString())}" y="94" text-anchor="middle">${String(new Date(t).getHours()).padStart(2, '0')}:00</text>`)}
+    // An Activity lane: a tick per event at its time, its state its colour; ok first, so the loudest ticks sit on top.
+    // A tick links to its event on Activity.
+    const ORDER = { ok: 0, queued: 0, unknown: 0, caution: 1, warning: 2 };
+    const kindLane = (k, i) => {
+      const y = KIND_Y + i * KIND_STEP, why = kindWhy(k);
+      const label = html`<text class="lane-l" x="0" y="${y + 4}">${k.name}</text>`;
+      if (!AV.doc && !AV.error) return html`${label}<text class="lane-note" x="${X0}" y="${y + 4}">reading…</text>`;
+      if (why) return html`${label}<rect class="unread" x="${X0}" y="${y - 7}" width="${W - 8 - X0}" height="14"/><text class="lane-note" x="${X0 + 4}" y="${y + 4}">▨ unknown · ${k.name.toLowerCase()} not read: ${why}</text>`;
+      return html`${label}${evs(k).sort((a, b) => ORDER[a.s] - ORDER[b.s]).map(e => html`<a href="${eventHref(e)}"><rect class="tick ${e.s}" x="${(+x(e.at) - 1.5).toFixed(1)}" y="${y - 6}" width="3" height="12"><title>${hm(e.at)} UTC · ${e.what}</title></rect></a>`)}`;
+    };
+    put($('track-plot'), marks.length || events.length ? html`<svg viewBox="0 0 ${W} ${TRACK_H + 14}" role="img" aria-label="${said}">
+      <defs><pattern id="track-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line class="hatch" x1="0" y1="0" x2="0" y2="7"/></pattern></defs>
+      ${ticks.map(([t, label]) => { const gx = x(new Date(t).toISOString()); return html`<line class="grid" x1="${gx}" y1="6" x2="${gx}" y2="${TRACK_H - 4}"/><text class="axis" x="${gx}" y="${TRACK_H + 10}" text-anchor="middle">${label}</text>`; })}
       ${LANES.map(([, label, y]) => html`<text class="lane-l" x="0" y="${y + 4}">${label}</text>`)}
-      ${marks.map(mark)}<line class="now" x1="${x(T.until)}" y1="4" x2="${x(T.until)}" y2="82"/></svg>`
-      : html`<p class="why">Nothing landed, failed, was filed or ran in the last 24 hours.</p>`);
+      ${marks.map(mark)}${KINDS.map(kindLane)}<line class="now" x1="${x(T.until)}" y1="4" x2="${x(T.until)}" y2="${TRACK_H - 2}"/></svg>`
+      : html`<p class="why">Nothing landed, failed, was filed or ran in the ${SPAN_SAID[span].toLowerCase()}.</p>`);
     const K2 = T.key;
     put($('flowkey'), html`<li><a href="/tasks?view=list&amp;status=done&amp;age=0&amp;realm=all">Landed 24h</a></li><li><b>${K2.landed}</b></li>
       <li><a href="#view=queue">Landing</a></li><li><b>${K2.landing}</b></li>
       <li><a href="/tasks?view=list&amp;due=week&amp;realm=all">Due this week</a></li><li><b>${K2.due_week}</b></li>
       <li><a href="/tasks?view=list&amp;status=blocked&amp;realm=all">Blocked</a></li><li><b>${K2.blocked}</b></li>`);
-    $('track-table').hidden = !marks.length;
-    put($('track-rows'), html`${[...marks].sort((a, b) => a.at < b.at ? 1 : -1).map(m => html`<tr data-id="${markId(m)}" aria-selected="${String(row() === markId(m))}"><td class="when"><time datetime="${m.at}">${clock(m.at)}</time></td><td>${m.label}</td><td class="what"><a href="${markHref(m.lane, m)}">${m.what}</a></td></tr>`)}`);
+    $('track-table').hidden = !marks.length && !events.length;
+    const rows = [...marks.map(m => ({ at: m.at, tr: html`<tr data-id="${markId(m)}" aria-selected="${String(row() === markId(m))}"><td class="when"><time datetime="${m.at}">${clock(m.at)}</time></td><td>${m.label}</td><td class="what"><a href="${markHref(m.lane, m)}">${m.what}</a></td></tr>` })),
+      ...events.map(e => ({ at: e.at, tr: html`<tr><td class="when"><time datetime="${e.at}">${clock(e.at)}</time></td><td>${KINDS.find(k => k.id === e.k).name}</td><td class="what"><a href="${eventHref(e)}">${e.what}</a></td></tr>` }))];
+    put($('track-rows'), html`${rows.sort((a, b) => a.at < b.at ? 1 : -1).map(r => r.tr)}`);
   }
 
   // Since yesterday (sd:6002): the document's `digest`, merged per repo with the PRs folded under the lines, failed with
@@ -985,6 +1031,14 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     const showKey = new URLSearchParams(location.search).get('show');
     (showKey === null ? 'suggested' : showKey).split(',').filter(v => QSHOW.includes(v)).forEach(v => qShow.add(v));
     document.addEventListener('shell:view', e => { if (e.detail.id === 'queue' && !QV.seen) loadQueue(); });
+    // pack sd:7681: the Timeline reads its Activity lanes when it first shows; the tiles pick its window, kept in ?range=.
+    document.addEventListener('shell:view', e => { if (e.detail.id === 'timeline' && !AV.seen) loadActivity(); });
+    $('track-range').addEventListener('click', e => {
+      const b = e.target.closest('[data-range]'); if (!b || b.dataset.range === span) return;
+      span = b.dataset.range;
+      const u = new URL(location.href); if (span === '7d') u.searchParams.set('range', '7d'); else u.searchParams.delete('range'); history.replaceState(null, '', u);
+      if (DOC) dayTrack(); else rangeTiles();
+    });
     if (typeof setInterval === 'function') setInterval(() => { if (QV.seen && !document.hidden && !QV.busy && shell.view.current() === 'queue') loadQueue(); }, 30000);
     // sd:6714: a plain click on a row of the Queue view or the day track selects it, as a Needs you row's
     // does, its link included; a modifier click leaves the link to the browser, so it opens a new tab.

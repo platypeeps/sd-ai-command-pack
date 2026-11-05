@@ -18,6 +18,18 @@
 .daytrack a:hover .brief { fill: var(--color-ink); }
 .daytrack .sess { fill: var(--color-accent); }
 .daytrack .now { stroke: var(--color-accent); stroke-width: 1.5; }
+/* pack sd:7681: Activity's kind lanes, moved from its Cadence view. Tick colour = state (ok neutral, caution, warning);
+ * a hatched band = the kind was not read. Hallmark · component: timeline lanes · theme: design.md instrument panel. */
+.daytrack .tick { fill: var(--color-series-2); }
+.daytrack .tick.caution { fill: var(--color-caution); }
+.daytrack .tick.warning { fill: var(--color-warning); }
+.daytrack a:hover .tick { fill: var(--color-accent); }
+.daytrack .unread { fill: url(#track-hatch); }
+.daytrack .hatch { stroke: var(--color-hatch); stroke-width: 1; }
+.daytrack .lane-note { font: 400 11px var(--font-data); fill: var(--color-ink-2); }
+.track-head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-xs); }
+.track-head h2 { margin: 0; }
+@media (forced-colors: active) { .daytrack .tick { fill: CanvasText; } }
 .daytrack a:focus-visible > * { outline: 2px solid var(--color-focus); }
 .daytrack .why { margin: 0; }
 .flowkey { list-style: none; margin: 0; padding: 0 0 0 var(--space-md); border-left: var(--rule-hair) solid var(--color-rule-2); display: grid;

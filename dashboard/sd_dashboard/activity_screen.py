@@ -53,9 +53,13 @@ from sd_db.errors import SdDbError
 
 from . import command_journal
 
-__all__ = ["JOURNAL_CAP", "KINDS", "WINDOW", "document", "reviews"]
+__all__ = ["JOURNAL_CAP", "KINDS", "RANGES", "WINDOW", "document", "reviews"]
 
 WINDOW = timedelta(hours=24)
+
+#: The windows a read may ask for (`/api/activity?range=`): the page's 24 hours, and the 7 days Today's
+#: Timeline draws its Activity lanes over (pack sd:7681). The rail badge stays on the 24 hours either way.
+RANGES = {"24h": WINDOW, "7d": timedelta(days=7)}
 
 #: The latest exec notes the journal read takes (the library's own bound).
 JOURNAL_CAP = 100
@@ -253,10 +257,11 @@ def _detail(connection, row: dict) -> str:
     return "" if row["title"] == command_journal.HOLDER_TITLE else row["title"] or ""
 
 
-def document(connection: sqlite3.Connection, *, now: str, jobs_backend=None) -> dict:
-    """Every event in the 24 hours before `now`, and every journal record, newest first, and what each source said."""
+def document(connection: sqlite3.Connection, *, now: str, jobs_backend=None, window: timedelta = WINDOW) -> dict:
+    """Every event in the `window` (24 hours) before `now`, and every journal record, newest first, and what each
+    source said."""
     end = _utc(now)
-    start = end - WINDOW
+    start = end - window
     events: list[dict] = []
     sources: dict[str, str] = {}
     undated: list[str] = []
@@ -285,7 +290,7 @@ def document(connection: sqlite3.Connection, *, now: str, jobs_backend=None) -> 
     return {"read": _iso(end), "from": _iso(start), "to": _iso(end), "kinds": list(KINDS),
             "sources": sources, "undated": undated, "review_unrecorded": unrecorded["n"], "journal_skipped": skipped,
             "journal_cap": JOURNAL_CAP, "journal_unread": journal["unread"], "events": events,
-            "attention": _attention(events, start)}
+            "attention": _attention(events, end - WINDOW)}
 
 
 def _attention(events, start: datetime) -> dict:

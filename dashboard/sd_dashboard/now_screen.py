@@ -714,28 +714,33 @@ def motion(connection: sqlite3.Connection, active: dict, lanes: list[dict]) -> d
 
 
 TRACK_HOURS = 24
+#: The Timeline's longer range (pack sd:7681): the track carries this many days of marks, and its 24h / 7d tiles
+#: pick which part the page draws.
+TRACK_DAYS = 7
 
 
 def track(connection: sqlite3.Connection, now: str, *, rows: list[dict], briefs: list[dict], active: dict,
           lane: dict) -> dict:
-    """The day track (sd:5921): the last 24 hours, rolling, as marks in four lanes, and its key's four counts.
+    """The day track (sd:5921): the last `TRACK_DAYS` days, rolling, as marks in four lanes, and its key's four counts.
 
     Landed is each item a merge delivered (`sd_db.today.delivered`); Jobs each failed run at its log time; Briefs each new
     brief at its filing; Live each session running now, from its start or
-    the window's, whichever is later. Every mark names its row. A read that failed is `error`, so the page
+    the window's, whichever is later. Every mark names its row. `since` starts the 7 days and `day` the last 24 hours,
+    which the key's Landed counts. A read that failed is `error`, so the page
     says the track was not read, never an empty day.
     """
     from sd_db import today
 
     end = datetime.fromisoformat(now.replace("Z", "+00:00"))
-    since, until = _utc((end - timedelta(hours=TRACK_HOURS)).timestamp()), _utc(end.timestamp())
+    since, until = _utc((end - timedelta(days=TRACK_DAYS)).timestamp()), _utc(end.timestamp())
+    day = _utc((end - timedelta(hours=TRACK_HOURS)).timestamp())
     week = (end + timedelta(days=7)).strftime("%Y-%m-%d")
 
     def within(marks):
         return sorted((mark for mark in marks if mark["at"] and since <= mark["at"] <= until), key=lambda mark: mark["at"])
 
     try:
-        delivered = today.delivered(connection, now=now, hours=TRACK_HOURS)
+        delivered = today.delivered(connection, now=now, hours=TRACK_DAYS * 24)
         due = sum(1 for row in today.planned(connection, now=now) if row["due"] <= week)
         blocked = len(today.blocked(connection))
     except (SdDbError, sqlite3.Error, KeyError, TypeError) as failure:
@@ -753,8 +758,8 @@ def track(connection: sqlite3.Connection, now: str, *, rows: list[dict], briefs:
                         "item": row["item"], "what": f"sd:{row['item']} {row['session']}"}
                        for n, row in enumerate(active.get("rows") or [])),
     }
-    return {"since": since, "until": until, **marks,
-            "key": {"landed": len(marks["landed"]), "landing": lane["merging"] + lane["next"], "due_week": due,
+    return {"since": since, "day": day, "until": until, **marks,
+            "key": {"landed": sum(1 for mark in marks["landed"] if mark["at"] >= day), "landing": lane["merging"] + lane["next"], "due_week": due,
                     "blocked": blocked}}
 
 
