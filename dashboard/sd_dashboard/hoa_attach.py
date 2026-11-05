@@ -7,7 +7,8 @@ No new store: an asset's attachments are its Drive folder's listing. The design 
   Light System folder id, and `hoa.google_account` the account workspace-mcp reads them as. Subfolders are found by
   name (`place`): a valve or hydrant is `Main/<asset id>`, made on its first attachment; `WELL-A1` and `WELL-A2` are
   `Well A1` and `Well A2`; the tank is `Cistern`; the booster station is `Submarine`; the irrigation system, point or
-  line, is `Irrigation` (sd:7667). A street light `LGT-n` is `LGT-n` under Light System, a folder the operator made.
+  line, is `Irrigation` (sd:7667). A street light `LGT-n` is `LGT-n` under Light System, a folder the operator made;
+  while `hoa.light_system_folder` is unset, a light lists no folder and an upload names the setting.
 - **List**, `GET /api/hoa/attachments?asset=<id>`: the folder's items. A `.url` file is a Reference; its target is read
   from its text. A missing asset folder is an empty list, and nothing is made.
 - **Picture**, `GET /api/hoa/attachments/picture?id=<file id>`: one picture's bytes, through workspace-mcp's download
@@ -153,6 +154,13 @@ def _folder(connection, ident: object, *, make: bool) -> tuple[dict, str, str | 
     """`(asset, account, folder id)`: the asset's folder, made when `make` and missing; None when missing."""
     asset = _asset(connection, ident)
     key, sub, own = place(asset)
+    if key == LIGHT_KEY and not make:
+        from sd_db import writes
+
+        # sd:7667: the pack can land before hoa declares the light key and before it is set. Unset, a pole has no
+        # folder yet: an empty listing, Drive not asked; an upload still refuses below, naming the setting.
+        if not writes.read_settings(connection, [LIGHT_KEY]).get(LIGHT_KEY):
+            return asset, "", None
     root, account = _settings(connection, key)
     parent = _one(account, root, sub)
     if parent is None:

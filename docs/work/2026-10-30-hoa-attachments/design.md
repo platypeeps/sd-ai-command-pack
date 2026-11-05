@@ -58,6 +58,7 @@ Add no store. An asset's attachments are its Drive folder's listing.
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
 | Read settings | none | `hoa.water_system_folder` unset | 503 names `sd config set`; nothing sent | `test_failures_are_named_never_an_empty_list` |
+| Read settings | none | `hoa.light_system_folder` unset or undeclared | a light lists no folder, Drive not asked; an upload answers 503 naming the key | `test_an_unset_light_setting_is_no_folder_yet_and_an_upload_names_it` |
 | Find subfolder | none | Cistern renamed or gone | 503 names the folder; nothing written | same |
 | Find subfolder | none | two folders of one name | 503 names both ids; merge in Drive | same |
 | Any call | none | workspace-mcp down or token expired | 503 "Nothing was written"; re-login in workspace-mcp | `test_each_failure_says_whether_drive_holds_the_file` |
@@ -82,6 +83,7 @@ Add no store. An asset's attachments are its Drive folder's listing.
 ## Risks
 
 - Each setting key must be declared in the hoa checkout's `sd-plugin.json` before `sd config set` takes it.
-  Until then the list answers 503 naming the key; an unset light key leaves the water assets read.
+  Until then the list answers 503 naming the key.
+  An unset `hoa.light_system_folder` is no folder yet: a light lists none, and an upload names the key.
 - The listing's text shape is workspace-mcp's; a change there reads as an empty folder.
   The tests pin the shape the server printed on 2026-10-30.

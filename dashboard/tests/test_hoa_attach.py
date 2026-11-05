@@ -208,14 +208,21 @@ class TheOtherSystems(Case):
         self.assertEqual(self.attach({"asset": "LGT-1", "sha256": staged["sha256"], "name": "a.jpg"})[0], 200)
         self.assertEqual([(t, a["folder_id"]) for t, a in self.drive.writes()], [("create_drive_file", "L1")])
 
-    def test_a_light_pole_names_its_setting_and_its_missing_folder(self):
-        # The water setting set, the light one not: the 503 names the light setting.
+    def test_an_unset_light_setting_is_no_folder_yet_and_an_upload_names_it(self):
+        # The pack lands before hoa declares the key and before it is set: a pole lists no folder and no files,
+        # nothing is read or made, and an upload is refused naming the setting.
         writes.set_setting(self.connection, hoa_attach.LIGHT_KEY, None)
-        status, body = hoa_attach.listing(self.connection, {"asset": ["LGT-1"]})
+        got = hoa_attach.listing(self.connection, {"asset": ["LGT-1"]})
+        self.assertEqual(got, {"asset": "LGT-1", "folder": "", "files": []})
+        self.assertEqual(self.drive.calls, [], "an unset light setting asks Drive nothing")
+        status, body = self.attach({"asset": "LGT-1", "link": "https://drive.google.com/file/d/X/view"})
         self.assertEqual(status, 503)
-        self.assertIn("sd config set hoa.light_system_folder", body["error"])
+        self.assertIn("Nothing was written: hoa.light_system_folder is not set", body["error"])
+        self.assertEqual(self.drive.writes(), [])
         self.assertIsInstance(hoa_attach.listing(self.connection, {"asset": ["TANK-01"]}), dict,
                               "an unset light setting leaves the water assets read")
+
+    def test_a_light_pole_with_no_folder_is_named_and_never_made(self):
         writes.set_setting(self.connection, hoa_attach.LIGHT_KEY, "LIGHTS")
         self.drive.items["LIGHTS"] = [("LGT-2", "L2", FOLDER)]
         status, body = hoa_attach.listing(self.connection, {"asset": ["LGT-1"]})
