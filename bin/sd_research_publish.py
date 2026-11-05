@@ -2749,6 +2749,8 @@ def piece_docs(
             if (items is None or row["id"] in items) and row["stage"] in PIECE_FOLDERS]
     if not rows:  # no realm or account read for nothing to queue
         return docs, problems
+    from sd_db import paths  # noqa: PLC0415 - the checkout's `lib/`
+
     account = piece_accounts(connection)
     for row in rows:
         address, why = account(row["repo"])
@@ -2761,9 +2763,11 @@ def piece_docs(
             problems.append("mirror: sd:%s: %s; not queued" % (row["id"], problem or type(problem).__name__))
             continue
         problems += ["mirror: sd:%s: %s; not queued" % (row["id"], why) for why in unread]
+        # The queue file's key, as `enqueue` names it, bounds the name with it (pack sd:7565).
+        key = repo_key(paths.expand(row["repo"]))
         for part, (name, text) in texts.items():
             docs.setdefault(row["repo"], []).append({
-                "out": writing.piece_out(row["piece"], part), "title": "%s · %s" % (row["title"], part),
+                "out": writing.piece_out(row["piece"], part, key=key), "title": "%s · %s" % (row["title"], part),
                 "item": row["id"], "content": text, "source": "sd:%s/%s" % (row["id"], name),
                 "moves": True, "drive": {"folder": PIECE_FOLDERS[row["stage"]], "account": address}})
     return docs, problems

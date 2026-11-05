@@ -25,7 +25,7 @@ cold build, and the gate names each one on stderr.
 
 The gate's worktree is housekeeping of the same kind (sd:2739). A killed gate
 never runs the `finally` that removes it, so its entry stays registered.
-`worktree_prefix` names each gate's temporary folder after its pid, and first
+`worktree_place` names each gate's temporary folder after its pid, and first
 removes every gate worktree whose named process is gone. Only a worktree
 named `tree` in a folder `sd-local-gate-<pid>-<suffix>` directly in the temp
 dir counts as a gate's: a checkout elsewhere with a like name is never touched.
@@ -33,6 +33,11 @@ A live gate's worktree stays; so does a folder from before this rule. The
 dead gate's whole folder goes with its worktree, the check's `TMPDIR` included (sd:3032).
 The same start removes what a run outside the gate left in the temp dir (`reap_temporary`): an sd folder whose
 named pid is gone. Nothing goes by age, so every other entry stays; macOS purges those.
+
+On the hub the gate's folder goes on the RAM disk once it is ready (`sd_tmpdisk`, sd:7557), and the check's
+`TMPDIR` with it. A gate start then cleans both places: the disk, and the inherited temp dir that older gates
+and runs used. A commit that tracks a `Cargo.toml` stays off the disk, even from a temp dir on it: with no warm
+folder free its build goes cold into the worktree's `target/`, about 4.5 GB, more than the 4 GiB disk.
 """
 
 from __future__ import annotations
@@ -46,9 +51,10 @@ import re
 import shutil
 import sys
 import tempfile
-from typing import Iterator, Mapping, TextIO
+from typing import Iterator, Mapping, TextIO, TypedDict
 
 import sd_lib
+import sd_tmpdisk
 
 #: Where the gate keeps its build caches; unset reads `${XDG_CACHE_HOME:-~/.cache}/sd/gate`.
 CACHE_VARIABLE = "SD_GATE_CACHE_DIR"
@@ -71,9 +77,8 @@ GATE_FOLDER = re.compile(r"sd-local-gate-([0-9]{1,9})-[a-z0-9_]+")
 #: The check's own `TMPDIR`, beside the gate's worktree: the gate's cleanup removes what the check's tests leave (sd:3032).
 # ponytail: one letter, so a socket under it fits macOS's 104-byte path cap (sd:3086); move TMPDIR to /tmp if 24 bytes stop sufficing.
 TEMPORARY = "t"
-#: An sd folder that names its owner's pid: a gate's, a test run's (`tests/__init__.py`), or a review's prior report
-#: (`bin/sd_ship_review.py`, sd:3059); it goes once the pid is gone.
-OWNED = re.compile(r"(?:sd-local-gate|sd-tests|sd-ship-verify)-([0-9]{1,9})-[a-z0-9_]+")
+#: An sd folder that names its owner's pid; it goes once the pid is gone. `sd_tmpdisk` holds the one pattern.
+OWNED = sd_tmpdisk.OWNED
 
 
 def running(pid: int) -> bool:
@@ -87,11 +92,13 @@ def running(pid: int) -> bool:
     return True
 
 
-def reap_temporary(temporary: pathlib.Path) -> int:
+def reap_temporary(temporary: pathlib.Path, *, owners: bool = True) -> int:
     """Remove the user's entries directly in `temporary` that are `OWNED` by a dead pid; how many went.
 
     Age proves nothing: a live process or the operator may still read an old entry (sd:3032 review). A dead gate's
-    folder counts too: its worktree was another repository's, so `worktree_prefix` never saw it.
+    folder counts too: its worktree was another repository's, so `worktree_place` never saw it. `owners=False`
+    skips the owner check, for the RAM disk: it mounts with ownership off, so its owner reads whatever the
+    volume's owner is, not who made the entry (sd:7557).
     """
     try:
         entries = list(os.scandir(temporary))
@@ -106,7 +113,7 @@ def reap_temporary(temporary: pathlib.Path) -> int:
             status = entry.stat(follow_symlinks=False)
         except OSError:
             continue
-        if status.st_uid != os.getuid():
+        if owners and status.st_uid != os.getuid():
             continue
         if entry.is_dir(follow_symlinks=False):
             shutil.rmtree(entry.path, ignore_errors=True)
@@ -117,21 +124,40 @@ def reap_temporary(temporary: pathlib.Path) -> int:
     return removed
 
 
-def worktree_prefix(root: pathlib.Path) -> str:
-    """This gate's temporary folder prefix, after removing `root`'s gate worktrees whose gate process is gone
-    and the temp dir's leftovers (`reap_temporary`)."""
-    temporary = pathlib.Path(tempfile.gettempdir()).resolve()
-    if removed := reap_temporary(temporary):
-        print(f"sd gate: removed {removed} temp entries from {temporary} (sd:3032)", file=sys.stderr)
+class Place(TypedDict):
+    """`tempfile.TemporaryDirectory`'s keywords for a gate's folder."""
+
+    dir: str | None  # None: `tempfile`'s default
+    prefix: str
+
+
+def worktree_place(root: pathlib.Path, head: str) -> Place:
+    """`tempfile`'s `dir` and `prefix` for this gate's temporary folder, after removing `root`'s gate worktrees
+    whose gate process is gone and the temp dirs' leftovers (`reap_temporary`).
+
+    The folder goes on the RAM disk when `sd_tmpdisk` reads it ready, unless `head` may track a `Cargo.toml`;
+    a read of `head` that fails counts as one that does. Such a head, or a disk not ready, never goes on the disk,
+    even from a temp dir that lies on it (`gate_temporary`). Both places are cleaned first, the inherited one too
+    (older gates and runs left their folders there), and the disk whatever its free space (`reap_places`).
+    """
+    inherited = str(pathlib.Path(tempfile.gettempdir()).resolve())
+    listed = sd_lib.git_output(["ls-tree", "-r", "-z", "--name-only", head], root)
+    rust = listed is None or any(pathlib.PurePosixPath(name).name == "Cargo.toml" for name in listed.split("\0") if name)
+    places = [pathlib.Path(place) for place in sd_tmpdisk.reap_places(inherited)]
+    for temporary in places:
+        if removed := reap_temporary(temporary, owners=not sd_tmpdisk.within(temporary)):
+            print(f"sd gate: removed {removed} temp entries from {temporary} (sd:3032)", file=sys.stderr)
+    resolved = {place.resolve() for place in places}
     listing = sd_lib.git_output(["worktree", "list", "--porcelain"], root) or ""
     for line in listing.splitlines():
         tree = pathlib.Path(line.removeprefix("worktree "))
         named = GATE_FOLDER.fullmatch(tree.parent.name)
         if line.startswith("worktree ") and named and tree.name == "tree" \
-                and tree.parent.parent.resolve() == temporary and not running(int(named[1])):
+                and tree.parent.parent.resolve() in resolved and not running(int(named[1])):
             sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
             shutil.rmtree(tree.parent, ignore_errors=True)  # and the check's `TMPDIR` beside it (sd:3032)
-    return f"{GATE_PREFIX}{os.getpid()}-"
+    # Placed after the reap, so the room it freed counts; never on the disk for a Rust head or a disk not ready.
+    return {"dir": sd_tmpdisk.gate_temporary(inherited, rust=rust), "prefix": f"{GATE_PREFIX}{os.getpid()}-"}
 
 
 def check_temporary(parent: str) -> str:
