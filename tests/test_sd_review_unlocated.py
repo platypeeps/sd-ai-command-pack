@@ -42,6 +42,8 @@ BLIND_NOWHERE = sd_review.Completed(0, json.dumps({"findings": [
 
 
 class AnAnswerThatCitesNothingReviewedIsNotAdvice(ReviewRunFixture):
+    reviewing_depth = 1  # fallthrough, one reader per tier
+
     def review_with(self, answers: dict) -> dict:
         result = self.run_review(self.prepare(), FakeRunner({**CHECK, **answers}, default=CLEAN))
         self.assertIn("src.py", result["subject"]["paths"], "the premise: the reader was shown src.py")

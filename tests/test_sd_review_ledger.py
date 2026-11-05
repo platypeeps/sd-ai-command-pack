@@ -113,6 +113,7 @@ class LedgerFixture(ReviewFixture):
 class TheCostRows(LedgerFixture):
     """The cost-row test and the integration test through `review`: an
     at-cap bill in the database, nothing handed in by the test."""
+    reviewing_depth = 1  # one charged url call per review
 
     def test_a_charged_call_leaves_one_run_row_at_the_usage_and_the_receipt_names_it(self) -> None:
         self.seed()
@@ -250,6 +251,7 @@ class TheConcurrentPair(LedgerFixture):
 class TheLifecycle(LedgerFixture):
     """The row's state at each point, read by the fake wire while it holds
     the request."""
+    reviewing_depth = 1  # one charged url call per review
 
     def state_seen_by(self, answer: Any) -> tuple[list[str], Any]:
         seen: list[str] = []
@@ -356,6 +358,7 @@ class TheBoundaries(LedgerFixture):
     each with an uncapped bill (dispatched as before) and a capped one
     (refused naming the fault). No test bypasses the cap or blocks an
     uncapped review."""
+    reviewing_depth = 1  # one charged url call per review
 
     def no_library(self) -> Any:
         absent = sd_review.sd_lib.Imported(None, "sd_db is not installed in this virtualenv", "")

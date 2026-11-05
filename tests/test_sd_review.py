@@ -229,7 +229,23 @@ FIXTURE_CONSENT = "codex@codex, second@second"
 
 
 class ReviewFixture(unittest.TestCase):
+    #: sd:7519 made every reviewing tier ask two readers. A class whose tests
+    #: pin the chain's mechanics with one reader per tier -- fallthrough, the
+    #: ledger, the meter, unlocated answers -- sets this to 1: those paths are
+    #: the same at any depth, and `test_sd_review_parallel.py` runs the shipped two.
+    reviewing_depth: int | None = None
+
+    def one_reader_per_tier(self, depth: int = 1) -> None:
+        """Pin every reviewing tier's depth for this test; `reviewing_depth` does it for a class."""
+        for pinned in (unittest.mock.patch.dict(sd_review.sd_route.TIER_DEPTH, {
+                tier: depth for tier in ("cheap", "standard", "deep")}),
+                unittest.mock.patch.object(sd_review.sd_route, "DEFAULT_DEPTH", depth)):
+            pinned.start()
+            self.addCleanup(pinned.stop)
+
     def setUp(self) -> None:
+        if self.reviewing_depth is not None:
+            self.one_reader_per_tier(self.reviewing_depth)
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.tmp = pathlib.Path(self._tmp.name).resolve()
@@ -1160,6 +1176,7 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["findings"][0]["backend"], "codex")
 
     def test_a_rate_limited_provider_falls_through_without_a_shortfall(self) -> None:
+        self.one_reader_per_tier()
         root = self.make_repo()
         self.prepare(root)
         runner = FakeRunner(
@@ -1179,6 +1196,7 @@ class PipelineTests(ReviewFixture):
         self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 1))
 
     def test_an_unavailable_provider_lets_the_chain_continue(self) -> None:
+        self.one_reader_per_tier()
         root = self.make_repo()
         self.prepare(root)
         runner = FakeRunner(
@@ -1790,6 +1808,8 @@ class TheUrlEntryRunsTests(ReviewFixture):
     nobody has shown to prevent the request.
     """
 
+    reviewing_depth = 1  # the chain falls through one url entry at a time
+
     def home_with(self, url: str = "https://api.example.test/v1") -> pathlib.Path:
         self.homes = getattr(self, "homes", 0) + 1
         home = self.tmp / f"url-home-{self.homes}"
@@ -2009,7 +2029,7 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
 
     def test_planning_scope_asks_a_provider_even_at_tier_skip(self) -> None:
         self.assertEqual(
-            sd_review.review_depth(self.skip, challenge=False, scope="planning"), 1,
+            sd_review.review_depth(self.skip, challenge=False, scope="planning"), 2,
             "scope=planning earned no reviewer at tier skip. Either `review_depth`"
             " stopped honouring FLOOR_SCOPES, or `planning` left it -- and"
             " `sd-plan` gates `planning -> ready` on a lane that now asks nobody.")
@@ -2018,7 +2038,7 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
         """The same seam, reached by the other role that uses it."""
 
         self.assertEqual(
-            sd_review.review_depth(self.skip, challenge=True, scope="worktree"), 1)
+            sd_review.review_depth(self.skip, challenge=True, scope="worktree"), 2)  # both readers (sd:7519)
 
     def test_an_ordinary_scope_at_tier_skip_asks_nobody(self) -> None:
         """The control. Without it the two above pass on a floor that is never
@@ -2139,8 +2159,8 @@ class TimingPlanTests(ReviewFixture):
 
     def test_all_fallbacks_receive_an_allowance_without_changing_depth(self):
         root, args, planned = self.planned()
-        self.assertEqual(planned["requested_reviews"], 1)
-        self.assertEqual(planned["fallback_candidates"], ["p1", "p2", "p3"])
+        self.assertEqual(planned["requested_reviews"], 2)  # sd:7519
+        self.assertEqual(planned["fallback_candidates"], ["p2", "p3"])
         self.assertEqual(planned["timing"]["execution_seconds"], 12600 + sd_review.sd_lib.GATE_SLOT_SECONDS)  # sd:2611
         self.assertEqual([row["name"] for row in planned["timing"]["candidates"]], ["p0", "p1", "p2", "p3"])
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "p0": sd_review.Completed(127, "", "missing", False)},
@@ -2148,11 +2168,11 @@ class TimingPlanTests(ReviewFixture):
         args.explain = False
         args.expected_timing = sd_review.hashlib.sha256(json.dumps(planned["timing"], sort_keys=True).encode()).hexdigest()
         actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
-        self.assertEqual(len(runner.calls), 3)
+        self.assertEqual(len(runner.calls), 4)  # p0 fails, p1 and p2 answer, then the gate
         self.assertEqual(actual["timing"], planned["timing"])
-        self.assertEqual(actual["completed_reviews"], 1)
-        self.assertEqual(actual["requested_reviews"], 1)
-        self.assertEqual(actual["reviewed_by"], ["p1"])
+        self.assertEqual(actual["completed_reviews"], 2)
+        self.assertEqual(actual["requested_reviews"], 2)
+        self.assertEqual(actual["reviewed_by"], ["p1", "p2"])
 
     def test_timeout_change_refuses_before_check_or_provider(self):
         root, args, report = self.planned(count=2, depth="standard", timeout=90)
@@ -2178,7 +2198,7 @@ class TimingPlanTests(ReviewFixture):
         self.assertEqual(runner.calls, [])
 
     def test_only_timing_inputs_are_bound(self):
-        root, args, report = self.planned(count=1, depth="cheap")
+        root, args, report = self.planned(count=2, depth="cheap")
         args.explain = False
         args.expected_timing = sd_review.hashlib.sha256(json.dumps(report["timing"], sort_keys=True).encode()).hexdigest()
         args.challenge = True

@@ -63,6 +63,8 @@ class TheLensReachesTheProviderPromptTests(ReviewRunFixture):
 
 
 class TheChainStillChoosesTests(ReviewRunFixture):
+    reviewing_depth = 1  # fallthrough, one reader per tier
+
     def test_a_failing_first_reviewer_hands_the_lensed_review_to_the_next(self) -> None:
         root = self.prepare()
         runner = FakeRunner({"codex": sd_review.Completed(1, "", "401 Unauthorized")})
@@ -89,6 +91,8 @@ class TheChainStillChoosesTests(ReviewRunFixture):
 
 
 class ALensedMarkdownChangeIsReadTests(ReviewRunFixture):
+    reviewing_depth = 1  # the lens reaches one reader at a time
+
     def brief(self) -> pathlib.Path:
         # No review declaration: the built-in policy, whose `docs_skip`
         # routes a change of only `*.md` to tier `skip` and asks nobody.
@@ -136,6 +140,8 @@ class ALensedReviewSeesTheWholeDocumentTests(ReviewRunFixture):
     so its empty findings would count as clean. With a lens every provider is
     handed the complete document at the reviewed revision instead.
     """
+    reviewing_depth = 1  # the lens reaches one reader at a time
+
 
     def committed_brief(self) -> pathlib.Path:
         root = self.make_repo()
