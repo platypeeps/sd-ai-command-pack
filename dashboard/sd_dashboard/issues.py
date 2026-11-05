@@ -20,6 +20,13 @@ issue source already lists. A closed row carries its `state`; the page shows it 
 sd:6175: Hide is the workflow database's `view` state, the store Contributions' and Designs' Hide write, keyed
 `issue:<row key>` (`view_key`); `with_views` marks each row of both lists `hidden`, and a store that does not read hides
 nothing and says why. Refresh from GitHub starts `SYNC_JOB` through the route Run now posts; `sync_job` is its launchd state.
+
+pack sd:7708: local categories for Jira issues, kept in the same view store and written to no tracker. The operator's
+category names, in order, are the `tags` of one view row, `CATEGORIES_KEY`; a Jira row's category is the first of its own
+view row's tags that names a listed category. `with_views` gives each Jira row of Your issues its `category` (None when it
+has none) and the document its `categories`. `view` sets or clears a row's category; `categories` saves the list against
+the one the page read, and renames a category with every issue under it in one transaction. Removing a name leaves its
+issues' tags as they were, so they read as uncategorized, and Undo, which lists the name again, puts them back.
 """
 
 from __future__ import annotations
@@ -40,6 +47,11 @@ REF_SOURCE = "task-ref"
 VIEW_ROOT = "issue"
 #: The job Refresh from GitHub starts (sd:6175): the nightly `sd shadow sync`, through `/api/jobs/<name>/retry`.
 SYNC_JOB = "shadow-sync-nightly"
+#: The view row whose `tags` are the issue categories (pack sd:7708). A row key starts with its tracker and a colon, so no
+#: issue's key (`view_key`) is this one.
+CATEGORIES_KEY = f"{VIEW_ROOT}:categories"
+#: The group of Jira rows with no listed category; a category may not take its name.
+UNCATEGORIZED = "Uncategorized"
 
 
 def fallback(entry: dict, row: dict) -> str:
@@ -162,14 +174,24 @@ def view_key(key: str) -> str:
 def with_views(document: dict, connection) -> dict:
     """`document` with each Your issues and Intake row's `hidden`, and `store` saying whether the view state was read.
 
-    A read that fails hides nothing: every row shows, and `store.reason` says why Hide is off.
+    A read that fails hides nothing: every row shows, and `store.reason` says why Hide is off. Each Jira row of Your
+    issues also carries its `category` and the document the `categories` (pack sd:7708); a failed read lists none.
     """
     from .documents_screen import views
 
     kept, unread = views(connection)
+    names = listed(kept)
     for row in (*document.get("issues", ()), *document.get("intake", ())):
-        row["hidden"] = bool(kept.get(view_key(row["key"]), {}).get("hidden"))
-    return {**document, "store": {"available": not unread, "reason": unread}}
+        state = kept.get(view_key(row["key"]), {})
+        row["hidden"] = bool(state.get("hidden"))
+        if row.get("tracker") == "Jira":
+            row["category"] = next((tag for tag in state.get("tags", ()) if tag in names), None)
+    return {**document, "categories": names, "store": {"available": not unread, "reason": unread}}
+
+
+def listed(kept: dict) -> list[str]:
+    """The issue categories in the operator's order (pack sd:7708), from the view rows `writes.views` read."""
+    return list(kept.get(CATEGORIES_KEY, {}).get("tags", ()))
 
 
 def sync_job(connection: sqlite3.Connection, backend) -> dict:
@@ -191,25 +213,100 @@ def sync_job(connection: sqlite3.Connection, backend) -> dict:
 
 def view(payload: dict):
     """`POST /api/github/issues/view` (sd:6175): `{"key", "hidden"}`, as `designs.request` and
-    `contribution_screen.view` take; the write as `action_route` returns one. The write reads both lists again, so a key
-    they no longer list is refused as stale and nothing is written."""
+    `contribution_screen.view` take, or `{"key", "category"}` (pack sd:7708), a listed category's name or None to clear
+    it; the write as `action_route` returns one. The write reads both lists again, so a key they no longer list is
+    refused as stale and nothing is written; so is a category the list no longer holds."""
     from datetime import datetime, timezone
 
     from sd_db import workflow
+    from sd_db.database import transaction
 
     from . import today_github
 
-    key, hidden = payload.get("key"), payload.get("hidden")
-    if set(payload) != {"key", "hidden"} or not isinstance(key, str) or not isinstance(hidden, bool):
+    key, hidden, category = payload.get("key"), payload.get("hidden"), payload.get("category", "")
+    if set(payload) == {"key", "category"}:
+        if not isinstance(key, str) or not (category is None or isinstance(category, str) and category):
+            raise ValueError("Send the issue's key and a category's name, or null to clear it.")
+    elif set(payload) != {"key", "hidden"} or not isinstance(key, str) or not isinstance(hidden, bool):
         raise ValueError("Send the issue's key and hidden, true or false.")
     if not hasattr(writes, "set_view"):
         raise ValueError("The command pack has no view store yet (sd:3430): pull it and restart the dashboard.")
 
     def write(connection):
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        listed = with_github(document(connection), today_github.document(connection, now=now))["issues"]
-        if key.lower() not in {str(row["key"]).lower() for row in (*listed, *intake(connection)["intake"])}:
-            raise workflow.StaleItem(f"No issue {key} is listed. Nothing was hidden or shown. Read GitHub again.")
-        return {"key": key, **writes.set_view(connection, view_key(key), hidden=hidden)}
+        listed_rows = with_github(document(connection), today_github.document(connection, now=now))["issues"]
+        if "hidden" in payload:
+            if key.lower() not in {str(row["key"]).lower() for row in (*listed_rows, *intake(connection)["intake"])}:
+                raise workflow.StaleItem(f"No issue {key} is listed. Nothing was hidden or shown. Read GitHub again.")
+            return {"key": key, **writes.set_view(connection, view_key(key), hidden=hidden)}
+        row = next((row for row in listed_rows if str(row["key"]).lower() == key.lower()), None)
+        if row is None:
+            raise workflow.StaleItem(f"No issue {key} is listed. No category was set. Read GitHub again.")
+        if row["tracker"] != "Jira":
+            raise ValueError(f"{key} is a {row['tracker']} issue; only a Jira issue takes a category.")
+        with transaction(connection):
+            if category is not None and category not in listed(writes.views(connection)):
+                raise workflow.StaleItem(f"No category {category} is listed. No category was set. Read GitHub again.")
+            state = writes.set_view(connection, view_key(key), tags=[category] if category else [])
+        return {"key": key, "category": category, **state}
+
+    return write
+
+
+def category_names(names) -> list[str]:
+    """`names` trimmed, as the view store keeps tags; raises `ValueError` naming the first rule one breaks."""
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        raise ValueError("Send the categories as a list of names.")
+    kept = [name.strip() for name in names]
+    folded = [name.casefold() for name in kept]
+    if any(not name or len(name) > writes.VIEW_TAG_LENGTH for name in kept):
+        raise ValueError(f"A category's name is 1 to {writes.VIEW_TAG_LENGTH} characters.")
+    if len(kept) > writes.VIEW_TAGS:
+        raise ValueError(f"At most {writes.VIEW_TAGS} categories: remove one first.")
+    if len(set(folded)) != len(folded):
+        raise ValueError("Each category's name is its own, in any case.")
+    if UNCATEGORIZED.casefold() in folded:
+        raise ValueError(f"{UNCATEGORIZED} is the group of issues with no category; name the category another way.")
+    return kept
+
+
+def categories(payload: dict):
+    """`POST /api/github/issues/categories` (pack sd:7708): `{"categories", "before"}` saves the list, or
+    `{"rename", "to", "before"}` renames one category and every issue under it, in one transaction. `before` is the list
+    the page read; a list that changed since is refused as stale and nothing is written. Answers the list written."""
+    from sd_db import workflow
+    from sd_db.database import transaction
+
+    if set(payload) == {"categories", "before"}:
+        names, rename = category_names(payload["categories"]), None
+    elif set(payload) == {"rename", "to", "before"} and isinstance(payload["rename"], str):
+        names, rename = None, (payload["rename"], category_names([payload["to"]])[0])
+    else:
+        raise ValueError("Send categories and before, or rename, to and before.")
+    before = payload["before"]
+    if not isinstance(before, list):
+        raise ValueError("Send before, the categories the page read.")
+    if not hasattr(writes, "set_view"):
+        raise ValueError("The command pack has no view store yet (sd:3430): pull it and restart the dashboard.")
+
+    def write(connection):
+        with transaction(connection):
+            kept = writes.views(connection)
+            held = listed(kept)
+            if held != before:
+                raise workflow.StaleItem("The categories changed since the page read them. Nothing was saved. Read GitHub again.")
+            moved = 0
+            new = names
+            if rename is not None:
+                old, to = rename
+                if old not in held:
+                    raise workflow.StaleItem(f"No category {old} is listed. Nothing was renamed. Read GitHub again.")
+                new = category_names([to if name == old else name for name in held])
+                for key, state in kept.items():
+                    if key.startswith(f"{VIEW_ROOT}:") and key != CATEGORIES_KEY and old in state["tags"]:
+                        writes.set_view(connection, key, tags=[to if tag == old else tag for tag in state["tags"]])
+                        moved += 1
+            writes.set_view(connection, CATEGORIES_KEY, tags=new)
+        return {"categories": new, "moved": moved}
 
     return write

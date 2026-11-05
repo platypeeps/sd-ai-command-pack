@@ -92,7 +92,7 @@ class TheRail(unittest.TestCase):
 
 class TheGitHubRegistration(Registers, unittest.TestCase):
     page, section, route = "github", "GitHub", "/github"
-    api = ("/api/today/github", "/api/github/issues", "/api/github/dependabot", "/api/github/tracked", "/api/github/issues/view", "/api/today/github/copilot-review", "/api/today/github/merge/preview",
+    api = ("/api/today/github", "/api/github/issues", "/api/github/dependabot", "/api/github/tracked", "/api/github/issues/view", "/api/github/issues/categories", "/api/today/github/copilot-review", "/api/today/github/merge/preview",
            "/api/today/github/merge", "/api/today/github/close/preview", "/api/today/github/close")
 
 
@@ -250,7 +250,7 @@ class TheRoutes(BrowserSession):
         # pack sd:6702: when GitHub was last read, the Pull requests read's collector; a fixture never synced.
         self.assertEqual(found.pop("synced")["state"], "never")
         self.assertEqual(found, {"issues": [], "issues_error": "", "github_error": "", "intake": [], "intake_error": "",
-                                 "store": {"available": True, "reason": ""}, "sync": job})
+                                 "categories": [], "store": {"available": True, "reason": ""}, "sync": job})
 
 
 if __name__ == "__main__":

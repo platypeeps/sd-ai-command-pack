@@ -335,8 +335,10 @@ window.shell = { itemHref: n => `/tasks?item=${n}`, openItem: n => `#${n} opens 
         self.assertIn("sd shadow sync keeps no labels, priority or description", details)
         self.assertEqual((out["selected"], out["panes"]), (["iss:github:example/project#12"], ["tab-details"]))
         self.assertEqual(out["ids"], ["jira issue.open", "jira issue.item", "jira issue.hide", "jira issue.unhide",
-                                      "github issue.open", "github issue.item", "github issue.hide", "github issue.unhide"])
-        self.assertEqual(sorted(set(out["types"])), ["github issue", "jira issue"])
+                                      "github issue.open", "github issue.item", "github issue.hide", "github issue.unhide",
+                                      # pack sd:7708: Set category, then the category list's commands.
+                                      "jira issue.category", "issue categories.add", "issue category.rename", "issue category.remove"])
+        self.assertEqual(sorted(set(out["types"])), ["github issue", "issue categories", "jira issue"])
 
     def test_a_jira_row_says_open_in_jira_and_a_fact_not_stored_says_so(self):
         _, out = self.run_page("window.issues.details('iss:jira:EXAMPLE-8');"
@@ -515,7 +517,8 @@ class TheGitHubPage(ScreenCase):
     GitHub (sd:6175, sd:6701, pack sd:6702).
     The stand-in server keeps the hidden keys a view POST writes and answers each read with them."""
 
-    def run_page(self, body, *, issues_rows=None, intake_rows=None, sync=None, states=("idle",), store=None, synced=None):
+    def run_page(self, body, *, issues_rows=None, intake_rows=None, sync=None, states=("idle",), store=None, synced=None,
+                 categories=()):
         doc = {"issues": issues_rows if issues_rows is not None else [
                    {"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget",
                     "reason": "filed", "url": None, "state": None, "hidden": False},
@@ -525,13 +528,20 @@ class TheGitHubPage(ScreenCase):
                "intake": intake_rows if intake_rows is not None else [
                    {"repo": "anvil", "repo_path": "/home/example/repos/acme/anvil", "ref": "#21", "key": "github:example/project#21",
                     "title": "Docs typo", "author": "octocat", "url": None, "hidden": False}],
-               "intake_error": "", "store": store or {"available": True, "reason": ""}, "sync": sync or JOB, "synced": synced}
-        answer = """(() => { const HID = new Set(), DOC = %s, STATES = %s; let reads = 0;
+               "intake_error": "", "store": store or {"available": True, "reason": ""}, "sync": sync or JOB, "synced": synced,
+               "categories": list(categories)}
+        # pack sd:7708: the stand-in keeps each row's category and the category list as the view store does.
+        answer = """(() => { const HID = new Set(), DOC = %s, STATES = %s, CAT = {}; let reads = 0;
   return (path, body) => {
+    if (path === '/api/github/issues/view' && 'category' in body) { CAT[body.key] = body.category; return [200, { key: body.key, category: body.category }]; }
+    if (path === '/api/github/issues/categories') {
+      DOC.categories = body.rename ? DOC.categories.map(n => n === body.rename ? body.to : n) : body.categories.map(n => n.trim());
+      if (body.rename) DOC.issues.forEach(r => { if ((r.key in CAT ? CAT[r.key] : r.category) === body.rename) CAT[r.key] = body.to; });
+      return [200, { categories: DOC.categories, moved: 0 }]; }
     if (path === '/api/github/issues/view') { if (body.hidden) HID.add(body.key); else HID.delete(body.key); return [200, { key: body.key, hidden: body.hidden }]; }
     if (path.startsWith('/api/jobs/')) return [200, { request: { status: 'accepted', message: 'kickstarted' } }];
     const state = STATES[Math.min(reads++, STATES.length - 1)];
-    const mark = r => ({ ...r, hidden: HID.has(r.key) || r.hidden });
+    const mark = r => ({ ...r, hidden: HID.has(r.key) || r.hidden, ...(r.key in CAT ? { category: CAT[r.key] } : {}) });
     return [200, { ...DOC, issues: DOC.issues.map(mark), intake: DOC.intake.map(mark), sync: DOC.sync.error ? DOC.sync : { ...DOC.sync, state } }];
   }; })()""" % (json.dumps(doc), json.dumps(list(states)))
         script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + COMMANDS_JS
@@ -672,9 +682,204 @@ class TheGitHubPage(ScreenCase):
         # pack sd:7682: Your issues and Issue Intake are on the Issues page, which keeps Refresh from GitHub too.
         for page, view, tally in (("github", "pulls", "github-tally"), ("issues", "issues", "issues-tally"), ("issues", "intake", "intake-tally")):
             html = (V2 / f"{page}.html").read_text(encoding="utf-8")
-            self.assertIn(f'<p class="tally" id="{tally}"></p>\n          <div class="tools"><span id="{view}-sync"></span></div>', html)
+            cats = '<span id="issues-cats"></span>' if view == "issues" else ""
+            self.assertIn(f'<p class="tally" id="{tally}"></p>\n          <div class="tools">{cats}<span id="{view}-sync"></span></div>', html)
             self.assertIn(f'<p class="why" id="{view}-said"></p>', html)
         self.assertIn('id="intake-filters"', (V2 / "issues.html").read_text(encoding="utf-8"))
+
+
+CATEGORY_ROWS = [
+    {"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget", "reason": "filed",
+     "url": None, "state": None, "hidden": False, "category": "Alerts", "updated_at": "2026-11-01T10:00:00Z"},
+    {"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-9", "key": "jira:EXAMPLE-9", "title": "Tune the alarm", "reason": "assigned",
+     "url": None, "state": None, "hidden": False, "category": None},
+    {"repo": "anvil", "tracker": "GitHub", "ref": "#12", "key": "github:example/project#12", "title": "Crash on start",
+     "reason": "assigned", "url": None, "state": "open", "hidden": False}]
+
+
+class TheCategoryGroups(ScreenCase):
+    """pack sd:7708 on the stand-in page: Your issues groups its Jira rows by local category, one group open at a time,
+    Uncategorized last; Set category, the Details select and the list's commands post, each with Undo."""
+
+    run_page = TheGitHubPage.run_page
+
+    def page(self, body, **kwargs):
+        return self.run_page(body, issues_rows=CATEGORY_ROWS, categories=kwargs.pop("categories", ("Alerts", "Ingest")), **kwargs)
+
+    # A press on a group's name, as the page's click listener sees it.
+    PRESS = ("const press = key => (DOC_LISTENERS.click || []).forEach(h => h({ target: { closest: s => s === '[data-cat-open]'"
+             " ? { dataset: { catOpen: key } } : null } }));\n")
+    GROUPS = r'data-cat="([^"]+)" aria-expanded="(\w+)"'
+
+    def test_jira_rows_group_by_category_one_open_at_a_time_and_uncategorized_is_last(self):
+        out = self.page(self.PRESS + "show('issues'); await flush(); R.first = ELS.issues.html;"
+                        " press('none'); await flush(); R.none = ELS.issues.html; press('none'); await flush(); R.shut = ELS.issues.html;")
+        r = out["R"]
+        self.assertEqual(re.findall(self.GROUPS, r["first"]), [("cat:Alerts", "true"), ("cat:Ingest", "false"), ("none", "false")])
+        self.assertLess(r["first"].index("Crash on start"), r["first"].index('data-cat="cat:Alerts"'))
+        self.assertIn("Fix the widget", r["first"])
+        self.assertNotIn("Tune the alarm", r["first"])
+        self.assertEqual(re.findall(self.GROUPS, r["none"]), [("cat:Alerts", "false"), ("cat:Ingest", "false"), ("none", "true")])
+        self.assertIn("Tune the alarm", r["none"])
+        self.assertNotIn("Fix the widget", r["none"])
+        self.assertEqual(re.findall(self.GROUPS, r["shut"]), [("cat:Alerts", "false"), ("cat:Ingest", "false"), ("none", "false")])
+        self.assertNotIn("Tune the alarm", r["shut"])
+        self.assertIn("Crash on start", r["shut"])
+        self.assertIn(">1 issue<", r["first"])
+        self.assertIn(">0 issues<", r["first"])
+
+    def test_set_category_posts_and_the_row_sits_in_its_group_and_undo_takes_it_out(self):
+        out = self.page("show('issues'); await flush(); FIELD_VALUES.category = 'Ingest';"
+                        " act('jira issue.category', 'iss:jira:EXAMPLE-9'); await flush(); R.after = ELS.issues.html; R.toast = lastToast().msg;"
+                        " lastUndo().undo(); await flush(); R.back = ELS.issues.html;"
+                        " R.github = REG.filter(c => c.on === 'github issue').map(c => c.id);")
+        r = out["R"]
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/github/issues/view", {"key": "jira:EXAMPLE-9", "category": "Ingest"}],
+                                                         ["/api/github/issues/view", {"key": "jira:EXAMPLE-9", "category": None}]])
+        self.assertIn(("cat:Ingest", "true"), re.findall(self.GROUPS, r["after"]))
+        self.assertIn("Tune the alarm", r["after"])
+        self.assertIn("Category Ingest · Jira EXAMPLE-9", r["toast"])
+        self.assertIn(("none", "true"), re.findall(self.GROUPS, r["back"]))
+        self.assertIn("Tune the alarm", r["back"])
+        self.assertNotIn("github issue.category", r["github"])
+
+    def test_the_details_select_picks_or_clears_the_category_with_undo(self):
+        change = ("const change = (id, value) => (DOC_LISTENERS.change || []).forEach(h => h({ target: { closest: s => s === '[data-iss-cat]'"
+                  " ? { dataset: { issCat: id }, value } : null } }));\n")
+        out = self.page(change + "show('issues'); await flush(); window.issues.details('iss:jira:EXAMPLE-8'); R.details = ELS.details.html;"
+                        " change('iss:jira:EXAMPLE-8', ''); await flush(); R.toast = lastToast().msg; R.after = ELS.issues.html;"
+                        " lastUndo().undo(); await flush(); R.back = ELS.issues.html;")
+        r = out["R"]
+        self.assertIn('<select class="cap-in" data-iss-cat="iss:jira:EXAMPLE-8" aria-label="Category">', r["details"])
+        self.assertIn('<option value="Alerts" selected>Alerts</option>', r["details"])
+        self.assertIn('<option value="">None (Uncategorized)</option>', r["details"])
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/github/issues/view", {"key": "jira:EXAMPLE-8", "category": None}],
+                                                         ["/api/github/issues/view", {"key": "jira:EXAMPLE-8", "category": "Alerts"}]])
+        self.assertIn("Category cleared · Jira EXAMPLE-8", r["toast"])
+        self.assertIn(("none", "true"), re.findall(self.GROUPS, r["after"]))
+        self.assertIn(("cat:Alerts", "true"), re.findall(self.GROUPS, r["back"]))
+
+    def test_remove_asks_nothing_leaves_its_issues_uncategorized_and_undo_restores_the_list(self):
+        # The open group left, so the first group with a row, Uncategorized, opens.
+        out = self.page("show('issues'); await flush(); act('issue category.remove', 'isscat:Alerts'); await flush();"
+                        " R.after = ELS.issues.html; R.toast = lastToast().msg; R.none = ELS.issues.html;"
+                        " lastUndo().undo(); await flush(); R.back = ELS.issues.html;")
+        r = out["R"]
+        self.assertEqual(out["confirms"], [])
+        self.assertEqual([p[:2] for p in out["posts"]], [
+            ["/api/github/issues/categories", {"categories": ["Ingest"], "before": ["Alerts", "Ingest"]}],
+            ["/api/github/issues/categories", {"categories": ["Alerts", "Ingest"], "before": ["Ingest"]}]])
+        self.assertEqual(re.findall(self.GROUPS, r["after"]), [("cat:Ingest", "false"), ("none", "true")])
+        self.assertIn("Fix the widget", r["none"])
+        self.assertIn("Tune the alarm", r["none"])
+        self.assertIn("Category Alerts removed · its issues are uncategorized", r["toast"])
+        self.assertEqual([g for g, _ in re.findall(self.GROUPS, r["back"])], ["cat:Alerts", "cat:Ingest", "none"])
+
+    def test_new_category_and_rename_post_the_list_the_page_read(self):
+        out = self.page("show('issues'); await flush(); R.button = ELS['issues-cats'].html; FIELD_VALUES.name = 'Pages';"
+                        " act('issue categories.add', 'isscats'); await flush(); R.added = ELS.issues.html; R.addToast = lastToast().msg;"
+                        " FIELD_VALUES.to = 'Paging'; act('issue category.rename', 'isscat:Pages'); await flush(); R.renamed = ELS.issues.html;"
+                        " lastUndo().undo(); await flush(); R.back = ELS.issues.html;")
+        r = out["R"]
+        self.assertIn('data-cmd="issue categories.add" data-obj="isscats"', r["button"])
+        self.assertEqual([p[:2] for p in out["posts"]], [
+            ["/api/github/issues/categories", {"categories": ["Alerts", "Ingest", "Pages"], "before": ["Alerts", "Ingest"]}],
+            ["/api/github/issues/categories", {"rename": "Pages", "to": "Paging", "before": ["Alerts", "Ingest", "Pages"]}],
+            ["/api/github/issues/categories", {"rename": "Paging", "to": "Pages", "before": ["Alerts", "Ingest", "Paging"]}]])
+        self.assertIn("Category Pages added", r["addToast"])
+        self.assertIn('data-cat="cat:Paging"', r["renamed"])
+        self.assertIn('data-cat="cat:Pages"', r["back"])
+
+    def test_an_unread_store_says_why_and_groups_nothing(self):
+        out = self.page("show('issues'); await flush(); R.rows = ELS.issues.html; R.button = ELS['issues-cats'].html;"
+                        " R.off = C.offWhy(cmd('jira issue.category'), C.get('iss:jira:EXAMPLE-8'));",
+                        store={"available": False, "reason": "the view store was not read: locked"})
+        r = out["R"]
+        self.assertIn("Categories were not read: the view store was not read: locked. The Jira issues below are not grouped.", r["rows"])
+        self.assertNotIn('data-cat="', r["rows"])
+        self.assertIn("Fix the widget", r["rows"])
+        self.assertIn("Tune the alarm", r["rows"])
+        self.assertIn("disabled", r["button"])
+        self.assertEqual(r["off"], "Categories are off: the view store was not read: locked")
+
+
+class TheCategoryStore(ScreenCase):
+    """pack sd:7708: a Jira row's category is its view row's tag that names a listed category; the list is one view row."""
+
+    def write(self, request):
+        with stub(return_value=FOUND), stub_intake(return_value=INTAKE):
+            return request(self.connection)
+
+    def read(self):
+        with stub(return_value=FOUND), stub_intake(return_value=INTAKE):
+            return github_issues(self.connection)
+
+    def jira(self):
+        return next(row for row in self.read()["issues"] if row["key"] == "jira:EXAMPLE-8")
+
+    def test_assigning_stores_the_category_and_the_read_carries_it(self):
+        self.write(issues.categories({"categories": ["Alerts", " Ingest "], "before": []}))
+        out = self.write(issues.view({"key": "jira:EXAMPLE-8", "category": "Ingest"}))
+        self.assertEqual((out["category"], out["tags"]), ("Ingest", ["Ingest"]))
+        found = self.read()
+        self.assertEqual(found["categories"], ["Alerts", "Ingest"])
+        self.assertEqual([(row["ref"], row.get("category", "absent")) for row in found["issues"]],
+                         [("EXAMPLE-8", "Ingest"), ("#12", "absent"), ("#3", "absent")])
+        self.assertEqual(writes.views(self.connection)[issues.view_key("jira:EXAMPLE-8")]["tags"], ["Ingest"])
+
+    def test_clearing_leaves_the_row_uncategorized_and_keeps_hidden(self):
+        self.write(issues.categories({"categories": ["Alerts"], "before": []}))
+        self.write(issues.view({"key": "jira:EXAMPLE-8", "hidden": True}))
+        self.write(issues.view({"key": "jira:EXAMPLE-8", "category": "Alerts"}))
+        self.write(issues.view({"key": "jira:EXAMPLE-8", "category": None}))
+        self.assertEqual((self.jira()["category"], self.jira()["hidden"]), (None, True))
+
+    def test_removing_a_category_leaves_its_issues_uncategorized_and_listing_it_again_restores_them(self):
+        self.write(issues.categories({"categories": ["Alerts", "Ingest"], "before": []}))
+        self.write(issues.view({"key": "jira:EXAMPLE-8", "category": "Alerts"}))
+        self.write(issues.categories({"categories": ["Ingest"], "before": ["Alerts", "Ingest"]}))
+        self.assertEqual((self.jira()["category"], self.read()["categories"]), (None, ["Ingest"]))
+        self.write(issues.categories({"categories": ["Alerts", "Ingest"], "before": ["Ingest"]}))
+        self.assertEqual(self.jira()["category"], "Alerts")
+
+    def test_rename_moves_the_category_and_its_issues_in_one_write(self):
+        self.write(issues.categories({"categories": ["Alerts", "Ingest"], "before": []}))
+        self.write(issues.view({"key": "jira:EXAMPLE-8", "category": "Alerts"}))
+        out = self.write(issues.categories({"rename": "Alerts", "to": "Paging", "before": ["Alerts", "Ingest"]}))
+        self.assertEqual(out, {"categories": ["Paging", "Ingest"], "moved": 1})
+        self.assertEqual((self.jira()["category"], self.read()["categories"]), ("Paging", ["Paging", "Ingest"]))
+
+    def test_a_stale_list_an_unlisted_category_or_a_github_row_writes_nothing(self):
+        self.write(issues.categories({"categories": ["Alerts"], "before": []}))
+        github = next(row["key"] for row in self.read()["issues"] if row["tracker"] == "GitHub")
+        before = writes.views(self.connection)
+        for request, refused in ((issues.categories({"categories": ["Ingest"], "before": []}), workflow.StaleItem),
+                                 (issues.categories({"rename": "Gone", "to": "X", "before": ["Alerts"]}), workflow.StaleItem),
+                                 (issues.view({"key": "jira:EXAMPLE-8", "category": "Ingest"}), workflow.StaleItem),
+                                 (issues.view({"key": "jira:EXAMPLE-404", "category": "Alerts"}), workflow.StaleItem),
+                                 (issues.view({"key": github, "category": "Alerts"}), ValueError)):
+            with self.subTest(refused=refused), self.assertRaises(refused):
+                self.write(request)
+        self.assertEqual(writes.views(self.connection), before)
+        for names in ([""], ["a", "A"], ["uncategorized"], ["x" * 65], [f"c{n}" for n in range(17)], "Alerts"):
+            with self.subTest(names=names), self.assertRaises(ValueError):
+                issues.categories({"categories": names, "before": []})
+        for payload in ({"key": "jira:EXAMPLE-8", "category": ""}, {"key": "jira:EXAMPLE-8", "category": 3},
+                        {"categories": [], "before": "x"}, {"rename": "Alerts", "to": "", "before": []}):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                (issues.categories if "key" not in payload else issues.view)(payload)
+
+    def test_an_unread_store_lists_no_category_and_says_why(self):
+        self.write(issues.categories({"categories": ["Alerts"], "before": []}))
+        self.write(issues.view({"key": "jira:EXAMPLE-8", "category": "Alerts"}))
+        with mock.patch.object(writes, "views", side_effect=sqlite3.OperationalError("database is locked")):
+            found = self.read()
+        self.assertEqual((found["categories"], self.jira_of(found)["category"]), ([], None))
+        self.assertEqual(found["store"], {"available": False, "reason": "the view store was not read: database is locked"})
+
+    @staticmethod
+    def jira_of(found):
+        return next(row for row in found["issues"] if row["key"] == "jira:EXAMPLE-8")
 
 
 class TheViewRoute(BrowserSession):
@@ -704,3 +909,16 @@ class TheViewRoute(BrowserSession):
             self.assertEqual([row["hidden"] for row in read()["intake"]], [True, False])
             self.assertEqual(self.post("/api/github/issues/view", {"key": "jira:EXAMPLE-8", "hidden": False})[0], 200)
             self.assertEqual([row["hidden"] for row in read()["issues"]], [False, False, False])
+
+    def test_the_category_routes_write_the_list_and_a_rows_category(self):
+        job = {"name": "shadow-sync-nightly", "error": "not installed here"}
+        with stub(return_value=FOUND), stub_intake(return_value=INTAKE), mock.patch.object(issues, "sync_job", return_value=job):
+            status, _, out = self.post("/api/github/issues/categories", {"categories": ["Alerts"], "before": []})
+            self.assertEqual((status, out), (200, {"categories": ["Alerts"], "moved": 0}))
+            status, _, refused = self.post("/api/github/issues/categories", {"categories": [], "before": []})
+            self.assertEqual((status, refused.get("reload")), (409, True))
+            self.assertEqual(self.post("/api/github/issues/categories", {"categories": ["uncategorized"], "before": ["Alerts"]})[0], 400)
+            status, _, out = self.post("/api/github/issues/view", {"key": "jira:EXAMPLE-8", "category": "Alerts"})
+            self.assertEqual((status, out["category"]), (200, "Alerts"))
+            read = json.loads(self.request("/api/github/issues", headers={"Cookie": self.cookie})[2])
+            self.assertEqual((read["categories"], read["issues"][0]["category"]), (["Alerts"], "Alerts"))
