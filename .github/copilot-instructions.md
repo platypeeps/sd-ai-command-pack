@@ -1,6 +1,6 @@
 # Repository Copilot Instructions
 
-This repository is the sd-ai-command-pack source. Every file here is authored:
+This repository is the sd-workflow source. Every file here is authored:
 there are no generated mirrors and no vendored payload. `skills/sd-*/SKILL.md` is
 the payload and `bin/` is the tooling; `bin/sd_install.py --user` renders the former
 onto a machine at install time. Review each file once.

@@ -4,7 +4,7 @@ On 2026-09-26 a session ran `sd-ship` through the pack checkout's absolute
 path. The operator's permission rule `Bash(sd-ship:*)` matches the bare name
 only, so every such call prompted. A session copies the form it reads, so the
 guard is on the text it reads: no file in this repository may spell a command
-as `<somewhere>/sd-ai-command-pack/bin/<command>`.
+as `<somewhere>/sd-workflow/bin/<command>` (or the old `sd-ai-command-pack`).
 
 The files are enumerated from git, tracked and untracked alike, so a new page
 is covered the day it is written. These places are exempt, each for a reason a
@@ -28,7 +28,9 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 #: A pack command named by the checkout's path rather than by its PATH name.
-ABSOLUTE_INVOCATION = re.compile(r"sd-ai-command-pack/bin/[A-Za-z0-9_.-]+")
+#: Both checkout names: the folder moved to `sd-workflow` (sd:6027) and the old
+#: path stays a symlink for a while, so either spelling can still be copied.
+ABSOLUTE_INVOCATION = re.compile(r"sd-(?:ai-command-pack|workflow)/bin/[A-Za-z0-9_.-]+")
 
 #: Path prefixes the guard does not read; the module docstring gives each reason.
 EXEMPT = ("tests/", "bin/sd_install.py", "CHANGELOG.md", "docs/work/archive/")
@@ -63,7 +65,11 @@ class PackCommandsByName(unittest.TestCase):
     def test_no_page_calls_a_pack_command_by_the_checkouts_path(self) -> None:
         hits = absolute_invocations(REPO_ROOT)
         self.assertEqual(hits, [], "call these by their PATH name, as `sd-ship` and not "
-                         "`.../sd-ai-command-pack/bin/sd-ship`; see tests/test_pack_bin_by_name.py")
+                         "`.../sd-workflow/bin/sd-ship`; see tests/test_pack_bin_by_name.py")
+
+    def test_the_renamed_checkout_path_is_caught_too(self) -> None:
+        line = "Run ~/repos/platypeeps/sd-workflow/bin/sd-ship merge --item 1"
+        self.assertEqual(ABSOLUTE_INVOCATION.findall(line), ["sd-workflow/bin/sd-ship"])
 
     def test_the_guard_reads_new_pages_and_honours_only_its_exemptions(self) -> None:
         planted = "Run /Users/x/repos/platypeeps/sd-ai-command-pack/bin/sd-ship merge --item 1\n"

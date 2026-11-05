@@ -798,7 +798,7 @@ R.on = r.when(C.get('cmd:{self.ids['stopped']}')); R.primary = r.primary(C.get('
         """The seeded document plus merges in two more repositories, so the repo list has something to filter."""
         doc = json.loads(json.dumps(self.doc))
         merge = next(e for e in doc["events"] if e["k"] == "merge")
-        for n, repo in enumerate(("ui-design", "sd-ai-command-pack", "ui-design")):
+        for n, repo in enumerate(("ui-design", "sd-workflow", "ui-design")):
             doc["events"].append(dict(merge, id=f"merge:90{n}", repo=repo, what=f"Slice in {repo}"))
         return doc
 
@@ -837,16 +837,16 @@ ELS['repo-q'].value = 'sd-'; ELS['repo-q'].listeners.input[0]({});
         R = out["R"]
         self.assertEqual((R["closed"], R["open"], R["after"]), (True, False, True))
         self.assertIn('aria-expanded="true"', R["bar"])
-        self.assertEqual(re.findall(r'data-repo="([\w-]+)"', R["all"]), ["system", "ui-design", "sd-ai-command-pack"],
+        self.assertEqual(re.findall(r'data-repo="([\w-]+)"', R["all"]), ["system", "ui-design", "sd-workflow"],
                          "every repo, most events first, with no 'more' cut")
         self.assertEqual(re.findall(r'data-repo="([\w-]+)"', R["typed"]), ["ui-design"], "typing filters the list")
         self.assertRegex(R["picked"], r'data-repo="ui-design" aria-selected="true"[^>]*><span class="ck" aria-hidden="true">✓</span>')
         self.assertIn('id="repo-btn" aria-haspopup="listbox" aria-expanded="true" aria-controls="repo-pop">Repo <span class="n">· 1</span>', R["one"])
-        self.assertEqual(out["repos"][-2:], ["ui-design", "ui-design,sd-ai-command-pack"], "Enter picks the active option")
+        self.assertEqual(out["repos"][-2:], ["ui-design", "ui-design,sd-workflow"], "Enter picks the active option")
         self.assertIn('<span class="n">· 2</span>', R["two"])
         self.assertEqual(R["stopped"], 2, "Enter and Esc stop at the popover, so the shell does not clear the filter")
         self.assertIn('aria-expanded="false"', R["shut"])
-        for repo in ("ui-design", "sd-ai-command-pack"):
+        for repo in ("ui-design", "sd-workflow"):
             self.assertIn(f'class="tok" data-f="repo" data-v="{repo}" aria-label="Remove filter: {repo}"', R["shut"])
         self.assertIn("Slice in ui-design", R["rows"])
         self.assertNotIn("Port the page<small>", R["rows"])
