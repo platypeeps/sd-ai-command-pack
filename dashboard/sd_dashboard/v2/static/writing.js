@@ -184,13 +184,26 @@ addEventListener('DOMContentLoaded', () => {
     const why = C.offWhy(CMDS.find(c => c.id === id), { id: String(p.id) }), say = why ? `${label}: ${why}` : label;
     return html`<button class="icon-btn" type="button" data-cmd="${id}" data-obj="${p.id}" aria-label="${say}" title="${say}"${why ? html` disabled` : ''}>${ICON(icon)}</button>`;
   };
+  // pack sd:7243: each file's Drive copy, from Review on, in the account its realm picks. A link once a drain delivered
+  // one; off with the reason until then: queued, not mirrored at this stage, missing, or unknown.
+  function driveIcon(p, file, n) {
+    const m = p.mirror || {}, c = (m.copies?.[file] || [])[0];
+    if (c?.url) {
+      const say = `${n}: open the Drive copy${c.state === 'queued' ? '; an update is queued' : ''}`;
+      return html`<a class="icon-btn" href="${c.url}" target="_blank" rel="noopener" data-drive="${file}" aria-label="${say}" title="${say}">${ICON('arrow-up-right')}</a>`;
+    }
+    const why = m.unread ? `unknown: ${m.unread}` : c ? 'queued, not yet drained' : !p.files[file] ? 'missing'
+      : m.folder ? `not drained yet; it goes to ${m.folder}` : 'none; a piece mirrors from Review on';
+    const say = `${n}: Drive copy ${why}`;
+    return html`<button class="icon-btn" type="button" data-drive="${file}" aria-label="${say}" title="${say}" disabled>${ICON('arrow-up-right')}</button>`;
+  }
   function gateActs(p, k, n) {
-    if (k === 'D') return html`<button class="icon-btn" type="button" data-gate-again="" aria-label="Draft: read the pieces again" title="Draft: read the pieces again">${ICON('rotate-ccw')}</button>${cmdIcon('piece.draft', p, 'eye', 'Draft: Show draft')}`;
+    if (k === 'D') return html`<button class="icon-btn" type="button" data-gate-again="" aria-label="Draft: read the pieces again" title="Draft: read the pieces again">${ICON('rotate-ccw')}</button>${cmdIcon('piece.draft', p, 'eye', 'Draft: Show draft')}${driveIcon(p, 'index.md', n)}`;
     const line = { R: `claude "/sd-research piece=${p.piece}"`, F: `claude "/sd-fact-check input=${p.folder}/${p.piece}/index.md"` }[k];
     const again = line ? html`<button class="icon-btn" type="button" data-copy="${line}" aria-label="${n}: no route runs it; copy the line to run in ${p.repo}" title="Copy, to run in ${p.repo}: ${line}">${ICON('copy')}</button>`
       : cmdIcon('piece.review', p, 'rotate-ccw', 'Adversarial: Refresh review');
     const [tab, file] = GATE[k], say = p.files[file] ? `${n}: view ${file}` : `${n}: missing`;
-    return html`${again}<button class="icon-btn" type="button" data-gate-view="${tab}" aria-label="${say}" title="${say}"${p.files[file] ? '' : html` disabled`}>${ICON('eye')}</button>`;
+    return html`${again}<button class="icon-btn" type="button" data-gate-view="${tab}" aria-label="${say}" title="${say}"${p.files[file] ? '' : html` disabled`}>${ICON('eye')}</button>${driveIcon(p, file, n)}`;
   }
 
   // pack sd:6700: the first open grill question, with a button per option or a box for words.

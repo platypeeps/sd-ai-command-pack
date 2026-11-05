@@ -267,6 +267,52 @@ def piece_files(row) -> dict[str, dict | None]:
     return found
 
 
+#: The files a piece mirrors to Drive (pack sd:7243), by the stem its request is named with: the draft, then each report.
+MIRRORED = {"draft": "index.md", **REPORTS}
+#: The longest name a piece document takes, in bytes. Its queue file is `<repo key>.<name>.<destination>.json`, and a
+#: file name holds 255 bytes, but a slug may run to 240 (`_key`): a longer name keeps its head and a digest of the
+#: whole, so the pack's queue and the dashboard's lookup name one file (pack sd:7243 review).
+OUT_BYTES = 160
+
+
+def piece_out(piece: str, stem: str) -> str:
+    """A piece file's document name, `<year>-<slug>-<stem>`, bounded to OUT_BYTES."""
+    out = f"{piece.replace('/', '-')}-{stem}"
+    if len(out.encode()) <= OUT_BYTES:
+        return out
+    digest = hashlib.sha256(out.encode()).hexdigest()[:16]
+    return f"{out.encode()[:OUT_BYTES - len(digest) - len(stem) - 2].decode(errors='ignore')}-{digest}-{stem}"
+
+
+def mirror_texts(row) -> tuple[dict[str, tuple[str, str]], list[str]]:
+    """Each present piece file's `(name, text)` by `MIRRORED` stem, from the registered checkout, and what was not read.
+
+    Never a linked worktree's (pack sd:7243): a mirror is the main checkout's copy, as a render's is. An absent file is
+    left out; one outside the repository or one that cannot be read is named, never read as absent. A missing index.md
+    raises, as `piece_files` does.
+    """
+    token = _CHECKOUT.set(None)
+    try:
+        index = _path(row["repo"], row["piece"], row["path"])
+        root = _disk(row["repo"])
+    finally:
+        _CHECKOUT.reset(token)
+    texts: dict[str, tuple[str, str]] = {}
+    problems: list[str] = []
+    for stem, name in MIRRORED.items():
+        candidate = index.with_name(name)
+        try:
+            if not candidate.resolve(strict=True).is_relative_to(root):
+                problems.append(f"{name} is outside the registered repository")
+                continue
+            texts[stem] = (name, candidate.read_text(encoding="utf-8", errors="replace"))
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            problems.append(f"{name} not read: {error.strerror or error}")
+    return texts, problems
+
+
 def read_report(connection: sqlite3.Connection, item: int, gate: str, limit: int) -> str | None:
     """Up to `limit` + 1 characters of piece `item`'s report for `gate`, a REPORTS key, so a caller can tell a cut; None
     for one absent or outside the repository. A non-piece raises WorkflowError; any other read failure raises OSError:
