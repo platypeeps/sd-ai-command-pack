@@ -2274,6 +2274,23 @@ class TheResearchFilter(PageScript):
         self.assertEqual(got["reads"], 0)
         self.assertGreater(len(rows), 1)
 
+    def test_read_again_reads_the_research_checkouts_again_while_the_filter_is_on(self):
+        """Lead review of 960414d82: a failed read stayed cached, so the filter stayed unusable until a reload."""
+        checkout = str(Path(self.tmp.name).resolve() / "checkout")
+        good = {"title": "Research", "paths": [checkout], "rows": [], "sections": []}
+        answer = ("(path) => path === '/api/management/research' ? (OUT.research = (OUT.research || 0) + 1,"
+                  " OUT.research === 1 ? [503, {error: 'Research could not be observed: budget'}] : [200, GOOD]) : [200, {}]")
+        body = ("await flush(); R.first = ELS['view-repos'].html; window.PAGE_AGAIN.run(); await flush(); await flush();"
+                " R.html = ELS['view-repos'].html; R.reads = OUT.research || 0;")
+        got = self.run_page(body, answer=answer, search="?research=yes", extra=f"var GOOD = {json.dumps(good)};\n")["R"]
+        self.assertIn("The research checkouts were not read", got["first"])
+        self.assertEqual(got["reads"], 2)
+        self.assertEqual(re.findall(r'data-repo="([^"]+)"', got["html"]), [checkout])
+        self.assertIn("<h3>Research documents</h3>", got["html"])
+        got = self.run_page("await flush(); window.PAGE_AGAIN.run(); await flush(); R.reads = OUT.research || 0;",
+                            answer=self.ANSWER, extra=f"var RESEARCH_ANSWER = {json.dumps([200, good])};\n")["R"]
+        self.assertEqual(got["reads"], 0)
+
     def test_the_route_answers_the_research_tile(self):
         page = next(entry for entry in v2.registry.PAGES if entry.section == "Management")
         route = next(api for api in page.api if api.path == "/api/management/research")

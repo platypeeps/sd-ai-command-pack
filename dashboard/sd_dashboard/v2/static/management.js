@@ -238,7 +238,8 @@ function tokens() {
 const RS = { sort: 'name', dir: 1, page: 1, size: 25, managed: null, merge: null, research: null, cols: 'git' };
 // Research (pack sd:7527): Operations > Resources > Research as a Repos filter. yes keeps the sd-research-kit checkouts
 // and draws their documents below the table, no keeps the rest; /api/management/research (sd_tile.py research) is read
-// the first time the filter is set. Until it answers, or when it fails, no row is said to be one or not.
+// the first time the filter is set, and again on Read again. Until it answers, or when it fails, no row is said to be
+// one or not.
 let RESEARCH = null;
 const researchPaths = () => RESEARCH?.paths ? new Set(RESEARCH.paths.map(tilde)) : null;
 const readResearch = () => { RESEARCH = { reading: true };
@@ -1209,8 +1210,13 @@ window.PAGE_COMMANDS = [
 // reread after a write keeps the rows and says the write landed.
 let reading = null, FAILED = '';
 const load = () => reading.load();
-// Read again (sd:5638): the shell's head button reads the management document again.
-window.PAGE_AGAIN = { title: 'Read the management document again', run: () => view === 'machine' ? readMachine() : load() };
+// Read again (sd:5638): the shell's head button reads the management document again, and the Research reading while
+// its filter is on: a failed read is kept until then (lead review of 960414d82).
+window.PAGE_AGAIN = { title: 'Read the management document again', run: () => {
+  if (view === 'machine') return readMachine();
+  if (RS.research) RESEARCH = null;
+  return load();
+} };
 const reread = () => reading.reread();
 function adopt(doc) {
   absorb(doc);
