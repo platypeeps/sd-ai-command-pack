@@ -419,20 +419,20 @@ class TheFilterPick(unittest.TestCase):
     it. And Enter on a focused summary opened the selected row, not the menu, on every page with a selected row."""
 
     def test_a_multi_pick_keeps_its_size_whatever_is_picked(self):
-        R = run_js("""const opts = [['system', 'system'], ['sd-ai-command-pack', 'sd-ai-command-pack'], ['hoa', 'hoa']];
+        R = run_js("""const opts = [['system', 'system'], ['sd-workflow', 'sd-workflow'], ['hoa', 'hoa']];
 R.none = String(list.pick('repo', 'Repo', opts, new Set(), { multi: true }));
-R.one = String(list.pick('repo', 'Repo', opts, new Set(['sd-ai-command-pack']), { multi: true }));
+R.one = String(list.pick('repo', 'Repo', opts, new Set(['sd-workflow']), { multi: true }));
 R.two = String(list.pick('repo', 'Repo', opts, new Set(['system', 'hoa']), { multi: true }));""")
         summary = {k: re.search(r"<summary[^>]*>(.*?)</summary>", v, re.S).group(1) for k, v in R.items()}
         shown = {k: re.search(r'<span id="f-repo-v">([^<]*)</span>', s).group(1) for k, s in summary.items()}
-        self.assertEqual(shown, {"none": "All", "one": "sd-ai-command-pack", "two": "2 picked"})
+        self.assertEqual(shown, {"none": "All", "one": "sd-workflow", "two": "2 picked"})
         # Beside the shown label, every summary holds the same labels out of sight: each one it can show, as a select's
         # options size it, so the pill is as wide as its widest label whatever is picked.
         rest = {k: s.replace(f'<span id="f-repo-v">{shown[k]}</span>', "") for k, s in summary.items()}
         self.assertEqual(rest["none"], rest["one"])
         self.assertEqual(rest["none"], rest["two"])
         self.assertEqual(rest["none"], '<span class="fpick-size" aria-hidden="true"><span>All</span><span>3 picked</span>'
-                                       '<span>system</span><span>sd-ai-command-pack</span><span>hoa</span></span>')
+                                       '<span>system</span><span>sd-workflow</span><span>hoa</span></span>')
         # They share the shown label's one grid cell and take no space or paint of their own.
         self.assertIn(".fpick > summary { display: grid; }", SHELL_CSS)
         self.assertIn(".fpick > summary > span, .fpick-size > span { grid-area: 1 / 1; overflow: hidden; text-overflow: ellipsis; }", SHELL_CSS)

@@ -629,7 +629,7 @@ the ack store, the database write path — were deleted rather than ported. What
 could not be ported is what stayed: these collectors read a vault and a machine
 that only exist here, so they remain system-owned.
 
-The port went to the framework dashboard in `sd-ai-command-pack` for the week
+The port went to the framework dashboard in `sd-workflow` for the week
 that followed, and **came back**: the workflow dashboard at the top of this file
 serves `127.0.0.1:8767` today, from this directory, and `dashboard.sh` says so
 in its own help. So "the dashboard moved to the pack" describes one week of

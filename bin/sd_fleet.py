@@ -96,7 +96,10 @@ EXIT_REFUSED = 3
 DEFAULT_OWNERS = ("platypeeps",)
 #: A GitHub login: letters, digits and single inner hyphens.
 LOGIN = re.compile(r"[A-Za-z0-9](?:-?[A-Za-z0-9])*")
-PACK_SLUG = sd_setup_github.ACTION_REPOSITORY
+#: The pack's own remote. `ACTION_REPOSITORY` is the slug consumer workflows were
+#: written with and still use (GitHub redirects the old name); the repository is
+#: `platypeeps/sd-workflow` since sd:6027, so a remote reads as the pack under either.
+PACK_SLUGS = (sd_setup_github.ACTION_REPOSITORY, "platypeeps/sd-workflow")
 
 ROUTE_PATH = str(sd_setup_github.WORKFLOW_RELATIVE_PATH)
 DEPENDABOT_PATH = str(sd_setup_guard.DEPENDABOT_RELATIVE_PATH)
@@ -184,7 +187,7 @@ def check_workflow_text() -> str:
     """
 
     return f"""\
-# Laid by `sd fleet stamp` (sd-ai-command-pack) in a repository that had no
+# Laid by `sd fleet stamp` (sd-workflow) in a repository that had no
 # pull_request workflow. `sd-ship merge` under a declared gap requires a
 # successful pull_request run of every workflow at the head, and refuses a head
 # nothing validated; this is the run.
@@ -698,7 +701,7 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
     slug = owner_slug(remote)
     plan = Plan(root=str(root), slug=slug or (remote or ""), base=tree.commit or f"worktree {tree.root}")
     owned = slug.split("/", 1)[0] in owners if slug else False
-    self_install = slug == PACK_SLUG
+    self_install = slug in PACK_SLUGS
 
     def propose(path: str, after: str, where: str = "tracked", before: str | None = None) -> None:
         current = tree.text_at(path) if where == "tracked" else before

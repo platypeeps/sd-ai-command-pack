@@ -49,6 +49,9 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_REFUSED = 3
 
+# The old slug on purpose (sd:6027): consumer workflows and Dependabot guards were written with it,
+# GitHub redirects it, and `sd_setup_guard.ACTIONS_PREFIX` must match what they hold. Moving it is a
+# fleet migration of its own, not a reference rename.
 ACTION_REPOSITORY = "platypeeps/sd-ai-command-pack"
 ACTION_SUBPATH = "actions/review-route"
 # Pinned by digest with the tag beside it, because that is what this

@@ -3031,9 +3031,10 @@ BACKTICKED_PATH = re.compile(r"`(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|py|json|
 #: qualified and the scan passed it -- verified against all three before this
 #: was tightened. A guard with a false negative is worse than no guard, because
 #: the class then looks clean. The boundary still matches what the prose
-#: actually says: `pack`, `pack's`, and the `pack` in `sd-ai-command-pack`,
-#: whose preceding `-` is a non-word character.
-QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
+#: actually says: `pack`, `pack's`, the `pack` in `sd-ai-command-pack`
+#: (whose preceding `-` is a non-word character), and `sd-workflow`, the
+#: repository's name since sd:6027, which has no `pack` in it.
+QUALIFIER = re.compile(r"\bpack\b|\bsd-workflow\b", re.IGNORECASE)
 
 #: A sentence-end candidate: a terminator before whitespace or the end of the
 #: text. A dot inside a backticked path is followed by a letter, so it ends
@@ -3044,9 +3045,9 @@ QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
 #:
 #: The qualifier is read in the citation's own sentence, on *both* sides of
 #: the citation, which the first version did not. English puts the
-#: qualification either way round -- "the cap is in the sd-ai-command-pack
+#: qualification either way round -- "the cap is in the sd-workflow
 #: checkout's `<path>`" and "`<path>` ... that file lives only in the
-#: sd-ai-command-pack checkout" are the same statement -- and a guard that
+#: sd-workflow checkout" are the same statement -- and a guard that
 #: accepts one word order and not the other enforces a house style instead of
 #: the invariant. Both forms are live in `skills/` today.
 #:
@@ -3080,7 +3081,7 @@ def sentence_ends(flat: str) -> list[int]:
 
 #: The one way the next sentence may carry the qualifier: by opening on the
 #: file just cited. "`<path>` gives the cap. That file lives only in the
-#: sd-ai-command-pack checkout" is one claim in two sentences, and
+#: sd-workflow checkout" is one claim in two sentences, and
 #: `skills/sd-plan` writes it that way.
 BACK_REFERENCE = re.compile(r"\s*(?:(?:that|this|the)\s+(?:rule\s+)?file|it)\b", re.IGNORECASE)
 
@@ -3266,7 +3267,7 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
 
         root = self.fixture()
         for name, prose in (
-            ("sd-alpha", "its cap is in the sd-ai-command-pack checkout's"),
+            ("sd-alpha", "its cap is in the sd-workflow checkout's"),
             ("sd-beta", "its cap is in"),
             ("sd-gamma", "read the caps in the pack's"),
         ):
@@ -3301,7 +3302,7 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         """The word order is prose, not the invariant.
 
         "the pack's `<path>`" and "`<path>` ... that file lives only in the
-        sd-ai-command-pack checkout" say the same thing, and both are live in
+        sd-workflow checkout" say the same thing, and both are live in
         `skills/` today. A guard that reads only backwards passes the first
         and fails the second, which makes the guard a style rule. The third
         case is the one that must still fail: a mention in a later sentence
@@ -3315,7 +3316,7 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
 
         document.write_text(
             "the cap is on that row in\n`.claude/rules/caps.md`.\nThat file lives only in"
-            " the sd-ai-command-pack checkout.\n", encoding="utf-8")
+            " the sd-workflow checkout.\n", encoding="utf-8")
         self.assertEqual(unqualified_rule_paths(root), [])
 
         document.write_text(
@@ -3355,11 +3356,11 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
 
         for real in (
             "the cap is in\n`.claude/rules/caps.md`. That file lives only in the"
-            " sd-ai-command-pack checkout.\n",
+            " sd-workflow checkout.\n",
             "the cap is in\n`.claude/rules/caps.md`.\nIt ships only with the pack.\n",
             "the cap is in the pack's\n`.claude/rules/caps.md`, which no other checkout has.\n",
             # An abbreviation's dot is not a sentence end (review round 1).
-            "Read the sd-ai-command-pack checkout's rules (e.g.\n`.claude/rules/caps.md`).\n",
+            "Read the sd-workflow checkout's rules (e.g.\n`.claude/rules/caps.md`).\n",
             "Read the rules (e.g. `.claude/rules/caps.md`, i.e. the caps) in the pack.\n",
             "From the pack, read the caps, notes, etc. in `.claude/rules/caps.md`.\n",
             # A wrap inside the back-reference is still one (review round 2).
@@ -3401,7 +3402,7 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
                 self.assertEqual(len(unqualified_rule_paths(root)), 1)
 
         for real in (
-            "the cap is in the sd-ai-command-pack checkout's",
+            "the cap is in the sd-workflow checkout's",
             "the caps live in the pack's",
             "read it in the pack at",
         ):

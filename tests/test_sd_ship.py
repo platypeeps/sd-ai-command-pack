@@ -7777,6 +7777,11 @@ class NeededByRepositories(unittest.TestCase):
     def test_the_writing_repository_warns_about_a_missing_trailer(self) -> None:
         self.assertEqual(self.warnings("sd-writing"), ["commit abc1234 has no Needed-by trailer; delivery continues"])
 
+    def test_the_renamed_pack_checkout_warns_too(self) -> None:
+        for folder in ("sd-workflow", "sd-ai-command-pack"):
+            with self.subTest(folder=folder):
+                self.assertEqual(self.warnings(folder), ["commit abc1234 has no Needed-by trailer; delivery continues"])
+
     def test_an_unrelated_repository_does_not(self) -> None:
         self.assertEqual(self.warnings("elsewhere"), [])
 
