@@ -3900,9 +3900,17 @@ class ThreadGroups:
             self._holders.clear()
 
     def holding_threads(self) -> list[threading.Thread]:
-        """The threads that led a group since the last `reopen_groups`, still running."""
+        """The other threads that led a group since the last `reopen_groups`, still running.
+
+        The caller is left out: `sd-review --verify-report` reads a prior
+        finding's source through the same runner in the main thread, and
+        joining it raised "cannot join current thread" over the reader's
+        own error (sd:7569)."""
+        import threading  # noqa: PLC0415 - only the group helpers need it
+
+        me = threading.current_thread()
         with self._lock:
-            return [thread for thread in self._holders if thread.is_alive()]
+            return [thread for thread in self._holders if thread.is_alive() and thread is not me]
 
     def end_groups(self) -> None:
         """SIGTERM each live group, then SIGKILL one still registered after `GROUP_CLEANUP_SECONDS`.
