@@ -754,6 +754,22 @@ R.all = ELS['view-board'].html; press('Work'); R.work = ELS['view-board'].html; 
         self.assertIn("Highest 1 of 50 Work ideas.", col(r["work"]))
         self.assertIn("An idea with no source", col(r["off"]))
 
+    def test_a_pressed_no_area_tile_that_vanishes_on_a_read_again_clears(self):
+        """pack sd:7695: No area pressed, then a read again in which every idea has an area: the tile is gone, so the
+        filter clears and the column shows the highest ideas again, not an empty column no tile can clear."""
+        out = self.run_page("""const press = v => ELS['view-board'].listeners.click.forEach(f => f({ target: { closest: s =>
+  s === '[data-f="area"]' ? { dataset: { f: 'area', v } } : null } }));
+press('none'); R.none = ELS['view-board'].html;
+DOC.ideas.areas = { Personal: 157, Work: 50 }; window.PAGE_AGAIN.run(); await flush(); R.again = ELS['view-board'].html;""")
+        def col(board):
+            return re.search(r'<div class="col vault".*?</div></div></div>', board, re.S).group(0)
+        r = out["R"]
+        self.assertIn('data-v="none" aria-pressed="true"', col(r["none"]))
+        self.assertEqual(re.findall(r'data-f="area" data-v="([^"]*)" aria-pressed="(\w+)"', col(r["again"])),
+                         [("Personal", "false"), ("Work", "false"), ("RWBP", "false")])
+        self.assertIn("Gates are cheaper than rework", col(r["again"]))
+        self.assertIn("Highest 2 of 207 inbox ideas.", col(r["again"]))
+
     def test_parked_shows_the_parked_pieces_alone_and_an_older_all_link_shows_open(self):
         def board(search):
             return re.findall(r'<article class="card[^"]*"[^>]*data-id="(\d+)"', self.run_page("", search=search)["html"]["view-board"])

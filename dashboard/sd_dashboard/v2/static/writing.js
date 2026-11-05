@@ -139,6 +139,9 @@ addEventListener('DOMContentLoaded', () => {
     // and with no tile pressed the column shows the first `top` of them, the highest overall.
     const nArea = a => (I.areas || {})[a === 'none' ? '' : a] || 0;
     const areaTiles = [...IDEA_AREAS.map(a => [a, a]), ...(nArea('none') ? [['none', 'No area']] : [])];
+    // pack sd:7695: a pressed tile a read again no longer draws (No area once every idea has one) clears, else the column
+    // stays narrowed to nothing with no tile to press off.
+    if (ideaArea && !(I.state === 'read' && I.count && areaTiles.some(([a]) => a === ideaArea))) ideaArea = '';
     const ideasShown = ideaArea ? I.rows.filter(i => (ideaArea === 'none' ? !i.area : i.area === ideaArea)) : I.rows.slice(0, I.top || I.rows.length);
     const ofWhat = !ideaArea ? `${I.count} inbox ideas` : ideaArea === 'none' ? `${nArea('none')} ideas with no area` : `${nArea(ideaArea)} ${ideaArea} ideas`;
     const idea = i => html`<article class="card idea" aria-label="Idea: ${i.title}"><div class="top"><span class="id">${i.created || ''}</span>${i.area ? html`<span class="area">${i.area}</span>` : ''}<span class="tag">${i.score == null ? 'no score' : `${i.score}/10`}</span></div>

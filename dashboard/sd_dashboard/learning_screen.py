@@ -18,8 +18,10 @@ row's stage in the page's words (`READ`, `WATCHED`); a stage the map does not na
 
 **Categories (pack sd:7669).** Each view has a small fixed set, `CATEGORIES`, chosen from the vault's rows; each
 document says its own in the kind's declared `category` field, which `sd store set sdw.learning TITLE category X`
-writes. The document sends the set and each row's `category` as text, one off the set too: the page files a row
-off the set, or with none, under Other.
+writes. The document sends the set and each row's `category` as text, one off the set too, for Details and search.
+Each row's `filed` (pack sd:7695) is the tile it counts under: the first of its values the set names, compared
+case-insensitively and spelled as the set spells it, else "", which the page files under Other. A list such as
+`["Computers", "Communication"]` files under Communication; as joined text it named no category.
 
 A store that does not read raises, so the route answers 500 with the cause and the page says the rows were not read.
 """
@@ -63,6 +65,15 @@ def _text(value) -> str:
     return str(value or "").strip()
 
 
+def _filed(value, names) -> str:
+    """The first of `value`'s values that `names` holds, as `names` spells it, else "": a field may hold any JSON."""
+    named = {name.casefold(): name for name in names}
+    for one in value if isinstance(value, list) else [value]:
+        if isinstance(one, str) and one.strip().casefold() in named:
+            return named[one.strip().casefold()]
+    return ""
+
+
 def _url(value) -> tuple[str, str]:
     """The link and its host for an http(s) URL; else no link, so the page draws the text and never a javascript: href.
     A URL urlsplit refuses (`https://[broken`, a full-width colon) is no link either (sd:6280): one row never fails the read."""
@@ -75,14 +86,14 @@ def _url(value) -> tuple[str, str]:
     return (text, host) if parts.scheme in ("http", "https") and host else ("", "")
 
 
-def _base(row, words) -> dict:
+def _base(row, words, names) -> dict:
     fields = row["fields"]
     url, host = _url(fields.get("url"))
     stage = row.get("stage") or ""
     return {"id": row["id"], "title": row["title"], "stage": stage, "state": words.get(stage, stage),
             "url": url, "host": host, "url_text": "" if url else _text(fields.get("url")),
             "description": _text(fields.get("description")), "added": _text(fields.get("dateCreated"))[:10],
-            "category": _text(fields.get("category"))}
+            "category": _text(fields.get("category")), "filed": _filed(fields.get("category"), names)}
 
 
 def books(connection, *, now: str) -> dict:
@@ -93,7 +104,7 @@ def books(connection, *, now: str) -> dict:
         kind = _text(fields.get("content-type")).lower()
         if not _in_view(row, "books", kind in ("book", "article")):
             continue
-        item = _base(row, READ)
+        item = _base(row, READ, CATEGORIES["books"])
         item.update(kind=kind, by=_text(fields.get("author")) or _text(fields.get("publisher")) or item["host"],
                     subtitle=_text(fields.get("subtitle")), published=_text(fields.get("published-date")),
                     pages=_text(fields.get("total-pages")), isbn=_text(fields.get("isbn")))
@@ -109,7 +120,7 @@ def videos(connection, *, now: str) -> dict:
         named = VIDEO_TITLE.match(row["title"] or "")
         if not _in_view(row, "videos", _text(fields.get("content-type")).lower() in ("youtube", "video") or bool(named)):
             continue
-        item = _base(row, WATCHED)
+        item = _base(row, WATCHED, CATEGORIES["videos"])
         item.update(title=named.group(3) if named else row["title"],
                     channel=_text(fields.get("channel")) or (named.group(2) if named else ""),
                     date=_text(fields.get("published-date"))[:10] or (named.group(1) if named else ""),
