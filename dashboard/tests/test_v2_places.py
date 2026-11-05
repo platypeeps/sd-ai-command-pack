@@ -1023,6 +1023,29 @@ clickAct('sim', 'Start'); await flush(); R.after = ELS['overview-rows'].html;"""
                       "Not known on far-host: its result reads state &#39;odd&#39;."):
             self.assertIn(words, out["R"]["rows"])
 
+    def test_a_checkout_tile_shows_update_and_one_that_starts_and_stops_refresh(self):
+        # Pack sd:7665: every service on a realm place gets Update (pull the latest code, restart nothing), and one
+        # with Start and Stop also Refresh (stop, update, start). The Overview is the server's, from a real file.
+        from sd_dashboard import place_tiles
+
+        svc, site = self.dir / "svc", self.dir / "site"
+        for folder in (svc, site):
+            (folder / ".git").mkdir(parents=True)
+        conf = self.dir / "place-tiles.conf"
+        conf.write_text(f"tile|acme|svc|Service|{svc}|-\nact|svc|Start|./svc.sh start\nact|svc|Stop|./svc.sh stop\n"
+                        f"tile|acme|site|Site|{site}|-\nact|site|Deploy|./deploy.sh\n", encoding="utf-8")
+        with mock.patch.dict("os.environ", {"XDG_STATE_HOME": str(self.dir / "state")}):
+            doc = place_tiles.document("acme", now=NOW, config=conf)
+        out = self.run_page(self.CLICK + "R.rows = ELS['overview-rows'].html; clickAct('svc', 'Refresh'); await flush();",
+                            {"/api/place/acme/overview": [200, doc], "/api/place/tiles": [202, {"started": NOW}]}, place="acme")
+        tiles = dict(part.split('"', 1) for part in out["R"]["rows"].split('data-tile="')[1:])
+        self.assertIn('data-tile-act="Update" data-tip="Pulls the latest code into this folder; restarts nothing, '
+                      'and refuses local changes.\ngit pull --ff-only"', tiles["svc"])
+        self.assertIn('data-tile-act="Refresh" data-tip="Stops Service, runs its Update, then starts it again.', tiles["svc"])
+        self.assertIn('data-tile-act="Update"', tiles["site"])
+        self.assertNotIn('data-tile-act="Refresh"', tiles["site"], "a tile that starts nothing got Refresh")
+        self.assertEqual(out["posts"], [["/api/place/tiles", {"realm": "acme", "tile": "svc", "action": "Refresh"}, 64]])
+
     ISSUES = {"state": "read", "area": "acme", "read": NOW, "reason": "", "rows": [], "done": [], "lead": False, "issues_reason": "",
               "issues_store": {"available": True, "reason": ""}, "issues": [
                   {"tracker": "Jira", "ref": "ACME-8", "key": "jira:ACME-8", "title": "Fix the kit", "repo": "acme-site", "reason": "filed",

@@ -742,6 +742,23 @@ class TheServer(BrowserSession):
         self.assertIn('data-sort="updated"', out["head"])
         self.assertIn(">Updated<", out["head"])
 
+    def test_a_file_type_tile_per_type_listed_and_a_tile_filters_the_projects(self):
+        # pack sd:7668: one File type tile per extension the listed files carry, no other, each counting the projects
+        # that hold one; pressing one leaves the projects with a file of that type, and pressing it again clears it.
+        out = self.rendered(
+            "const press = (f, v) => ELS.filters.listeners.click.forEach(h => h({ target: { closest: s => "
+            "s === '[data-f]' ? { dataset: { f, v } } : null } }));"
+            "R.filters = ELS.filters.html; press('type', 'mp4'); R.mp4 = ELS.rows.html; R.on = ELS.filters.html;"
+            "press('type', 'mp4'); R.off = ELS.rows.html;")
+        self.assertIn('aria-label="File type"', out["filters"])
+        tiles = re.findall(r'data-f="type" data-v="([^"]*)"', out["filters"])
+        self.assertEqual(tiles, ["mp4", "png"])
+        self.assertIn('title="png: 1 project"', out["filters"])
+        self.assertIn('data-v="mp4" aria-pressed="true"', out["on"])
+        self.assertNotIn('data-id="art/shirts/cat"', out["mp4"])
+        self.assertIn('data-id="art/songs/tune"', out["mp4"])
+        self.assertIn('data-id="art/shirts/cat"', out["off"])
+
     def test_a_project_row_expands_and_only_one_is_expanded_at_a_time(self):
         # pack sd:7490: a disclosure button per row; opening one closes the other, a second press closes it.
         out = self.rendered("R.none = ELS.rows.html; expand('art/shirts/cat'); R.cat = ELS.rows.html;"

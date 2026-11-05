@@ -22,6 +22,7 @@ and 320 px, both schemes, a coarse pointer, focus visibility).
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -1057,13 +1058,14 @@ def seed_learning(connection):
     return {
         "book": learning(connection, "Agile Retrospectives", "in-progress", **{"content-type": "book", "author": ["A. Writer", "B. Writer"],
                          "subtitle": "Making Good Teams Great", "url": "https://books.example.test/retro", "published-date": "2006",
-                         "total-pages": "170", "isbn": "9780000000000", "description": "Retrospectives that work."}),
+                         "total-pages": "170", "isbn": "9780000000000", "description": "Retrospectives that work.",
+                         "category": "Teams & Facilitation"}),
         "article": learning(connection, "On Queues", "queued", **{"content-type": "article", "publisher": "Example Weekly",
-                            "url": "javascript:alert(1)"}),
+                            "url": "javascript:alert(1)", "category": ["Computers"]}),
         "bare": learning(connection, "A Bare Book", "done", **{"content-type": "book", "url": "https://press.example.test/bare"}),
         "video": learning(connection, "2016-06-06 - YouTube - Example Channel - A Talk", "in-progress",
                           **{"content-type": "youtube", "channel": "Example Channel", "url": "https://www.youtube.com/watch?v=x",
-                             "published-date": "2016-06-06T10:00:00Z", "duration": "534"}),
+                             "published-date": "2016-06-06T10:00:00Z", "duration": "534", "category": ["Coding"]}),
         "named": learning(connection, "2024-02-03 - YouTube - Other Channel - Queues - A Primer", "queued",
                           **{"url": "https://www.youtube.com/watch?v=y"}),
         "course": learning(connection, "A Course", "queued", **{"content-type": "course", "url": "https://course.example.test"}),
@@ -1100,6 +1102,20 @@ class TheBooks(ScreenCase):
         self.assertEqual((rows[broken]["url"], rows[broken]["host"], rows[broken]["url_text"]), ("", "", "https://[broken"))
         self.assertEqual((rows[wide]["url"], rows[wide]["url_text"]), ("", "https://example.com\uff1a80"))
         self.assertEqual(rows[ids["book"]]["url"], "https://books.example.test/retro")
+
+    def test_each_view_names_its_categories_and_each_row_its_category(self):
+        """pack sd:7669: each view sends its fixed category set; a row's category is its `category` field as text,
+        and a value off the set is still sent, so the page files it under Other."""
+        ids = seed_learning(self.connection)
+        doc = learning_screen.books(self.connection, now=NOW)
+        self.assertEqual(doc["categories"], list(learning_screen.CATEGORIES["books"]))
+        rows = {r["id"]: r for r in doc["rows"]}
+        self.assertEqual((rows[ids["book"]]["category"], rows[ids["article"]]["category"], rows[ids["bare"]]["category"]),
+                         ("Teams & Facilitation", "Computers", ""))
+        doc = learning_screen.videos(self.connection, now=NOW)
+        self.assertEqual(doc["categories"], list(learning_screen.CATEGORIES["videos"]))
+        self.assertEqual({r["id"]: r["category"] for r in doc["rows"]}, {ids["video"]: "Coding", ids["named"]: ""})
+        self.assertTrue(all(2 < len(set(c)) <= 6 for c in learning_screen.CATEGORIES.values()))
 
     def test_the_route_reads_the_books(self):
         seed_learning(self.connection)
@@ -1218,6 +1234,26 @@ ELS.shift.value = 'writer kind:research'; ELS.shift.listeners.input.forEach(f =>
         self.assertNotIn("Agile Retrospectives", r["queued"])
         self.assertIn("Agile Retrospectives", r["text"])
         self.assertNotIn("On Queues", r["text"])
+
+    def test_a_category_tile_per_category_and_other_narrows_the_view(self):
+        """pack sd:7669: one Category tile per category of the view's set, then Other for a row off the set or with none;
+        a tile narrows the rows to it, and Details names the row's category."""
+        out = self.run_view("""window.shell.view.show('books'); await flush();
+R.filters = ELS['books-filters'].html;
+const press = v => ELS['books-filters'].listeners.click[0]({ target: { closest: s => s === '[data-f="category"]' ? { dataset: { f: 'category', v } } : null } });
+press('Teams & Facilitation'); R.teams = ELS['books-rows'].html;
+window.PAGE_LIST.select([...OBJ.values()].find(o => o.type === 'book' && o.title === 'Agile Retrospectives').id); R.details = ELS.details.html;
+press('Teams & Facilitation'); press('other'); R.other = ELS['books-rows'].html;""", self.books())
+        r = out["R"]
+        tiles = re.findall(r'data-f="category" data-v="([^"]*)"', r["filters"])
+        self.assertEqual([html.unescape(t) for t in tiles], [*learning_screen.CATEGORIES["books"], "other"])
+        self.assertIn('title="Other: 2"', r["filters"])
+        self.assertIn("Agile Retrospectives", r["teams"])
+        self.assertNotIn("On Queues", r["teams"])
+        self.assertIn("<dt>Category</dt><dd>Teams &amp; Facilitation</dd>", r["details"])
+        self.assertIn("On Queues", r["other"])
+        self.assertIn("A Bare Book", r["other"])
+        self.assertNotIn("Agile Retrospectives", r["other"])
 
     def test_clear_filters_in_the_empty_view_clears_the_search_too(self):
         """sd:6285: the empty state's Clear filters cleared the read state only, so a search that matched nothing stayed."""

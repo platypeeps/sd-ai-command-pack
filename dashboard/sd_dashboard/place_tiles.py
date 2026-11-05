@@ -14,6 +14,10 @@ and probes its URL once, bounded by `PROBE_SECONDS`, the name lookup too (sd:639
 `help`, the plain words its button's hover shows ("" when the line has none, pack sd:7536), and its last run (`last`).
 The line splits on every `|`, so a command never holds one: a pipe makes too many fields, or leaves a quote open.
 
+Pack sd:7665: a tile gets Update (`git pull --ff-only`, no restart) when its folder is a checkout of its own and no line
+names Update, and Refresh (Stop, Update, Start) when it has those three and no line names Refresh
+(`_update_and_refresh`). `parse` adds them, so a run and a host's follow job see the same actions.
+
 `run` answers `POST /api/place/tiles {realm, tile, action}`. It reads the file again and runs only a command a line
 names, split by `shlex` with no shell, in the tile's folder, through `sweep.spawn`: one lock per action
 (`<state>/<realm>/<tile>/<action>/lock`), so Stop runs while Start's server holds Start's lock, and a second Deploy
@@ -44,15 +48,19 @@ import os
 import re
 import secrets
 import shlex
+import signal
 import socket
+import subprocess
+import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from .documents import _config_dir, pipe_lines
 
-__all__ = ["CONFIG", "EXAMPLE", "PROBE_SECONDS", "REQUEST", "RESULT", "WRAP", "document", "key", "parse", "run",
-           "state_dir", "this_host"]
+__all__ = ["CONFIG", "EXAMPLE", "PROBE_SECONDS", "REQUEST", "RESULT", "STEP_SECONDS", "STOP_WAIT", "WRAP", "document", "key", "parse",
+           "refresh", "run", "state_dir", "this_host"]
 
 #: In this machine's config directory, never supplied by a request.
 CONFIG = _config_dir() / "place-tiles.conf"
@@ -64,6 +72,14 @@ TAIL = 4000
 #: Runs the command, then records its exit code and end time in the file `$1`.
 WRAP = 'f=$1; shift; "$@"; c=$?; printf "%s %s\\n" "$c" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f"; exit "$c"'
 ID = re.compile(r"[a-z0-9][a-z0-9-]*")
+#: Seconds Refresh's Stop and Update may each take before Refresh ends them, their children too, and stops (sd:7665).
+STEP_SECONDS = 600.0
+#: Seconds Refresh waits after Stop for Start's lock to clear, the server it stopped letting go, before Update.
+STOP_WAIT = 30.0
+#: The Refresh runner: a fresh interpreter, `-I` so the tile's folder shadows no module, given the dashboard and the
+#: pack library as its path, then `refresh(realm, tile, config)`.
+BOOT = ("import sys; sys.path[:0] = sys.argv[1:3]; from sd_dashboard.place_tiles import refresh; "
+        "sys.exit(refresh(*sys.argv[4:]))")
 #: The setting rows of a hosted tile's action (sd:6387): the hub's request and that host's result.
 REQUEST, RESULT = "place_tiles.request", "place_tiles.result"
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -108,7 +124,33 @@ def parse(text: str) -> tuple[list[dict], list[str]]:
         else:
             problems.append(f"line {number}: expected tile|<realm>|<tile>|<label>|<folder>|<url or ->[|<host>] "
                             "or act|<tile>|<label>|<command>[|<help>]")
+    for tile in tiles.values():
+        _update_and_refresh(tile)
     return list(tiles.values()), problems
+
+
+def _update_and_refresh(tile: dict) -> None:
+    """Pack sd:7665: append Update and Refresh to a tile whose lines name neither, after its own actions.
+
+    Update pulls the latest code and restarts nothing; a tile gets it when its folder is a checkout of its own (`.git`
+    there), or when its host has the folder and decides. A folder inside another checkout (a tool of a pinned
+    checkout) gets none: a pull there moves the whole checkout, which its lane or repo-sync owns. Refresh runs the
+    tile's own Stop and Update, then starts Start as its button does, under Start's own lock (`refresh`); a tile
+    without Start and Stop runs no process to restart, so it gets none. Refresh starts nothing after a failed update,
+    as a hand-written one did. Its `argv` is empty: `run` builds the runner, which needs the file's path.
+    """
+    by = {_slug(a["label"]): a for a in tile["actions"]}
+    if "update" not in by and (_hosted(tile) or (Path(tile["folder"]) / ".git").exists()):
+        by["update"] = {"label": "Update", "command": "git pull --ff-only", "argv": ["git", "pull", "--ff-only"],
+                        "help": "Pulls the latest code into this folder; restarts nothing, and refuses local changes."}
+        tile["actions"].append(by["update"])
+    if "refresh" not in by and all(step in by for step in ("stop", "update", "start")):
+        stop, update, start = (shlex.join(by[step]["argv"]) for step in ("stop", "update", "start"))
+        help_ = (f"Asks {tile['host']} to stop {tile['label']}, run its Update, then start it again; the Start button "
+                 "here does not show that start." if _hosted(tile)
+                 else f"Stops {tile['label']}, runs its Update, then starts it again.")
+        tile["actions"].append({"label": "Refresh", "command": f"{stop}; {update} && Start: {start}", "argv": [],
+                                "refresh": True, "help": help_})
 
 
 def _read(config: Path) -> tuple[list[dict], list[str]]:
@@ -303,9 +345,10 @@ def run(payload, config: Path | None = None):
     if not folder.is_dir():
         raise ValueError(f"Nothing ran: {folder} is not on this machine, so {tile['label']} runs elsewhere.")
     state = _state(tile, action["label"])
+    argv = _refresher(tile, config) if action.get("refresh") else action["argv"]
 
     def start(connection):
-        return spawn(state, folder, ["/bin/sh", "-c", WRAP, "sh", str(state / "exit"), *action["argv"]], action["command"],
+        return spawn(state, folder, ["/bin/sh", "-c", WRAP, "sh", str(state / "exit"), *argv], action["command"],
                      f"{tile['label']} {action['label']}", prepare=lambda: (state / "exit").unlink(missing_ok=True))
 
     return start
@@ -319,3 +362,150 @@ def _ask(connection, tile: dict, action: dict):
              "tile": tile["id"], "action": action["label"]}
     writes.set_setting(connection, key(REQUEST, tile, action["label"]), json.dumps(asked))
     return 202, {"requested": asked["id"], "at": asked["at"], "host": tile["host"], "command": action["command"]}
+
+
+def _refresher(tile: dict, config: Path) -> list[str]:
+    """The argv of a tile's Refresh: `refresh` in a fresh interpreter, which the WRAP and Refresh's lock hold."""
+    from . import pack_library
+
+    return [sys.executable, "-I", "-c", BOOT, str(Path(__file__).resolve().parents[1]), str(pack_library()), "refresh",
+            tile["realm"], tile["id"], str(config)]
+
+
+class _Ended(Exception):
+    """TERM or INT reached Refresh: its running step is ended and reaped before Refresh lets go of its lock."""
+
+    def __init__(self, signum: int):
+        super().__init__(signum)
+        self.signum = signum
+
+
+def _end_refresh(signum, _frame):
+    # One signal is enough: the rest are ignored, so ending the step is not cut short in turn.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, signal.SIG_IGN)
+    raise _Ended(signum)
+
+
+def refresh(realm: str, tile_id: str, config: str) -> int:
+    """`_refresh`, with TERM and INT ending its running step before it returns; the old handlers come back after."""
+    handlers = {sig: signal.signal(sig, _end_refresh) for sig in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        return _refresh(realm, tile_id, config)
+    except _Ended as ended:
+        print(f"Refresh was ended by signal {ended.signum}; its running step was ended first.", flush=True)
+        return 128 + ended.signum
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+
+
+def _refresh(realm: str, tile_id: str, config: str) -> int:
+    """A tile's Refresh (sd:7665): its Stop, then its Update, then a start of Start through `run`, as its button does.
+
+    Start runs under its own lock, so a foreground server is Start's: Start's button reads it running and refuses a
+    second server, and Refresh ends once Start is started. Each step moves state, so a step that fails stops Refresh
+    before the next one (the PR's failure table, review round 2):
+
+    - Stop exits non-zero: the server may still run, so Update does not run, unless the service reads stopped: Start's
+      lock is free and the tile's link refuses. With no link, or one that does not refuse, it is not known to be
+      stopped, and not known is not stopped.
+    - Stop exits 0 and Start's lock is still held `STOP_WAIT` seconds later: the server still runs; no Update.
+    - Stop or Update runs past `STEP_SECONDS` (a pull waiting on a credential): Refresh ends it and its children, and
+      stops with 124. Git is told not to prompt, so a pull fails at once where it can.
+    - Update fails: nothing starts; the service stays stopped, and the output says to press Update, then Start.
+    - Start is refused (a press of Start got there first: 409) or no longer named (400): named, exit 1 or 2.
+
+    A Refresh cut short frees its lock only once no step of it runs (review round 3): TERM or INT ends and reaps the
+    running step first, and each step holds Refresh's lock too (`SD_RUN_LOCK_FD`), so after a KILL the step left
+    behind keeps Refresh running, and the next Refresh a 409, until it ends. Its exit record names the cut, and the
+    next Refresh runs every step again. The probe after a failed Stop is bounded by `PROBE_SECONDS`, as the Overview's
+    are; past it the service is not known to be stopped. On a hosted tile the host runs this, writes no row for Start, and the hub's Start button reads
+    its own last request, not this start: a limit Refresh's hover says on the hub. The output goes to Refresh's
+    `start.log`.
+    """
+    from .sweep import _held
+
+    config_path = Path(config)
+    try:
+        tiles, _ = _read(config_path)
+    except (OSError, UnicodeDecodeError) as error:
+        print(f"Nothing ran: {config_path.name} was not read: {error.__class__.__name__}.")
+        return 2
+    tile = next((t for t in tiles if (t["realm"], t["id"]) == (realm, tile_id)), None)
+    by = {_slug(a["label"]): a for a in tile["actions"]} if tile else {}
+    if tile is None or _hosted(tile) or not all(step in by for step in ("stop", "update", "start")):
+        print(f"Nothing ran: {config_path.name} no longer gives {tile_id} of {realm} a Start, Stop and Update here.")
+        return 2
+    start_state = _state(tile, by["start"]["label"])
+    code = _step(by["stop"], tile["folder"])
+    if code is None:
+        print(f"Stop ran past {STEP_SECONDS:g} s and was ended; whether {tile['label']} runs is not known, so Update "
+              "did not run.", flush=True)
+        return 124
+    if code and not (_held(start_state) is None and tile["url"] and _probes([tile["url"]])[0]["answers"] is False):
+        print(f"Stop exited {code} and {tile['label']} is not known to be stopped, so Update did not run.", flush=True)
+        return code
+    deadline = time.monotonic() + STOP_WAIT
+    while _held(start_state) is not None:
+        if time.monotonic() >= deadline:
+            print(f"Start's server still runs {STOP_WAIT:g} s after Stop, so Update did not run.", flush=True)
+            return 1
+        time.sleep(0.2)
+    code = _step(by["update"], tile["folder"])
+    if code is None or code:
+        why = f"ran past {STEP_SECONDS:g} s and was ended" if code is None else f"exited {code}"
+        print(f"Update {why}, so Start was not pressed: {tile['label']} stays stopped. Press Update, then Start.",
+              flush=True)
+        return 124 if code is None else code
+    try:
+        status, body = run({"realm": realm, "tile": tile_id, "action": by["start"]["label"]}, config_path)(None)
+    except ValueError as error:
+        print(f"Start was not started: {error}", flush=True)
+        return 2
+    if status == 202:
+        print(f"Start started at {body['started']}, under its own lock: its button shows how it runs.", flush=True)
+        return 0
+    print(f"Start was not started: {body.get('error', status)}", flush=True)
+    return 1
+
+
+def _step(action: dict, folder: str) -> int | None:
+    """Refresh's Stop or Update, in its own session and holding Refresh's lock too; its exit code, or None when it ran
+    past `STEP_SECONDS` and it and its children were ended. `_Ended` ends it the same way, then goes on up."""
+    print(f"$ {action['command']}", flush=True)
+    lock = os.environ.get("SD_RUN_LOCK_FD", "")
+    fds = (int(lock),) if lock.isdigit() and _open(int(lock)) else ()
+    child = subprocess.Popen(action["argv"], cwd=folder, stdin=subprocess.DEVNULL, start_new_session=True,
+                             pass_fds=fds, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    try:
+        return child.wait(timeout=STEP_SECONDS)
+    except subprocess.TimeoutExpired:
+        _end(child)
+        return None
+    except _Ended:
+        _end(child)
+        raise
+
+
+def _open(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+    except OSError:
+        return False
+    return True
+
+
+def _end(child: subprocess.Popen) -> None:
+    """TERM, then KILL whatever of the step's group outlived TERM, and reap it; the group is gone once killpg finds
+    no member."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(child.pid, sig)
+        except ProcessLookupError:
+            break
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    child.wait()
