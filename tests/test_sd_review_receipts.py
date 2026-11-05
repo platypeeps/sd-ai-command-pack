@@ -407,7 +407,7 @@ class ReceiptTests(ReviewFixture):
         self.assertNotIn(receipts.CONTRACT, subprocess.run(["git", "ls-files", "--", receipts.CONTRACT], cwd=pack,
                                                            capture_output=True, text=True, check=True).stdout)
         help_text = next(action.help for action in sd_review.build_parser()._actions if "--reuse-check" in action.option_strings)
-        self.assertIn(f"Never reuses in sd-ai-command-pack itself, which tracks no reuse declaration ({receipts.CONTRACT})",
+        self.assertIn(f"Never reuses in sd-workflow itself, which tracks no reuse declaration ({receipts.CONTRACT})",
                       help_text)
 
     def commit_contract(self, **fields):

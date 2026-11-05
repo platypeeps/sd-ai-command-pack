@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lint the tracked documentation footprint of the sd-ai-command-pack workflow.
+"""Lint the tracked documentation footprint of the sd-workflow repository.
 
 Five tree rules and one body rule. Numbers are stable: rules 5, 6 and 8 retired.
 

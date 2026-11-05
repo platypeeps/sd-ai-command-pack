@@ -156,7 +156,7 @@ scope, the verification bar, or the `## Final report` contract.
   the unit inline exactly as above. Naming the role never changes the scope, the
   `min_sources` bar, or the `## Final report` contract, and inline platforms are
   unaffected.
-- **Spawn under the pack's parallel-work rules.** The sd-ai-command-pack
+- **Spawn under the pack's parallel-work rules.** The sd-workflow
   checkout's `WORKFLOW.md`, section **Parallel work**, decides when to fan
   out: the units are independent, share no mutable state, and return results
   the orchestrator can verify cheaply. Otherwise run them inline, in
