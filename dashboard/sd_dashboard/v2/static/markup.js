@@ -84,5 +84,18 @@
       : c.button ? html`<li><button class="cell${cls}" type="button"${at}>${inner}</button></li>`
       : html`<li><div class="cell${cls}"${at}>${inner}</div></li>`;
   })}`;
-  window.markup = Object.freeze({ html, put, plural, cells });
+  // A machine or vault view (pack sd:7527): sd_tile.py's {sections, rows}, as reports_screen.collect checked it. Its rows
+  // that want attention lead; each section is figures, a heading, a table or a listing, and a cell is text with an
+  // optional title, http(s) link or numeric flag. Every value is escaped: a tile sends data, never markup.
+  const td = c => html`<td${c.num ? html` class="n"` : ''}${c.title ? html` title="${c.title}"` : ''}>${/^https?:\/\//.test(c.href || '')
+    ? html`<a href="${c.href}" rel="noopener noreferrer">${c.text}</a>` : c.text}</td>`;
+  const part = s => s.heading !== undefined ? html`<h3>${s.heading}</h3>`
+    : s.figures ? html`<dl class="figures">${s.figures.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>`
+    : s.listing ? html`<ul class="listing">${s.listing.map(l => html`<li>${l}</li>`)}</ul>`
+    : s.table ? html`<div class="tile-scroll"><table class="ledger tile-table"><thead><tr>${s.table.columns.map(([label, how]) =>
+      html`<th scope="col"${how === 'num' ? html` class="n"` : ''}>${label}</th>`)}</tr></thead><tbody>${s.table.rows.map(r => html`<tr>${r.map(td)}</tr>`)}</tbody></table></div>`
+    : '';
+  const tile = doc => html`${doc.rows.length ? html`<section class="notice tile-attention"><h3>Needs attention</h3><dl>${doc.rows.map(r =>
+    html`<div><dt>${r.what}</dt><dd>${r.detail}</dd></div>`)}</dl></section>` : ''}${doc.sections.map(part)}`;
+  window.markup = Object.freeze({ html, put, plural, cells, tile });
 })();

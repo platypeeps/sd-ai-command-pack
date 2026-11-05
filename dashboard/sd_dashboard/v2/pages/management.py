@@ -2,7 +2,9 @@
 Repos areas were retired in sd:3402; Services, Sessions and Protection stay as shared palette screens. The page reads
 each job's log and cancels a running job, and filters and pages services (sd:3388); it has no pull and no gap matrix. Land (sd:5104) commits a checkout's work per item and enqueues it.
 Standard setup (sd:5610) previews and applies the managed-repo standard.
-End session (sd:5126) ends a Claude session on this Mac."""
+End session (sd:5126) ends a Claude session on this Mac.
+Machine (pack sd:7527) is the Toolbox view Operations > Resources showed: `sd_tile.py toolbox`, read when the view opens;
+Research is the Repos filter `?research=yes|no`, from `sd_tile.py research`."""
 
 from __future__ import annotations
 
@@ -13,6 +15,18 @@ def _read(read):
     from ... import management_screen
 
     return management_screen.document(read.connection, now=read.now, fleet=read.fleet, jobs=read.jobs, services=read.services)
+
+
+def _machine(read):
+    from ... import reports_screen
+
+    return reports_screen.view("toolbox")
+
+
+def _research(read):
+    from ... import reports_screen
+
+    return reports_screen.view("research")
 
 
 def _land_preview(read):
@@ -51,6 +65,10 @@ PAGE = Page(
     html="management.html",
     item="sd:2118",
     api=(Api("/api/management", _read),
+         # Machine (pack sd:7527): Operations > Resources > Toolbox, the launchd jobs, agents, containers and drift.
+         Api("/api/management/machine", _machine),
+         # Research (pack sd:7527): Resources > Research as the Repos filter, the sd-research-kit checkouts and documents.
+         Api("/api/management/research", _research),
          # Land (sd:5104): the GET previews, the POST lands; `land` checks the preview's revision before anything moves.
          Api("/api/repos/land/preview", read=_land_preview, query=True), Api("/api/repos/land", write=_land),
          # Standard setup (sd:5610): the GET previews `sd fleet standard`, the POST applies the plan with its digest.

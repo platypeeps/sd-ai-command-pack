@@ -1,5 +1,4 @@
 """Real HTTP controls, with disposable registry/files and no provider processes."""
-import html
 import json
 import re
 import sqlite3
@@ -91,24 +90,7 @@ class WorkflowControls(BrowserSession):
         self.assertEqual(self.post("/api/providers/configure", payload)[0], 409)
         self.assertEqual(self.snapshot(), before)
 
-    def test_provider_page_explains_automatic_order_without_hiding_enabled_entries(self):
-        from sd_dashboard.operations_screen import _provider_controls
-
-        state = provider_controls.snapshot(self.connection)
-        provider_controls.configure(self.connection,
-            enabled={entry["name"]: entry["enabled"] for entry in state["providers"]},
-            orders={**state["orders"], "reviewer": ["codex", "claude"]},
-            expected_revision=state["revision"], who="operator")
-        page = str(_provider_controls(self.connection))
-        self.assertIn("Automatic author order", page)
-        self.assertIn("Automatic reviewer order", page)
-        self.assertIn("Omitted providers remain available for explicit requests when enabled.", page)
-        self.assertIn('name="enabled.minimax"', page)
-        self.assertIn('value="codex, claude"', page)
-
     START_BILL_SENTENCE = "provider 'claude' is a 'start' entry on the capped bill 'a'"
-    # `tag` escapes quotes (`markup.escape`, `quote=True`), so the page carries the sentence this way.
-    START_BILL_SENTENCE_HTML = html.escape(START_BILL_SENTENCE, quote=True)
 
     def cap_of(self, state, name):
         return next(bill["cap_usd_month"] for bill in state["bills"] if bill["name"] == name)
@@ -171,43 +153,9 @@ class WorkflowControls(BrowserSession):
         self.assertEqual(self.post("/api/bills/" + "x" * 201 + "/cap", {"revision": current["revision"], "cap_usd_month": 2.0})[0], 404)
         self.assertEqual(before, self.snapshot())
 
-    def test_the_usage_area_renders_one_cap_form_per_url_bill_with_the_current_cap_and_revision(self):
-        state = provider_controls.snapshot(self.connection)
-        self.assertEqual(self.post("/api/bills/c/cap", {"revision": state["revision"], "cap_usd_month": 12.5})[0], 200)
-        current = provider_controls.snapshot(self.connection)
-        page = self.request("/operations?area=usage")[2]
-        forms = re.findall(r'<form\b[^>]*action="/api/bills/([^"]+)/cap"[^>]*>.*?</form>', page, re.S)
-        self.assertEqual(forms, ["c"], "one form, for the one bill no start entry is billed to")
-        form = re.search(r'<form\b[^>]*action="/api/bills/c/cap"[^>]*>.*?</form>', page, re.S).group(0)
-        self.assertIn(f'<input type="hidden" name="revision" value="{current["revision"]}">', form)
-        self.assertIn("$12.50", form)
-        self.assertRegex(form, r'<input[^>]*name="cap_usd_month"[^>]*type="number"')
-        self.assertRegex(form, r'<input[^>]*name="cap_usd_month"[^>]*value="12.5"')
-        self.assertIn('data-workflow-form', form)
-        self.assertNotIn(self.START_BILL_SENTENCE_HTML, page)
-        for bill in ("a", "b"):
-            self.assertRegex(page, rf"<p[^>]*>{bill}: no cap can be set here; a &#x27;start&#x27; entry is billed to it\.</p>")
-
-    def test_the_script_sends_the_cap_as_a_number_or_null_and_returns_to_the_usage_area(self):
-        """A form field is a string and the route takes a number or `null`;
-        the configure form's handling covers neither, so the script carries
-        two lines for this form. Pinned by text, as `test_criterion_7` pins
-        the palette's selector: no browser runs here.
-
-        #435's review: `Number("abc")` is `NaN`, which JSON carries as `null`,
-        and `null` is the clear -- so a tampered field would have deleted the
-        cap. Only a blank field becomes `null`; a value that is not a finite
-        decimal goes as its string, and the library refuses it (below)."""
-        script = self.request("/static/dashboard.js")[2]
-        self.assertNotIn('null : Number(values.cap_usd_month)', script)
-        # The number control's own grammar (`.5`, `+1`, `1.`, `1e3`; #435's verification round).
-        self.assertIn('values.cap_usd_month = cap === "" ? null : /^[-+]?(\\d+\\.?\\d*|\\.\\d+)([eE][-+]?\\d+)?$/.test(cap) && Number.isFinite(Number(cap)) ? Number(cap) : cap;', script)
-        self.assertIn('action.startsWith("/api/bills/") ? "/operations?area=usage"', script)
-
     def test_a_string_cap_is_the_ledgers_refusal_and_the_cap_stays(self):
         """The route hands a string straight to `set_cap`, and `ledger._money`
-        refuses it with 400; nothing is cleared. This is what the script's
-        raw-string fallback relies on."""
+        refuses it with 400; nothing is cleared."""
         state = provider_controls.snapshot(self.connection)
         self.assertEqual(self.post("/api/bills/c/cap", {"revision": state["revision"], "cap_usd_month": 12.5})[0], 200)
         current = provider_controls.snapshot(self.connection)
@@ -217,30 +165,6 @@ class WorkflowControls(BrowserSession):
         self.assertEqual(result["error"], "a cap must be a finite, non-negative number; bill 'c' was given 'abc'")
         self.assertEqual(before, self.snapshot())
         self.assertEqual(self.cap_of(provider_controls.snapshot(self.connection), "c"), 12.5)
-
-    def test_a_legacy_row_cap_on_a_start_bill_renders_the_readers_warning(self):
-        provider_controls.snapshot(self.connection)  # seeds the rows the bare UPDATE below needs
-        with self.connection:
-            self.assertEqual(self.connection.execute("UPDATE bill SET cap_usd_month = 5.0 WHERE name = 'a'").rowcount, 1)
-        page = self.request("/operations?area=usage")[2]
-        self.assertIn(self.START_BILL_SENTENCE_HTML, page)
-        self.assertRegex(page, r'<ul class="notice[^"]*">\s*<li>[^<]*' + re.escape(self.START_BILL_SENTENCE_HTML))
-        # The repair the library names, `set_cap(..., None)`, is the one save a
-        # start bill's row gets: a clear-only form, no number field.
-        self.assertEqual(re.findall(r'action="/api/bills/([^"]+)/cap"', page), ["a", "c"])
-        clear = re.search(r'<form\b[^>]*action="/api/bills/a/cap"[^>]*>.*?</form>', page, re.S).group(0)
-        self.assertIn('<input type="hidden" name="cap_usd_month" value="">', clear)
-        self.assertNotIn('type="number"', clear)
-        self.assertIn("Clear the legacy cap for a", clear)
-        state = provider_controls.snapshot(self.connection)
-        self.assertIn(f'name="revision" value="{state["revision"]}"', clear)
-        status, _, result = self.post("/api/bills/a/cap", {"revision": state["revision"], "cap_usd_month": None})
-        self.assertEqual(status, 200)
-        self.assertEqual(result["warnings"], [])
-        self.assertIsNone(self.connection.execute("SELECT cap_usd_month FROM bill WHERE name='a'").fetchone()[0])
-        page = self.request("/operations?area=usage")[2]
-        self.assertNotIn(self.START_BILL_SENTENCE_HTML, page)
-        self.assertEqual(re.findall(r'action="/api/bills/([^"]+)/cap"', page), ["c"])
 
     def test_the_stopped_runners_routes_are_gone(self):
         """sd:3041: the runner stopped, so its run, prepare and control routes answer 404 and write nothing."""
@@ -262,7 +186,6 @@ class WorkflowControls(BrowserSession):
         before = self.snapshot()
         with patch("subprocess.run", side_effect=AssertionError("catalog invoked a process")):
             self.assertEqual(self.request("/api/skills", headers={"Cookie": self.cookie})[0], 200)
-            self.assertEqual(self.request("/operations?area=usage")[0], 200)
         self.assertEqual(self.request("/static/icon.svg")[0], 200)
         self.assertEqual(before, self.snapshot())
         skill = skills_catalog.catalog(self.connection)["skills"][0]
@@ -271,14 +194,6 @@ class WorkflowControls(BrowserSession):
         before = self.snapshot()
         self.assertEqual(self.post("/api/skills/sd-fixture/try", {"revision": skill["revision"]})[0], 409)
         self.assertEqual(before, self.snapshot())
-
-    def test_usage_does_not_treat_missing_costs_as_measured_zero(self):
-        item = self.item("Delivered", kind="task", status="done")
-        self.connection.execute("UPDATE item SET shipped_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?", (item,))
-        page = self.request("/operations?area=usage")[2]
-        self.assertIn("No bills yet.", page)
-        self.assertIn("not recorded", page)
-        self.assertNotIn("$0.00", page)
 
     def test_report_followups_gate_acknowledgement(self):
         """A followup a person wrote still refuses the dashboard's acknowledge, named in the error, and the

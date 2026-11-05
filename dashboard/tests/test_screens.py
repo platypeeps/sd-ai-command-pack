@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard.server import NotFound, route
-from sd_db import reads, transition, update_assignment, upsert_shadow
+from sd_db import reads, transition, upsert_shadow
 from sd_db.writes import record_cost
 from support import ScreenCase
 
@@ -40,75 +40,6 @@ def maintenance_children(checkout):
         events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
     return [event["argv"] for event in events if event.get("event") == "child_start"
             and {"maintenance", "gc"} & set(event.get("argv", []))]
-
-
-class OperationsUsageNumbers(ScreenCase):
-    def setUp(self):
-        super().setUp()
-        self.repo()
-        self.sent = self.item("finished, unsent", status="planning", repo="/repos/system")
-        transition(self.connection, self.sent, "ready_to_send", who="sd-ship")
-        self.running = self.item("in progress", status="planning", repo="/repos/system")
-        transition(self.connection, self.running, "in_progress", who="the operator")
-        self.later = self.item("planning, not due", status="planning")
-
-    def test_usage_has_the_four_weekly_numbers_with_inputs_in_a_detail_view(self):
-        """Criterion 15's rendering clause, and requirement 5's hover rule.
-
-        The prd offers "on hover or in a detail view" and requirement 5
-        forbids a hover-only affordance, so only one of the two is allowed:
-        the inputs are in a `details` element, and there is no `title`
-        attribute anywhere on the page to hold a tooltip.
-        """
-        page = self.render("/operations", {"area": ["usage"]})
-        for label in ("cost per shipped item", "framework commits per shipped item",
-                      "assignment to merge", "reverts"):
-            self.assertIn(label, page)
-        self.assertGreaterEqual(page.count("<details"), 4)
-        self.assertGreaterEqual(page.count("<summary>Inputs</summary>"), 4)
-        self.assertNotIn(" title=", page)
-
-    def test_the_cost_tile(self):
-        self.assertIn("cost-tile", self.render("/operations", {"area": ["usage"]}))
-
-    def test_usage_contains_provider_ranks(self):
-        self.connection.execute(
-            "INSERT INTO provider (name, enabled, author_rank) VALUES ('opus', 1, 1)"
-        )
-        self.connection.commit()
-        page = self.render("/operations", {"area": ["usage"]})
-        self.assertIn("Providers this month", page)
-        self.assertIn("opus", page)
-        self.assertIn("$/pass", page)
-
-
-class OperationsUsage(ScreenCase):
-    def test_relocated_details_keep_fixture_totals_provider_values_and_clock(self):
-        self.provider("fixture-provider", author_rank=2, reviewer_rank=1)
-        self.connection.execute("INSERT INTO bill VALUES ('fixture-plan', 'api', 100)")
-        first = self.item("First delivery")
-        second = self.item("Second delivery")
-        self.connection.execute("UPDATE item SET shipped_at = '2026-09-04T12:00:00Z'")
-        assignment = self.assignment(first, provider="fixture-provider")
-        other_assignment = self.assignment(second)
-        update_assignment(self.connection, assignment, started="2026-09-04T10:00:00Z")
-        update_assignment(self.connection, other_assignment, started="2026-09-04T08:00:00Z")
-        record_cost(self.connection, source="run", provider="fixture-provider", bill="fixture-plan",
-                    assignment=assignment, pass_="review-1", usd=9)
-        record_cost(self.connection, source="reserved", bill="fixture-plan", usd=2)
-        self.connection.execute("UPDATE cost SET timestamp = '2026-09-04T12:00:00Z'")
-        self.connection.commit()
-        before = tuple(self.connection.iterdump())
-
-        page = self.render("/operations", {"area": ["usage"]})
-        for expected in ("Week, cost and provider details", 'class="tile-value">$4.50',
-                         'class="tile-value">3.0 h', "shipped items</dt><dd>2",
-                         "fixture-plan: $9.00 of $100.00 (+$2.00 reserved)",
-                         "<td>fixture-provider</td><td>2</td><td>1</td><td>1</td><td>0</td><td>$9.00"):
-            self.assertIn(expected, page)
-        self.assertNotIn("Age in status", page)
-        self.assertNotIn("Jobs needing attention", page)
-        self.assertEqual(tuple(self.connection.iterdump()), before)
 
 
 class Backlog(ScreenCase):

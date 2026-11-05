@@ -24,7 +24,7 @@ from .caching import STATIC_VERSIONS
 from .markup import Markup, join, tag
 from .v2 import VERSIONS as UI_VERSIONS
 
-__all__ = ["shell_page", "tile", "command_hint"]
+__all__ = ["shell_page", "command_hint"]
 
 
 def command_hint(command: str) -> Markup:
@@ -34,32 +34,6 @@ def command_hint(command: str) -> Markup:
 
 def command_reference(command: str) -> Markup:
     return tag("span", hidden=True, data_cli=command)
-
-
-def tile(label: str, value: object, *, detail: Markup | None = None, href: str | None = None) -> Markup:
-    """A number, its label, and its inputs in a detail view.
-
-    Criterion 15 offers "on hover or in a detail view" and requirement 5
-    forbids a hover-only affordance, so this renders the detail view: a
-    `details` element the operator taps open. There is no `title` attribute
-    and no tooltip anywhere on this page.
-    """
-    body: list[object] = [
-        tag("p", label, class_="tile-label"),
-        tag("p", value, class_="tile-value"),
-    ]
-    if href:
-        body.append(tag("p", tag("a", "Open", href=href), class_="tile-open"))
-    if detail is not None:
-        body.append(
-            tag(
-                "details",
-                tag("summary", "Inputs"),
-                detail,
-                class_="tile-detail",
-            )
-        )
-    return tag("div", join(body), class_="tile")
 
 
 def _equivalents(rendered_body: Markup) -> Markup:
@@ -79,7 +53,7 @@ def shell_page(title: str, section: str, *body: object, subtitle: str, note: str
     `section` is the rail entry the screen belongs to; `note` fills the Details pane; `screen` names the palette scope,
     one of `runner_exec.SCREENS` (sd:4002).
     `cli_equivalents=False` leaves out the folded list of the body's commands.
-    `script` names a `/ui/` page script that loads before shell.js, as a v2 page's does: Operations declares its views.
+    `script` names a `/ui/` page script that loads before shell.js, as a v2 page's does: Operations moved follows an old view.
     The body keeps its server-drawn forms, which `/static/dashboard.js` submits as before; it leaves the keys to the
     shell but `p`. `/ui/classic.css` styles that markup.
     A body with a table or a list gets row 1 marked for the shell's one bar (sd:5539), which filters its tables and sets

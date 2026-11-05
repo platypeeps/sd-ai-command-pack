@@ -1,13 +1,13 @@
 """Metrics: the readings behind the default UI's Metrics page (sd:2119).
 
 The page is `v2/metrics.html`; it holds no data. It reads one JSON document,
-`/api/metrics`, built here by `document` from the reads the classic Usage and
-Progress areas already make:
+`/api/metrics`, built here by `document` from the reads the retired Usage and
+Progress areas made:
 
 - `usage`: the month as `sd usage --json` prints it (`usage.read`), so the
-  page, the classic screen and the CLI cannot disagree about a dollar
-  (requirement 6). Dollars are the month to date, not a week: a week of spend
-  would be a second computation of the same ledger.
+  page and the CLI cannot disagree about a dollar (requirement 6). Dollars are
+  the month to date, not a week: a week of spend would be a second computation
+  of the same ledger. `?month=` names another month (pack sd:7524).
 - `trend`: the last 7-day-window meter reading of each day for the last week
   (`reads.meter_days`).
 - `numbers`: the week's four numbers (`reads.weekly_numbers`).
@@ -21,7 +21,7 @@ Progress areas already make:
   median wait past the 30 min target (pack sd:7412) is `over`: the lane runner files the parallel-lanes question
   then. The range leaves it at 7 days, as it leaves Age.
 - `controls`: the provider registry as `provider_controls.snapshot` reads it, with its `revision`, and per bill the
-  one cap write the route takes (`_writes`), the read the classic Usage area's forms make (sd:3387).
+  one cap write the route takes (`_writes`, sd:3387).
 - `range`: the page's range, `7d` or `6mo` (`RANGES`, pack sd:7208). With `6mo`, `ranged` holds the parts the range
   changes, read over the last six calendar months, this one to date (`_ranged`): `spend`, dollars by bill per month,
   one `usage.read` a month; `scorecard`, the providers' six months; `ci`, the gate runs since the first month began.
@@ -54,12 +54,18 @@ from sd_db import provider_controls, reads, registry, reporting, usage
 from sd_db.errors import SdDbError
 
 from . import pack_module
-from .operations_screen import BILL_NAME
 from .queue_screen import READ_FAILURES
 from .tasks_screen import is_scheduled
 
-__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "MONTHS", "RANGES", "SLOT_WAIT", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW",
+__all__ = ["BILL_NAME", "CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "MONTHS", "RANGES", "SLOT_WAIT", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW",
            "document", "health", "slow", "times"]
+
+#: A bill name the cap route (`/api/bills/<name>/cap`, `server.action_route`) accepts in its path. The registry puts
+#: no rule on a bill name (`registry.parse` takes every key of the `bills` mapping), so the bound is this route's own
+#: and the services route's, character for character, 200 at most (#435's verification round). `_writes` offers a
+#: write only for a name it matches, so no control posts to a path that answers 404. Moved here from the retired
+#: Usage area (pack sd:7524).
+BILL_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}"
 
 #: The vendor window the trend draws: seven days, in minutes.
 WINDOW = 10080
@@ -342,7 +348,7 @@ def _writes(name, spawned, held):
 
     A bill a `start` entry is billed to takes no cap (`set_cap` refuses it with the registry's sentence), except the
     clear of a legacy row cap the merged view hides, the repair `set_cap(..., None)` makes. A name outside `BILL_NAME`
-    has no route. The rule is `operations_screen._bill_caps`', so both screens offer the same writes until slice 10.
+    has no route. Operations Usage's cap forms had the same rule; they retired in pack sd:7524.
     """
     if not re.fullmatch(BILL_NAME, name):
         return "", "its name is outside what the cap route accepts"
@@ -454,23 +460,35 @@ def slow(connection, name: str, *, now: str) -> dict:
     raise ValueError(f"{name!r} is not a slow Metrics part")
 
 
-def document(connection, *, now: str, kept=None, span: str = "7d") -> dict:
+def _past(connection, month, now, current) -> dict:
+    """`month`'s read for the history panels, with this month's `meter`: the week lamps and Budget used, now stay live.
+    An unread live meter is `meter_error`, not an empty list that reads as no reading."""
+    past = _guard(lambda: {"error": "", **usage.read(connection, month=month, now=now).document()})
+    if past["error"]:
+        return past
+    return {**past, "meter": current.get("meter", []), **({"meter_error": current["error"]} if current["error"] else {})}
+
+
+def document(connection, *, now: str, kept=None, span: str = "7d", month: str | None = None) -> dict:
     """The Metrics page's document: every reading, each guarded on its own, and the panels no reader covers.
 
     `kept(name)` answers a `SLOW` part from the server's snapshot, with `observed` and `stale`; without it they are
-    read now. `span` is one of `RANGES`; `6mo` adds `ranged`, read now.
+    read now. `span` is one of `RANGES`; `6mo` adds `ranged`, read now. `month`, `YYYY-MM`, makes `usage` that
+    month's read, now, the picker Operations Usage had (pack sd:7524), but its `meter` stays this month's (`_past`);
+    `attention` stays on this month's too, so the rail badge does not move with the month the page shows.
     """
     if span not in RANGES:
         raise ValueError(f"{span!r} is not a Metrics range: {', '.join(RANGES)}")
     today = _stamp(now).date()
     read_slow = kept or (lambda name: slow(connection, name, now=now))
-    spend, trend = _guard(lambda: read_slow("usage")), _guard(lambda: _trend(connection, today))
+    current, trend = _guard(lambda: read_slow("usage")), _guard(lambda: _trend(connection, today))
+    spend = current if month is None else _past(connection, month, now, current)
     ci = _guard(lambda: _ci(connection, now))
     ranged = {"ranged": _ranged(connection, now, today)} if span == "6mo" else {}
     return {
         "read": now,
         "range": span,
-        "attention": _attention(spend, trend, ci),
+        "attention": _attention(current, trend, ci),
         "usage": spend,
         "trend": trend,
         "numbers": _guard(lambda: read_slow("numbers")),

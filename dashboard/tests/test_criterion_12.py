@@ -95,7 +95,7 @@ class DeliberateWriteControls(ScreenCase):
                 self.assertIn('action="/api/', form, path)
                 self.assertIn('data-workflow-form', form, path)
                 # The palette form shows the registered command it runs; the CLI that mirrored it went with the runner (sd:3041).
-                # No pack verb sets a bill cap, so that form names none (`operations_screen._bill_caps`).
+                # No pack verb sets a bill cap, so a cap form would name none (Metrics' Cap says so, pack sd:7524).
                 if "data-palette-form" not in form and "/cap\"" not in form:
                     self.assertRegex(form, r'data-cli="sd (task|note|work|writing|assignments|providers) ', path)
                 self.assertNotIn('<code class="command">', form)
@@ -256,14 +256,13 @@ class OnTheWire(ScreenCase):
         row. A section is not the same thing as a destination.
 
         sd:3402 retired classic Today, so Operations is the classic page whose
-        links are followed. Sessions starts the fleet collector, which waits up
-        to its 12 s on a child; under a loaded gate that outlasted `fetch`'s
-        10 s (sd:2718). The route is the subject here, so its read fails at
-        once, and Services reads an empty launchd fixture, not this Mac's.
+        links are followed. Any page that reads launchd reads an empty
+        fixture here, not this Mac's. Sessions and Services moved to
+        Management in pack sd:7517, so this page starts no fleet collector.
         """
         from unittest.mock import patch
 
-        from sd_dashboard import reports_screen, sessions_screen
+        from sd_dashboard import reports_screen
         from sd_db import services
 
         empty = Path(self.tmp.name) / "launchd"
@@ -271,8 +270,7 @@ class OnTheWire(ScreenCase):
         self.listening.RequestHandlerClass.services_backend = services.ServiceBackend(
             user_agents=empty, system_daemons=empty, runner=lambda argv: self.fail(f"launchctl {argv}"))
         # Resources reads sd_tile in a child, which runs launchctl; it reads nothing here.
-        with patch.object(sessions_screen, "collect", side_effect=OSError("not read by this test")), \
-                patch.object(reports_screen, "collect", lambda area: ""):
+        with patch.object(reports_screen, "collect", lambda area: {"sections": [], "rows": []}):
             _, _, body = self.fetch("/operations")
             for href in set(re.findall(r'href="(/[^"]*)"', body)):
                 status, _, _ = self.fetch(href.replace("&amp;", "&"))
