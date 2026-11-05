@@ -825,6 +825,8 @@ URL_OUTPUT_CONTRACT = (
     'or null. Example: {"findings": [{"path": "src/example.rs", "line": 12, "severity": "high", '
     '"summary": "When X happens, Y fails, so Z breaks.", "family": "correctness"}]}'
 )
+READER_OVERHEADS = {"codex-json": None, "claude-json": sd_lib.READER_PROMPTS["claude-json"] + "\n\nReview input:\n", "agy-json": "\n\nReview input:\n",
+                    "opencode-json": "\n\nReview input:\n", "url": f"\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{URL_OUTPUT_CONTRACT}"}
 
 
 def codex_argv(
@@ -882,19 +884,8 @@ def codex_argv(
     ]
 
 
-def reader_overheads() -> dict[str, str | None]:
-    """What each reader kind wraps around prompt and material; None reads the repository itself."""
-    return {"codex-json": None, "claude-json": sd_lib.READER_PROMPTS["claude-json"] + "\n\nReview input:\n",
-            "agy-json": "\n\nReview input:\n",
-            "opencode-json": "\n\nReview input:\n",
-            "url": f"\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{URL_OUTPUT_CONTRACT}"}
-
-
-def collect_material(root: pathlib.Path, subject: Subject, prompt: str) -> tuple[str, list[dict[str, Any]]]:
-    """sd:7653: the rename and deletion fallbacks fit prompt, material and the largest overhead
-    under the limit, so every caller sends and measures the same material."""
-    reserve = len(prompt.encode("utf-8")) + max(len(text.encode("utf-8")) for text in reader_overheads().values() if text)
-    return sd_review_material.collect_review_material(root, subject, MAX_OUTPUT_BYTES, reserve)
+def collect_material(root: pathlib.Path, subject: Subject, prompt: str) -> tuple[str, list[dict[str, Any]]]:  # sd:7653: fit prompt, material, overhead
+    return sd_review_material.collect_review_material(root, subject, MAX_OUTPUT_BYTES, len((prompt + max(filter(None, READER_OVERHEADS.values()), key=lambda text: len(text.encode()))).encode()))
 
 
 def review_material(root: pathlib.Path, subject: Subject, prompt: str) -> str:
@@ -903,9 +894,7 @@ def review_material(root: pathlib.Path, subject: Subject, prompt: str) -> str:
         material, _inventory = collect_material(root, subject, prompt)
     except (OSError, UnicodeError, ValueError, subprocess.SubprocessError) as error:
         raise Refusal(f"cannot read review input; no partial subject sent: {error}") from None
-    if len(material.encode("utf-8")) > MAX_OUTPUT_BYTES:
-        raise Refusal(f"review input exceeds {MAX_OUTPUT_BYTES} bytes; split the review subject")
-    return material
+    return material  # run_provider refuses a request_prompt over MAX_OUTPUT_BYTES
 
 
 def claude_argv(workdir: pathlib.Path, start: str) -> list[str]:
@@ -2014,7 +2003,6 @@ def review(
         authored_subject = subject if target_base == subject.head else subject._replace(base=target_base)
     checklist = "" if preflight else blocker_checklist(root, subject, getattr(args, "database", None), env)
     prompt, prepended, context = ("", False, []) if preflight else prepared_prompt(root, subject, args, previous, env, checklist)
-    overheads = reader_overheads()
     try:
         _material, inventory = ("", []) if preflight else collect_material(root, subject, prompt)
         input_manifest = sd_review_material.input_manifest(inventory, prompt, {}, MAX_OUTPUT_BYTES, context)
@@ -2029,7 +2017,7 @@ def review(
     meter_candidates, selection_refusal = ([], "") if not asked else sd_review_readiness.select_ready_candidates(
         registry, args.provider, explain=args.explain, consent=consent, readers=READERS,
     )
-    transport_overheads = {provider.name: overheads["url" if provider.url else provider.reader or "codex-json"]
+    transport_overheads = {provider.name: READER_OVERHEADS["url" if provider.url else provider.reader or "codex-json"]
                            for provider in meter_candidates}
     if input_manifest["status"] != "unreadable":
         input_manifest = sd_review_material.input_manifest(inventory, prompt, transport_overheads, MAX_OUTPUT_BYTES, context)
