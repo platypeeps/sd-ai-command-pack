@@ -192,15 +192,24 @@ def _ended(row) -> dict | None:
     return entry
 
 
-def _entries(connection) -> tuple[list[tuple[str, dict]], int]:
+def _written(row, since: str) -> bool:
+    """The entry's row was written at or after `since`; a stamp that does not parse counts, since its age is unknown."""
+    try:
+        return _stamp(str(row["timestamp"])) >= _stamp(since)
+    except ValueError:
+        return True
+
+
+def _entries(connection, since: str) -> tuple[list[tuple[str, dict]], int]:
     """The lane entries that ended, oldest first, each with its end as `%Y-%m-%dT%H:%M:%SZ`, and the count of bodies that
-    are not lane entries (`unreadable`). One entry runs once: the lane queues a retry as a new entry."""
+    are not lane entries (`unreadable`) written since `since` (pack sd:7734): an older bad body is out of the range. One
+    entry runs once: the lane queues a retry as a new entry."""
     ended, unreadable = [], 0
     for row in reads.lane_entries(connection):
         try:
             entry = _ended(row)
         except ValueError:
-            unreadable += 1
+            unreadable += _written(row, since)
             continue
         if entry:
             ended.append((_stamp(entry["finished_at"]).strftime("%Y-%m-%dT%H:%M:%SZ"), entry))
@@ -212,13 +221,13 @@ def _ci(connection, now, since=None):
     """CI health from the lane's entries (sd:5473): the latest checkpoint of each, as `reads.lane_entries` reads it.
 
     A run is an entry that ended in the range: passed (`PASSED`) or failed, the failure split by `_failure`. The rate is
-    passed over gate runs, passed plus `gate`; a review stop or a conflict ran no gate. A body that is not a lane entry
-    is `unreadable`. The range is `CI_DAYS` ending now, or from `since`; `days` counts it in whole days. The flaky heads
+    passed over gate runs, passed plus `gate`; a review stop or a conflict ran no gate. A body in the range that is not
+    a lane entry is `unreadable`. The range is `CI_DAYS` ending now, or from `since`; `days` counts it in whole days. The flaky heads
     moved to Today's Needs you (`flaky`, pack sd:7663).
     """
     days = CI_DAYS if since is None else math.ceil((_stamp(now) - _stamp(since)).total_seconds() / 86400)
     since = since or (_stamp(now) - timedelta(days=CI_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    ended, unreadable = _entries(connection)
+    ended, unreadable = _entries(connection, since)
     repos: dict[str, dict] = {}
     for at, entry in ended:
         if at < since:
@@ -253,7 +262,7 @@ def flaky(connection, now: str) -> tuple[list[dict], int]:
     since = (_stamp(now) - timedelta(days=CI_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     failed: dict[tuple, list] = {}
     found = {}
-    ended, unreadable = _entries(connection)
+    ended, unreadable = _entries(connection, since)
     for at, entry in ended:
         head = entry.get("head") or entry.get("expected_head")
         if not isinstance(head, str):
