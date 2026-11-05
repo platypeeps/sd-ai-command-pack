@@ -480,6 +480,17 @@ class TheTimeline(ReaderCase):
             self.assertIn(f"▨ unknown · {kind} not read:", plot)
         self.assertNotIn('<rect class="tick', plot)
 
+    def test_an_activity_read_that_fails_shows_even_when_no_mark_is_in_the_window(self):
+        """A window with no Today mark and no event still says Activity was not read: unknown is not zero."""
+        self.TRACK = {**self.TRACK, "landed": []}
+        out = self.run_timeline("ANSWER = path => path.startsWith('/api/activity') ? [500, { error: 'database locked' }] : [200, DOC0];"
+                                " showTimeline(); await flush();" + self.DRAWN)
+        plot = out["R"]["plot"]
+        self.assertNotIn("Nothing landed", plot)
+        for kind in ("merges", "runs", "reviews", "commands"):
+            self.assertIn(f"▨ unknown · {kind} not read: database locked", plot)
+        self.assertIn("merges not read, runs not read", plot)
+
     def test_a_7_day_tick_and_row_open_activity_at_7_days(self):
         """Activity reads 24 hours unless asked: an older event's link carries the range, or it opens with no row."""
         out = self.run_timeline("showTimeline(); await flush(); R.day = ELS['track-plot'].html; range('7d');" + self.DRAWN)

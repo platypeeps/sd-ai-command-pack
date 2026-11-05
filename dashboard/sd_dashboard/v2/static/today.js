@@ -722,8 +722,10 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     const of = k => marks.filter(m => m.lane === k).length;
     const events = AV.doc ? AV.doc.events.filter(e => inside(e.at)) : [];
     const evs = k => events.filter(e => e.k === k.id);
+    // A failed Activity read draws its hatched lanes even in a window with no mark: unknown is not zero.
+    const unknown = KINDS.some(k => kindWhy(k));
     const said = `${SPAN_SAID[span]}: ${of('landed')} landed, ${plural(of('jobs'), 'job')} failed, ${plural(of('briefs'), 'brief')} filed, ${plural(of('live'), 'session')} live`
-      + (AV.doc ? `; ${KINDS.map(k => kindWhy(k) ? `${k.name.toLowerCase()} not read` : `${evs(k).length} ${k.name.toLowerCase()}`).join(', ')}` : '');
+      + (AV.doc || AV.error ? `; ${KINDS.map(k => kindWhy(k) ? `${k.name.toLowerCase()} not read` : `${evs(k).length} ${k.name.toLowerCase()}`).join(', ')}` : '');
     const ticks = [];
     // A day tick is each local midnight, stepped by the calendar, so a day of 23 or 25 hours (DST) keeps one tick a day.
     if (span === '7d') for (const d = new Date(t0); d.setHours(24, 0, 0, 0) <= t1;) ticks.push([d.getTime(), d.toLocaleDateString([], { weekday: 'short', day: 'numeric' })]);
@@ -744,7 +746,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       if (why) return html`${label}<rect class="unread" x="${X0}" y="${y - 7}" width="${W - 8 - X0}" height="14"/><text class="lane-note" x="${X0 + 4}" y="${y + 4}">▨ unknown · ${k.name.toLowerCase()} not read: ${why}</text>`;
       return html`${label}${evs(k).sort((a, b) => ORDER[a.s] - ORDER[b.s]).map(e => html`<a href="${eventHref(e)}"><rect class="tick ${e.s}" x="${(+x(e.at) - 1.5).toFixed(1)}" y="${y - 6}" width="3" height="12"><title>${hm(e.at)} UTC · ${e.what}</title></rect></a>`)}`;
     };
-    put($('track-plot'), marks.length || events.length ? html`<svg viewBox="0 0 ${W} ${TRACK_H + 14}" role="img" aria-label="${said}">
+    put($('track-plot'), marks.length || events.length || unknown ? html`<svg viewBox="0 0 ${W} ${TRACK_H + 14}" role="img" aria-label="${said}">
       <defs><pattern id="track-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line class="hatch" x1="0" y1="0" x2="0" y2="7"/></pattern></defs>
       ${ticks.map(([t, label]) => { const gx = x(new Date(t).toISOString()); return html`<line class="grid" x1="${gx}" y1="6" x2="${gx}" y2="${TRACK_H - 4}"/><text class="axis" x="${gx}" y="${TRACK_H + 10}" text-anchor="middle">${label}</text>`; })}
       ${LANES.map(([, label, y]) => html`<text class="lane-l" x="0" y="${y + 4}">${label}</text>`)}
