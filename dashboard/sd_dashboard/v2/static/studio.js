@@ -53,9 +53,11 @@
       <td class="acts"><a class="btn quiet sm" href="${url(f)}" target="_blank" rel="noopener">Open</a>${r.render
         ? html`<button class="btn quiet sm" type="button" data-cmd="studio.rerender" data-obj="${f.id}">Re-render</button>` : ''}</td></tr>`;
   }
+  // A pressed File type tile narrows the expanded files to that type too (sd:7709).
   function subs(r) {
-    const list = results(r);
+    const list = results(r).filter(f => !F.type || typeOf(f) === F.type);
     if (list.length) return list.map(f => sub(r, f));
+    if (F.type) return html`<tr class="sub empty"><td class="g"></td><td colspan="6">No rendered ${F.type} file; clear the File type filter to list the others.</td></tr>`;
     return html`<tr class="sub empty"><td class="g"></td><td colspan="6">No rendered file yet. Results list from a selected, print, stickers, previews or media root, and a song's final-video.mp4 or illustrated-film/renders films; a hidden one stays in Details.</td></tr>`;
   }
   function row(r) {
