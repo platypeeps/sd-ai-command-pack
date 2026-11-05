@@ -7,7 +7,7 @@ disable-model-invocation: true
 # sd-review
 
 Review locally; report findings without posting them to GitHub.
-Read the sd-ai-command-pack checkout's `.claude/rules/sd-operator-defaults.md` before selecting recipients.
+Read the sd-workflow checkout's `.claude/rules/sd-operator-defaults.md` before selecting recipients.
 Use STE-Concise for findings and reports.
 Report only the result, decisive evidence, unresolved findings, and next action.
 
@@ -54,7 +54,7 @@ Installation does not grant consent.
 
 Planning reviews use the *prd and design* point.
 Branch review before publication uses *code, before merge*.
-Their caps are on those rows in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
+Their caps are on those rows in the sd-workflow checkout's `.claude/rules/sd-planning-adversarial-review.md`.
 Do not substitute another diff or copy a cap into this procedure.
 
 ## Ordinary review
@@ -151,7 +151,7 @@ If the table shows the PR does too much, split it.
 | `--dry-run` | Print invocations without execution. |
 | `--draft` | Apply draft routing. |
 | `--json` | Emit structured results. |
-| `--reuse-check` | Explicitly reuse eligible full-check evidence; otherwise run the deterministic gate. Never reuses in sd-ai-command-pack itself, which tracks no reuse declaration (`.github/sd-check-reuse.json`). |
+| `--reuse-check` | Explicitly reuse eligible full-check evidence; otherwise run the deterministic gate. Never reuses in sd-workflow itself, which tracks no reuse declaration (`.github/sd-check-reuse.json`). |
 | `--gate-check BRANCH` | Branch scope: run the gate as the local gate does against `origin/BRANCH`, leaving a gate receipt for the merge gate; `sd-ship prepare` passes it under `repo.ci = local`. |
 | `--timeout SECONDS` | Set the per-phase timeout for the gate and each provider; unset, the gate gets 3600 and each provider 1800. |
 
@@ -236,12 +236,12 @@ The `never_skip` deny-list overrides docs-skip rules.
 
 This is a separate, explicitly requested installation operation, not part of local review.
 Mode `guest` cannot install the routing workflow (R10-D5); `full` and `minimal` can.
-Before installation or drift checks, read `skills/sd-review/references/setup-github.md` in the sd-ai-command-pack checkout.
+Before installation or drift checks, read `skills/sd-review/references/setup-github.md` in the sd-workflow checkout.
 The workflow reports routing only; it requests no reviewer and posts no comment.
 
 ## Conditional procedures
 
-Read only the applicable reference in the sd-ai-command-pack checkout:
+Read only the applicable reference in the sd-workflow checkout:
 
 - Before `--reuse-check`, read `skills/sd-check/references/check-receipts.md`.
   Reuse requires a tracked complete local-only declaration and a clean committed checkout.

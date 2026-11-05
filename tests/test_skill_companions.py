@@ -438,7 +438,7 @@ class WorkflowReferenceTests(unittest.TestCase):
                         body = home.target_for(surface.name).read_text(encoding="utf-8")
                         paths = re.findall(r"`(skills/sd-[^`]+/references/[^`]+\.md)`", body)
                         self.assertGreater(len(paths), 0, "conditional procedures disappeared")
-                        self.assertIn("sd-ai-command-pack checkout", body)
+                        self.assertIn("sd-workflow checkout", body)
                         for relative in paths:
                             target = (REPO_ROOT / relative).resolve()
                             self.assertTrue(target.is_relative_to(REPO_ROOT))

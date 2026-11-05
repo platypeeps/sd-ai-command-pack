@@ -31,7 +31,7 @@ Reuse the stable review record; do not create another record to escape review hi
 Itemless merge remains manual and retains the same protection, ownership, review, and exact-head gates.
 Do not run every listed check twice: the local review also invokes the repository gate.
 Check reviewer eligibility and approval boundaries before that expensive invocation.
-Read the sd-ai-command-pack checkout's [operator defaults](../.claude/rules/sd-operator-defaults.md) for reviewer and report preferences.
+Read the sd-workflow checkout's [operator defaults](../.claude/rules/sd-operator-defaults.md) for reviewer and report preferences.
 
 ## Implementation ownership
 

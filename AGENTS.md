@@ -1,4 +1,4 @@
-# sd-ai-command-pack
+# sd-workflow
 
 Instructions for AI assistants working in this repository.
 
@@ -16,7 +16,7 @@ Instructions for AI assistants working in this repository.
 - Record decisions, incidents and findings in sd notes, not in new `docs/` files.
 - Do not create pull requests in the upstream `Trellis` repository without
   explicit approval from the user for that specific upstream PR. If
-  `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
+  `sd-workflow` work uncovers a `Trellis`-owned change, document the
   finding and provide a paste-ready handoff instead of opening a `Trellis` PR.
 - At the planning convergence boundary, follow
   [.claude/rules/sd-planning-adversarial-review.md](.claude/rules/sd-planning-adversarial-review.md).

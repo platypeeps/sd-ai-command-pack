@@ -49,7 +49,7 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_REFUSED = 3
 
-ACTION_REPOSITORY = "platypeeps/sd-ai-command-pack"
+ACTION_REPOSITORY = "platypeeps/sd-ai-command-pack"  # old slug on purpose; sd:7633 moves it
 ACTION_SUBPATH = "actions/review-route"
 # Pinned by digest with the tag beside it, because that is what this
 # repository's own workflow security audit requires -- and a consumer inherits

@@ -2,8 +2,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-unittest-2E7D32)](#verify)
-[![License: MIT](https://img.shields.io/github/license/platypeeps/sd-ai-command-pack)](LICENSE)
-[![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/platypeeps/sd-ai-command-pack)
+[![License: MIT](https://img.shields.io/github/license/platypeeps/sd-workflow)](LICENSE)
+[![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/platypeeps/sd-workflow)
 
 ## Overview
 
@@ -355,8 +355,8 @@ an explicitly configured private HTTPS front door and operator identity.
 ## Install
 
 ```bash
-git clone https://github.com/platypeeps/sd-ai-command-pack
-cd sd-ai-command-pack
+git clone https://github.com/platypeeps/sd-workflow
+cd sd-workflow
 python3 bin/sd_install.py --user
 ```
 

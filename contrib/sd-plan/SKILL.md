@@ -61,7 +61,7 @@ write a design just to record routine progress or work already merged.
    development
    flow's *prd and design* review point. The review table in
    `.claude/rules/sd-planning-adversarial-review.md` gives the cap on that row.
-   That file lives only in the sd-ai-command-pack checkout, and planning runs
+   That file lives only in the sd-workflow checkout, and planning runs
    in whatever repository encloses cwd (R10-D6), so read the cap there. Record
    the findings on the item's row.
 5. **Promote.** `planning → ready` only when acceptance criteria are present
@@ -71,7 +71,7 @@ write a design just to record routine progress or work already merged.
    by a status field or a GitHub issue.
 6. **Branch.** Create the branch when work starts; the row records it. The branch's checkout holds one writer:
    this session in its own worktree (`--worktree`), or the runner in its
-   clone. See the sd-ai-command-pack checkout's `WORKFLOW.md`, section
+   clone. See the sd-workflow checkout's `WORKFLOW.md`, section
    **Parallel work**. An `in_progress` item still needs a branch
    (`sd-docs-lint` rule 2); in a checkout using row status, the status itself
    remains on the row.

@@ -474,6 +474,13 @@ class ThroughTheScript(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout), (1, ""))
         self.assertIn(f"missing installed runtime {self.root / 'gone'}", result.stderr)
 
+    def test_the_default_interpreter_is_the_renamed_checkouts_venv(self):
+        """sd:6027: with no override the verb looks in the `sd-workflow` checkout under HOME."""
+        result = self.grants(DASHBOARD_PYTHON=sys.executable)
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        self.assertIn(f"missing installed runtime {self.root}/repos/platypeeps/sd-workflow/.venv/bin/python",
+                      result.stderr)
+
     def test_the_verb_is_in_the_help(self):
         result = self.grants("help")
         self.assertEqual(result.returncode, 0)

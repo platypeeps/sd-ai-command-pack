@@ -89,7 +89,7 @@ class TheReceiptSaysWhichCheckout(PackCase):
     def test_a_checkout_the_receipt_does_not_name_is_not_consulted(self):
         """The receipt picks the directory. A second clone sitting somewhere
         else on disk is not what the installed skills load."""
-        (self.home / "repos/sd-ai-command-pack/bin").mkdir(parents=True)
+        (self.home / "repos/sd-workflow/bin").mkdir(parents=True)
         support.pack(self.home, checkout=self.home / "installed-copy")
         self.assertEqual(self.installed().checkout, self.home / "installed-copy")
 
