@@ -195,7 +195,7 @@ class TheAssets(BrowserSession):
             self.assertIn(".track-plot", sel, f"{sel} also matches svg.i in the track table")
         self.assertTrue(any("width: 100%" in body for _, body in svg_rules), "the chart no longer fills its plot")
         self.assertIn('class="track-plot"', (V2 / "today.html").read_text(encoding="utf-8"))
-        self.assertIn("put($('track-plot'), marks.length ? html`<svg ", TODAY_JS)
+        self.assertIn("put($('track-plot'), marks.length || events.length ? html`<svg ", TODAY_JS)
 
     def test_a_members_detail_in_details_sits_on_its_own_line(self):
         """pack sd:7678: Details lists a group's members as title then `.via` detail. `.via` was styled

@@ -402,6 +402,85 @@ class TheTrack(ReaderCase):
         self.assertEqual((out["R"]["key"], out["R"]["table"]), ("", True))
 
 
+class TheTimeline(ReaderCase):
+    """pack sd:7681: the Timeline is one chart on one time axis: Today's Landed, Jobs, Briefs and Live lanes, then one
+    lane per Activity kind, read from /api/activity?range=7d when the view first shows. The 24h / 7d tiles drive the
+    whole view: its axis, its marks and its table."""
+
+    TRACK = {"since": "2026-08-30T12:00:00Z", "day": "2026-09-05T12:00:00Z", "until": NOW,
+             "key": {"landed": 1, "landing": 0, "due_week": 0, "blocked": 0},
+             "landed": [{"at": "2026-09-03T10:00:00Z", "id": "item:6", "item": 6, "what": "sd:6 Three days ago"},
+                        {"at": "2026-09-06T10:00:00Z", "id": "item:7", "item": 7, "what": "sd:7 Seven"}],
+             "jobs": [], "briefs": [], "live": []}
+    ACTIVITY = {"read": NOW, "from": "2026-08-30T12:00:00Z", "to": NOW, "kinds": ["merge", "run", "review", "command"],
+                "sources": {"merge": "", "review": "database locked", "run": "", "job": "", "command": ""},
+                "events": [{"id": "merge:41", "k": "merge", "at": "2026-09-06T09:30:00Z", "s": "ok", "what": "Port the page"},
+                           {"id": "run:5", "k": "run", "at": "2026-09-06T08:00:00Z", "s": "warning", "what": "nightly-sync failed"},
+                           {"id": "cmd:9", "k": "command", "at": "2026-09-03T09:00:00Z", "s": "ok", "what": "sd status · exit 0"}]}
+    ANSWER = ("const ACT = %s;\nANSWER = path => path === '/api/activity?range=7d' ? [200, ACT] : [200, DOC0];\n"
+              "const showTimeline = () => (DOC_LISTENERS['shell:view'] || []).forEach(f => f({ detail: { id: 'timeline' } }));\n"
+              "const range = v => ELS['track-range'].listeners.click[0]({ target: { closest: s => s === '[data-range]' ? { dataset: { range: v } } : null } });\n")
+    DRAWN = "R.plot = ELS['track-plot'].html; R.rows = ELS['track-rows'].html; R.tiles = ELS['track-range'].html; R.h = ELS['track-h'].textContent;"
+
+    def run_timeline(self, body):
+        self.doc["track"] = self.TRACK
+        return self.run_page(body, after=self.ANSWER % json.dumps(self.ACTIVITY))
+
+    def test_the_timeline_carries_the_activity_lanes_under_todays(self):
+        out = self.run_timeline("R.before = ELS['track-plot'].html; showTimeline(); await flush();" + self.DRAWN)
+        self.assertEqual(out["gets"], ["/api/now", "/api/activity?range=7d"], "Activity is read once the Timeline shows")
+        self.assertNotIn("tick", out["R"]["before"])
+        plot = out["R"]["plot"]
+        labels = re.findall(r'<text class="lane-l" x="0" y="\d+">(\w+)</text>', plot)
+        self.assertEqual(labels, ["Landed", "Jobs", "Briefs", "Live", "Merges", "Runs", "Reviews", "Commands"])
+        self.assertEqual(plot.count("<svg "), 1, "one chart, one time axis")
+        # The 24 hours: the merge and the failed run; the command 3 days old is not drawn.
+        self.assertEqual(re.findall(r'<rect class="tick (\w+)"', plot), ["ok", "warning"])
+        self.assertIn('<a href="/activity?kind=merge&amp;row=merge%3A41">', plot)
+        self.assertIn("▨ unknown · reviews not read: database locked", plot)
+        self.assertIn('aria-label="Last 24 hours: 1 landed, 0 jobs failed, 0 briefs filed, 0 sessions live; 1 merges, 1 runs,'
+                      ' reviews not read, 0 commands"', plot)
+        self.assertIn("Port the page", out["R"]["rows"])
+        self.assertNotIn("sd status", out["R"]["rows"])
+
+    def test_the_range_tiles_change_the_axis_and_the_window(self):
+        out = self.run_timeline("showTimeline(); await flush(); R.day = ELS['track-plot'].html; range('7d');" + self.DRAWN
+                                + " R.search = location.search;")
+        day, week = out["R"]["day"], out["R"]["plot"]
+
+        def axis(plot):
+            return re.findall(r'<text class="axis"[^>]*>([^<]+)</text>', plot)
+
+        self.assertTrue(axis(day) and all(re.fullmatch(r"\d\d:00", a) for a in axis(day)), axis(day))
+        self.assertEqual(len(axis(week)), 7, axis(week))
+        self.assertFalse(any(a.endswith(":00") for a in axis(week)), "the 7d axis names days, not hours")
+        self.assertIn('aria-label="Last 7 days: 2 landed,', week)
+        # Lane by lane: the merge, the failed run, and the command 3 days old.
+        self.assertEqual(re.findall(r'<rect class="tick (\w+)"', week), ["ok", "warning", "ok"])
+        self.assertIn("sd status · exit 0", out["R"]["rows"])
+        self.assertIn("sd:6 Three days ago", out["R"]["rows"])
+        self.assertIn('data-range="7d" aria-pressed="true"', out["R"]["tiles"])
+        self.assertIn('data-range="24h" aria-pressed="false"', out["R"]["tiles"])
+        self.assertEqual(out["R"]["h"], "The last 7 days")
+        self.assertTrue(out["R"]["search"].endswith("&range=7d"), "the address keeps the row and the range")
+
+    def test_the_address_keeps_the_7_day_range(self):
+        out = self.run_timeline("showTimeline(); await flush();" + self.DRAWN)
+        self.assertIn("Last 24 hours", out["R"]["plot"])
+        self.doc["track"] = self.TRACK
+        out = self.run_page("showTimeline(); await flush();" + self.DRAWN, search="?range=7d",
+                            after=self.ANSWER % json.dumps(self.ACTIVITY))
+        self.assertIn('aria-label="Last 7 days:', out["R"]["plot"])
+
+    def test_an_activity_read_that_fails_hatches_every_kind_with_the_reason(self):
+        out = self.run_timeline("ACT.status = 1; ANSWER = path => path.startsWith('/api/activity') ? [500, { error: 'database is locked' }] : [200, DOC0];"
+                                " showTimeline(); await flush();" + self.DRAWN)
+        plot = out["R"]["plot"]
+        for kind in ("merges", "runs", "reviews", "commands"):
+            self.assertIn(f"▨ unknown · {kind} not read:", plot)
+        self.assertNotIn('<rect class="tick', plot)
+
+
 HELP = {
     "jobs": "Failed scheduled jobs. Press to list them in Needs you.",
     "lane": "Lane entries blocked until someone acts; merging, next and flaky heads (a gate that failed, then passed at one"

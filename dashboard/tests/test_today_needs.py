@@ -195,8 +195,9 @@ class TheGroups(ReportsCase):
 
 
 class TheTrack(ReportsCase):
-    """The day track (sd:5921): the last 24 hours as marks, one per landed item, failed run, new brief and session, and the
-    key's four counts. A mark outside the 24 hours is left out; a read that failed is its reason, never an empty day."""
+    """The day track (sd:5921): the last 7 days as marks (pack sd:7681: the Timeline's 24h / 7d tiles), one per landed
+    item, failed run, new brief and session, and the key's four counts, Landed over the last 24 hours. A mark outside
+    the 7 days is left out; a read that failed is its reason, never an empty day."""
 
     DELIVERED = [{"id": 7, "title": "Seven", "at": "2026-09-06 10:00:00"}, {"id": 8, "title": "Eight", "at": "2026-09-05T11:00:00Z"}]
     PLANNED = [{"due": "2026-09-08"}, {"due": "2026-09-20"}]
@@ -210,26 +211,29 @@ class TheTrack(ReportsCase):
             return now_screen.document(self.connection, now=NOW, jobs=jobs, fleet=fleet_document,
                                        lanes=queue(lane(rows=[{**blocked(1), "state": "merging"}])))["track"]
 
-    def test_each_lane_marks_its_source_in_the_last_24_hours_and_the_key_counts(self):
+    def test_each_lane_marks_its_source_in_the_last_7_days_and_the_key_counts_24_hours(self):
         from datetime import datetime, timezone
 
-        jobs = JobsBackend(self.tmp.name, jobs=[("nightly-sync", "failed", 7, None), ("old-one", "failed", 1, None)])
+        jobs = JobsBackend(self.tmp.name, jobs=[("nightly-sync", "failed", 7, None), ("old-one", "failed", 1, None),
+                                                ("older", "failed", 2, None)])
         jobs.log("nightly-sync", datetime(2026, 9, 6, 9, 0, tzinfo=timezone.utc).timestamp())
         jobs.log("old-one", datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc).timestamp())
+        jobs.log("older", datetime(2026, 8, 29, 9, 0, tzinfo=timezone.utc).timestamp())
         self.brief("2026-09-06 - Daily Intel Brief", at="2026-09-06T06:00:00Z")
         found = self.track(jobs)
-        self.assertEqual((found["since"], found["until"]), ("2026-09-05T12:00:00Z", NOW))
-        self.assertEqual([(m["at"], m["item"]) for m in found["landed"]], [("2026-09-06T10:00:00Z", 7)])
-        self.assertEqual([(m["at"], m["id"]) for m in found["jobs"]], [("2026-09-06T09:00:00Z", "job:nightly-sync:7")])
+        self.assertEqual((found["since"], found["day"], found["until"]), ("2026-08-30T12:00:00Z", "2026-09-05T12:00:00Z", NOW))
+        self.assertEqual([(m["at"], m["item"]) for m in found["landed"]], [("2026-09-05T11:00:00Z", 8), ("2026-09-06T10:00:00Z", 7)])
+        self.assertEqual([(m["at"], m["id"]) for m in found["jobs"]], [("2026-09-04T09:00:00Z", "job:old-one:1"),
+                                                                     ("2026-09-06T09:00:00Z", "job:nightly-sync:7")])
         self.assertEqual([m["at"] for m in found["briefs"]], ["2026-09-06T06:00:00Z"])
         self.assertEqual(found["live"], [])
         self.assertEqual(found["key"], {"landed": 1, "landing": 1, "due_week": 1, "blocked": 3})
 
     def test_a_session_started_before_the_window_is_live_from_the_windows_start(self):
-        """sd:6710: Live shows every session running now; one started days ago spans the whole window."""
+        """sd:6710: Live shows every session running now; one started before the 7 days spans the whole window."""
         from sd_db import today
 
-        active = {"rows": [{"item": 5585, "session": "Worktree old", "started": "2026-09-02T08:00:00Z"},
+        active = {"rows": [{"item": 5585, "session": "Worktree old", "started": "2026-08-20T08:00:00Z"},
                            {"item": 9, "session": "Worktree new", "started": "2026-09-06T11:30:00Z"}]}
         with mock.patch.object(today, "delivered", return_value=[]), \
                 mock.patch.object(today, "planned", return_value=[]), \
@@ -237,7 +241,7 @@ class TheTrack(ReportsCase):
             found = now_screen.track(self.connection, NOW, rows=[], briefs=[], active=active,
                                      lane={"merging": 0, "next": 0})
         self.assertEqual([(m["at"], m["item"]) for m in found["live"]],
-                         [("2026-09-05T12:00:00Z", 5585), ("2026-09-06T11:30:00Z", 9)])
+                         [("2026-08-30T12:00:00Z", 5585), ("2026-09-06T11:30:00Z", 9)])
 
     def test_a_read_that_failed_is_its_reason(self):
         import sqlite3

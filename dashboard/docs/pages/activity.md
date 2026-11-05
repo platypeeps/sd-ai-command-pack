@@ -1,7 +1,8 @@
 # Activity
 
 Activity is at `/activity` (sd:2111): one timeline of the last 24 hours, as an
-annunciator, a lane per kind and a ledger banded by hour. `GET /api/activity`
+annunciator and a ledger banded by hour. Its lane per kind moved to Today's
+Timeline (pack sd:7681), so Activity has no Cadence view. `GET /api/activity`
 (`activity_screen.document`) reads only what the library already records:
 merges are the delivery notes `sd-ship` writes, runs are runner assignments
 and launchd jobs placed at their log time, and commands are the execution
@@ -13,11 +14,12 @@ dispositions were accepted are a caution, and a merge with no review record is
 counted, not drawn. A review that never reached a merge is not recorded, and a
 review's time is its merge's. The design's deploy and mail kinds are left out:
 no repository records deployments, and the operator ruled out a mail reader
-(sd:2212). A kind whose every source failed to read draws hatched, unknown
-rather than zero, with the reason. The timeline's filters are one bar: state
+(sd:2212). A kind whose every source failed to read draws a hatched lamp,
+unknown rather than zero. `?range=7d` reads 7 days for Today's Timeline; the
+rail badge counts the 24 hours either way. The timeline's filters are one bar: state
 and range as segmented controls, a Repo list that filters as you type, and the
 picked kinds, repos and query as removable tokens, then Clear all; the lamps
-and lanes filter by kind. The shell draws that bar for every table page
+filter by kind. The shell draws that bar for every table page
 (`shell.list.fbar`, sd:5463); the count sits on the Timeline title line. Job retry posts the job's revision
 and asks first after exit 127, command not found, naming the exit (sd:3392). Its toast says "Retry
 started" only when launchctl accepted the request; a refusal names launchctl's

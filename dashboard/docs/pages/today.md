@@ -72,3 +72,12 @@ reads the lane again. The line above the table says the outcome in the words Nee
 A build run's Cancel asks first and posts `/api/assignments/<id>/cancel`; an ended blocked or cancelled bundle's Retry
 and Send to builder post `/api/queue/builds/retry` (pack sd:6020).
 Queue's Last 7 days moved to Metrics' Lane times view (pack sd:7233).
+
+The Timeline view is one chart on one time axis (pack sd:7681): Today's
+Landed, Jobs, Briefs and Live lanes from `/api/now`'s `track`, which carries 7
+days of marks, then one lane per Activity kind (Merges, Runs, Reviews,
+Commands) from `GET /api/activity?range=7d`, read when the view first shows
+and on each Read again after. The 24h and 7d tiles pick the window the axis,
+the marks and the table draw; `?range=7d` keeps the longer one. A kind whose
+read failed draws a hatched lane with the reason. A tick links to its event
+on Activity. The key's Landed counts the last 24 hours.
