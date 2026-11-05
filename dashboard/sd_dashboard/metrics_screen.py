@@ -460,21 +460,29 @@ def slow(connection, name: str, *, now: str) -> dict:
     raise ValueError(f"{name!r} is not a slow Metrics part")
 
 
+def _past(connection, month, now, current) -> dict:
+    """`month`'s read for the history panels, with this month's `meter`: the week lamps and Budget used, now stay live.
+    An unread live meter is `meter_error`, not an empty list that reads as no reading."""
+    past = _guard(lambda: {"error": "", **usage.read(connection, month=month, now=now).document()})
+    if past["error"]:
+        return past
+    return {**past, "meter": current.get("meter", []), **({"meter_error": current["error"]} if current["error"] else {})}
+
+
 def document(connection, *, now: str, kept=None, span: str = "7d", month: str | None = None) -> dict:
     """The Metrics page's document: every reading, each guarded on its own, and the panels no reader covers.
 
     `kept(name)` answers a `SLOW` part from the server's snapshot, with `observed` and `stale`; without it they are
     read now. `span` is one of `RANGES`; `6mo` adds `ranged`, read now. `month`, `YYYY-MM`, makes `usage` that
-    month's read, now, the picker Operations Usage had (pack sd:7524); `attention` stays on this month's, so the
-    rail badge does not move with the month the page shows.
+    month's read, now, the picker Operations Usage had (pack sd:7524), but its `meter` stays this month's (`_past`);
+    `attention` stays on this month's too, so the rail badge does not move with the month the page shows.
     """
     if span not in RANGES:
         raise ValueError(f"{span!r} is not a Metrics range: {', '.join(RANGES)}")
     today = _stamp(now).date()
     read_slow = kept or (lambda name: slow(connection, name, now=now))
     current, trend = _guard(lambda: read_slow("usage")), _guard(lambda: _trend(connection, today))
-    spend = current if month is None else _guard(
-        lambda: {"error": "", **usage.read(connection, month=month, now=now).document()})
+    spend = current if month is None else _past(connection, month, now, current)
     ci = _guard(lambda: _ci(connection, now))
     ranged = {"ranged": _ranged(connection, now, today)} if span == "6mo" else {}
     return {

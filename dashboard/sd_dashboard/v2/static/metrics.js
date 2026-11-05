@@ -163,7 +163,8 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     put($('bills'), html`${u.bills.map(b => { const st = capState(b); return bar(`bill:${b.name}`, b.name, `${b.cost_basis}${b.cap == null ? '' : ` · cap ${money(b.cap)}`}`, windowed(b) && !b.spent ? null : (b.cap ? b.spent / b.cap * 100 : b.spent / max * 100), windowed(b) && !b.spent ? '▨ window' : money(b.spent), st === 'ok' ? '' : st, st === 'ok' ? '' : st); })}`);
     $('bills-note').textContent = `Total ${money(u.spent)} spent${u.unbilled == null ? '' : ` (${money(u.unbilled)} on no bill)`} and ${money(u.held)} held in ${u.month}. ▨ marks a bill that spends a vendor window, not a zero.`;
     burns(u);
-    put($('windows'), u.meter.length ? html`${u.meter.map(m => { const st = pctState(m.used_percent); return bar(`win:${m.provider}:${m.window_minutes}`, m.provider, `${m.window_minutes} min window`, m.used_percent, `${m.used_percent}%`, st === 'ok' ? 's1' : st, st === 'ok' ? '' : st); })}` : html`<li class="why">No meter reading yet.</li>`);
+    // A past month keeps this month's meter (metrics_screen._past); meter_error says that read failed.
+    put($('windows'), u.meter_error ? html`<li>${unknownBlock(u.meter_error)}</li>` : u.meter.length ? html`${u.meter.map(m => { const st = pctState(m.used_percent); return bar(`win:${m.provider}:${m.window_minutes}`, m.provider, `${m.window_minutes} min window`, m.used_percent, `${m.used_percent}%`, st === 'ok' ? 's1' : st, st === 'ok' ? '' : st); })}` : html`<li class="why">No meter reading yet.</li>`);
   }
   // pack sd:7524: Operations Usage's burn line (charts.burn_svg), drawn here. A capped bill that is not a plan bill draws
   // spend to date as cumulative points, flat from its last row to today, the cap as a dashed rule, and, in the month

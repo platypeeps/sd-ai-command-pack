@@ -124,13 +124,29 @@ class TheDocument(Fixture):
         """pack sd:7524: ?month= reads any month, as Operations Usage's picker did; the badge stays on this month."""
         self.cost("run", "2026-08-10T10:00:00Z", provider="kimi", bill="capped", role="author", usd=120)
         doc = metrics_screen.document(self.connection, now=NOW, month="2026-08")
-        self.assertEqual(doc["usage"], {"error": "", **usage.read(self.connection, month="2026-08", now=NOW).document()})
+        past = usage.read(self.connection, month="2026-08", now=NOW).document()
+        self.assertEqual({k: v for k, v in doc["usage"].items() if k != "meter"},
+                         {"error": "", **{k: v for k, v in past.items() if k != "meter"}})
         self.assertEqual(({b["name"]: b["spent"] for b in doc["usage"]["bills"]}, doc["usage"]["today"]),
                          ({"capped": 120.0, "plan": 0.0}, None))
         self.assertEqual(doc["attention"], self.doc()["attention"])
-        self.assertNotEqual(metrics_screen._attention(doc["usage"], doc["trend"], doc["ci"]), doc["attention"])
+        # August's own meter would light other lamps; the badge stays on this month's.
+        self.assertNotEqual(metrics_screen._attention({**doc["usage"], "meter": past["meter"]}, doc["trend"], doc["ci"]),
+                            doc["attention"])
         self.assertEqual(metrics_screen.document(self.connection, now=NOW, month="soon")["usage"],
                          {"error": "SdDbError: a month is YYYY-MM, not 'soon'"})
+
+    def test_a_past_month_keeps_the_live_budget_windows(self):
+        """Lead review of 960414d82: the week lamps and Budget used, now read `usage.meter`; a past month had swapped
+        them for that month's last readings. Only the history follows ?month=."""
+        now_meter = self.doc()["usage"]["meter"]
+        self.assertTrue(now_meter)
+        # The fixture's 2026-08-30 reading is August's last; the live one is 2026-09-06's.
+        self.assertEqual(metrics_screen.document(self.connection, now=NOW, month="2026-08")["usage"]["meter"], now_meter)
+        with mock.patch.object(metrics_screen, "slow", side_effect=sqlite3.OperationalError("database is locked")):
+            failed = metrics_screen.document(self.connection, now=NOW, month="2026-08")["usage"]
+        self.assertEqual((failed["error"], failed["meter"]), ("", []))
+        self.assertIn("database is locked", failed["meter_error"])
 
     def test_the_trend_is_the_last_7_day_window_reading_of_each_of_seven_days(self):
         trend = self.doc()["trend"]
@@ -912,6 +928,17 @@ ELS.month.value = ''; ELS.month.listeners.change[0]({ target: ELS.month }); awai
         self.assertEqual(out["urls"], [[["month", "2026-08"]], []])
         self.assertRegex(r["lamps"], r'data-cell="spend".*?<small>2026-08 · 2 bills</small>')
         self.assertNotIn("/operations", METRICS_JS, "Metrics opens no Operations area")
+
+    def test_a_past_month_draws_the_live_windows_and_an_unread_meter_as_unknown(self):
+        """Lead review of 960414d82: Budget used, now and the week lamps stay on the live meter for a past month."""
+        august = metrics_screen.document(self.connection, now=NOW, month="2026-08")
+        r = self.run_page("R.windows = ELS.windows.html; R.lamps = ELS.annunciator.html;", august)["R"]
+        self.assertIn("80%", r["windows"])
+        self.assertRegex(r["lamps"], r'data-cell="w-claude".*?<b>80%</b> used')
+        august["usage"] = {**august["usage"], "meter": [], "meter_error": "OperationalError: database is locked"}
+        r = self.run_page("R.windows = ELS.windows.html;", august)["R"]
+        self.assertIn("database is locked", r["windows"])
+        self.assertNotIn("No meter reading yet", r["windows"])
 
     def test_a_week_number_with_no_rows_is_unknown_not_a_measured_zero(self):
         """Operations Usage's rule (test_controls_actions, retired in pack sd:7524): no cost row is not $0.00."""
