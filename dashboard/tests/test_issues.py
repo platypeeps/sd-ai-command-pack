@@ -644,6 +644,9 @@ class TheGitHubPage(ScreenCase):
                             states=("running",))
         self.assertEqual(out["R"]["off"], "the job is already running")
         self.assertIn("disabled", out["R"]["line"])
+        # pack sd:7675: the button says it runs and turns its icon while the job runs.
+        self.assertIn('disabled aria-busy="true"', out["R"]["line"])
+        self.assertIn("<span>Refreshing from GitHub</span>", out["R"]["line"])
         self.assertIn("running in the background", out["R"]["line"])
         missing = {"name": "shadow-sync-nightly", "error": "shadow-sync-nightly is not an installed job (x); local-cron-jobs/cron-jobs.sh install shadow-sync-nightly installs it"}
         out = self.run_page("show('issues'); await flush(); R.line = (ELS['issues-sync'].html + ELS['issues-said'].html);"

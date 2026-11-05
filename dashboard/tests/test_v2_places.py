@@ -971,6 +971,9 @@ class TheOverviewScript(Fixture):
         # A tile whose folder is not here says why, and its button is off with the reason.
         self.assertIn("<p class=\"why\">/x is not on this machine, so its actions run elsewhere.</p>", rows)
         self.assertIn('data-tile-act="Start" aria-disabled="true"', rows)
+        # pack sd:7675: an action that runs turns its button's icon; one that ended does not.
+        self.assertRegex(rows, r'data-tile-act="Refresh" aria-busy="true"[^>]*><svg[^>]*>.*?</svg>Refresh</button>')
+        self.assertNotRegex(rows, r'data-tile-act="Deploy" aria-busy')
 
     def test_a_buttons_hover_says_what_it_does_then_the_command(self):
         # Pack sd:7536: the act line's help leads; with none, the hover names the action plainly. The command is the

@@ -770,7 +770,7 @@ function registerCommands() {
       run: () => landing(regenerateUpload(), v => `Upload link signed · expires ${v.expiry.slice(0, 16).replace('T', ' ')} UTC`) },
     // launchd calendar jobs. Retry (commands.js) posts /api/jobs/<name>/retry; operations.inventory's capability is the off
     // reason. Exit 127 is "command not found": Print is the row's act (sd:3392).
-    window.commands.retry({ job: o => ({ name: o.job, service: o.service, failed: o.failed, exit: o.exit, capability: o.caps.retry }),
+    window.commands.retry({ job: o => ({ name: o.job, service: o.service, failed: o.failed, exit: o.exit, running: o.running, capability: o.caps.retry }),
       run: o => landing(job(o, 'retry'), out => window.commands.answered(out, o.job, 'retried', `Run started · ${o.job}`)) }),
     // build (sd:3388): Cancel is `sd jobs cancel`, which sends SIGTERM to the running job through launchd. It posts
     // /api/jobs/<name>/cancel with the row's revision; the confirm names the job, since the run stops part way.

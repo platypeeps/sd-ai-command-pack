@@ -921,10 +921,15 @@
   // reason an off one is off fold under "Same thing from the CLI", closed until opened (sd:3464).
   function bar(id) {
     // sd:5295: `bar: false` is a command an on-page field or dropdown already does; its key, the ⋯ menu and bulk keep it.
+    // pack sd:7675: a command whose job runs now (`busy(o)`) is off, but shows as its button, disabled and turning, so the
+    // bar says the job runs instead of folding the command away.
     const o = OBJ.get(id); const list = cmdsFor(o).filter(c => c.bar !== false); if (!list.length) return html``;
-    const on = list.filter(c => !offWhy(c, o)), off = list.filter(c => offWhy(c, o));
-    const first = on.find(c => c.primary?.(o)) || on[0];
-    const button = c => html`<button class="btn${c === first ? '' : ' quiet'}${c.risk === 'confirm' ? ' risky' : ''}" type="button" data-cmd="${c.id}" data-obj="${id}" data-tip="${tipOf(c, o)}" aria-keyshortcuts="${c.key ? '. ' + c.key : ''}">${c.label}${c.key ? html`<kbd>${c.key}</kbd>` : ''}</button>`;
+    const busy = c => !!c.busy?.(o);
+    const on = list.filter(c => !offWhy(c, o) || busy(c)), off = list.filter(c => offWhy(c, o) && !busy(c));
+    const first = on.find(c => !busy(c) && c.primary?.(o)) || on.find(c => !busy(c));
+    const button = c => busy(c)
+      ? html`<button class="btn quiet" type="button" data-cmd="${c.id}" data-obj="${id}" data-tip="${offWhy(c, o)}" disabled aria-busy="true">${ICON('rotate-ccw')}Running</button>`
+      : html`<button class="btn${c === first ? '' : ' quiet'}${c.risk === 'confirm' ? ' risky' : ''}" type="button" data-cmd="${c.id}" data-obj="${id}" data-tip="${tipOf(c, o)}" aria-keyshortcuts="${c.key ? '. ' + c.key : ''}">${c.label}${c.key ? html`<kbd>${c.key}</kbd>` : ''}</button>`;
     return html`<div class="actions">${on.map(button)}</div>
       <details class="cli-all"><summary>Same thing from the CLI</summary>${off.map(c => html`<p class="why off"><b>${c.label}</b> is off: ${offWhy(c, o)}</p>`)}${on.filter(c => noCli(cliOf(c, o))).map(c => html`<p class="why"><b>${c.label}</b> has no CLI${c.cli ? `: ${cliOf(c, o).replace(/^no (CLI|sd verb):?\s*/, '')}` : '; it is dashboard only'}.</p>`)}${on.filter(c => !noCli(cliOf(c, o))).map(c => html`<div class="cli fold"><button class="cli-line" type="button" aria-expanded="false" title="Show the full command"><code>${cliOf(c, o)}</code></button><button class="icon-btn" type="button" data-copy="${cliOf(c, o)}" aria-label="Copy: ${cliOf(c, o)}">${ICON('copy')}</button></div>${executes(c, o) ? (c.sends ? html`<p class="why"><b>${c.label}</b> runs here and sends <code>${c.sends(o)}</code>.</p>` : '') : html`<p class="why"><b>${c.label}</b> is copy only: the dashboard does not run this line.</p>`}`)}</details>`;
   }

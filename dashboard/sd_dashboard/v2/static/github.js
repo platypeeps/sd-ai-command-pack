@@ -52,7 +52,8 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'dependabot'
         : 'It runs in the background; every view reads again when it ends.';
     const at = SYNCED?.last_success_at ? html` GitHub read <time class="rel" datetime="${SYNCED.last_success_at}"></time>.` : ' GitHub not read yet.';
     // pack sd:7084: the button sits in each view's section head tools; what it does and when GitHub was read stay under it.
-    const button = html`<button class="btn quiet sm" type="button" title="${TIP}" data-cmd="jobs.retry" data-obj="${JOB}"${off ? html` disabled` : ''}><svg class="i" aria-hidden="true"><use href="#i-rotate-ccw"/></svg><span>Refresh from GitHub</span></button>`;
+    // pack sd:7675: while the run goes the button is busy, its icon turns, and its words say it refreshes.
+    const button = html`<button class="btn quiet sm" type="button" title="${TIP}" data-cmd="jobs.retry" data-obj="${JOB}"${off ? html` disabled` : ''}${running ? html` aria-busy="true"` : ''}><svg class="i" aria-hidden="true"><use href="#i-rotate-ccw"/></svg><span>${running ? 'Refreshing from GitHub' : 'Refresh from GitHub'}</span></button>`;
     lines.forEach(id => { put(document.getElementById(id), button); put(document.getElementById(id.replace('-sync', '-said')), html`${said}${at}`); });
   }
   document.addEventListener('DOMContentLoaded', () => {
