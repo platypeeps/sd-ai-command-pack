@@ -1501,6 +1501,73 @@ class TheIntake(RepoCase):
         set_github_issues(self.connection, path, "off")
         self.assertEqual(intake_issues(self.connection), {})
 
+    def test_a_mine_scope_lists_only_the_issues_that_reach_the_operator(self):
+        """pack sd:7672: `mine` keeps an assigned or watched row (a mention or a
+        review request) and drops one only the open sweep saw, such as an issue
+        someone else opened with no assignee or mention. `all`, the default,
+        keeps them all, and another repository keeps its own scope. An issue
+        the operator opened stays out under both (the test above)."""
+        from sd_db import repos
+
+        path = self._on("one", "https://github.com/example/project")
+        other = self._on("two", "https://github.com/example/other")
+        base = "https://github.com/example/project"
+        self._shadow([("github", "example/project", f"{base}/issues/1", "issue", "open", "assigned"),
+                      ("github", "example/project", f"{base}/issues/2", "issue", "open", "watched"),
+                      ("github", "example/project", f"{base}/issues/3", "issue", "open", None),
+                      ("github", "example/other", "https://github.com/example/other/issues/4", "issue", "open",
+                       None)])
+        everything = {path: [3, 2, 1], other: [4]}
+        numbers = lambda: {key: [row["number"] for row in rows]  # noqa: E731
+                           for key, rows in intake_issues(self.connection).items()}
+        self.assertEqual(numbers(), everything)
+        self.assertEqual(repos.set_issues_scope(self.connection, path, "mine"), (path, "all"))
+        self.assertEqual(numbers(), {path: [2, 1], other: [4]})
+        repos.set_issues_scope(self.connection, other, "mine")
+        self.assertEqual(numbers(), {path: [2, 1]})
+        self.assertEqual(repos.set_issues_scope(self.connection, path, "all"), (path, "mine"))
+        self.assertEqual(numbers(), {path: [3, 2, 1]})
+
+
+class TheIssuesScopeSetting(RepoCase):
+    """pack sd:7672. `policy.issues_scope`: which intake issues a repository lists, all or mine.
+
+    The writer mirrors `set_github_issues`: `all` is no key, the policy's
+    other keys stay, a word outside the two and an unregistered path are
+    refused. It governs what intake shows, never what agents may write.
+    """
+
+    def test_it_sets_the_key_keeps_the_others_and_the_reader_follows(self):
+        from sd_db import repos
+
+        path = add(self.connection, support.repository(self.checkouts / "one"), home=self.home)
+        self.assertEqual(repos.issues_scope(self.connection, path), "all")
+        set_github_issues(self.connection, path, "ask")
+        self.assertEqual(repos.set_issues_scope(self.connection, path, "mine"), (path, "all"))
+        self.assertEqual(declarations(self.connection, path), {"policy": {"issues": "ask", "issues_scope": "mine"}})
+        self.assertEqual(repos.issues_scope(self.connection, paths.expand(path)), "mine")
+        self.assertEqual(issues_policy(self.connection, path), "ask")
+        set_github_issues(self.connection, path, "off")
+        self.assertEqual(repos.issues_scope(self.connection, path), "mine")
+        self.assertEqual(repos.set_issues_scope(self.connection, path, "all"), (path, "mine"))
+        self.assertEqual(declarations(self.connection, path), {})
+
+    def test_every_word_but_all_and_mine_is_refused_and_writes_nothing(self):
+        from sd_db import repos
+
+        path = add(self.connection, support.repository(self.checkouts / "one"), home=self.home)
+        repos.set_issues_scope(self.connection, path, "mine")
+        for word in ("", "Mine", "MINE", " mine", "mine\n", "ALL", "none", "off", "ask", "read", "\x00", "míne"):
+            with self.subTest(word=word), self.assertRaises(RepoRefusal) as caught:
+                repos.set_issues_scope(self.connection, path, word)
+            self.assertIn("all, mine", str(caught.exception))
+        self.assertEqual(repos.issues_scope(self.connection, path), "mine")
+        stranger = support.repository(self.checkouts / "two")
+        with self.assertRaises(RepoRefusal) as caught:
+            repos.set_issues_scope(self.connection, stranger, "mine")
+        self.assertIn("not a registered repository", str(caught.exception))
+        self.assertEqual(repos.issues_scope(self.connection, stranger), "all")
+
 
 class TheCloneLines(RepoCase):
     """sd:4043. `list --clones P` gives back `repo-sync`'s conf lines, whole or not at all."""

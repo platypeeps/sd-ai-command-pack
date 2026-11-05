@@ -50,7 +50,7 @@ rule when it decides first (`denied`, `owner`), read from
 Every write the page makes goes through a route `server.action_route`
 answers: job retry and cancel, service start, stop
 and restart, and the sd-db repo verbs (`repos.set_runner_merge`,
-`repos.set_managed`, `repos.set_lane_host`, `repos.set_dependabot`, `repos.set_github_issues`, `repos.set_jira_project`), which refuse a stale `before`
+`repos.set_managed`, `repos.set_lane_host`, `repos.set_dependabot`, `repos.set_github_issues`, `repos.set_issues_scope`, `repos.set_jira_project`), which refuse a stale `before`
 and, on a satellite, refuse with `HubOnly` (sd:1629, sd:3075), and
 Refresh satellites (`refresh_satellites`), which writes a new request row, and
 End session (`claude_sessions.end`), which sends SIGTERM to a Claude session on this Mac (sd:5126), and
@@ -96,10 +96,14 @@ PIN_BYTES = 65536
 LOG_BYTES = 4096
 
 
-def _issues(connection, path: str) -> str | None:
-    """`policy.issues` for the row (pack sd:6849); None when the declarations do not read."""
+def _issues(connection, path: str, reader: str = "issues_policy") -> str | None:
+    """`policy.issues` for the row (pack sd:6849), or `policy.issues_scope` (pack sd:7672); None when the
+    declarations do not read, or this sd_db has no such reader."""
+    read = getattr(repos, reader, None)
+    if read is None:
+        return None
     try:
-        return repos.issues_policy(connection, path)
+        return read(connection, path)
     except (repos.SdDbError, sqlite3.Error, TypeError, ValueError, RecursionError):
         return None
 
@@ -284,6 +288,8 @@ def _repos(connection) -> list[dict]:
             "dependabot_gate": _dependabot_gate(row["remote"]),
             # sd:4840, pack sd:6849: `policy.issues`, off, read or ask; an unread setting is unknown, not off.
             "github_issues": _issues(connection, row["path"]),
+            # pack sd:7672: `policy.issues_scope`, all or mine: which intake issues the repo lists.
+            "issues_scope": _issues(connection, row["path"], "issues_scope"),
             # sd:5103: the Jira project File Jira issue files in, `off` for none; before migration 36, unknown.
             "jira_project": (row["jira_project"] or "off") if "jira_project" in row.keys() else None,
             "created_at": row["created_at"], "updated_at": row["updated_at"],
@@ -579,6 +585,7 @@ def _attention(jobs) -> dict:
 SETTERS = {"runner-merge": (repos.set_runner_merge, "runner_merge"), "managed": (repos.set_managed, "managed"),
            "lane-host": (repos.set_lane_host, "lane_host"), "channels": (repos.set_channels, "channels"),
            "dependabot": (repos.set_dependabot, "dependabot"), "github-issues": (repos.set_github_issues, "github_issues"),
+           "issues-scope": (getattr(repos, "set_issues_scope", None), "issues_scope"),
            # sd:5103: a pack before migration 36 has no setter; `set_repo` then refuses the write by name.
            "jira-project": (getattr(repos, "set_jira_project", None), "jira_project")}
 
@@ -621,6 +628,7 @@ def set_repo(connection: sqlite3.Connection, field: str, path: str, value, befor
             raise repos.RepoRefusal(f"{path} is not a registered repository")
         current = (("yes" if row[column] else "no") if column in ("managed", "dependabot")
                    else repos.issues_policy(connection, row["path"]) if column == "github_issues"
+                   else repos.issues_scope(connection, row["path"]) if column == "issues_scope"
                    else repos.policy_merge(row["declarations"]) if column == "runner_merge"
                    else (row[column] or "off") if column == "jira_project" else row[column])
         if current != before:

@@ -1156,6 +1156,36 @@ def see_shadow(connection: sqlite3.Connection, *, tracker: str, urls) -> int:
     return cursor.rowcount
 
 
+def restate_reasons(connection: sqlite3.Connection, *, tracker: str, repos: tuple[str, ...],
+                    assigned: set[str], mentioned: set[str]) -> int:
+    """Restate the `reason` of each stored open issue of `repos` from complete searches (pack sd:7672).
+
+    `repos` are intake repositories whose `issues_scope` is `mine`, and whose
+    unwindowed assignee and mention searches all completed this run, so
+    `assigned` and `mentioned` hold every open issue there that reaches the
+    operator. Each row reads `assigned`, else `filed` when the operator opened
+    it (`filed`, or a stored `filed` from before migration 40 left that
+    column empty), else `watched`, else no reason: one that no longer holds
+    is taken back. Returns the count changed.
+    """
+    lowered = [repo.lower() for repo in repos]
+    if not lowered:
+        return 0
+    changed = 0
+    with transaction(connection):
+        rows = connection.execute(
+            "SELECT id, url, reason, filed FROM shadow WHERE tracker = ? AND kind = 'issue' AND state = 'open' "
+            f"AND lower(repo) IN ({', '.join('?' * len(lowered))})", (tracker, *lowered)).fetchall()
+        for row in rows:
+            opened = row["filed"] == 1 or (row["filed"] is None and row["reason"] == "filed")
+            want = ("assigned" if row["url"] in assigned else "filed" if opened
+                    else "watched" if row["url"] in mentioned else None)
+            if want != row["reason"]:
+                connection.execute("UPDATE shadow SET reason = ? WHERE id = ?", (want, row["id"]))
+                changed += 1
+    return changed
+
+
 def close_shadow(connection: sqlite3.Connection, *, tracker: str, closed: dict[str, str | None]) -> int:
     """Close the open rows of `closed`'s urls, each one a direct read said is no open issue (sd:4880).
 
