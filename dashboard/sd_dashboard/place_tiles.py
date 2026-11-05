@@ -41,7 +41,6 @@ repositories each spell the key rule; a change to it changes both.
 
 from __future__ import annotations
 
-import concurrent.futures
 import http.client
 import json
 import os
@@ -52,6 +51,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -133,14 +133,15 @@ def _update_and_refresh(tile: dict) -> None:
     """Pack sd:7665: append Update and Refresh to a tile whose lines name neither, after its own actions.
 
     Update pulls the latest code and restarts nothing; a tile gets it when its folder is a checkout of its own (`.git`
-    there), or when its host has the folder and decides. A folder inside another checkout (a tool of a pinned
-    checkout) gets none: a pull there moves the whole checkout, which its lane or repo-sync owns. Refresh runs the
+    there). A folder inside another checkout (a tool of a pinned checkout) gets none: a pull there moves the whole
+    checkout, which its lane or repo-sync owns. A hosted tile gets none either (sd:7704): its host adds Update only for
+    a checkout there and answers no action its own file lacks, so a line names Update on both. Refresh runs the
     tile's own Stop and Update, then starts Start as its button does, under Start's own lock (`refresh`); a tile
     without Start and Stop runs no process to restart, so it gets none. Refresh starts nothing after a failed update,
     as a hand-written one did. Its `argv` is empty: `run` builds the runner, which needs the file's path.
     """
     by = {_slug(a["label"]): a for a in tile["actions"]}
-    if "update" not in by and (_hosted(tile) or (Path(tile["folder"]) / ".git").exists()):
+    if "update" not in by and not _hosted(tile) and (Path(tile["folder"]) / ".git").exists():
         by["update"] = {"label": "Update", "command": "git pull --ff-only", "argv": ["git", "pull", "--ff-only"],
                         "help": "Pulls the latest code into this folder; restarts nothing, and refuses local changes."}
         tile["actions"].append(by["update"])
@@ -177,16 +178,27 @@ def _probes(urls: list[str]) -> list[dict | None]:
     """Each URL's probe, None for no URL, all within `PROBE_SECONDS` (sd:6396).
 
     The socket timeout bounds connect and read, not the name lookup before them, so one slow resolver held the whole
-    read. A probe still out at the bound is unknown; its thread is left to end on its own, never waited for.
+    read. A probe still out at the bound is unknown; its thread is left to end on its own, never waited for. Each runs
+    in a daemon thread, not an executor's worker, which interpreter exit joins: Refresh's probe after a failed Stop
+    runs in its own process, and a stalled lookup held it, its lock and its exit record open (sd:7704).
     """
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
-    try:
-        futures = [pool.submit(_probe, url) if url else None for url in urls]
-        concurrent.futures.wait([f for f in futures if f is not None], timeout=PROBE_SECONDS)
-        return [None if f is None else f.result() if f.done()
-                else {"answers": None, "status": f"not known: no answer within {PROBE_SECONDS:g} s"} for f in futures]
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+    found: dict[int, dict] = {}
+
+    def probe(index: int, url: str) -> None:
+        try:
+            found[index] = _probe(url)
+        except Exception as error:  # noqa: BLE001 - a failed probe is unknown, never a down app
+            found[index] = {"answers": None, "status": f"not known: {error.__class__.__name__}"}
+
+    threads = [threading.Thread(target=probe, args=(index, url), daemon=True) for index, url in enumerate(urls) if url]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + PROBE_SECONDS
+    for thread in threads:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return [None if not url else found.get(index, {"answers": None,
+                                                   "status": f"not known: no answer within {PROBE_SECONDS:g} s"})
+            for index, url in enumerate(urls)]
 
 
 def _slug(label: str) -> str:
@@ -479,13 +491,15 @@ def _step(action: dict, folder: str) -> int | None:
     child = subprocess.Popen(action["argv"], cwd=folder, stdin=subprocess.DEVNULL, start_new_session=True,
                              pass_fds=fds, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
     try:
-        return child.wait(timeout=STEP_SECONDS)
+        code = child.wait(timeout=STEP_SECONDS)
     except subprocess.TimeoutExpired:
         _end(child)
         return None
     except _Ended:
         _end(child)
         raise
+    # Popen gives a step a signal ended as minus the signal; a shell's 128+signum is what Refresh exits (sd:7704).
+    return 128 - code if code < 0 else code
 
 
 def _open(fd: int) -> bool:

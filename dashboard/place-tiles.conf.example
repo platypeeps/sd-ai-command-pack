@@ -24,11 +24,12 @@
 #
 # Update and Refresh come with every tile (sd:7665), with no act line:
 # Update runs git pull --ff-only in <folder> and restarts nothing, when
-# <folder> is a checkout of its own (it holds .git) or the tile names a
-# <host>; Refresh runs Stop, then Update, then presses Start, so a
+# <folder> is a checkout of its own (it holds .git) and the tile names no
+# other <host>; Refresh runs Stop, then Update, then presses Start, so a
 # server runs under Start's lock, when the tile has all three. An act line labelled Update or Refresh replaces that one;
 # Refresh then runs your Update. A folder inside another checkout, such
 # as a tool of a pinned checkout, gets no Update: name one that fits it.
+# A hosted tile gets an Update only from a line, here and on its host.
 #
 # <host> runs the tile's actions on that machine (its `hostname -s`,
 # lower-cased) instead (sd:6387): a button writes a request row in the

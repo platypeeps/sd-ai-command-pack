@@ -19,6 +19,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -179,6 +180,22 @@ class TheTiles(Case):
         probe = doc["rows"][0]["probe"]
         self.assertEqual((probe["answers"], probe["status"]), (None, "not known: no answer within 0.2 s"))
 
+    def test_a_stalled_probe_does_not_hold_its_process_open_at_exit(self):
+        # sd:7704: Refresh's probe after a failed Stop runs in its own `python3 -I`. An executor's worker is joined at
+        # interpreter exit, so a stalled name lookup held Refresh, its lock and its exit record past the bound.
+        script = ("import socket, time\nfrom sd_dashboard import place_tiles\n"
+                  "def slow(*args, **kwargs):\n    time.sleep(30)\n    raise socket.gaierror(8, 'slow')\n"
+                  "socket.getaddrinfo = slow\nplace_tiles.PROBE_SECONDS = 0.2\n"
+                  "print(place_tiles._probes(['http://slow.example.test:8740/'])[0]['answers'], flush=True)\n")
+        began = time.monotonic()
+        try:
+            done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=15,
+                                  env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)})
+        except subprocess.TimeoutExpired:
+            self.fail("the process stayed open on its stalled probe")
+        self.assertEqual((done.returncode, done.stdout), (0, "None\n"), done.stderr)
+        self.assertLess(time.monotonic() - began, 10, "the process waited on its stalled probe at exit")
+
     def test_a_url_http_refuses_to_send_is_that_tiles_unknown_not_the_overviews_failure(self):
         for url in ("http://127.0.0.1:1/a b", "http://127.0.0.1:nope/"):
             self.write(url)
@@ -287,15 +304,20 @@ class TheUpdateAndRefresh(Case):
         self.assertEqual((refresh["command"], refresh["refresh"]),
                          ("/bin/zsh -lc 'echo $HOME'; git pull --ff-only && Start: ./app.sh start", True))
 
-    def test_a_folder_inside_another_checkout_or_not_here_gets_neither_and_a_hosted_one_both(self):
+    def test_a_folder_inside_another_checkout_not_here_or_on_another_host_gets_neither(self):
         # A tool folder inside a pinned checkout (no .git of its own): pulling there moves the whole checkout, which its
-        # lane owns. A folder not here runs nothing anyway. A hosted tile's host has the folder and decides there.
+        # lane owns. A folder not here runs nothing anyway. sd:7704: a hosted tile's folder is on its host, which adds
+        # Update only for a checkout of its own and answers no action its own file lacks, so the hub offers neither
+        # unless a line names Update; a button the host never answers would read pending for good.
         got = self.actions(f"tile|acme|app|App|{self.app}|-\nact|app|Start|s\nact|app|Stop|t\n"
                            f"tile|acme|gone|Gone|{self.dir / 'gone'}|-\nact|gone|Start|s\nact|gone|Stop|t\n"
                            f"tile|acme|far|Far|{self.dir / 'gone'}|-|far-host\nact|far|Start|s\nact|far|Stop|t\n")
         self.assertEqual([label for label, _ in got["app"]], ["Start", "Stop"])
         self.assertEqual([label for label, _ in got["gone"]], ["Start", "Stop"])
-        self.assertEqual([label for label, _ in got["far"]], ["Start", "Stop", "Update", "Refresh"])
+        self.assertEqual([label for label, _ in got["far"]], ["Start", "Stop"])
+        named = self.actions(f"tile|acme|far|Far|{self.dir / 'gone'}|-|far-host\nact|far|Start|s\nact|far|Stop|t\n"
+                             "act|far|Update|git pull --ff-only\n")
+        self.assertEqual([label for label, _ in named["far"]], ["Start", "Stop", "Update", "Refresh"])
 
     def test_a_line_that_names_update_or_refresh_wins_and_refresh_runs_that_update(self):
         got = self.actions(f"tile|acme|app|App|{self.app}|-\nact|app|Start|s\nact|app|Stop|t\nact|app|update|./app.sh update\n"
@@ -304,7 +326,7 @@ class TheUpdateAndRefresh(Case):
         refresh = place_tiles.parse(f"tile|acme|app|App|{self.app}|-\nact|app|Start|s\nact|app|Stop|t\n"
                                     "act|app|update|./app.sh update\n")[0][0]["actions"][-1]
         self.assertEqual(refresh["command"], "t; ./app.sh update && Start: s")
-        self.assertEqual(got["own"][2:], [("Refresh", ["./re.sh"]), ("Update", ["git", "pull", "--ff-only"])])
+        self.assertEqual(got["own"][2:], [("Refresh", ["./re.sh"])])
 
     def test_refresh_stops_updates_then_starts_and_starts_nothing_after_a_failed_update(self):
         for update, runs, code in (('sh -c "echo update >> runs"', "stop\nupdate\nstart\n", 0),
@@ -438,6 +460,14 @@ class TheRefreshSteps(Case):
         self.servers()
         self.assertEqual(self.runs(), "stop\nupdate\nstart\n")
 
+    def test_a_step_ended_by_a_signal_exits_128_plus_its_number(self):
+        # sd:7704: Popen gives a signal-killed step's code as minus the signal; sys.exit(-9) reads as 247, not 137.
+        self.tiles("sh -c 'echo stop >> runs; kill -KILL $$'")
+        self.assertEqual(self.refresh(), 128 + signal.SIGKILL)
+        self.tiles("true", update="sh -c 'echo update >> runs; kill -TERM $$'")
+        self.assertEqual(self.refresh(), 128 + signal.SIGTERM)
+        self.assertEqual(self.runs(), "stop\nupdate\n", "Start ran after an Update a signal ended")
+
     def test_a_failed_stop_with_no_link_to_ask_runs_no_update(self):
         # No link to ask: whether it still runs is not known, and not known is not stopped.
         self.tiles("sh -c 'echo stop >> runs; exit 1'")
@@ -553,7 +583,8 @@ class TheRefreshSteps(Case):
     def test_a_hosted_refresh_says_the_start_button_here_does_not_show_its_start(self):
         # The host's Refresh starts Start there under its own lock and writes no Start row, so the hub's Start reads
         # its last answered request: a limit the button's hover says.
-        refresh = place_tiles.parse(f"tile|work|sim|Sim|{self.app}|-|far-host\nact|sim|Start|s\nact|sim|Stop|t\n")[0][0]["actions"][-1]
+        refresh = place_tiles.parse(f"tile|work|sim|Sim|{self.app}|-|far-host\nact|sim|Start|s\nact|sim|Stop|t\n"
+                                    "act|sim|Update|u\n")[0][0]["actions"][-1]
         self.assertEqual(refresh["label"], "Refresh")
         self.assertIn("the Start button here does not show", refresh["help"])
 
