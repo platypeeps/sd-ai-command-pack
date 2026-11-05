@@ -100,6 +100,37 @@ class TheDocument(Pieces):
         # A parked piece is listed, and it has no moves until it is revived.
         self.assertEqual((by[self.ids["parked"]]["parked"], by[self.ids["parked"]]["next"]), (True, []))
 
+    def test_each_piece_carries_its_drive_folder_and_each_files_copies(self):
+        # pack sd:7243: the stage gives the folder, with no designation; fields.published and the queue give each copy.
+        import tempfile
+
+        from sd_dashboard import publishing
+        from sd_db import paths
+
+        queue = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pending-mirror-syncs"
+        self.enterContext(mock.patch.object(publishing.kit(), "QUEUE", queue))
+        url = "https://docs.google.com/document/d/example-doc/edit"
+        fields = {"published": {f"{paths.key(str(self.root))}::2026-fixture-research": {"drive": url}}}
+        self.connection.execute("UPDATE item SET fields = ?, stage = 'review' WHERE id = ?",
+                                (json.dumps(fields), self.ids["fixture"]))
+        self.connection.commit()
+        by = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}
+        mirror = by[self.ids["fixture"]]["mirror"]
+        self.assertEqual((mirror["folder"], mirror["unread"]), ("Writing/Drafts", ""))
+        self.assertEqual([(c["channel"], c["state"], c["url"]) for c in mirror["copies"]["research.md"]],
+                         [("drive", "published", url)])
+        # A parked piece mirrors nothing, whatever its stage.
+        self.assertEqual((mirror["copies"]["index.md"], by[self.ids["parked"]]["mirror"]["folder"]), ([], None))
+
+    def test_a_mirror_not_read_is_unknown_with_its_reason(self):
+        # A pack without the queue says why; it is never "no copy".
+        from sd_dashboard import publishing
+
+        with mock.patch.object(publishing, "kit", side_effect=ImportError("no sd_research_publish")):
+            pieces = writing_screen.document(self.connection, now=NOW)["pieces"]
+        self.assertEqual([p["mirror"]["folder"] for p in pieces], [None, None])
+        self.assertIn("no sd_research_publish", pieces[0]["mirror"]["unread"])
+
     def test_each_piece_carries_its_whole_draft_up_to_a_bound(self):
         """pack sd:7242: Show draft opens the whole `## Draft`, not its first 6 paragraphs; a draft past DRAFT_CHARS is cut
         at a paragraph and says so, so one long file cannot swell /api/writing."""
@@ -315,6 +346,26 @@ class ThePage(Pieces):
         piece = next(p for p in json.loads(self.request("/api/writing", headers=cookie)[2])["pieces"] if p["id"] == ids["fixture"])
         self.assertEqual((piece["stage"], piece["ready_recorded"]), ("ready", True))
         self.assertEqual(self.post(f"/api/items/{piece['id']}/park", {"revision": piece["revision"]})[0], 200)
+
+    def test_the_stage_and_park_writes_queue_the_piece_and_a_failed_queue_changes_neither(self):
+        # pack sd:7243: no one designates a piece; the dashboard's Stage and Park ask the pack to queue it after their
+        # write, as the sd writing verbs do. Failure table, "Verb or page write, then enqueue": the write stands.
+        from sd_dashboard import publishing
+
+        ids = self.seed()
+        cookie = {"Cookie": self.cookie}
+        queued = []
+        enqueue = self.enterContext(mock.patch.object(publishing.kit(), "enqueue_pieces",
+                                                      side_effect=lambda connection, items: queued.append(items) or []))
+        piece = next(p for p in json.loads(self.request("/api/writing", headers=cookie)[2])["pieces"] if p["id"] == ids["fixture"])
+        self.assertEqual(self.post(f"/api/items/{piece['id']}/stage", {"revision": piece["revision"], "stage": "review"})[0], 200)
+        self.assertEqual(queued, [{ids["fixture"]}])
+        enqueue.side_effect = OSError("queue unwritable")
+        piece = next(p for p in json.loads(self.request("/api/writing", headers=cookie)[2])["pieces"] if p["id"] == ids["fixture"])
+        self.assertEqual(self.post(f"/api/items/{piece['id']}/park", {"revision": piece["revision"]})[0], 200)
+        self.assertEqual(enqueue.call_count, 2)
+        piece = next(p for p in json.loads(self.request("/api/writing", headers=cookie)[2])["pieces"] if p["id"] == ids["fixture"])
+        self.assertTrue(piece["parked"])
 
 
 def piece(id, title, stage, **fields):
@@ -743,6 +794,30 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         self.assertIn("Adversarial report body", out["R"]["editor"])
         self.assertIn('aria-pressed="true">Adversarial</button>', out["R"]["editor"])
         self.assertIn("/api/writing/11/adversarial", out["gets"])
+
+    def test_each_gate_row_links_its_drive_copy_or_says_why_not(self):
+        """pack sd:7243: each gate row has a Drive icon. A delivered copy is a link that opens in a new tab; a queued
+        one, a missing file, a stage that mirrors nothing and an unread queue are off and say why."""
+        url = "https://docs.google.com/document/d/example-doc/edit"
+        mirror = ("DOC.pieces[0].mirror = { folder: 'Writing/Drafts', unread: '', copies: {"
+                  " 'index.md': [{ channel: 'drive', state: 'published', url: '%s' }],"
+                  " 'research.md': [{ channel: 'drive', state: 'queued', url: null }],"
+                  " 'fact-check.md': [], 'adversarial.md': [] } };\n" % url)
+        def rows(out):
+            return re.findall(r"<li>.*?</li>", re.search(r'<ul class="gates">.*?</ul>', out["R"]["details"], re.S).group(0), re.S)
+
+        draft, research, fact, adversarial = rows(self.run_page("open('11'); await flush(); R.details = ELS.details.html;",
+                                                                prelude=mirror))
+        self.assertIn(f'href="{url}" target="_blank" rel="noopener" data-drive="index.md" aria-label="Draft: open the Drive copy"', draft)
+        self.assertIn('data-drive="research.md" aria-label="Research: Drive copy queued, not yet drained"', research)
+        self.assertIn('aria-label="Fact-check: Drive copy missing"', fact)
+        self.assertIn('aria-label="Adversarial: Drive copy not drained yet; it goes to Writing/Drafts"', adversarial)
+        early = mirror.replace("folder: 'Writing/Drafts'", "folder: null")
+        self.assertIn("a piece mirrors from Review on", rows(self.run_page("open('11'); await flush(); R.details = ELS.details.html;",
+                                                                          prelude=early))[3])
+        unread = "DOC.pieces[0].mirror = { folder: null, unread: 'the queue was not read', copies: {} };\n"
+        self.assertIn("Drive copy unknown: the queue was not read", rows(self.run_page(
+            "open('11'); await flush(); R.details = ELS.details.html;", prelude=unread))[0])
 
     def test_a_reread_drops_the_cached_reports_so_two_versions_in_one_second_differ(self):
         """pack sd:7328: a report is cached per piece, file and whole-second change time. Two versions written in one

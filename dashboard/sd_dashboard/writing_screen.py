@@ -6,16 +6,20 @@ page's rail badge (sd:3446, `_attention`). Each piece's `realm` is `places.realm
 filter uses (sd:5064). Its `grill` is its open question notes and the count of its rulings (pack sd:6700): Details
 walks the questions, and Apply answers waits until none is open. Its `ideas` are the vault's inbox blog ideas
 (pack sd:7244), the `sdw.blog-idea` rows `records.list_rows` reads, highest score first: IDEAS of them beside the inbox
-count, each with a link only for http. A failed read is unknown with its reason, never an empty inbox.
+count, each with a link only for http. A failed read is unknown with its reason, never an empty inbox. Its `mirror` is
+the Drive folder its stage mirrors to and each mirrored file's Drive copies (`publishing.piece_mirror`, pack sd:7243);
+a queue not read is unknown with its reason.
 """
 
+import json
 import math
 import re
 from pathlib import Path
 
-from sd_db import records, writing
+from sd_db import paths, records, writing
 from sd_db.workflow import WorkflowError
 
+from . import publishing
 from .decisions import RULING, parse
 from .markup import href
 from .places import realm_of, realms
@@ -111,6 +115,11 @@ def document(connection, *, now):
     pieces = []
     found = realms(connection)
     rules = found["list"] if found["state"] in ("read", "partial") else None
+    try:
+        kit = publishing.kit()
+        mirrored = (kit.QUEUE, kit.receipts(), kit.PIECE_FOLDERS), ""
+    except Exception as error:  # noqa: BLE001 - a queue not read is unknown, never "no copy"
+        mirrored = (None, None, {}), f"the pack's mirror queue was not read: {error}"
     for row in writing.list_pieces(connection, include_parked=True):
         full = writing.piece_state(connection, row["id"])
         state = full["writing"]
@@ -133,9 +142,26 @@ def document(connection, *, now):
             "files": files, "draft": draft, "draft_cut": cut, "words": words, "grill": _grill(full["notes"]),
             # pack sd:6977: adversarial.md against the draft by its digest stamp; Apply review shows only when current.
             "adversarial": gates.get("companions", {}).get("adversarial"),
+            "mirror": _mirror(row, state["parked"], *mirrored),
         })
     return {"read": now, "stages": list(writing.STAGES), "pieces": pieces, "attention": _attention(pieces), "ideas": _ideas(connection),
             "realms": {key: found[key] for key in ("state", "source", "problems")}}
+
+
+def _mirror(row, parked: bool, kept: tuple, unread: str) -> dict:
+    """The piece's `mirror`: `piece_mirror` with the Drive folder its stage mirrors to, None for none (parked, or a
+    stage before review), and what was not read; unknown (`folder` None, `unread` the reason) when the queue was not."""
+    if unread:
+        return {"folder": None, "copies": {}, "unread": unread}
+    queue, receipts, folders = kept
+    try:
+        fields = json.loads(row["fields"] or "{}")
+    except ValueError:
+        fields = None
+    folder = None if parked else folders.get(row["stage"])
+    found = publishing.piece_mirror(paths.expand(row["repo"]), row["piece"], folder,
+                                    fields if isinstance(fields, dict) else {}, queue=queue, receipts=receipts)
+    return {**found, "unread": "" if isinstance(fields, dict) else "its fields are not a JSON object"}
 
 
 def _grill(notes) -> dict:

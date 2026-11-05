@@ -3260,6 +3260,15 @@ class BriefTests(Fixture):
                          (self.TEXT, self.brief, "sd:%d" % self.brief, ""))
         self.assertEqual((request["document"], request["title"], request["space_id"]), (self.STEM, self.STEM, PRIVATE_FOLDER))
 
+    def test_a_brief_picks_no_account_from_the_realm_list(self) -> None:
+        # Lead review class (pack sd:7243): only a piece picks an account by realm. A brief's request names none, so
+        # a realm list read in part cannot send it to the wrong Drive.
+        from sd_db import writes  # noqa: PLC0415 - after the path is set
+        writes.set_setting(self.connection, "dashboard.realms", "realm|work|%s" % (self.root / "*"))
+        self.fields({"publish": {"drive": {}}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertNotIn("account", self.request("drive"))
+
     def test_the_same_text_again_is_already_queued(self) -> None:
         self.fields({"publish": {"drive": {}}})
         PUBLISH.enqueue_briefs(self.connection)
@@ -3347,6 +3356,292 @@ class BriefTests(Fixture):
         self.fields({"publish": {"notion": {}}})
         PUBLISH.enqueue_briefs(self.connection)
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")) if PUBLISH.QUEUE.exists() else [], [])
+
+
+class PieceTests(Fixture):
+    """pack sd:7243: a writing piece at review or later mirrors each of its files to Drive, with no designation.
+
+    The operator's ruling (note #40909): the stage decides, `review` and `ready` go to `Writing/Drafts` and `published`
+    to `Writing/Published`, the piece's realm picks the account, and a published piece's copy moves, not doubles. Each
+    request carries the file's text from the registered checkout, names the item and `sd:<item>/<file>`, and is queued
+    again only when that file changed.
+    """
+
+    PIECE = "2026/a-piece"
+    INDEX = ('---\ntitle: "A piece"\nstatus: review\nupdated: 2026-09-08\npublished: null\n'
+             'published_urls:\n  gdrive: null\nreview_urls:\n  gdocs: null\n---\n\n## Draft\nA claim.\n')
+    REPORTS = {"research.md": "Source.\n", "fact-check.md": "Claim ledger.\n", "adversarial.md": "Findings.\n"}
+    STEMS = ("draft", "research", "fact-check", "adversarial")
+    URL = "https://docs.google.com/document/d/example-file-id/edit"
+    WORK, PERSONAL = "work@example.test", "personal@example.test"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.database()
+        from sd_db import writing  # noqa: PLC0415 - after the path is set
+        from sd_db.writes import upsert_repo  # noqa: PLC0415
+        sd_db = sd_lib.import_sd_db().module
+        self.key = sd_db.paths.key(str(self.repo.resolve()))
+        upsert_repo(self.connection, self.key)
+        self.folder = self.repo / "content" / self.PIECE
+        self.folder.mkdir(parents=True)
+        (self.folder / "index.md").write_text(self.INDEX, encoding="utf-8")
+        for name, text in self.REPORTS.items():
+            (self.folder / name).write_text(text, encoding="utf-8")
+        self.writing = writing
+        self.item = writing.import_piece(self.connection, self.key, self.PIECE, who="test")["item"]["id"]
+        self.stage("review")
+        self.account = (self.WORK, "")
+        patcher = unittest.mock.patch.object(PUBLISH, "piece_accounts",
+                                             lambda connection: lambda repo: self.account)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.patcher = patcher
+
+    def stage(self, stage: str) -> None:
+        self.connection.execute("UPDATE item SET stage = ? WHERE id = ?", (stage, self.item))
+        self.connection.commit()
+
+    def name(self, stem: str, destination: str = "drive") -> str:
+        return "my-research.2026-a-piece-%s.%s.json" % (stem, destination)
+
+    def request(self, stem: str, destination: str = "drive") -> dict:
+        return json.loads((PUBLISH.QUEUE / self.name(stem, destination)).read_text())
+
+    def queued(self) -> list[str]:
+        return sorted(path.name for path in PUBLISH.QUEUE.glob("*.json")) if PUBLISH.QUEUE.exists() else []
+
+    def deliver(self, stem: str) -> None:
+        name = self.name(stem)
+        self.assertEqual(PUBLISH.delivered_main([name, self.request(stem)["fingerprint"], "--url", self.URL]), 0)
+
+    def test_a_realm_list_read_in_part_queues_nothing_on_any_trigger(self) -> None:
+        # Lead review class: a malformed line that defined `work` sent work pieces to personal. Each trigger reaches
+        # the account through `enqueue_pieces`: the verbs, Stage and Park name the item; the tick sweep names none.
+        self.patcher.stop()
+        from sd_db import writes  # noqa: PLC0415 - after the path is set
+        writes.set_setting(self.connection, "dashboard.realms", "realm|work|%s" % self.repo.resolve())
+        writes.set_setting(self.connection, "google.accounts.work.email", self.WORK)
+        writes.set_setting(self.connection, "google.accounts.personal.email", self.PERSONAL)
+        for items in ({self.item}, None):
+            lines = PUBLISH.enqueue_pieces(self.connection, items)
+            self.assertEqual(self.queued(), [], items)
+            self.assertTrue(any("the realm list read in part (line 1:" in line for line in lines), lines)
+
+    def test_a_piece_before_review_queues_nothing(self) -> None:
+        for stage in ("accepted", "researching", "drafting", "declined"):
+            with self.subTest(stage=stage):
+                self.stage(stage)
+                self.assertEqual(PUBLISH.enqueue_pieces(self.connection), [])
+                self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_a_parked_piece_queues_nothing(self) -> None:
+        self.connection.execute("UPDATE item SET parked_at = '2026-11-01T00:00:00Z' WHERE id = ?", (self.item,))
+        self.connection.commit()
+        self.assertEqual(PUBLISH.enqueue_pieces(self.connection), [])
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_a_piece_at_review_queues_each_file_into_drafts_for_its_account(self) -> None:
+        reports = PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(self.queued(), sorted(self.name(stem) for stem in self.STEMS), reports)
+        draft = self.request("draft")
+        self.assertEqual((draft["content"], draft["item"], draft["source"], draft["rendered"], draft["markdown"]),
+                         (self.INDEX, self.item, "sd:%d/index.md" % self.item, "", ""))
+        self.assertEqual((draft["document"], draft["title"], draft["folder"], draft["account"], draft["file"]),
+                         ("2026-a-piece-draft", "A piece · draft", "Writing/Drafts", self.WORK, ""))
+        research = self.request("research")
+        self.assertEqual((research["content"], research["source"], research["title"]),
+                         ("Source.\n", "sd:%d/research.md" % self.item, "A piece · research"))
+        self.assertEqual([path.name for path in PUBLISH.QUEUE.glob("*.notion.json")], [])
+
+    def test_a_ready_piece_stays_in_drafts(self) -> None:
+        self.stage("ready")
+        PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(self.request("draft")["folder"], "Writing/Drafts")
+
+    def test_a_published_piece_moves_its_copy_to_published(self) -> None:
+        PUBLISH.enqueue_pieces(self.connection)
+        self.deliver("draft")
+        self.stage("published")
+        reports = PUBLISH.enqueue_pieces(self.connection)
+        draft = self.request("draft")
+        self.assertEqual((draft["folder"], draft["file"], draft["moves"]), ("Writing/Published", self.URL, True), reports)
+
+    def test_a_copy_in_another_account_is_not_carried(self) -> None:
+        PUBLISH.enqueue_pieces(self.connection)
+        self.deliver("draft")
+        self.account = (self.PERSONAL, "")
+        PUBLISH.enqueue_pieces(self.connection)
+        draft = self.request("draft")
+        self.assertEqual((draft["account"], draft["file"]), (self.PERSONAL, ""))
+
+    def test_an_unread_account_holds_the_piece_and_says_why(self) -> None:
+        self.account = ("", "no google.accounts.work.email setting")
+        reports = PUBLISH.enqueue_pieces(self.connection)
+        self.assertTrue(any("sd:%d" % self.item in line and "google.accounts.work.email" in line
+                            and "not queued" in line for line in reports), reports)
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_a_missing_report_queues_the_files_that_are_there(self) -> None:
+        (self.folder / "adversarial.md").unlink()
+        PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(self.queued(), sorted(self.name(stem) for stem in self.STEMS[:3]))
+
+    def test_only_a_changed_file_is_queued_again(self) -> None:
+        PUBLISH.enqueue_pieces(self.connection)
+        again = PUBLISH.enqueue_pieces(self.connection)
+        self.assertFalse(any(line.startswith("mirror: queued") for line in again), again)
+        (self.folder / "index.md").write_text(self.INDEX + "A second claim.\n", encoding="utf-8")
+        edited = PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual([line.split()[2] for line in edited if line.startswith("mirror: queued")],
+                         ["2026-a-piece-draft"], edited)
+
+    def test_a_stop_part_way_is_finished_by_the_next_run(self) -> None:
+        # Failure table, "Enqueue: per file": two requests written, then the process stops. A stop is SystemExit: a
+        # write error holds only its file and goes on (test_a_request_that_cannot_be_written_holds_that_file...).
+        real, written = PUBLISH.write_request, []
+
+        def stop_after_two(path, request, digest):
+            if len(written) == 2:
+                raise SystemExit("stopped")
+            written.append(path.name)
+            real(path, request, digest)
+
+        with unittest.mock.patch.object(PUBLISH, "write_request", stop_after_two):
+            with self.assertRaises(SystemExit):
+                PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(len(self.queued()), 2)
+        again = PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(sum(line.startswith("mirror: queued") for line in again), 2, again)
+        self.assertEqual(sum("already queued" in line for line in again), 2, again)
+        self.assertEqual(self.queued(), sorted(self.name(stem) for stem in self.STEMS))
+
+    def test_a_delivered_copy_is_recorded_on_the_piece_and_updated_next_time(self) -> None:
+        PUBLISH.enqueue_pieces(self.connection)
+        self.deliver("research")
+        self.assertEqual(self.published(self.item)["%s::2026-a-piece-research" % self.key]["drive"], self.URL)
+        (self.folder / "research.md").write_text("Source, revised.\n", encoding="utf-8")
+        PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(self.request("research")["file"], self.URL)
+
+    def test_files_come_from_the_registered_checkout_not_a_worktree(self) -> None:
+        other = self.root / "worktree" / "content" / self.PIECE
+        other.mkdir(parents=True)
+        (other / "index.md").write_text(self.INDEX + "Unmerged.\n", encoding="utf-8")
+        token = self.writing._CHECKOUT.set((self.repo.resolve(), (self.root / "worktree").resolve()))
+        try:
+            PUBLISH.enqueue_pieces(self.connection)
+        finally:
+            self.writing._CHECKOUT.reset(token)
+        self.assertEqual(self.request("draft")["content"], self.INDEX)
+
+    def test_a_file_outside_the_repository_is_named_and_the_rest_queue(self) -> None:
+        outside = self.root / "elsewhere.md"
+        outside.write_text("Not this repository's.\n", encoding="utf-8")
+        (self.folder / "fact-check.md").unlink()
+        (self.folder / "fact-check.md").symlink_to(outside)
+        reports = PUBLISH.enqueue_pieces(self.connection)
+        self.assertTrue(any("fact-check.md" in line and "sd:%d" % self.item in line for line in reports), reports)
+        self.assertNotIn(self.name("fact-check"), self.queued())
+        self.assertEqual(len(self.queued()), 3)
+
+    def test_a_long_slug_queues_names_that_fit_and_the_page_reads_the_same(self) -> None:
+        # Lead review: a 240-character slug fits its folder, but its queue names ran to 270-276 bytes.
+        slug = "2026/" + "a" * 240
+        folder = self.repo / "content" / slug
+        folder.mkdir(parents=True)
+        (folder / "index.md").write_text(self.INDEX, encoding="utf-8")
+        long = self.writing.import_piece(self.connection, self.key, slug, who="test")["item"]["id"]
+        self.connection.execute("UPDATE item SET stage = 'review' WHERE id = ?", (long,))
+        self.connection.commit()
+        reports = PUBLISH.enqueue_pieces(self.connection, {long})
+        out = self.writing.piece_out(slug, "draft")
+        self.assertEqual(self.queued(), ["my-research.%s.drive.json" % out], reports)
+        self.assertLessEqual(len(out.encode()), self.writing.OUT_BYTES)
+        self.assertEqual(self.writing.piece_out(self.PIECE, "draft"), "2026-a-piece-draft")  # a short name stays
+
+    def test_a_request_that_cannot_be_written_holds_that_file_and_the_rest_queue(self) -> None:
+        real, calls = PUBLISH.write_request, []
+
+        def write(path: Path, request: dict, digest: str) -> None:
+            calls.append(path.name)
+            if len(calls) == 1:
+                raise OSError(63, "File name too long")
+            real(path, request, digest)
+        with unittest.mock.patch.object(PUBLISH, "write_request", write):
+            reports = PUBLISH.enqueue_pieces(self.connection)
+        self.assertEqual(len(self.queued()), 3, reports)
+        self.assertTrue(any(calls[0].split(".")[1] in line and "File name too long" in line and "not queued" in line
+                            for line in reports), reports)
+
+    def test_a_repository_that_fails_to_queue_holds_it_and_the_next_is_queued(self) -> None:
+        from sd_db.writes import upsert_repo  # noqa: PLC0415
+        other = self.root / "other-repo"
+        other.mkdir()
+        upsert_repo(self.connection, str(other))
+        with unittest.mock.patch.object(PUBLISH, "enqueue", side_effect=[OSError("disk full"), ["mirror: queued b"]]):
+            reports = PUBLISH.enqueue_rows(self.connection, {self.key: [{}], str(other): [{}]}, [], "piece")
+        self.assertIn("mirror: queued b", reports)
+        self.assertTrue(any("disk full" in line and "no piece of it queued" in line for line in reports), reports)
+
+    def test_only_the_named_items_are_queued(self) -> None:
+        self.assertEqual(PUBLISH.enqueue_pieces(self.connection, items={self.item + 1}), [])
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_an_unread_channels_setting_holds_the_repo(self) -> None:
+        from sd_db import repos  # noqa: PLC0415
+        with unittest.mock.patch.object(repos, "repo_channels", side_effect=RuntimeError("hub down")):
+            reports = PUBLISH.enqueue_pieces(self.connection)
+        self.assertTrue(any(line.startswith(PUBLISH.HELD) and "hub down" in line for line in reports), reports)
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+
+class PieceAccountTests(Fixture):
+    """pack sd:7243: a piece's realm picks its Drive account. Realm `work` takes `google.accounts.work.email`; any
+    other realm takes `google.accounts.personal.email`. An unread realm list is unknown, never
+    Personal."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.database()
+        from sd_db import writes  # noqa: PLC0415 - after the path is set
+        work = str(self.root / "work-*")
+        writes.set_setting(self.connection, "dashboard.realms",
+                           "realm|work|Work|%s\nrealm|side|Side|%s" % (work, self.root / "side-*"))
+        writes.set_setting(self.connection, "google.accounts.work.email", "work@example.test")
+        writes.set_setting(self.connection, "google.accounts.personal.email", "personal@example.test")
+
+    def test_work_takes_the_work_account_and_every_other_realm_the_personal_one(self) -> None:
+        account = PUBLISH.piece_accounts(self.connection)
+        self.assertEqual(account(str(self.root / "work-blog")), ("work@example.test", ""))
+        self.assertEqual(account(str(self.root / "side-news")), ("personal@example.test", ""))
+        self.assertEqual(account(str(self.root / "elsewhere")), ("personal@example.test", ""))
+
+    def test_an_unread_realm_list_is_unknown_not_personal(self) -> None:
+        PUBLISH.piece_accounts(self.connection)  # puts the pack's dashboard on the path, as it loads it
+        places = importlib.import_module("sd_dashboard.places")
+        with unittest.mock.patch.object(places, "realms", return_value={
+                "state": "error", "source": "row", "problems": ["database is locked"], "list": []}):
+            account = PUBLISH.piece_accounts(self.connection)
+        address, why = account(str(self.root / "elsewhere"))
+        self.assertEqual(address, "")
+        self.assertIn("database is locked", why)
+        with unittest.mock.patch.object(places, "realms", return_value={
+                "state": "missing", "source": "row", "problems": [], "list": []}):
+            account = PUBLISH.piece_accounts(self.connection)
+        self.assertEqual(account(str(self.root / "elsewhere")), ("", "no realm list is set (dashboard.realms)"))
+
+    def test_a_realm_list_read_in_part_holds_every_piece_and_names_the_line(self) -> None:
+        # Lead review: a skipped line that defined `work` sent work pieces to the personal Drive.
+        from sd_db import writes  # noqa: PLC0415 - after the path is set
+        writes.set_setting(self.connection, "dashboard.realms",
+                           "realm|work|%s\nrealm|side|Side|%s" % (self.root / "work-*", self.root / "side-*"))
+        account = PUBLISH.piece_accounts(self.connection)
+        for repo in ("work-blog", "side-news", "elsewhere"):
+            address, why = account(str(self.root / repo))
+            self.assertEqual(address, "", repo)
+            self.assertIn("the realm list read in part", why)
+            self.assertIn("line 1", why)
 
 
 #: An Archify diagram as the 05-architecture template holds it: the SVG in

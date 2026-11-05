@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import sd_db
+import sd_db.publication
 import sd_db.writing as writing
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -496,6 +497,95 @@ class WritingFromWorktree(unittest.TestCase):
         with patch.object(writing, "checkout", None, create=True):
             with self.assertRaisesRegex(cli.WorkRefusal, "update this pack checkout"):
                 self.run_in(self.linked, "readiness", "--piece", "2026/a")
+
+
+class WritingMirror(unittest.TestCase):
+    """pack sd:7243: a verb that writes a piece queues its Drive mirror again, best effort.
+
+    `enqueue_pieces` queues only the files whose text changed, so every write verb may call it. It never changes the
+    verb's exit status or its JSON: the verb's write is committed, and the next verb or page write queues.
+    """
+
+    GATE = {"artifact": "fact-check", "verdict": "pass"}
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name).resolve()
+        (self.repo / "content").mkdir()
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        self.connection = Mock()
+        with patch.object(sys, "path", [str(ROOT / "bin"), *sys.path]):
+            self.publish = importlib.import_module("sd_research_publish")
+        self.enqueue = Mock(return_value=["mirror: queued 2026-a-draft -> Briefs/repo"])
+        for patcher in (
+            patch.object(cli.sd_handoff_rows, "library", return_value=sd_db),
+            patch.object(cli.sd_handoff_rows, "connect", Mock(return_value=self.connection)),
+            patch.object(cli.sd_lib, "repo_root", return_value=self.repo),
+            patch.object(cli.sd_lib, "stored_repo", side_effect=str),
+            patch.object(cli.getpass, "getuser", return_value="operator"),
+            patch.object(writing, "piece_for_key", return_value={"id": 7}),
+            patch.object(writing, "record_gate", autospec=True, return_value=self.GATE),
+            patch.object(writing, "piece_state", autospec=True, return_value={"item": {"id": 7}}),
+            patch.object(writing, "promote", autospec=True, return_value={"item": {"piece": "2026/a"}}),
+            patch.object(self.publish, "enqueue_pieces", self.enqueue),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def call(self, *argv):
+        arguments = self.parser.parse_args(["writing", *argv, "--json"])
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors:
+            code = arguments.handler(arguments)
+        return code, output.getvalue(), errors.getvalue()
+
+    def gate(self):
+        return self.call("gate", "--piece", "2026/a", "--artifact", "fact-check", "--verdict", "pass", "--reason", "ok")
+
+    def test_a_write_verb_queues_the_piece_and_says_so_on_stderr(self):
+        code, output, errors = self.gate()
+        self.assertEqual((code, json.loads(output)), (0, self.GATE))
+        self.enqueue.assert_called_once_with(self.connection, {7})
+        self.assertIn("mirror: queued 2026-a-draft", errors)
+
+    def test_a_publication_reconcile_queues_the_piece_it_published(self):
+        # pack sd:7243: reconcile moves a piece to `published`, so its Drive copy moves to Writing/Published.
+        folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        for name in ("context.json", "evidence.json"):
+            (folder / name).write_text("{}", encoding="utf-8")
+        reconciled = {"phase": "published"}
+        self.enterContext(patch.object(sd_db.publication, "reconcile", autospec=True, return_value=reconciled))
+        code, output, _ = self.call("publication-reconcile", "--piece", "2026/a", "--claim", "c1",
+                                    "--context-file", str(folder / "context.json"),
+                                    "--evidence-file", str(folder / "evidence.json"))
+        self.assertEqual((code, json.loads(output)), (0, reconciled))
+        self.enqueue.assert_called_once_with(self.connection, {7})
+
+    def test_promote_queues_the_item_it_names(self):
+        self.assertEqual(self.call("promote", "12")[0], 0)
+        self.enqueue.assert_called_once_with(self.connection, {12})
+
+    def test_a_failed_enqueue_changes_neither_exit_nor_json(self):
+        # Failure table, "Verb, then enqueue": the verb's write is committed; the mirror is named on stderr.
+        expected = self.gate()[:2]
+        for failure in (RuntimeError("queue unwritable"), OSError("disk full")):
+            with self.subTest(failure=failure):
+                self.enqueue.side_effect = failure
+                code, output, errors = self.gate()
+                self.assertEqual((code, output), expected)
+                self.assertIn("mirror: piece not queued: %s" % failure, errors)
+
+    def test_a_pack_without_the_producer_changes_neither_exit_nor_json(self):
+        expected = self.gate()[:2]
+        with patch.object(self.publish, "enqueue_pieces", None):
+            code, output, errors = self.gate()
+        self.assertEqual((code, output), expected)
+        self.assertIn("mirror: piece not queued", errors)
+
+    def test_a_read_verb_queues_nothing(self):
+        self.assertEqual(self.call("get", "--piece", "2026/a")[0], 0)
+        self.enqueue.assert_not_called()
 
 
 if __name__ == "__main__":
