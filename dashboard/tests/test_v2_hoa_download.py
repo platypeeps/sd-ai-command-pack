@@ -35,7 +35,13 @@ here = pathlib.Path(os.environ["STUB_DIR"])
 mode = (here / "mode").read_text().strip() if (here / "mode").exists() else "signed-in"
 def say(text):
     print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}), flush=True)
-print(json.dumps({"type": "system", "subtype": "init"}), flush=True)
+# pack sd:7723: claude 2.1.316 once started `-p --chrome` with no Chrome server and ToolSearch alone.
+init = {"type": "system", "subtype": "init"}
+if mode.startswith("chromeless"):
+    init.update(tools=["ToolSearch"], mcp_servers=[])
+elif mode == "chrome-no-result":
+    init.update(tools=["ToolSearch"], mcp_servers=[{"name": "claude-in-chrome", "status": "connected"}])
+print(json.dumps(init), flush=True)
 if mode == "crash":
     print("boom: no browser extension", flush=True)
     sys.exit(2)
@@ -49,8 +55,9 @@ if mode in ("login", "login-never"):
     say("The portal shows a login page.\nSTATUS: waiting for login")
     while mode == "login-never" or not (here / "release").exists():
         time.sleep(0.05)
-result = {"signed-in": "RESULT: signed in", "login": "RESULT: signed in",
-          "unavailable": "RESULT: unavailable, no browser is connected"}[mode]
+result = {"signed-in": "RESULT: signed in", "login": "RESULT: signed in", "chromeless-signed-in": "RESULT: signed in",
+          "unavailable": "RESULT: unavailable, no browser is connected",
+          "chromeless": "I would call navigate now.", "chrome-no-result": "I would call navigate now."}[mode]
 print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "Done.\n" + result}), flush=True)
 '''
 #: The checkout's downloads: each counts itself in downloads.txt, prints a line, exits `code` (default 0).
@@ -181,6 +188,21 @@ class TheRun(Stubs, unittest.TestCase):
             self.assertEqual(self.run_now(), 1, mode)
             self.assertEqual((self.record()["state"], self.record()["reason"]), ("failed", reason))
         self.assertEqual(self.downloads(), [])
+
+    def test_a_reply_with_no_result_line_from_a_run_without_chrome_tools_says_they_did_not_load(self):
+        """pack sd:7723: init named no Chrome tool or server and no RESULT line came back: the tools did not load."""
+        (self.stub / "mode").write_text("chromeless")
+        self.assertEqual(self.run_now(), 3)
+        self.assertEqual((self.record()["state"], self.record()["reason"]), ("unavailable", hoa_download.CHROME_UNLOADED))
+        self.assertIn("/chrome", hoa_download.CHROME_UNLOADED)
+        # A Chrome server at init, or a RESULT line, leaves the reply's own outcome.
+        (self.stub / "mode").write_text("chrome-no-result")
+        self.assertEqual(self.run_now(), 1)
+        self.assertEqual((self.record()["state"], self.record()["reason"]), ("failed", "no RESULT: line in the reply"))
+        self.assertEqual(self.downloads(), [])
+        (self.stub / "mode").write_text("chromeless-signed-in")
+        self.assertEqual(self.run_now(), 0)
+        self.assertEqual(self.downloads(), ["mission export"])
 
     def test_each_child_carries_an_alarm_that_outlives_a_killed_runner(self):
         started = []

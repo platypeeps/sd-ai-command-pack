@@ -3165,7 +3165,7 @@ def body_text(args, root: pathlib.Path, api: GitHub | None) -> tuple[str, str]:
 def unmanaged_refusal(why: str) -> Refusal:
     """A checkout the sd database marks unmanaged (sd:2566): no prepare, merge or record runs there."""
     return Refusal(why, code="unmanaged_repository", boundary="policy", state="operator_decision",
-                   next_action="Mark the repository managed with bin/sd-db repo managed, or ship it without the pack.")
+                   next_action="Bring the repository to the standard with sd fleet standard, or ship it without the pack.")
 
 
 def outside_repository() -> Refusal:

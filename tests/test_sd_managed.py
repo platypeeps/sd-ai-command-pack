@@ -124,6 +124,8 @@ class TheDirectCommands(Fixture):
                 self.assertIn("`sd fleet standard` in ~/theirs", said)
         refused = json.loads(self.run_command("sd-ship", root).stdout)
         self.assertEqual(refused["workflow"]["blocker"]["code"], "unmanaged_repository")
+        # pack sd:7732: `repo managed PATH yes` refuses once sd:7710 lands; the standard sets the flag.
+        self.assertIn("sd fleet standard", refused["workflow"]["next_action"])
 
     def test_sd_review_reviews_an_unmanaged_checkout_and_sd_ship_still_refuses(self) -> None:
         """pack sd:5953: sd-review reads a diff and writes no repository file."""
