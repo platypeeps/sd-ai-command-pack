@@ -42,7 +42,7 @@ An existing manual operator path needs separate authorization; a gate refusal do
 Standing permission starts no background work and does not enable `runner_merge: auto` on the repository row.
 
 Read `sd config get sd.external_reviews` separately.
-Apply the sd-ai-command-pack checkout's `.claude/rules/sd-operator-defaults.md`.
+Apply the sd-workflow checkout's `.claude/rules/sd-operator-defaults.md`.
 Inspect the complete reviewer chain before expensive checks.
 Do not substitute an unrequested provider.
 
@@ -56,7 +56,7 @@ The first prepare of an item names its claim: `--deliver` on the item's last PR,
 Without either flag, the first prepare refuses; a reprepare keeps the stored claim.
 Small changes need no placeholder work item.
 The checkout holds one writer: this session in its own worktree, or the runner in its clone.
-The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is the rule; do not ship from a checkout another session is writing in.
+The sd-workflow checkout's `WORKFLOW.md`, section **Parallel work**, is the rule; do not ship from a checkout another session is writing in.
 
 1. **Commit enumerated paths only.**
    In the pack, system repository, and writing repository, follow `WORKFLOW.md` for the `Needed-by:` trailer.
@@ -69,7 +69,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Use `sd-review --scope branch --challenge` for the *code, before merge* point.
    A branch of only plain prose (not `skills/`, `bin/`, `tests/`, hooks, `docs/work/`, any dot-path or agent-instruction file such as `AGENTS.md`) or only `.sd-pack-rev` gets the gate alone; prepare says `review skipped: docs-only` or `pin-bump` (sd:2998).
    A code branch whose head a clean plain `sd-review --scope branch` reviewed, or reached since by clean far merges of `origin/main`, gets the gate alone; prepare says `lead review reused` or why not (sd:5988).
-   Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
+   Read its cap on that row in the sd-workflow checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
    With no work root, use `--body-only`; do not create planning files to satisfy tree checks.
    Dispose every blocker.
@@ -121,11 +121,11 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    An `--associate-only` claim closes nothing (sd:3365).
    A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.
-   Read `skills/sd-ship/references/delivery.md` in the sd-ai-command-pack checkout before delivery, cancellation, or completion reporting.
+   Read `skills/sd-ship/references/delivery.md` in the sd-workflow checkout before delivery, cancellation, or completion reporting.
    A slice leaves its item open.
    No-item changes create no row or placeholder trailer.
 9. **Complete post-merge closeout.**
-   After every confirmed in-scope merge, read `skills/sd-ship/references/post-merge-closeout.md` in the sd-ai-command-pack checkout.
+   After every confirmed in-scope merge, read `skills/sd-ship/references/post-merge-closeout.md` in the sd-workflow checkout.
    Run `git fetch -p`; repository `delete_branch_on_merge` removes the remote branch first.
    Review remaining findings and inventory refs, branches, stashes, and worktrees.
    Remove the merged PR's local and remote branches, stashes, refs and stale worktrees when the reference's safety conditions hold, without asking.
@@ -162,7 +162,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Without `--title` or a stored title, a one-commit branch uses its subject; a longer branch is refused.
   Without `--body-file`, an open PR's live body is the description, found by branch when no receipt names one; reprepare preserves the delivery claim.
   Only an open PR binds: a merged or closed one that used the branch name is ignored, and prepare opens a new PR (sd:2656).
-  The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
+  The sd-workflow checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
 - `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
   With `--pr N` and without `--body-file`, it lints that pull request's live body.
   It reads no sd state, calls GitHub only for `--pr`, and exits non-zero on a refusal or a lint failure.
@@ -204,9 +204,9 @@ Never allocate another review ID to reset spent passes or discard history.
   Reconciliation removes no branch, worktree, or clone.
 
 Add `--reuse-check` to prepare or standalone review only when explicitly reusing eligible deterministic-check evidence.
-Before opting in, read `skills/sd-check/references/check-receipts.md` in the sd-ai-command-pack checkout.
+Before opting in, read `skills/sd-check/references/check-receipts.md` in the sd-workflow checkout.
 Reuse requires complete local-only dependencies and unchanged before-and-after identity; legacy receipts rerun.
-The flag never reuses in sd-ai-command-pack itself: the pack tracks no reuse declaration (`.github/sd-check-reuse.json`), so its gate runs.
+The flag never reuses in sd-workflow itself: the pack tracks no reuse declaration (`.github/sd-check-reuse.json`), so its gate runs.
 This flag does not reuse incomplete reviews or bypass source, policy, or receipt validation.
 
 Add `--provider NAME` to prepare or standalone review only for an explicitly requested reviewer.
@@ -265,7 +265,7 @@ Resume the existing receipt rather than starting another review or PR.
 A lost create or merge response requires reconciliation with the same remote operation.
 An empty search after uncertain creation does not authorize another PR.
 A merged PR is evidence to inspect, not permission to merge again.
-Before interruption recovery, read `skills/sd-ship/references/recovery.md` in the sd-ai-command-pack checkout.
+Before interruption recovery, read `skills/sd-ship/references/recovery.md` in the sd-workflow checkout.
 Read its review-retry section only when a review stopped or exhausted its automatic allowance.
 
 ## Recorded rebuttals
@@ -277,7 +277,7 @@ They cannot waive missing depth, incomplete transport, failed checks, or changed
 Fixes still require verification on their new head.
 A rejection that still stands after one review pass is recorded with `sd-ship adjudicate` before the next fix is pushed.
 A rebuttal needs a reason a reader can check, not operator acceptance.
-Before recording dispositions, read `skills/sd-ship/references/adjudication.md` in the sd-ai-command-pack checkout.
+Before recording dispositions, read `skills/sd-ship/references/adjudication.md` in the sd-workflow checkout.
 
 ## Remote findings
 

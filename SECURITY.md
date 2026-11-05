@@ -3,13 +3,13 @@
 ## Supported Versions
 
 Security fixes are made on the latest released version of
-`sd-ai-command-pack`. Consumers should refresh to the latest release before
+`sd-workflow`. Consumers should refresh to the latest release before
 reporting an issue that may already be fixed.
 
 ## Reporting A Vulnerability
 
 Do not disclose vulnerabilities in a public issue. Use the repository's
-[private security advisory form](https://github.com/platypeeps/sd-ai-command-pack/security/advisories/new)
+[private security advisory form](https://github.com/platypeeps/sd-workflow/security/advisories/new)
 and include the affected version, reproduction steps, impact, and any proposed
 mitigation. If private reporting is unavailable, contact the repository owner
 privately through GitHub without posting exploit details publicly.

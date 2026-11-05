@@ -224,7 +224,7 @@ class Hook(Registry):
                         "make test; sd-review -C /tmp", "(sd today)"):
             with self.subTest(command=command):
                 self.assertTrue(self.hook(self.teammate_call(command)).stdout)
-        for command in ("ls ~/repos/platypeeps/sd-ai-command-pack/bin", "git log --grep sd:6046", "echo sdx",
+        for command in ("ls ~/repos/platypeeps/sd-workflow/bin", "git log --grep sd:6046", "echo sdx",
                         "cat sd_work.py"):
             with self.subTest(command=command):
                 self.assertEqual(self.hook(self.teammate_call(command)).stdout, "")
