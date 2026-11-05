@@ -136,15 +136,13 @@ def worktree_place(root: pathlib.Path, head: str) -> Place:
     whose gate process is gone and the temp dirs' leftovers (`reap_temporary`).
 
     The folder goes on the RAM disk when `sd_tmpdisk` reads it ready, unless `head` may track a `Cargo.toml`;
-    a read of `head` that fails counts as one that does. Both places are cleaned, the inherited one too:
-    older gates and runs left their folders there.
+    a read of `head` that fails counts as one that does. Both places are cleaned first, the inherited one too
+    (older gates and runs left their folders there), and the disk whatever its free space (`reap_places`).
     """
     inherited = str(pathlib.Path(tempfile.gettempdir()).resolve())
     listed = sd_lib.git_output(["ls-tree", "-r", "-z", "--name-only", head], root)
     rust = listed is None or any(pathlib.PurePosixPath(name).name == "Cargo.toml" for name in listed.split("\0") if name)
-    disk = sd_tmpdisk.temporary(inherited)  # the inherited one when the disk is not ready
-    chosen = inherited if rust else disk
-    places = [pathlib.Path(place) for place in dict.fromkeys((disk, inherited))]
+    places = [pathlib.Path(place) for place in sd_tmpdisk.reap_places(inherited)]
     for temporary in places:
         if removed := reap_temporary(temporary, owners=not sd_tmpdisk.within(temporary)):
             print(f"sd gate: removed {removed} temp entries from {temporary} (sd:3032)", file=sys.stderr)
@@ -157,6 +155,8 @@ def worktree_place(root: pathlib.Path, head: str) -> Place:
                 and tree.parent.parent.resolve() in resolved and not running(int(named[1])):
             sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
             shutil.rmtree(tree.parent, ignore_errors=True)  # and the check's `TMPDIR` beside it (sd:3032)
+    # Placed after the reap, so the room it freed counts; the inherited dir when the disk is not ready.
+    chosen = inherited if rust else sd_tmpdisk.temporary(inherited)
     return {"dir": chosen, "prefix": f"{GATE_PREFIX}{os.getpid()}-"}
 
 

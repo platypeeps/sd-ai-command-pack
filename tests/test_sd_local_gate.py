@@ -1440,6 +1440,24 @@ class RamDiskGate(Repository):
         self.assertEqual((place, on_disk.exists(), in_outer.exists(), old.exists(), self.worktrees()),
                          (str(self.disk), False, True, False, 1), errors.getvalue())
 
+    def test_a_full_disk_of_dead_gate_folders_is_reaped_and_the_next_gate_lands_on_it(self) -> None:
+        """Lead review: reaping went through the free-space probe, so a disk that dead gates filled was never reaped,
+        and every later gate kept off it for good. A marked disk is reaped whatever its free space."""
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        dead = self.disk / f"{sd_gate_cache.GATE_PREFIX}{gone.pid}-ab"
+        (dead / sd_gate_cache.TEMPORARY).mkdir(parents=True)
+        real = shutil.disk_usage
+
+        def usage(path: str) -> object:  # full while the dead gate's folder is there
+            return mock.Mock(free=sd_tmpdisk.FREE - (1 if dead.exists() else 0)) if path == self.disk else real(path)
+
+        head = self.commit(self.recipe())
+        with mock.patch.object(shutil, "disk_usage", usage), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        tree, _ = self.places()
+        self.assertEqual((dead.exists(), tree.is_relative_to(self.disk)), (False, True), tree)
+
     def test_a_test_run_puts_its_temp_dir_on_a_ready_disk(self) -> None:
         code = ("import os, pathlib, sys; sys.path.insert(0, 'bin'); import sd_tmpdisk; "
                 f"sd_tmpdisk.ROOT = pathlib.Path({str(self.disk)!r}); sd_tmpdisk.ismount = lambda path: True; "

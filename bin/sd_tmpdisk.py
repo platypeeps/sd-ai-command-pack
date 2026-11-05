@@ -4,7 +4,8 @@ The system repository's `tmpdisk` stage keeps an HFS+ RAM disk at `ROOT`, with F
 Spotlight off, and writes `READY` there only after its remount (system sd:7092). Gate trees and test
 runs made about 13k of 55k file writes in 30 s under the inherited `TMPDIR`, and fseventsd grew to 17 GB.
 
-`temporary` is the one place both callers ask: `sd_gate_cache.worktree_place` and `tests/__init__.py`.
+`temporary` is the one place both callers ask: `sd_gate_cache.worktree_place` and `tests/__init__.py`;
+`reap_places` names where a gate start cleans up.
 The disk is ready when `ROOT` is a mount point, holds `READY`, is writable and has `FREE` bytes free.
 Any failed probe reads "not ready", never an error, and the inherited temp dir stays: a satellite has
 no such disk. A temp dir already inside the disk, or inside an sd folder that names its owner's pid
@@ -33,11 +34,18 @@ FREE = 1024 ** 3
 OWNED = re.compile(r"(?:sd-local-gate|sd-tests|sd-ship-verify)-([0-9]{1,9})-[a-z0-9_]+")
 
 
+def disk_marked() -> bool:
+    """Whether `ROOT` is mounted and holds `READY`, whatever its free space; a failed probe is False."""
+    try:
+        return ismount(ROOT) and (ROOT / READY).is_file()
+    except (OSError, ValueError):
+        return False
+
+
 def disk_ready() -> bool:
     """Whether `ROOT` is a mounted, marked, writable disk with `FREE` bytes free; a failed probe is False."""
     try:
-        return (ismount(ROOT) and (ROOT / READY).is_file() and os.access(ROOT, os.W_OK)
-                and shutil.disk_usage(ROOT).free >= FREE)
+        return disk_marked() and os.access(ROOT, os.W_OK) and shutil.disk_usage(ROOT).free >= FREE
     except (OSError, ValueError):
         return False
 
@@ -53,6 +61,17 @@ def within(path: os.PathLike[str] | str) -> bool:
 def owned_inside(path: os.PathLike[str] | str) -> bool:
     """Whether `path` lies in an `OWNED` folder: a gate's, a test run's or a review's."""
     return any(OWNED.fullmatch(part) for part in pathlib.Path(path).parts)
+
+
+def reap_places(inherited: str) -> list[str]:
+    """Where a gate start reaps: the disk when it is marked, whatever its free space, then `inherited`.
+
+    Only placing a folder needs room: a disk that dead gates filled is reaped, so the next gate lands on it
+    again (sd:7557 review). A nested `inherited` reaps only itself, as `temporary` keeps it.
+    """
+    if within(inherited) or owned_inside(inherited) or not disk_marked():
+        return [inherited]
+    return [str(ROOT), inherited]
 
 
 def temporary(inherited: str | None = None) -> str:
