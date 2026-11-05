@@ -316,7 +316,7 @@ def _pickup(connection, now: str) -> dict:
 
 def pickup(payload: dict):
     """POST /api/queue/builds/pickup: `{on, until}`, `until` the end the panel read (null when off); the write
-    `action_route` runs, or ValueError. On ends at the next 07:00 America/Denver; Off clears it. A value
+    `action_route` runs, or ValueError. On ends at the next 09:00 America/Denver; Off clears it. A value
     that moved since the read is a 409 and writes nothing."""
     if (set(payload) != {"on", "until"} or type(payload["on"]) is not bool
             or not (payload["until"] is None or isinstance(payload["until"], str))):
