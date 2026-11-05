@@ -23,16 +23,24 @@
 // sd shadow sync stored them (the read's `ready`); one whose state was not read is never ready, and a line counts them.
 // sd:6173: a Repo column; a Repo pick (shell.list.pick, multi) keeps the rows of the repos picked, none picked keeps all, and
 // names them in ?repo= (comma separated); an Actions column of the shell's rowActions: Open on GitHub, then the ⋯ menu.
+// pack sd:7664: the rows group by repo, one group open at a time, as Today's Queue view opens a repo (today.js qOpen): a
+// press on a repo row opens it and closes the one that was open, a press on the open one closes it. The first group, or
+// the selected row's, opens on the first draw and when a filter removes the open one; the pager pages the open group's rows. The repo row named the repo the
+// Repo column (sd:6173) named, so that column left.
 (() => {
   const { html, put, plural } = window.markup;
   const count = (shown, total, noun) => window.shell.list.count(shown, total, noun);
   const $ = id => document.getElementById(id);
   const GLYPH = { caution: '▲', queued: '◌', ok: '●' };
+  const RANK = { caution: 0, queued: 1, ok: 2 };
+  const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   // What each unread source leaves out, for its line.
   const UNREAD = { intake: 'Third-party issues in repos with GitHub issues on', delivery: 'Items of merged pull requests (delivery notes)',
     refs: 'Items filed under a GitHub ref' };
 
   let DOC = null, failed = '', reads = 0, started = false, PUT = new Set();
+  // The open repo group (pack sd:7664): undefined until the first draw picks one, null once every group is closed.
+  let OPEN;
   // The pager's state (shell.list): page and size, from the address when the view first draws.
   const SIZE = 25;
   let ST = null;
@@ -71,7 +79,6 @@
     return html`<tr data-key="${r.key}" data-id="${oid(r.key)}" data-pr aria-selected="${String(chosen() === r.key)}">
       <td class="g g-${s}" title="${r.state}">${GLYPH[s]}</td>
       <td class="what"><button type="button" data-gh-open="${r.key}">${r.title || r.ref}</button><span class="repo">#${r.number}</span></td>
-      <td class="src">${r.repo}</td>
       <td class="detail">${r.state === 'open' ? r.why : html`${r.state} · ${r.why}`}${r.item ? html`<span class="sub"><a href="${window.shell.itemHref(r.item)}">sd:${r.item}</a></span>` : ''}</td>
       <td class="when">${when(r)}</td>
       <td class="act">${window.shell.commands.rowActions(oid(r.key))}</td></tr>`;
@@ -80,12 +87,30 @@
   const unknown = () => DOC.pulls.filter(r => r.ready == null && (all() || mine(r)) && inRepo(r)).length;
   const note = () => ready() ? (unknown() ? html`<p class="st-line"><span class="g-unknown">▨</span> ${plural(unknown(), 'open pull request')} whose review, checks or merge state was not read, so not listed: the next GitHub sync reads them</p>` : '')
     : closed() ? html`<p class="st-line">Merged or closed: the last ${DOC.days} days${DOC.undated ? html` · <span class="g-unknown">▨</span> ${plural(DOC.undated, 'merged or closed row')} with no date recorded, not placed` : ''}</p>` : '';
+  // The shown rows by repo, in the order of each repo's newest row (the read sorts newest activity first); a group's glyph
+  // is its loudest row's.
+  function groups() {
+    const G = new Map();
+    shown().forEach(r => { if (!G.has(r.repo)) G.set(r.repo, []); G.get(r.repo).push(r); });
+    return [...G].map(([repo, rows]) => ({ repo, rows, s: rows.map(state).reduce((w, x) => RANK[x] < RANK[w] ? x : w, 'ok') }));
+  }
+  const group = g => { const on = OPEN === g.repo, waiting = g.rows.filter(r => r.why === 'waiting on you').length, at = g.rows.find(r => r.at);
+    return html`<tr class="repo" data-repo="${g.repo}" aria-expanded="${String(on)}">
+      <td class="g g-${g.s}" title="${g.s}">${GLYPH[g.s]}</td>
+      <td class="what"><button type="button" class="disc" data-open="${g.repo}" aria-expanded="${String(on)}" aria-label="${on ? 'Close' : 'Open'} ${g.repo}">${I('chevron-right')}</button><button type="button" class="pick" data-open="${g.repo}">${g.repo}</button></td>
+      <td class="detail">${plural(g.rows.length, closed() ? 'pull request' : 'open pull request')}${waiting ? html` · <span class="g-caution">${waiting} waiting on you</span>` : ''}</td>
+      <td class="when">${at ? when(at) : ''}</td><td class="act"></td></tr>`; };
   function table() {
-    const L = window.shell.list, rows = shown();
-    if (!rows.length) return html`<p class="st-line st-empty">No ${closed() ? '' : 'open '}pull request ${ready() ? 'is ready to merge' : all() ? 'is listed' : 'is assigned to you or opened by you'}.</p>`;
-    return html`<table class="ledger st" aria-labelledby="github-h" data-toolbar="github-filters">
-      <thead><tr><th scope="col"><span class="sr">State</span></th><th scope="col">Pull request</th><th scope="col">Repo</th><th scope="col">Why</th><th scope="col">Activity</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
-      <tbody>${L.pageOf(rows, st()).map(row)}</tbody></table>${L.pager(rows.length, st(), 'pull requests')}`;
+    const L = window.shell.list, G = groups();
+    if (!G.length) return html`<p class="st-line st-empty">No ${closed() ? '' : 'open '}pull request ${ready() ? 'is ready to merge' : all() ? 'is listed' : 'is assigned to you or opened by you'}.</p>`;
+    // The first draw opens the selected row's group, else the first; so does a draw whose open group a filter removed.
+    // Closed by a press (null), every group stays closed.
+    const has = repo => G.some(g => g.repo === repo), sel = (pullOf(chosen() || '') || {}).repo;
+    if (OPEN === undefined || (OPEN && !has(OPEN))) OPEN = has(sel) ? sel : G[0].repo;
+    const open = G.find(g => g.repo === OPEN);
+    return html`<table class="ledger st pulls" aria-labelledby="github-h" data-toolbar="github-filters" data-tgrid="off">
+      <thead><tr><th scope="col"><span class="sr">State</span></th><th scope="col">Pull request</th><th scope="col">Why</th><th scope="col">Activity</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+      <tbody>${G.map(g => html`${group(g)}${g === open ? L.pageOf(g.rows, st()).map(row) : ''}`)}</tbody></table>${open ? L.pager(open.rows.length, st(), 'pull requests') : ''}`;
   }
 
   // The counts, what waits on you, and when the GitHub collector last succeeded: a sync that is not fresh says so.
@@ -290,6 +315,10 @@
     }));
     $('github-sections').addEventListener('click', e => {
       const opened = e.target.closest('[data-gh-open]'); if (opened) return details(opened.dataset.ghOpen);
+      // A repo row (pack sd:7664): its chevron, name or the rest of its row opens it and closes the open one; a press on
+      // the open one closes it. Its rows start at page 1.
+      const g = e.target.closest('[data-open]') || (!e.target.closest('a, button') && e.target.closest('tr.repo'));
+      if (g) { const repo = g.dataset.open ?? g.dataset.repo; OPEN = OPEN === repo ? null : repo; st().page = 1; address({}); return draw(); }
       // The pager (shell.list): a page or a size redraws, and focus stays on the new copy of the button.
       if (window.shell.list.paging(e, st())) { address({}); return window.shell.list.keepFocus(e, draw); }
       const tr = !e.target.closest('a, button') && e.target.closest('tr[data-pr]'); if (tr) details(tr.dataset.key);
