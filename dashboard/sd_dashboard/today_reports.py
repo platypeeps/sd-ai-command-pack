@@ -8,8 +8,8 @@ Two lists, read from the workflow database and from nothing else:
   backlog leaves it out. Acknowledge posts the Reports page's route, `/api/reports/<id>/acknowledge`, with the revision.
   A report whose output shows an expired login carries `login` (`job_failures.login`), which Fix opens (sd:6964).
   Fix on any other report is the Reports page's debug session (pack sd:7683). A report another session already took
-  carries `claim`, who has it: `in_progress`, by its status change's `who`, or a note Fix wrote (`fix_session.NOTE`),
-  by that note's session; Today then names it in place of Fix.
+  carries `claim`, who has it: `in_progress`, by its status change's `who`, or a note Fix wrote (`fix_session.NOTE`)
+  in the last `CLAIM_HOURS`, by that note's session; Today then names it in place of Fix.
 - `briefs`: the routine briefs (`briefs_screen`) filed in the last `WINDOW_DAYS` days, newest first, that the operator has
   not marked seen. Seen is a Today snooze (`snooze`), key `today:brief:<stem>`, held until the brief changes
   (`writes.SNOOZE_FOREVER`, sd:5752): the place pages' Briefs (`places.briefs`) read the same mark (`seen_row`), so a brief
@@ -58,11 +58,24 @@ def _open(row) -> bool:
 
 #: A status change's body, as `writes.transition` writes it: `<old> -> <new> by <who>`, then `: <reason>` if given.
 MOVED = re.compile(r"-> in_progress by (?P<who>.+?)(?:: |$)")
+#: A Fix note claims its report for this long (pack sd:7733); after it, Today offers Fix again.
+# ponytail: an age limit, not a herdr pane probe; join `active_sessions` launches if a long Fix run gets a second one.
+CLAIM_HOURS = 4
 
 
-def claim(connection, row) -> str | None:
-    """Who has the report (pack sd:7683): the session that moved it to `in_progress`, else the newest Fix note's; None
-    while nobody took it."""
+def _recent(stamp, now: datetime) -> bool:
+    """Within `CLAIM_HOURS` of `now`; a stamp that does not parse still claims, since its age is unknown."""
+    try:
+        at = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    return now - at < timedelta(hours=CLAIM_HOURS)
+
+
+def claim(connection, row, now: datetime) -> str | None:
+    """Who has the report (pack sd:7683): the session that moved it to `in_progress`, else the newest Fix note's from
+    the last `CLAIM_HOURS`; None while nobody took it."""
     notes = reads.item_notes(connection, row["id"])
     if row["status"] == "in_progress":
         moved = [MOVED.search(note["body"]) for note in notes if note["kind"] == "status_change"]
@@ -70,12 +83,14 @@ def claim(connection, row) -> str | None:
         return f"{who or 'someone'} has it (in_progress)"
     for note in reversed(notes):
         found = note["kind"] == "comment" and active_sessions.LAUNCH.match(note["body"])
+        if found and not _recent(note["timestamp"], now):
+            return None
         if found:
             return f"{note['session'] or 'a session'} has it (Fix: {found['session']} session, herdr pane {found['pane']})"
     return None
 
 
-def _problem(connection, row, revision: str) -> dict:
+def _problem(connection, row, revision: str, now: datetime) -> dict:
     try:
         fields = reporting.fields_document(connection, row["fields"])
         readable = isinstance(fields, dict)
@@ -95,16 +110,16 @@ def _problem(connection, row, revision: str) -> dict:
             "job": report.get("job") or None, "exit": report.get("exit_code"), "host": report.get("host") or None,
             "why": basis.splitlines()[0] if basis else ("its fields cannot be read" if not readable else ""),
             "basis": basis, "repeats": repeats.get("count"), "body": text[-BODY_CHARS:], "cut": len(text) > BODY_CHARS,
-            "revision": revision, "fields_read": readable, "login": job_failures.login(text), "claim": claim(connection, row)}
+            "revision": revision, "fields_read": readable, "login": job_failures.login(text), "claim": claim(connection, row, now)}
 
 
-def problems(connection: sqlite3.Connection) -> tuple[list[dict], int, bool]:
+def problems(connection: sqlite3.Connection, now: datetime) -> tuple[list[dict], int, bool]:
     """The open reports that ask for a person, newest first and at most `SHOWN`; how many more; whether the read was full."""
     read = reporting.reports(connection, limit=READ)
     found = [row for row in read if _open(row)]
     rows = found[:SHOWN]
     revisions = reads.revisions(connection, [row["id"] for row in rows])
-    return [_problem(connection, row, revisions[row["id"]]) for row in rows], len(found) - len(rows), len(read) >= READ
+    return [_problem(connection, row, revisions[row["id"]], now) for row in rows], len(found) - len(rows), len(read) >= READ
 
 
 def seen_row(row: dict) -> dict:
@@ -131,7 +146,7 @@ def document(connection: sqlite3.Connection, *, now: str, snoozes: dict) -> dict
     out = {"problems": [], "problems_more": 0, "problems_capped": False, "problems_error": "",
            "briefs": [], "briefs_more": 0, "briefs_error": "", "briefs_skipped": 0}
     try:
-        out["problems"], out["problems_more"], out["problems_capped"] = problems(connection)
+        out["problems"], out["problems_more"], out["problems_capped"] = problems(connection, datetime.fromisoformat(now.replace("Z", "+00:00")))
     except (SdDbError, sqlite3.Error, ValueError, KeyError) as failure:
         out["problems_error"] = str(failure) or "the reports could not be read"
     try:
