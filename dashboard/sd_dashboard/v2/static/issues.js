@@ -221,7 +221,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   const stamp = (r, v) => v ? html`<time class="rel" data-long datetime="${v}"></time>` : ph(r);
   function details(id, open = true) {
     const r = rowOf(id); if (!r) return;
-    const tracker = r.tracker || 'GitHub', where = tracker === 'Jira' ? 'in Jira' : 'on GitHub';
+    const tracker = r.tracker || 'GitHub';
     document.querySelectorAll('#issues tr[data-id], #intake tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', String(tr.dataset.id === id)));
     put($('details'), html`<p class="kind">${tracker} issue · ${r.state || 'state not stored'}</p>
       <h2>${r.title || r.ref}</h2>
@@ -234,7 +234,6 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
         <dt>Description</dt><dd><span class="ph">not stored: sd shadow sync keeps no labels, priority or description</span></dd>
         <dt>Item</dt><dd>${r.item ? html`<a href="${window.shell.itemHref(r.item)}">sd:${r.item}</a>` : html`<span class="ph">${r.unread ? 'not read' : 'none filed under this issue'}</span>`}</dd></dl>
       ${r.unread ? html`<p class="why">The stored issue was not read: ${r.unread}. Read again tries again.</p>` : ''}
-      ${r.url ? html`<p><a href="${r.url}" target="_blank" rel="noopener noreferrer">Open ${r.ref} ${where}</a></p>` : ''}
       <h3>Act</h3>${window.shell.commands.bar(id)}`);
     window.shell.commands.select(id);
     if (open) window.shell.openPane('tab-details');

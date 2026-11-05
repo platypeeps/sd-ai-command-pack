@@ -327,9 +327,11 @@ window.shell = { itemHref: n => `/tasks?item=${n}`, openItem: n => `#${n} opens 
         details = drawn["details"]
         for shown in ("GitHub issue · open", "<h2>Crash on start</h2>", "example/project", "example-user", "octocat",
                       'datetime="2026-09-05T09:00:00Z"', f'<a href="/tasks?item={filed}">sd:{filed}</a>',
-                      '<a href="https://github.com/example/project/issues/12" target="_blank" rel="noopener noreferrer">Open #12 on GitHub</a>',
                       '<div class="bar">iss:github:example/project#12</div>'):
             self.assertIn(shown, details)
+        # pack sd:7718: the Act bar's Open on GitHub opens the issue, so Details carry no text link to it.
+        self.assertNotIn("https://github.com/example/project/issues/12", details)
+        self.assertNotIn("Open #12 on GitHub", details)
         self.assertIn("<dt>Labels</dt><dd><span class=\"ph\">not stored</span>", details)
         self.assertIn("<dt>Priority</dt>", details)
         self.assertIn("sd shadow sync keeps no labels, priority or description", details)
@@ -340,11 +342,11 @@ window.shell = { itemHref: n => `/tasks?item=${n}`, openItem: n => `#${n} opens 
                                       "jira issue.category", "issue categories.add", "issue category.rename", "issue category.remove"])
         self.assertEqual(sorted(set(out["types"])), ["github issue", "issue categories", "jira issue"])
 
-    def test_a_jira_row_says_open_in_jira_and_a_fact_not_stored_says_so(self):
+    def test_a_jira_row_opens_in_jira_by_its_command_and_a_fact_not_stored_says_so(self):
         _, out = self.run_page("window.issues.details('iss:jira:EXAMPLE-8');"
                                "const o = objects['iss:jira:EXAMPLE-8']; R = registered.find(c => c.id === 'jira issue.open').run(o);")
         details = dict(out["sunk"])["details"]
-        self.assertIn("Open EXAMPLE-8 in Jira", details)
+        self.assertNotIn("Open EXAMPLE-8 in Jira", details)  # pack sd:7718: the command below opens it
         self.assertIn("<dt>Assignee</dt><dd><span class=\"ph\">not stored</span>", details)
         self.assertIn("none filed under this issue", details)
         self.assertEqual(out["opened"], [["https://example.test/browse/EXAMPLE-8", "_blank"]])
