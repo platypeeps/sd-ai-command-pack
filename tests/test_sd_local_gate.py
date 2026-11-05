@@ -32,6 +32,7 @@ import sd_gate_run  # noqa: E402
 import sd_gate_slots  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_local_gate  # noqa: E402
+import sd_tmpdisk  # noqa: E402
 from sd_ship_remote import Refusal  # noqa: E402
 
 from tests.clean_env import clean_environment  # noqa: E402
@@ -1294,7 +1295,7 @@ class TemporaryLeftovers(unittest.TestCase):
         old = self.entry(f"sd-tests-{self.dead()}-x7")
         with mock.patch.object(tempfile, "tempdir", str(self.temporary)), \
                 contextlib.redirect_stderr(io.StringIO()) as errors:
-            sd_gate_cache.worktree_prefix(pathlib.Path(self.temporary))
+            sd_gate_cache.worktree_place(pathlib.Path(self.temporary), "HEAD")
         self.assertFalse(old.exists())
         self.assertIn("removed 1 temp entries", errors.getvalue())
 
@@ -1317,11 +1318,225 @@ class OuterTemporaryUntouched(unittest.TestCase):
         repo = pathlib.Path(tmp.name) / "repo"
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
         code = ("import sys, pathlib; sys.path.insert(0, 'bin'); import tests, sd_gate_cache; "
-                f"sd_gate_cache.worktree_prefix(pathlib.Path({str(repo)!r}))")
+                f"sd_gate_cache.worktree_place(pathlib.Path({str(repo)!r}), 'HEAD')")
         done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True,
                               env={**os.environ, "TMPDIR": str(outer)}, timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual((sorted(p.name for p in outer.iterdir() if p.name == leftover), done.stderr), ([leftover], ""))
+
+
+class TmpDiskProbe(unittest.TestCase):
+    """sd:7557: the RAM disk is ready only when every probe passes; any failed probe reads "not ready", never an error."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.disk = pathlib.Path(tmp.name).resolve() / "sd-tmp"
+        self.disk.mkdir()
+        (self.disk / sd_tmpdisk.READY).write_text("", encoding="utf-8")
+        self.mounted = True
+        for patch in (mock.patch.object(sd_tmpdisk, "ROOT", self.disk),
+                      mock.patch.object(sd_tmpdisk, "ismount", lambda path: self.mounted and path == self.disk)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_a_mounted_marked_writable_disk_with_room_is_ready(self) -> None:
+        self.assertTrue(sd_tmpdisk.disk_ready())
+
+    def test_each_failed_probe_reads_not_ready(self) -> None:
+        self.mounted = False
+        verdicts = {"not a mount point": sd_tmpdisk.disk_ready()}
+        self.mounted = True
+        with mock.patch.object(os, "access", return_value=False):
+            verdicts["read-only"] = sd_tmpdisk.disk_ready()
+        with mock.patch.object(shutil, "disk_usage", return_value=mock.Mock(free=sd_tmpdisk.FREE - 1)):
+            verdicts["under 1 GiB free"] = sd_tmpdisk.disk_ready()
+        with mock.patch.object(shutil, "disk_usage", side_effect=OSError("gone")):
+            verdicts["usage unreadable"] = sd_tmpdisk.disk_ready()
+        (self.disk / sd_tmpdisk.READY).unlink()
+        verdicts["no marker"] = sd_tmpdisk.disk_ready()
+        self.disk.rmdir()
+        verdicts["no folder"] = sd_tmpdisk.disk_ready()
+        self.assertEqual(verdicts, dict.fromkeys(verdicts, False))
+
+    def test_a_dir_already_on_the_disk_or_in_an_sd_folder_stays(self) -> None:
+        """A check's tests nest in their gate's folder, and a test's gate in its run's (sd:3032)."""
+        outer = pathlib.Path("/nonexistent-sd-7557/T")  # a path outside this run's own `sd-tests-` folder
+        nested = [str(outer / f"sd-local-gate-{os.getpid()}-ab" / "t"), str(outer / f"sd-tests-{os.getpid()}-ab"),
+                  str(self.disk / "x")]
+        self.assertEqual([sd_tmpdisk.temporary(path) for path in nested], nested)
+        self.assertEqual(sd_tmpdisk.temporary(str(outer)), str(self.disk))
+        self.mounted = False
+        self.assertEqual(sd_tmpdisk.temporary(str(outer)), str(outer), "not ready keeps the inherited temp dir")
+
+
+class RamDiskGate(Repository):
+    """sd:7557: once the RAM disk is ready, the gate's folder and a test run's go there; a Rust tree stays off it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.disk = self.root.parent / "sd-tmp"
+        self.disk.mkdir()
+        (self.disk / sd_tmpdisk.READY).write_text("", encoding="utf-8")
+        self.outer = self.root.parent / "outer"
+        self.outer.mkdir()
+        self.seen = self.root.parent / "seen"
+        # The run's own `sd-tests-<pid>-` folder holds both fakes; that nesting keeps the real disk away (sd:3032).
+        for patch in (mock.patch.object(sd_tmpdisk, "ROOT", self.disk),
+                      mock.patch.object(sd_tmpdisk, "ismount", lambda path: path == self.disk),
+                      mock.patch.object(sd_tmpdisk, "owned_inside", lambda path: False),
+                      mock.patch.dict(os.environ, {"TMPDIR": str(self.outer)}),
+                      mock.patch.object(tempfile, "tempdir", str(self.outer))):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def places(self) -> list[pathlib.Path]:
+        return [pathlib.Path(line) for line in self.seen.read_text(encoding="utf-8").splitlines()]
+
+    def recipe(self) -> str:
+        return f"check:\n\t@pwd >> {self.seen}; echo \"$$TMPDIR\" >> {self.seen}\n"
+
+    def test_a_gate_builds_its_tree_and_check_tmpdir_on_a_ready_disk(self) -> None:
+        head = self.commit(self.recipe())
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        tree, temporary = self.places()
+        self.assertEqual((tree.is_relative_to(self.disk), temporary.is_relative_to(self.disk)), (True, True), tree)
+        self.assertEqual((list(self.disk.iterdir()), list(self.outer.iterdir())), ([self.disk / sd_tmpdisk.READY], []))
+
+    def test_a_disk_that_is_not_ready_keeps_the_inherited_temp_dir(self) -> None:
+        (self.disk / sd_tmpdisk.READY).unlink()
+        head = self.commit(self.recipe())
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertEqual([place.is_relative_to(self.outer) for place in self.places()], [True, True])
+
+    def test_a_tree_that_tracks_cargo_stays_off_the_disk(self) -> None:
+        """A cold build goes into the worktree's `target/`, about 4.5 GB, more than the 4 GiB disk."""
+        (self.root / "crate").mkdir()
+        (self.root / "crate" / "Cargo.toml").write_text('[package]\nname = "f"\nversion = "0.1.0"\n', encoding="utf-8")
+        head = self.commit(self.recipe())
+        env = {**os.environ, sd_gate_cache.CARGO_TARGETS_VARIABLE: "0"}
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head, environ=env)["status"], "success")
+        self.assertEqual([place.is_relative_to(self.outer) for place in self.places()], [True, True])
+
+    def test_a_head_that_cannot_be_read_counts_as_one_that_tracks_cargo(self) -> None:
+        self.commit(self.recipe())
+        place = sd_gate_cache.worktree_place(self.root, "0" * 40)["dir"]
+        self.assertEqual(place, str(self.outer))
+
+    def test_a_gate_start_reaps_the_disk_whatever_owner_it_reads_and_the_inherited_dir_too(self) -> None:
+        """The disk mounts with ownership off, so an entry's owner is the volume's; the inherited dir keeps the
+        check, and older gates left their folders there."""
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        on_disk, in_outer = self.disk / f"sd-tests-{gone.pid}-x7", self.outer / f"sd-tests-{gone.pid}-x7"
+        on_disk.mkdir()
+        in_outer.mkdir()
+        head = self.commit(self.recipe())
+        old = self.outer / f"{sd_gate_cache.GATE_PREFIX}{gone.pid}-ab"
+        git(self.root, "worktree", "add", "-q", "--detach", str(old / "tree"), head)
+        with mock.patch.object(os, "getuid", return_value=os.getuid() + 1), \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            place = sd_gate_cache.worktree_place(self.root, head)["dir"]
+        self.assertEqual((place, on_disk.exists(), in_outer.exists(), old.exists(), self.worktrees()),
+                         (str(self.disk), False, True, False, 1), errors.getvalue())
+
+    def test_a_full_disk_of_dead_gate_folders_is_reaped_and_the_next_gate_lands_on_it(self) -> None:
+        """Lead review: reaping went through the free-space probe, so a disk that dead gates filled was never reaped,
+        and every later gate kept off it for good. A marked disk is reaped whatever its free space."""
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        dead = self.disk / f"{sd_gate_cache.GATE_PREFIX}{gone.pid}-ab"
+        (dead / sd_gate_cache.TEMPORARY).mkdir(parents=True)
+        real = shutil.disk_usage
+
+        def usage(path: str) -> object:  # full while the dead gate's folder is there
+            return mock.Mock(free=sd_tmpdisk.FREE - (1 if dead.exists() else 0)) if path == self.disk else real(path)
+
+        head = self.commit(self.recipe())
+        with mock.patch.object(shutil, "disk_usage", usage), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        tree, _ = self.places()
+        self.assertEqual((dead.exists(), tree.is_relative_to(self.disk)), (False, True), tree)
+
+    def nested_on_disk(self) -> pathlib.Path:
+        """The inherited temp dir on the disk, as in a test run or a check's `t/` there; the system's per-user temp dir
+        a fake folder."""
+        nested = self.disk / f"sd-tests-{os.getpid()}-ab"
+        nested.mkdir()
+        self.system = self.root.parent / "system"
+        self.system.mkdir()
+        for patch in (mock.patch.dict(os.environ, {"TMPDIR": str(nested)}),
+                      mock.patch.object(tempfile, "tempdir", str(nested)),
+                      mock.patch.object(os, "confstr", lambda name: str(self.system))):
+            patch.start()
+            self.addCleanup(patch.stop)
+        return nested
+
+    def test_a_cargo_head_under_a_temp_dir_on_the_disk_builds_off_it(self) -> None:
+        """Lane review: the Rust exclusion kept the inherited dir, and a nested run's is on the disk, so a cold
+        `target/` of about 4.5 GB still landed on the 4 GiB disk."""
+        self.nested_on_disk()
+        (self.root / "Cargo.toml").write_text('[package]\nname = "f"\nversion = "0.1.0"\n', encoding="utf-8")
+        head = self.commit(self.recipe())
+        env = {**os.environ, sd_gate_cache.CARGO_TARGETS_VARIABLE: "0"}
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head, environ=env)["status"], "success")
+        self.assertEqual([place.is_relative_to(self.system) for place in self.places()], [True, True])
+
+    def test_a_head_git_cannot_list_under_a_temp_dir_on_the_disk_goes_off_it(self) -> None:
+        self.nested_on_disk()
+        self.commit(self.recipe())
+        self.assertEqual(sd_gate_cache.worktree_place(self.root, "0" * 40)["dir"], str(self.system))
+
+    def test_a_gate_nested_on_a_disk_that_is_not_ready_goes_off_it(self) -> None:
+        """Not ready kept the inherited dir, which a nested run has on the disk itself."""
+        self.nested_on_disk()
+        with mock.patch.object(shutil, "disk_usage", return_value=mock.Mock(free=sd_tmpdisk.FREE - 1)):
+            place = sd_gate_cache.worktree_place(self.root, self.commit(self.recipe()))["dir"]
+        self.assertEqual(place, str(self.system))
+
+    def test_a_gate_nested_on_a_ready_disk_stays_in_its_runs_folder(self) -> None:
+        nested = self.nested_on_disk()
+        self.assertEqual(sd_gate_cache.worktree_place(self.root, self.commit(self.recipe()))["dir"], str(nested))
+
+    def test_the_system_temp_dir_ignores_tmpdir(self) -> None:
+        """macOS names the per-user temp dir, whatever `TMPDIR` says. Without the name (no RAM disk there either), a
+        gate takes no fixed path (bandit B108): the inherited dir off the disk, else tempfile's default."""
+        nested = self.nested_on_disk()
+        self.assertEqual(sd_tmpdisk.system_temporary(), str(self.system))
+        with mock.patch.object(os, "confstr", side_effect=ValueError("unrecognized configuration name")):
+            self.assertEqual((sd_tmpdisk.system_temporary(), sd_tmpdisk.gate_temporary(str(nested), rust=True),
+                              sd_tmpdisk.gate_temporary(str(self.outer), rust=True)), (None, None, str(self.outer)))
+        with mock.patch.object(os, "confstr", return_value=str(self.disk)):
+            self.assertIsNone(sd_tmpdisk.system_temporary(), "a per-user name on the disk is refused too")
+
+    def test_a_python_that_does_not_name_the_per_user_dir_still_reads_it_by_number(self) -> None:
+        """Lane review: the hub's Python registers no `CS_DARWIN_USER_TEMP_DIR`, so the name raised, the dir read None,
+        and a Cargo gate under a `TMPDIR` on the disk landed on it. `<unistd.h>` numbers it 65537."""
+        self.nested_on_disk()
+
+        def confstr(name: str | int) -> str:  # as Python answers where it does not know the name
+            if name != 65537:
+                raise ValueError("unrecognized configuration name")
+            return str(self.system)
+
+        (self.root / "Cargo.toml").write_text('[package]\nname = "f"\nversion = "0.1.0"\n', encoding="utf-8")
+        head = self.commit(self.recipe())
+        env = {**os.environ, sd_gate_cache.CARGO_TARGETS_VARIABLE: "0"}
+        names = {key: value for key, value in os.confstr_names.items() if key != "CS_DARWIN_USER_TEMP_DIR"}
+        with mock.patch.object(os, "confstr_names", names), mock.patch.object(os, "confstr", confstr):
+            self.assertEqual(sd_tmpdisk.system_temporary(), str(self.system))
+            self.assertEqual(sd_gate_run.check_in_worktree(self.root, head, environ=env)["status"], "success")
+        self.assertEqual([place.is_relative_to(self.system) for place in self.places()], [True, True])
+
+    def test_a_test_run_puts_its_temp_dir_on_a_ready_disk(self) -> None:
+        code = ("import os, pathlib, sys; sys.path.insert(0, 'bin'); import sd_tmpdisk; "
+                f"sd_tmpdisk.ROOT = pathlib.Path({str(self.disk)!r}); sd_tmpdisk.ismount = lambda path: True; "
+                "sd_tmpdisk.owned_inside = lambda path: False; import tests; print(os.environ['TMPDIR'])")
+        done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True,
+                              env={**os.environ, "TMPDIR": str(self.outer)}, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(pathlib.Path(done.stdout.strip()).parent, self.disk, done.stdout)
+        self.assertEqual(list(self.disk.iterdir()), [self.disk / sd_tmpdisk.READY], "its exit removes it")
 
 
 class StaleGateWorktrees(Repository):

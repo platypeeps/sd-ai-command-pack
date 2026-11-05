@@ -1,9 +1,9 @@
-"""Every test run gets a temp dir of its own, inside the one it was started with (sd:3032).
+"""Every test run gets a temp dir of its own, inside the one it was started with (sd:3032), or on the hub's RAM disk.
 
 A gate start reaps day-old leftovers from the temp dir, so a suite that starts a gate outside the gate reaped the
 operator's real `$TMPDIR`, and the reaper's stderr line broke `test_rule_registry` leg d's `-v` verdicts. Set here,
 `TMPDIR` reaches every module this package loads and every child they start; a child that imports the package
-nests its own. A killed run leaves its folder behind; its name holds the run's pid, so `OWNED` in `bin/sd_gate_cache.py`
+nests its own. A killed run leaves its folder behind; its name holds the run's pid, so `OWNED` in `bin/sd_tmpdisk.py`
 removes it once that pid is gone, never while the run lives.
 
 `SD_LANE_ROOT` points into that folder too: a review a fixture finishes in-process is held in the lane folder until
@@ -15,14 +15,30 @@ fetch on every run. A test that needs a config of its own, such as a hostile one
 """
 
 import atexit
+import importlib.util
 import os
 import shutil
 import sys
 import tempfile
+import types
 
 from tests.clean_env import GIT_ISOLATION
 
-os.environ["TMPDIR"] = tempfile.mkdtemp(prefix=f"sd-tests-{os.getpid()}-")
+
+def _tmpdisk() -> types.ModuleType:
+    """`bin/sd_tmpdisk.py`, the one RAM-disk probe the gate uses too (sd:7557); loaded by path, so `bin/` stays
+    off `sys.path` here, and once: a test that patches it patches what this package read."""
+    if "sd_tmpdisk" not in sys.modules:
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "sd_tmpdisk.py")
+        spec = importlib.util.spec_from_file_location("sd_tmpdisk", path)
+        assert spec is not None and spec.loader is not None, path
+        sys.modules["sd_tmpdisk"] = module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    return sys.modules["sd_tmpdisk"]
+
+
+# On the hub's RAM disk when it is ready, else the inherited temp dir, as before (sd:7557).
+os.environ["TMPDIR"] = tempfile.mkdtemp(prefix=f"sd-tests-{os.getpid()}-", dir=_tmpdisk().temporary())
 tempfile.tempdir = None
 os.environ["SD_LANE_ROOT"] = os.path.join(os.environ["TMPDIR"], "lanes")
 atexit.register(shutil.rmtree, os.environ["TMPDIR"], ignore_errors=True)

@@ -176,7 +176,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     otherwise the result's `receipt_skipped` names what moved (sd:2612).
     `reuse=False` never reads one and `record=False` never writes one (the merge gate).
     """
-    with tempfile.TemporaryDirectory(prefix=sd_gate_cache.worktree_prefix(root)) as parent:  # sd:2739
+    with tempfile.TemporaryDirectory(**sd_gate_cache.worktree_place(root, head)) as parent:  # sd:2739, sd:7557
         tree = pathlib.Path(parent) / "tree"
         gate_git(root, "worktree", "add", "--detach", str(tree), head)
         try:
