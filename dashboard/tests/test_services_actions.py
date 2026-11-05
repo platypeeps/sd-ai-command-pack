@@ -106,7 +106,7 @@ class ServicesActions(BrowserSession):
         status, _, page = self.request("/operations?area=services")
         self.assertEqual(status, 200)
         for text in ("Launchd services", "User LaunchAgent", "System daemon", "Running", "PID 111",
-                     "Stop unloads", "next login", f"sd services stop {self.label}"):
+                     "Stop stops a user service", "next login", f"sd services stop {self.label}"):
             self.assertIn(text, page)
         self.assertEqual(page.count(f'action="/api/services/{self.label}/stop"'), 1)
         self.assertNotIn(f'action="/api/services/{DASHBOARD_LABEL}/', page)
@@ -174,7 +174,7 @@ class ServicesActions(BrowserSession):
         page = self.request("/operations?area=services")[2]
         self.assertIn("Last request: ", page)
         self.assertIn("accepted", page)
-        self.assertIn("not proof of application health", page)
+        self.assertIn("may still be unhealthy", page)
         self.assertEqual(files, {path: path.read_bytes() for path in self.root.rglob("*.plist")})
 
     def test_auth_forgery_and_unsupported_targets_have_no_side_effects(self):
