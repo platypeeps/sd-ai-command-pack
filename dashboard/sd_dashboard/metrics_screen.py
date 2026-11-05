@@ -462,11 +462,13 @@ def slow(connection, name: str, *, now: str) -> dict:
 
 def _past(connection, month, now, current) -> dict:
     """`month`'s read for the history panels, with this month's `meter`: the week lamps and Budget used, now stay live.
-    An unread live meter is `meter_error`, not an empty list that reads as no reading."""
+    An unread live meter is `meter_error`, not an empty list that reads as no reading. A stale kept meter keeps its
+    `observed` and `stale`, so metrics.js lights no lamp from it (pack sd:7556)."""
     past = _guard(lambda: {"error": "", **usage.read(connection, month=month, now=now).document()})
     if past["error"]:
         return past
-    return {**past, "meter": current.get("meter", []), **({"meter_error": current["error"]} if current["error"] else {})}
+    flags = {key: current[key] for key in ("observed", "stale") if key in current} if current.get("stale") else {}
+    return {**past, "meter": current.get("meter", []), **({"meter_error": current["error"]} if current["error"] else {}), **flags}
 
 
 def document(connection, *, now: str, kept=None, span: str = "7d", month: str | None = None) -> dict:

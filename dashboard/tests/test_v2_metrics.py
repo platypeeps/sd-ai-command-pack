@@ -148,6 +148,18 @@ class TheDocument(Fixture):
         self.assertEqual((failed["error"], failed["meter"]), ("", []))
         self.assertIn("database is locked", failed["meter_error"])
 
+    def test_a_past_month_carries_the_stale_flag_of_the_kept_meter(self):
+        """pack sd:7556: a past month shows the kept snapshot's meter, so a stale snapshot makes it stale too, and
+        metrics.js lights no week lamp from it. A fresh snapshot leaves the past month unflagged."""
+        live = metrics_screen.slow(self.connection, "usage", now=NOW)
+        for answer, flags in ((dict(live, observed="2026-09-06T11:31:00Z", stale="database is locked"),
+                               {"observed": "2026-09-06T11:31:00Z", "stale": "database is locked"}),
+                              (dict(live, observed="2026-09-06T11:59:00Z"), {})):
+            kept = lambda name, a=answer: a if name == "usage" else metrics_screen.slow(self.connection, name, now=NOW)  # noqa: E731
+            past = metrics_screen.document(self.connection, now=NOW, kept=kept, month="2026-08")["usage"]
+            self.assertEqual(past["meter"], live["meter"])
+            self.assertEqual({key: past[key] for key in ("observed", "stale") if key in past}, flags)
+
     def test_the_trend_is_the_last_7_day_window_reading_of_each_of_seven_days(self):
         trend = self.doc()["trend"]
         self.assertEqual((trend["days"][0], trend["days"][-1], len(trend["days"])), ("2026-08-31", "2026-09-06", 7))
