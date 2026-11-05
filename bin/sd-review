@@ -2320,8 +2320,8 @@ def partial(outcome: Outcome, unread: Sequence[str]) -> Outcome:
 
 
 def finish_review(result: dict[str, Any], outcomes: Sequence[Outcome], reviewed: list[str]) -> dict[str, Any]:
-    """Preserve every finding; only complete answers count toward required depth."""
-    collected = [dict(finding, backend=outcome.backend) for outcome in outcomes for finding in outcome.findings]
+    """Keep every distinct finding, once; only complete answers count toward required depth."""
+    collected = sd_lib.distinct_findings(dict(finding, backend=outcome.backend) for outcome in outcomes for finding in outcome.findings)
     disposed = dispose(collected, result["severity_floor"])
     incomplete = len(reviewed) < result["requested_reviews"]
     remaining = [outcome.backend for outcome in outcomes if outcome.status not in (CLEAN, FINDINGS)] if incomplete else []

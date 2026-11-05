@@ -166,6 +166,26 @@ class TwoReadersAtOnce(ParallelFixture):
         self.assertEqual([row["backend"] for row in result["outcomes"]], ["codex", "second"])
         self.assertEqual(result["reviewed_by"], ["codex", "second"])
 
+    def test_a_finding_both_readers_report_is_listed_once(self) -> None:
+        """Two readers, one finding: adjudication takes a row per finding, so a copy is a second row to dispute."""
+        root = self.prepare()
+
+        def answer(*summaries: str) -> sd_review.Completed:
+            return sd_review.Completed(0, json.dumps({"findings": [
+                {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": text}
+                for text in summaries]}), "")
+
+        def codex(argv: Any, env: Any, cwd: Any, timeout: int) -> Any:
+            return answer("the value is wrong") if review_session(argv) else sd_review.Completed(0, "[]", "")
+
+        def second(argv: Any, env: Any, cwd: Any, timeout: int) -> Any:
+            return answer("the value is wrong", "the name is wrong")
+
+        result = self.review(root, FakeRunner({"codex": codex, "second": second}))
+        self.assertEqual(result["reviewed_by"], ["codex", "second"])
+        self.assertEqual([(row["summary"], row["backend"]) for row in result["findings"]],
+                         [("the value is wrong", "codex"), ("the name is wrong", "second")])
+
     def test_two_failures_leave_the_review_incomplete_and_name_both(self) -> None:
         root = self.prepare()
 

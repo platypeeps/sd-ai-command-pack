@@ -3989,6 +3989,22 @@ def fill_slots(items: Any, slots: int, run: Callable[[Any], Any], counted: Calla
     return [answers[index] for index in sorted(answers)]
 
 
+def distinct_findings(findings: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """sd:7519. Each finding once: one two readers both report keeps the first reader's `backend`.
+
+    Identical means every key but `backend` is equal. Adjudication takes a
+    row per blocking finding, so a copy was a second row to dispute.
+    """
+    seen: set[str] = set()
+    kept = []
+    for finding in findings:
+        key = json.dumps({name: value for name, value in finding.items() if name != "backend"}, sort_keys=True, default=str)
+        if key not in seen:
+            seen.add(key)
+            kept.append(dict(finding))
+    return kept
+
+
 # Review lenses (#1194)
 #
 # A lens re-aims the review lane's prompt at a subject that is not code. It

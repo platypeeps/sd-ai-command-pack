@@ -5660,7 +5660,8 @@ roles:
         """sd:2147. Every reviewer failed and none left a finding: the request stays unspent."""
         provider, working, prior = self.spent_reviews()
         head = _git(self.root, "rev-parse", "HEAD")
-        with self.assertRaisesRegex(ship.Refusal, "0/1 completed.*nothing was reviewed, so the operator request was not consumed"):
+        # The fixture registry holds two reviewers, so the pass asks both (sd:7519).
+        with self.assertRaisesRegex(ship.Refusal, "0/2 completed.*nothing was reviewed, so the operator request was not consumed"):
             self.additional()
         state = self.operation().state
         self.assertEqual(state["passes"], prior)
