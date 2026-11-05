@@ -16,6 +16,11 @@ else the title's), its date (`published-date`, else the title's), its URL and it
 row's stage in the page's words (`READ`, `WATCHED`); a stage the map does not name is shown as it is. A URL that is not
 `http` or `https` is no link: `url` is empty and `url_text` keeps what the row holds, so the page shows it as text.
 
+**Categories (pack sd:7669).** Each view has a small fixed set, `CATEGORIES`, chosen from the vault's rows; each
+document says its own in the kind's declared `category` field, which `sd store set sdw.learning TITLE category X`
+writes. The document sends the set and each row's `category` as text, one off the set too: the page files a row
+off the set, or with none, under Other.
+
 A store that does not read raises, so the route answers 500 with the cause and the page says the rows were not read.
 """
 
@@ -26,12 +31,18 @@ import urllib.parse
 from sd_db.reads import document_view
 from sd_db.records import VIDEO_TITLE
 
-__all__ = ["READ", "WATCHED", "books", "videos"]
+__all__ = ["CATEGORIES", "READ", "WATCHED", "books", "videos"]
 
 #: The learning stages in a book's words: to read, reading, done.
 READ = {"queued": "to read", "in-progress": "reading", "done": "done", "dropped": "dropped"}
 #: The learning stages in a video's words.
 WATCHED = {"queued": "to watch", "in-progress": "watching", "done": "watched", "dropped": "dropped"}
+
+#: Each view's categories, in the order its tiles show (pack sd:7669).
+CATEGORIES = {
+    "books": ("Coaching & Consulting", "Communication", "Teams & Facilitation", "Learning"),
+    "videos": ("Coding", "AI Agents & Tools", "AI & Society", "Philosophy & Religion", "Personal Growth"),
+}
 
 
 def _rows(connection):
@@ -70,7 +81,8 @@ def _base(row, words) -> dict:
     stage = row.get("stage") or ""
     return {"id": row["id"], "title": row["title"], "stage": stage, "state": words.get(stage, stage),
             "url": url, "host": host, "url_text": "" if url else _text(fields.get("url")),
-            "description": _text(fields.get("description")), "added": _text(fields.get("dateCreated"))[:10]}
+            "description": _text(fields.get("description")), "added": _text(fields.get("dateCreated"))[:10],
+            "category": _text(fields.get("category"))}
 
 
 def books(connection, *, now: str) -> dict:
@@ -86,7 +98,7 @@ def books(connection, *, now: str) -> dict:
                     subtitle=_text(fields.get("subtitle")), published=_text(fields.get("published-date")),
                     pages=_text(fields.get("total-pages")), isbn=_text(fields.get("isbn")))
         out.append(item)
-    return {"read": now, "rows": out}
+    return {"read": now, "categories": list(CATEGORIES["books"]), "rows": out}
 
 
 def videos(connection, *, now: str) -> dict:
@@ -103,4 +115,4 @@ def videos(connection, *, now: str) -> dict:
                     date=_text(fields.get("published-date"))[:10] or (named.group(1) if named else ""),
                     duration=_text(fields.get("duration")))
         out.append(item)
-    return {"read": now, "rows": out}
+    return {"read": now, "categories": list(CATEGORIES["videos"]), "rows": out}
