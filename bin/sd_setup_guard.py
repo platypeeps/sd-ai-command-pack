@@ -49,7 +49,7 @@ class GuardError(Exception):
     """The file has no place for the guard; the message names why."""
 
 
-ACTIONS_PREFIX = "platypeeps/sd-ai-command-pack/actions"
+ACTIONS_PREFIX = "platypeeps/sd-workflow/actions"
 
 #: Every action the pack ships, in the order a reader meets them. Enumerated
 #: here rather than assumed to be one: `actions/docs-gate` had a consumer, a
@@ -86,7 +86,7 @@ DEPENDENCIES = tuple(dependency_name(action) for action in ACTIONS)
 # its own README and no other action's.
 _PROSE: dict[str, tuple[str, ...]] = {
     "review-route": (
-        "# The sd-ai-command-pack pin is set by hand, not by Dependabot. The action",
+        "# The sd-workflow pin is set by hand, not by Dependabot. The action",
         "# runs the pack's own code out of the pinned checkout, so a bump is a",
         "# behaviour change across the whole pack, not a version number. Bump it",
         "# deliberately, in its own commit, with",
@@ -96,7 +96,7 @@ _PROSE: dict[str, tuple[str, ...]] = {
         "# go stale the next time the pin moves.",
     ),
     "docs-gate": (
-        "# The sd-ai-command-pack pin is set by hand, not by Dependabot. The action",
+        "# The sd-workflow pin is set by hand, not by Dependabot. The action",
         "# runs the pack's own code out of the pinned checkout, so a bump is a",
         "# behaviour change across the whole pack, not a version number. Bump it",
         "# deliberately, in its own commit; `sd-review setup-github` installs the",
