@@ -88,11 +88,13 @@ def file_material(root: pathlib.Path, name: str, change: str) -> tuple[str, bool
     return f"\n--- {json.dumps(name)} ---\n{content}", media
 
 
-def collect_review_material(root: pathlib.Path, subject: Any, limit: int = 2_000_000) -> tuple[str, list[dict[str, Any]]]:
-    """One entry per literal path; renames keep both sides. Over `limit` (sd-review's MAX_OUTPUT_BYTES), text renames
-    go as their delta (sd:7598), then deleted files as their header (sd:6088); each such path is summarized."""
+def collect_review_material(root: pathlib.Path, subject: Any, limit: int = 2_000_000,
+                            reserve: int = 0) -> tuple[str, list[dict[str, Any]]]:
+    """One entry per literal path; renames keep both sides. When material plus `reserve` (the prompt and transport
+    overhead sent with it, sd:7653) passes `limit` (sd-review's MAX_OUTPUT_BYTES), text renames go as their delta
+    (sd:7598), then deleted files as their header (sd:6088); each such path is summarized."""
     for whole, drop_deleted in ((True, False), (False, False), (False, True)):
-        if len((found := _collect(root, subject, drop_deleted, whole))[0].encode("utf-8")) <= limit:
+        if len((found := _collect(root, subject, drop_deleted, whole))[0].encode("utf-8")) + reserve <= limit:
             break
     return found
 
