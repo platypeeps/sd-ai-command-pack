@@ -58,6 +58,30 @@ class FixReviewTests(ReviewFixture):
         self.assertIn("the_original_defect = True", handed)
         self.assertTrue(result["verification_report_digest"])
 
+    def test_a_reader_that_raises_after_a_prior_report_ends_with_its_own_error(self):
+        """sd:7569. The prior finding's source is read in the main thread
+        through `subprocess_runner`, which registers that thread as a group
+        holder; the cleanup after a failed reader must not join it."""
+        root, first = self.branch()
+        blocking = json.dumps({"findings": [{"path": "src.py", "line": 1, "summary": "original unresolved defect",
+                                            "family": "correctness", "severity": "high"}]})
+        prior = sd_review.review(root, namespace(scope="branch"), FakeRunner({"codex": sd_review.Completed(0, blocking, "")}),
+                                 self.environment(), self.chatgpt_home())
+        report = self.tmp / "prior.json"
+        report.write_text(json.dumps(prior))
+        self.commit(root, "other.py", "unrelated_fix = True\n")
+
+        class ReaderBroke(Exception):
+            pass
+
+        def broken_reader(*_args):
+            raise ReaderBroke("the reader failed")
+        for mode in ({"verify_report": str(report), "base": first}, {"resume_report": str(report)}):
+            sd_review.READER_GROUPS.reopen_groups()
+            with self.subTest(mode=sorted(mode)), self.assertRaises(ReaderBroke):
+                sd_review.review(root, namespace(scope="branch", **mode), FakeRunner({"codex": broken_reader}),
+                                 self.environment(), self.chatgpt_home())
+
     def test_mismatched_or_malformed_previous_report_cannot_verify(self):
         root, first = self.branch()
         self.commit(root, "fix.py", "fix = True\n")
