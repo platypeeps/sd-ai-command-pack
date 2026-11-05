@@ -201,9 +201,9 @@ class AReplayWritesNothing(unittest.TestCase):
         self.assertEqual(self.beats(), ["ahead"])
         self.tick("beyond", 0, ended="2026-09-08T01:30:00Z")
         self.assertEqual(self.beats(), ["ahead", "beyond"])
-        # The second `exit 1` folds into b's open report (sd:920); its
-        # heartbeat is still this tick's own, and it still makes the job unhealthy.
-        self.assertEqual(self.tick("c", 31, exit_code=1, text="boom\n")["recorded"], "folded")
+        # beyond's clean run closed b's report (pack sd:7729), so the second
+        # `exit 1` opens a fresh one; its heartbeat still makes the job unhealthy.
+        self.assertEqual(self.tick("c", 31, exit_code=1, text="boom\n")["recorded"], "report")
         self.assertIs(reporting.health(self.db, "probe"), False)
 
     def test_a_late_failure_is_still_filed_but_does_not_become_current_health(self):
@@ -394,15 +394,17 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual(other["recorded"], "report")
         self.assertNotEqual(other["item"]["id"], first)
 
-    def test_a_recovery_files_nothing_and_the_next_failure_folds(self):
+    def test_a_recovery_files_nothing_and_the_next_failure_opens_a_fresh_report(self):
         failed = self.tick("a", 1)["item"]["id"]
         recovered = self.tick("b", 16, exit_code=0, text="ok\n")
         self.assertEqual((recovered["recorded"], recovered["why"]), ("heartbeat", "the job recovered"))
-        # The failure after a recovery folds into the still-open failure report.
-        self.assertEqual(self.tick("c", 31)["item"]["id"], failed)
+        # The recovery closed the failure report (pack sd:7729): nothing to fold into.
+        fresh = self.tick("c", 31)
+        self.assertEqual(fresh["recorded"], "report")
+        self.assertNotEqual(fresh["item"]["id"], failed)
         again = self.tick("d", 46, exit_code=0, text="ok\n")
         self.assertEqual((again["recorded"], again["why"]), ("heartbeat", "the job recovered"))
-        self.assertEqual([row["id"] for row in self.rows()], [failed])
+        self.assertEqual([row["id"] for row in self.rows()], [failed, fresh["item"]["id"]])
 
     def test_another_job_with_the_same_basis_is_not_a_target(self):
         first = self.tick("a", 1)["item"]["id"]
@@ -794,14 +796,8 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
 
 
 
-class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
-    """sd:4641, rule (e) of sd:4629: one open findings report per job and host.
-
-    A shrinking or changed set of findings opened a second report beside the
-    first. Now a new clean-exit findings report closes the older open one of
-    the same job and host as superseded; a superseded report never counts as
-    acknowledged; only reports that store a host take part.
-    """
+class _HostReports(unittest.TestCase):
+    """One database whose `ingest_log` runs on host `hosta`, with the report readers."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
@@ -831,6 +827,16 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
 
     TWO = "SD_REPORT_ATTENTION: 2 finding(s) [12]\n"
     ONE = "SD_REPORT_ATTENTION: 1 finding(s) [1]\n"
+
+
+class ANewFindingsReportSupersedesTheOlderOne(_HostReports):
+    """sd:4641, rule (e) of sd:4629: one open findings report per job and host.
+
+    A shrinking or changed set of findings opened a second report beside the
+    first. Now a new clean-exit findings report closes the older open one of
+    the same job and host as superseded; a superseded report never counts as
+    acknowledged; only reports that store a host take part.
+    """
 
     def test_a_report_stores_its_host(self):
         item = self.tick("a", 1, self.TWO)["item"]["id"]
@@ -1099,3 +1105,40 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.assertEqual(state["item"]["status"], "planning")
 
 if __name__ == "__main__": unittest.main()
+
+
+class ACleanRunClosesItsHostsOpenReport(_HostReports):
+    """pack sd:7729: a clean run of a job on a host closes that host's open failure or findings report.
+
+    Only `ingest_log`'s newest run of the host does, as a findings run supersedes (sd:4641): another
+    host's report, a report a person owes work on, and a late run's report stay open.
+    """
+
+    def test_a_clean_run_closes_the_hosts_failure_and_findings_reports(self):
+        for exit_code, text in ((1, "boom\n"), (0, self.TWO)):
+            with self.subTest(exit_code=exit_code):
+                job = f"probe{exit_code}"
+                failed = self.tick("a", 1, text, exit_code=exit_code, job=job)["item"]["id"]
+                clean = self.tick("b", 16, "all good\n", job=job)
+                self.assertEqual(clean["why"], "the job recovered")
+                self.assertEqual(self.row(failed)["status"], "done")
+                self.assertRegex(self.status_notes(failed)[-1],
+                                 rf"^planning -> done by cron: {reporting.RECOVERED}{job}:b\b")
+                self.assertEqual(self.open_followups(failed), 0)
+
+    def test_another_hosts_clean_run_leaves_it_open(self):
+        failed = self.tick("a", 1, "boom\n", exit_code=1)["item"]["id"]
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            self.tick("b", 16, "all good\n")
+        self.assertEqual(self.row(failed)["status"], "planning")
+
+    def test_a_followup_a_person_wrote_keeps_it_open(self):
+        failed = self.tick("a", 1, "boom\n", exit_code=1)["item"]["id"]
+        workflow.add_item_note(self.db, failed, kind="followup", body="Replace the disk.", who="operator")
+        self.tick("b", 16, "all good\n")
+        self.assertEqual(self.row(failed)["status"], "planning")
+
+    def test_a_late_clean_run_closes_nothing(self):
+        failed = self.tick("b", 16, "boom\n", exit_code=1)["item"]["id"]
+        self.tick("a", 1, "all good\n")
+        self.assertEqual(self.row(failed)["status"], "planning")
