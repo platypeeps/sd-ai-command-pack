@@ -105,7 +105,7 @@ An optional `"tool": "tree"` is for the pack gating itself (sd:2613); the gate i
 Default invocations store nothing.
 Use `--record-receipt` only for a proven complete, local-only check in a clean committed checkout.
 The dependency declaration must be tracked at `.github/sd-check-reuse.json`.
-Before recording or reusing evidence, read `skills/sd-check/references/check-receipts.md` in the sd-ai-command-pack checkout.
+Before recording or reusing evidence, read `skills/sd-check/references/check-receipts.md` in the sd-workflow checkout.
 It defines the declaration, controlled environment, identity bindings, and refusal conditions.
 Do not combine receipt recording with `--only` or `--dry-run`.
 Recording a receipt does not enable reuse automatically.

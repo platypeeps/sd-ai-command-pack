@@ -6,7 +6,7 @@ Every default below serves that person. Anything that would show a personal
 process to someone else is off unless this file says otherwise.
 
 For this maintainer's reviewer and report preferences, read the
-sd-ai-command-pack checkout's [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md).
+sd-workflow checkout's [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md).
 Those instructions do not change executable gates or another operator's permissions.
 
 ## Available controls

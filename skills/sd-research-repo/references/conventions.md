@@ -418,7 +418,7 @@ schema, so each finding states what would have to be true and a confidence tag
 inside its summary.
 
 This pass is the research flow's first review point, *after the brief and
-decisions*. Its cap is the one on that row in the sd-ai-command-pack checkout's
+decisions*. Its cap is the one on that row in the sd-workflow checkout's
 `.claude/rules/sd-planning-adversarial-review.md`. The pass over the final
 product, before the send box, is the second row and has its own cap. Read the
 caps there — in the pack, which is where that file lives; a research repo does

@@ -11,7 +11,7 @@ checks and web sweeps parallelise freely across read-only subagents. Anything
 that mutates a checkout stays in one lane, because two agents editing one
 checkout is how a document loses a paragraph nobody notices.
 
-The policy those two sentences apply is the sd-ai-command-pack checkout's
+The policy those two sentences apply is the sd-workflow checkout's
 `WORKFLOW.md`, section **Parallel work**: writers isolate, readers fan out, one
 integrator lands, every worker carries a budget and a deadline, and the test
 for whether to fan out at all. This page records the harness mechanics under
