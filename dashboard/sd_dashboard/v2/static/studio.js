@@ -9,6 +9,8 @@
 // sub-row per unhidden file of a result root (studio.RESULTS), newest first: its time, Open (the file, in a new tab) and,
 // for a kind with a render verb (studio.RENDER), Re-render, the kind's tool row with that verb. A song's final-video.mp4
 // and its films in illustrated-film/renders/ list under the role final (studio.OUTPUTS, sd:7514).
+// sd:7668: a File type tile per extension the listed files carry, read from the files and never a fixed list; a tile
+// leaves the projects that hold a file of that type.
 (() => {
   const { html, put, plural } = window.markup;
   const projects = n => plural(n, 'project', 'projects');
@@ -18,9 +20,12 @@
   const COLS = [[null, html`<span class="sr">State</span>`, 'g'], ['title', 'Project'], ['kind', 'Kind', 'repo'], ['repo', 'Repository', 'kind'],
     ['files', 'Files', 'num'], ['updated', 'Updated', 'when']];
   let DOC = null, ROWS = [], SELECTED = null, OPEN = null;
-  const F = { kind: '', q: '' }, L = { sort: 'title', dir: 1, page: 1, size: 50 };
+  const F = { kind: '', type: '', q: '' }, L = { sort: 'title', dir: 1, page: 1, size: 50 };
   const url = f => `/studio/files/${f.file.split('/').map(encodeURIComponent).join('/')}`;
   const count = r => r.roots.reduce((n, root) => n + root.files.length, 0);
+  // A file's type is its name's extension, lower case; a name with no dot has none and takes no tile.
+  const typeOf = f => { const i = f.name.lastIndexOf('.'); return i > 0 ? f.name.slice(i + 1).toLowerCase() : ''; };
+  const typesOf = r => new Set(r.roots.flatMap(root => root.files.map(typeOf)).filter(Boolean));
   // Each gallery file is a command object, so Pin and Hide are the shell's commands; its id names the file it serves.
   const fileId = (r, f) => `file:${r.repo}/${f.path}`;
   const storeOff = () => DOC && DOC.store && !DOC.store.available ? `the view store was not read: ${DOC.store.reason}` : true;
@@ -28,7 +33,7 @@
   function shown() {
     const key = { title: r => r.title.toLowerCase(), files: r => count(r), updated: r => r.updated || '' }[L.sort] || (r => String(r[L.sort] || '').toLowerCase());
     const q = F.q.toLowerCase().split(/\s+/).filter(Boolean);
-    return ROWS.filter(r => (!F.kind || r.kind === F.kind) && q.every(w => `${r.title} ${r.kind} ${r.repo} ${r.folder} ${r.brief}`.toLowerCase().includes(w)))
+    return ROWS.filter(r => (!F.kind || r.kind === F.kind) && (!F.type || typesOf(r).has(F.type)) && q.every(w => `${r.title} ${r.kind} ${r.repo} ${r.folder} ${r.brief}`.toLowerCase().includes(w)))
       .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * L.dir);
   }
   // A project's rendered results: the unhidden files of its result roots, newest first, as the command objects hold them.
@@ -68,9 +73,13 @@
   function draw() {
     const L_ = window.shell.list, list = shown(), slice = L_.pageOf(list, L), n = k => ROWS.filter(r => r.kind === k).length;
     const flagged = ROWS.filter(r => state(r)[0] !== 'ok').length;
+    const held = new Map();
+    ROWS.forEach(r => typesOf(r).forEach(t => held.set(t, (held.get(t) || 0) + 1)));
+    const types = [...held].sort((a, b) => (a[0] < b[0] ? -1 : 1));
     put($('sub'), html`${DOC ? `${projects(ROWS.length)}${flagged ? ` · ${flagged} with a problem` : ''}` : 'The projects were not read'}`);
     put($('filters'), L_.fbar(html`${L_.fseg('kind', 'Kind', KINDS.map(([k, w]) => ({ v: k, pressed: F.kind === k, title: `${w}: ${n(k)}`,
-      label: html`${w} <span class="n">${n(k)}</span>` })))}`, { clear: !!F.kind }));
+      label: html`${w} <span class="n">${n(k)}</span>` })))}${types.length ? L_.fseg('type', 'File type', types.map(([t, c]) => ({ v: t, pressed: F.type === t,
+      title: `${t}: ${projects(c)}`, label: html`${t} <span class="n">${c}</span>` }))) : ''}`, { clear: !!(F.kind || F.type) }));
     put($('rows-head'), L_.sortHead(COLS, L));
     put($('rows'), html`${slice.map(row)}`);
     const empty = $('empty');
@@ -153,13 +162,13 @@
     select: key => show(key), unselect });
   const redraw = () => { L.page = 1; draw(); };
   $('filters').addEventListener('click', e => {
-    if (e.target.closest('[data-fclear]')) { F.kind = ''; return redraw(); }
-    const c = e.target.closest('[data-f="kind"]'); if (!c) return;
-    F.kind = F.kind === c.dataset.v ? '' : c.dataset.v;
+    if (e.target.closest('[data-fclear]')) { F.kind = ''; F.type = ''; return redraw(); }
+    const c = e.target.closest('[data-f]'); if (!c || !(c.dataset.f in F) || c.dataset.f === 'q') return;
+    F[c.dataset.f] = F[c.dataset.f] === c.dataset.v ? '' : c.dataset.v;
     redraw();
   });
   document.addEventListener('shell:filter', e => { if (e.detail.q === F.q) return; F.q = e.detail.q || ''; redraw(); });
-  $('empty').addEventListener('click', e => { if (e.target.closest('[data-fclear]')) { F.kind = ''; F.q = ''; window.shell.filter(''); redraw(); } });
+  $('empty').addEventListener('click', e => { if (e.target.closest('[data-fclear]')) { F.kind = ''; F.type = ''; F.q = ''; window.shell.filter(''); redraw(); } });
   $('rows-head').addEventListener('click', e => { if (window.shell.list.sortBy(e, L)) window.shell.list.keepFocus(e, draw); });
   $('pager').addEventListener('click', e => { if (window.shell.list.paging(e, L)) window.shell.list.keepFocus(e, draw); });
   $('rows').addEventListener('click', e => {
