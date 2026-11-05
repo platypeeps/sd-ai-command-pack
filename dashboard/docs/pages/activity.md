@@ -15,8 +15,9 @@ counted, not drawn. A review that never reached a merge is not recorded, and a
 review's time is its merge's. The design's deploy and mail kinds are left out:
 no repository records deployments, and the operator ruled out a mail reader
 (sd:2212). A kind whose every source failed to read draws a hatched lamp,
-unknown rather than zero. `?range=7d` reads 7 days for Today's Timeline; the
-rail badge counts the 24 hours either way. The timeline's filters are one bar: state
+unknown rather than zero. `?range=7d`, from Today's Timeline at 7d, reads
+7 days and shows as a removable token; a range press or Clear all reads the
+24 hours again. The rail badge counts the 24 hours either way. The timeline's filters are one bar: state
 and range as segmented controls, a Repo list that filters as you type, and the
 picked kinds, repos and query as removable tokens, then Clear all; the lamps
 filter by kind. The shell draws that bar for every table page

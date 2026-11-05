@@ -79,5 +79,5 @@ days of marks, then one lane per Activity kind (Merges, Runs, Reviews,
 Commands) from `GET /api/activity?range=7d`, read when the view first shows
 and on each Read again after. The 24h and 7d tiles pick the window the axis,
 the marks and the table draw; `?range=7d` keeps the longer one. A kind whose
-read failed draws a hatched lane with the reason. A tick links to its event
-on Activity. The key's Landed counts the last 24 hours.
+read failed draws a hatched lane with the reason, even in a window with no
+mark. A tick links to its event on Activity, at 7 days when the tile says 7d. The key's Landed counts the last 24 hours.
