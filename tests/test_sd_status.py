@@ -2498,7 +2498,8 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual(found[0]["key"], "2026-08-01-alpha")
         self.assertNotIn("prd.md", found[0]["suggest"])
         self.assertIn("sd task edit", found[0]["suggest"])
-        self.assertIn("--clear-branch", found[0]["suggest"])
+        self.assertIn("--branch NAME", found[0]["suggest"])
+        self.assertNotIn("--clear-branch", found[0]["suggest"])
 
     def test_a_done_items_deleted_branch_is_no_finding(self) -> None:
         """A merge deletes the squashed branch, so a done item's branch is history (sd:2729)."""
