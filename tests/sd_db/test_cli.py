@@ -399,6 +399,25 @@ class TheMigrationVerbs(MigrationVerbCase):
             self.assertIn("needs a path and off, read or ask", completed.stderr)
         self.assertEqual(self._list_row()[-3], "off")
 
+    def test_repo_issues_scope_sets_the_policy_key_and_leaves_list_alone(self):
+        """pack sd:7672. `repo issues-scope PATH all|mine` prints `before -> after`;
+        `repo list` keeps its fields, and a bad word, path or count is refused."""
+        self.sd_db("repo", "add", str(self.checkout))
+        before = self._list_row()
+        completed = self.sd_db("repo", "issues-scope", str(self.checkout), "mine")
+        self.assertIn("policy.issues_scope all -> mine", completed.stdout)
+        self.assertEqual(self._list_row(), before)
+        completed = self.sd_db("repo", "issues-scope", str(self.checkout), "all")
+        self.assertIn("policy.issues_scope mine -> all", completed.stdout)
+        for word in ("Mine", "some", "off", ""):
+            completed = self.sd_db("repo", "issues-scope", str(self.checkout), word, expect=1)
+            self.assertIn("all, mine", completed.stdout + completed.stderr)
+        completed = self.sd_db("repo", "issues-scope", str(self.home / "absent"), "mine", expect=1)
+        self.assertIn("not a registered repository", completed.stdout + completed.stderr)
+        for extra in ([], ["mine", "all"]):
+            completed = self.sd_db("repo", "issues-scope", str(self.checkout), *extra, expect=1)
+            self.assertIn("needs a path and all or mine", completed.stderr)
+
     def test_repo_jira_project_sets_and_clears_the_key_and_leaves_list_alone(self):
         """sd:5103. `repo jira-project PATH KEY|off` prints `before -> after`;
         `repo list` keeps its fields, so no reader counting from either end moves."""
@@ -821,7 +840,7 @@ class TheRemoveVerbs(RemoveCase):
     def test_repo_and_item_with_no_verb_name_their_verbs(self):
         completed = self.sd_db("repo", expect=1)
         for verb in ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
-                     "dependabot", "github-issues", "remove"):
+                     "dependabot", "github-issues", "issues-scope", "remove"):
             self.assertIn(verb, completed.stderr)
         self.assertNotIn("satellite-gate", completed.stderr)
         completed = self.sd_db("item", expect=1)

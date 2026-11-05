@@ -448,6 +448,17 @@ class TheDocument(ScreenCase):
             management_screen.set_repo(self.connection, "github-issues", checkout, "read", "off")
         self.assertEqual({row["path"]: row for row in self.document()["repos"]}[checkout]["github_issues"], "ask")
 
+    def test_a_repo_carries_its_issues_scope_and_the_verb_flips_it(self):
+        """pack sd:7672: `policy.issues_scope` reads all or mine and `repos.set_issues_scope` writes it,
+        refusing a stale before."""
+        checkout = self.ids["checkout"]
+        self.assertEqual({row["path"]: row for row in self.document()["repos"]}[checkout]["issues_scope"], "all")
+        got = management_screen.set_repo(self.connection, "issues-scope", checkout, "mine", "all")
+        self.assertEqual((got["field"], got["value"], got["before"]), ("issues_scope", "mine", "all"))
+        with self.assertRaises(workflow.StaleItem):
+            management_screen.set_repo(self.connection, "issues-scope", checkout, "mine", "all")
+        self.assertEqual({row["path"]: row for row in self.document()["repos"]}[checkout]["issues_scope"], "mine")
+
     def test_the_lane_host_reads_hub_and_moves_refusing_a_stale_before_a_bad_name_and_an_unknown_path(self):
         """sd:3075, acceptances 2 and 3. NULL reads `hub`; a move writes the name."""
         checkout = self.ids["checkout"]
@@ -921,6 +932,14 @@ class ThePage(BrowserSession):
         self.assertEqual((status, got["field"], got["value"], got["before"]), (200, "github_issues", "read", "off"))
         self.assertEqual(self.post("/api/repos/github-issues", body)[0], 409)
         self.assertEqual(self.post("/api/repos/github-issues", {**body, "value": "on", "before": "read"})[0], 400)
+
+    def test_the_issues_scope_route_flips_once_and_refuses_a_stale_before_and_a_bad_word(self):
+        """pack sd:7672: `/api/repos/issues-scope` takes all or mine and the value the page showed."""
+        body = {"path": self.ids["checkout"], "value": "mine", "before": "all"}
+        status, _, got = self.post("/api/repos/issues-scope", body)
+        self.assertEqual((status, got["field"], got["value"], got["before"]), (200, "issues_scope", "mine", "all"))
+        self.assertEqual(self.post("/api/repos/issues-scope", body)[0], 409)
+        self.assertEqual(self.post("/api/repos/issues-scope", {**body, "value": "some", "before": "mine"})[0], 400)
 
     def test_the_lane_host_route_moves_once_and_refuses_a_stale_before_and_a_bad_name(self):
         """sd:3075, acceptance 2: `Build_2` is a 400 naming the rule; a repeated move is a stale 409."""
@@ -1711,6 +1730,28 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         self.assertIn("not read", cell)
         self.assertNotIn('data-set="github_issues"', cell)
 
+    def test_the_repo_page_shows_the_issues_scope_and_the_toggle_runs_the_verb_and_undoes(self):
+        """pack sd:7672: all or mine, written through `sd-db repo issues-scope`; an unread setting shows no toggle."""
+        path = self.ids["checkout"]
+        doc = json.loads(json.dumps(self.doc))
+        next(r for r in doc["repos"] if r["path"] == path)["issues_scope"] = "all"
+        out = self.run_page("""R.page = ELS['view-repos'].html; propose('issues_scope', 'mine'); R.cmd = pending[0].cmd;
+R.note = pending[0].note; C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg;
+await lastToast().undo(); await flush();""", doc=doc, search=f"?repo={path}", answer="(p, b) => [200, {}]")
+        cell = out["R"]["page"].split('data-key="issues_scope"')[1].split('<div class="row"')[0]
+        self.assertIn('data-set="issues_scope"', cell)
+        self.assertEqual(out["R"]["cmd"], f"sd-db repo issues-scope '{path}' mine")
+        self.assertIn("assigned to you", out["R"]["note"])
+        self.assertEqual([(p, b) for p, b, _ in out["posts"]],
+                         [("/api/repos/issues-scope", {"path": path, "value": "mine", "before": "all"}),
+                          ("/api/repos/issues-scope", {"path": path, "value": "all", "before": "mine"})])
+        self.assertEqual(out["R"]["toast"], "Ran locally · Issue intake: all → mine")
+        next(r for r in doc["repos"] if r["path"] == path)["issues_scope"] = None
+        page = self.run_page("R.page = ELS['view-repos'].html;", doc=doc, search=f"?repo={path}")["R"]["page"]
+        cell = page.split('data-key="issues_scope"')[1].split('<div class="row"')[0]
+        self.assertIn("not read", cell)
+        self.assertNotIn('data-set="issues_scope"', cell)
+
     def test_the_repo_page_shows_jira_project_beside_github_issues_and_the_field_runs_the_verb_and_undoes(self):
         """sd:5103: a key or off, written through `sd-db repo jira-project`; an empty field is off, a lower-case key is
         upper-cased, the shown value proposes nothing, and an unread setting shows no field. Both issue settings sit
@@ -1725,7 +1766,7 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         page = out["R"]["page"]
         self.assertIn('data-set="jira_project"', page)
         keys = re.findall(r'data-key="(\w+)"', page)
-        self.assertEqual(keys[keys.index("github_issues"):keys.index("channels") + 1], ["github_issues", "jira_project", "channels"])
+        self.assertEqual(keys[keys.index("github_issues"):keys.index("channels") + 1], ["github_issues", "issues_scope", "jira_project", "channels"])
         self.assertEqual(out["R"]["same"], 0)
         self.assertEqual(out["R"]["cmd"], f"sd-db repo jira-project '{path}' 'EXAMPLE'")
         self.assertIn("Jira project EXAMPLE", out["R"]["note"])

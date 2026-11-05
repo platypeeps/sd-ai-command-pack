@@ -29,6 +29,15 @@ class Policy(unittest.TestCase):
                          ["the policy declaration: push is ask in a org repository; auto is for managed ones only "
                           "(note #34749)"])
 
+    def test_the_issues_scope_key_takes_all_or_mine(self):
+        """pack sd:7672: `issues_scope` sits beside `issues` and governs what intake lists."""
+        for word in ("all", "mine"):
+            self.assertEqual(sd_lib.declaration_problems("policy", {**ORG, "issues_scope": word}), [])
+        for word in ("Mine", "some", "", None, 1):
+            with self.subTest(word=word):
+                self.assertEqual(sd_lib.declaration_problems("policy", {**ORG, "issues_scope": word}),
+                                 [f"the policy declaration: issues_scope is one of all, mine, not {word!r}"])
+
     def test_no_policy_reads_as_todays_managed_defaults(self):
         self.assertEqual(sd_repo_policy.effective(None), sd_repo_policy.DEFAULTS)
         self.assertEqual(sd_repo_policy.summary(None), "")

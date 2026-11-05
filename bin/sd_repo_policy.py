@@ -28,6 +28,8 @@ ACT_VALUES = ("ask", "auto")
 MERGE = "merge"
 MERGE_METHODS = ("rebase", "squash", "merge")
 ISSUES = ("off", "read", "ask")
+#: `issues_scope`: which intake issues the repository lists (pack sd:7672); `all` when absent. It governs no write.
+ISSUES_SCOPES = ("all", "mine")
 REVIEW_FIELDS = {"human": None, "reviewers": None, "request_when": ("after-green", "on-open"),
                  "bots": ("ignore", "triage", "blocking-only"), "copilot": ("never", "on-request"),
                  "after_approval": ("add-commits-only", "rebase-ok")}
@@ -174,7 +176,7 @@ def problems(value: Any) -> list[str]:
     where = "the policy declaration"
     if not isinstance(value, dict):
         return [f"{where} is a JSON object, not {type(value).__name__}"]
-    known = {"mode", *ACTS, MERGE, "merge_method", "issues", "review", "commit_convention", *LATER}
+    known = {"mode", *ACTS, MERGE, "merge_method", "issues", "issues_scope", "review", "commit_convention", *LATER}
     extra = sorted(set(value) - known)
     found = [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
     found += _choice(value, "mode", MODES, where)
@@ -185,6 +187,7 @@ def problems(value: Any) -> list[str]:
         found.append(f"{where}: issues takes off, read or ask; an agent never writes an issue unasked (note #34749)")
     else:
         found += _choice(value, "issues", ISSUES, where)
+    found += _choice(value, "issues_scope", ISSUES_SCOPES, where)
     mode = value.get("mode", "managed")
     found += [f"{where}: {act} is ask in a {mode} repository; auto is for managed ones only (note #34749)"
               for act in (*ACTS, MERGE) if mode != "managed" and value.get(act) == "auto"]

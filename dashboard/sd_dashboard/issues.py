@@ -6,7 +6,8 @@ synced before the reason was stored, stay synced and are not listed here. A read
 a pack without `mine_issues`, and a database not yet migrated to the `reason` column, each name their remedy.
 
 Issue intake (sd:4840) is Today's second list: each repo with `github_issues` on, its open issues someone else opened that
-no sd item carries yet, from `sd_db.repos.intake_issues` (pack sd:4880). Each row names the ref an item files it under,
+no sd item carries yet, from `sd_db.repos.intake_issues` (pack sd:4880); a repo whose `issues_scope` is mine lists
+only those that reach the operator (pack sd:7672). Each row names the ref an item files it under,
 `github:<owner>/<repo>#N`, which Today's File as item posts and `sd task add --ref` takes.
 
 Details (sd:5877): each row of both lists also carries the `shadow` columns its Details show (`FACTS`, each None when

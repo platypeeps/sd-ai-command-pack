@@ -17,7 +17,9 @@ A repo's page shows its Dependabot consent (sd:3984), the row's `dependabot`
 column: yes or no, written with `sd-db repo dependabot`. A `platypeeps` repo
 and one the sweep denies by name show that rule and no toggle.
 It also shows `github_issues` (sd:4840), the policy's `issues` key (pack sd:6849): off, read or ask,
-written with `sd-db repo github-issues`; a declaration that does not read shows it unread, with no toggle. Open item goes to
+written with `sd-db repo github-issues`; a declaration that does not read shows it unread, with no toggle.
+Issue intake beside it is the policy's `issues_scope` key (pack sd:7672): all or mine, written with
+`sd-db repo issues-scope`; mine lists only intake issues that reach the operator. Open item goes to
 the item's row on Tasks. Land on a checkout's row (sd:5104, `land.py`) reads
 `GET /api/repos/land/preview`, asks with what would land, then posts `/api/repos/land` with that preview's revision:
 one commit per item, a `land/sd-<n>` branch and worktree when the checkout is on its default branch, then

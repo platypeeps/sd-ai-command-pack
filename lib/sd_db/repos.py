@@ -825,20 +825,26 @@ def intake_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
     own issue too, as `on` asks for every open issue. An issue is carried
     once an item holds `sd task add --ref github:<owner>/<repo>#N`, in any
     status and any letter case. Pull requests stay out, as in `mine_issues`.
+
+    A repository whose `issues_scope` is `mine` (pack sd:7672) keeps only the
+    rows whose reason is in `SCOPE_MINE`: a row only the open sweep saw has
+    no reason, so an issue that never reached the operator stays out.
     """
     from .review import REF_SOURCE
 
     found: dict[str, list[dict]] = {}
     for path, slug in intake_repos(connection).items():
+        scoped = issues_scope(connection, path) == "mine"
         rows = connection.execute(
             "SELECT tracker, repo, url, number, title, state, reason, author, last_seen FROM shadow "
             "WHERE tracker = 'github' AND repo = ? COLLATE NOCASE AND kind = 'issue' AND state = 'open' "
             "AND (author IS NULL OR author COLLATE NOCASE NOT IN (SELECT mine.author FROM shadow AS mine "
             "WHERE mine.tracker = 'github' AND mine.reason = 'filed' AND mine.author IS NOT NULL)) "
+            f"AND (? = 0 OR reason IN ({', '.join('?' * len(SCOPE_MINE))})) "
             "AND NOT EXISTS (SELECT 1 FROM item WHERE item.source = ? "
             "AND item.external_id = 'github:' || shadow.repo || '#' || shadow.number COLLATE NOCASE) "
             "ORDER BY last_seen DESC, id DESC",
-            (slug, REF_SOURCE)).fetchall()
+            (slug, int(scoped), *SCOPE_MINE, REF_SOURCE)).fetchall()
         if rows:
             found[path] = [dict(row) for row in rows]
     return found
@@ -1015,8 +1021,14 @@ def set_github_issues(connection: sqlite3.Connection, path: Path | str, value: s
     refusals as `set_runner_merge`: a value that is not one of `ISSUES`,
     exactly, and a path no row holds.
     """
-    if value not in ISSUES:
-        raise RepoRefusal(f"{value!r} is not a github-issues setting; expected {', '.join(ISSUES)}")
+    return _set_policy_word(connection, path, "issues", value, ISSUES, "github-issues")
+
+
+def _set_policy_word(connection: sqlite3.Connection, path: Path | str, key: str, value: str,
+                     words: tuple[str, ...], verb: str) -> tuple[str, str]:
+    """Set `policy.<key>` to one of `words`; the first word is the default, which no key holds."""
+    if value not in words:
+        raise RepoRefusal(f"{value!r} is not a {verb} setting; expected {', '.join(words)}")
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
     with transaction(connection):
@@ -1028,9 +1040,9 @@ def set_github_issues(connection: sqlite3.Connection, path: Path | str, value: s
                 f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
         held = _declarations(row["declarations"], row["path"])
         policy = dict(held.get("policy") or {})
-        before = policy.pop("issues", "off")
-        if value != "off":
-            policy["issues"] = value
+        before = policy.pop(key, words[0])
+        if value != words[0]:
+            policy[key] = value
         held = {**held, "policy": policy} if policy else {k: v for k, v in held.items() if k != "policy"}
         connection.execute("UPDATE repo SET declarations = ?, updated_at = ? WHERE path = ?",
                            (_declarations_text(held) if held else None, now(), row["path"]))
@@ -1047,6 +1059,33 @@ def issues_policy(connection: sqlite3.Connection, path: Path | str) -> str:
     held = declarations(connection, path) or {}
     value = (held.get("policy") or {}).get("issues", "off")
     return value if value in ISSUES else "off"
+
+
+#: The words `repo issues-scope` takes: the `policy` declaration's `issues_scope` key (pack sd:7672).
+#: `all` is no key. It says which intake issues a repository lists; `issues` alone governs writes.
+ISSUES_SCOPES = ("all", "mine")
+#: The `shadow.reason` words a `mine` intake keeps: on GitHub, `watched` is a mention or a review request.
+SCOPE_MINE = ("assigned", "filed", "watched")
+
+
+def set_issues_scope(connection: sqlite3.Connection, path: Path | str, value: str) -> tuple[str, str]:
+    """Set one repository's `policy.issues_scope`, keeping its other policy keys. Returns `(path, before)`.
+
+    `all` removes the key. Same refusals as `set_github_issues`.
+    """
+    return _set_policy_word(connection, path, "issues_scope", value, ISSUES_SCOPES, "issues-scope")
+
+
+def issues_scope(connection: sqlite3.Connection, path: Path | str) -> str:
+    """One repository's `policy.issues_scope`: `all` or `mine` (pack sd:7672).
+
+    `mine`: its intake lists only issues assigned to the operator, mentioning
+    them or asking their review. No row and no key read `all`. A declaration
+    that does not read raises.
+    """
+    held = declarations(connection, path) or {}
+    value = (held.get("policy") or {}).get("issues_scope", "all")
+    return value if value in ISSUES_SCOPES else "all"
 
 
 #: A Jira project key as `repo.jira_project` holds it: the spelling `channels`
