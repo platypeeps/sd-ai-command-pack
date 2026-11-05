@@ -6,7 +6,10 @@ page's rail badge (sd:3446, `_attention`). Each piece's `realm` is `places.realm
 filter uses (sd:5064). Its `grill` is its open question notes and the count of its rulings (pack sd:6700): Details
 walks the questions, and Apply answers waits until none is open. Its `ideas` are the vault's inbox blog ideas
 (pack sd:7244), the `sdw.blog-idea` rows `records.list_rows` reads, highest score first: IDEAS of them beside the inbox
-count, each with a link only for http. A failed read is unknown with its reason, never an empty inbox. Its `mirror` is
+count, each with a link only for http. A failed read is unknown with its reason, never an empty inbox. Each idea's
+`area` (pack sd:7670) is one of `AREAS`, read from its `contexts` field, the vault's Personal-or-Work axis (`area`
+holds its topic); another value or none is no area (""). `areas` counts each, and `rows` holds the highest IDEAS
+overall and of each area, so the column filtered to one area still shows that area's best. Its `mirror` is
 the Drive folder its stage mirrors to and each mirrored file's Drive copies (`publishing.piece_mirror`, pack sd:7243);
 a queue not read is unknown with its reason.
 """
@@ -71,6 +74,9 @@ def report(connection, path: str):
 #: Inbox ideas the Ideas column shows; the header counts them all.
 IDEAS = 10
 
+#: An idea's areas (pack sd:7670), in the order the column's tiles show; RWBP is the brand website.
+AREAS = ("Personal", "Work", "RWBP")
+
 
 def read_ideas(connection) -> list[dict]:
     return records.list_rows(connection, "blog-idea", stage="inbox")
@@ -94,6 +100,15 @@ def _text(value) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _area(value) -> str:
+    """The first of `value`'s words that names an area, as `AREAS` spells it, else "": a field may hold any JSON."""
+    named = {area.casefold(): area for area in AREAS}
+    for word in value if isinstance(value, list) else [value]:
+        if isinstance(word, str) and word.strip().casefold() in named:
+            return named[word.strip().casefold()]
+    return ""
+
+
 def _ideas(connection) -> dict:
     """The inbox blog ideas, highest score first, or why they were not read."""
     try:
@@ -105,9 +120,15 @@ def _ideas(connection) -> dict:
         fields = row["fields"]
         url = _text(fields.get("url")) or ""
         rows.append({"item": row["id"], "title": row["title"], "score": _score(fields.get("score")), "url": url,
-                     "href": href(url) if url else None, "created": _text(fields.get("dateCreated"))})
+                     "href": href(url) if url else None, "created": _text(fields.get("dateCreated")),
+                     "area": _area(fields.get("contexts"))})
     rows.sort(key=lambda idea: (idea["score"] is None, -(idea["score"] or 0), idea["title"].casefold()))
-    return {"state": "read", "reason": "", "count": len(rows), "rows": rows[:IDEAS]}
+    areas = {area: n for area in (*AREAS, "") if (n := sum(idea["area"] == area for idea in rows))}
+    kept = {id(idea) for idea in rows[:IDEAS]}
+    for area in areas:
+        kept.update(id(idea) for idea in [idea for idea in rows if idea["area"] == area][:IDEAS])
+    return {"state": "read", "reason": "", "count": len(rows), "top": IDEAS, "areas": areas,
+            "rows": [idea for idea in rows if id(idea) in kept]}
 
 
 def document(connection, *, now):

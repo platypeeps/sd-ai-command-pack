@@ -173,13 +173,35 @@ class TheDocument(Pieces):
                     ("A tip", "tip", "inbox", "10", ""))}
         ideas = writing_screen.document(self.connection, now=NOW)["ideas"]
         def row(title, score, url, link):
-            return {"item": made[title], "title": title, "score": score, "url": url, "href": link, "created": "2026-10-01"}
-        self.assertEqual(ideas, {"state": "read", "reason": "", "count": 3, "rows": [
+            return {"item": made[title], "title": title, "score": score, "url": url, "href": link, "created": "2026-10-01", "area": ""}
+        self.assertEqual(ideas, {"state": "read", "reason": "", "count": 3, "top": 10, "areas": {"": 3}, "rows": [
             row("High idea", 9.0, "javascript:alert(1)", None), row("Low idea", 3.0, "https://example.test/low", "https://example.test/low"),
             row("Unscored idea", None, "", None)]})
         with mock.patch.object(writing_screen, "IDEAS", 1):
             ideas = writing_screen.document(self.connection, now=NOW)["ideas"]
         self.assertEqual((ideas["count"], [r["title"] for r in ideas["rows"]]), (3, ["High idea"]))
+
+    def test_each_idea_has_its_area_and_each_area_keeps_its_highest_ideas(self):
+        """pack sd:7670: an idea's area is Personal, Work or RWBP, read from its `contexts` field; another value or none is
+        no area. The column counts each area, and `rows` holds the highest IDEAS overall and of each area, so a filtered
+        column still shows an area's best ideas."""
+        from sd_db import create_item
+
+        def idea(title, score, contexts):
+            return create_item(self.connection, kind="idea", title=title, status="planning", source="vault",
+                               path=f"Blog Ideas/{title}.md", stage="inbox",
+                               fields={"kind": "blog-idea", "score": score, "contexts": contexts})
+        idea("Top personal", "9", ["Personal"])
+        idea("Next personal", "8", "personal")
+        idea("Work idea", "4", ["Work"])
+        idea("Brand idea", "2", "RWBP")
+        idea("Elsewhere idea", "1", ["Somewhere"])
+        with mock.patch.object(writing_screen, "IDEAS", 1):
+            ideas = writing_screen.document(self.connection, now=NOW)["ideas"]
+        self.assertEqual(ideas["areas"], {"Personal": 2, "Work": 1, "RWBP": 1, "": 1})
+        self.assertEqual([(r["title"], r["area"]) for r in ideas["rows"]],
+                         [("Top personal", "Personal"), ("Work idea", "Work"), ("Brand idea", "RWBP"), ("Elsewhere idea", "")])
+        self.assertEqual(writing_screen.AREAS, ("Personal", "Work", "RWBP"))
 
     def test_an_ideas_score_or_date_that_is_no_finite_number_or_text_is_unset(self):
         """pack sd:7244 review: the vault's fields are JSON that `json.loads` reads, so a score may be 'nan', 'inf',
@@ -394,10 +416,10 @@ DOC = {"read": NOW, "stages": list(writing.STAGES), "pieces": [
 ]}
 DOC["attention"] = writing_screen._attention(DOC["pieces"])
 #: pack sd:7244: the inbox ideas, highest score first, IDEAS of them beside the inbox count.
-DOC["ideas"] = {"state": "read", "reason": "", "count": 207, "rows": [
+DOC["ideas"] = {"state": "read", "reason": "", "count": 207, "top": 10, "areas": {"Personal": 150, "Work": 50, "": 7}, "rows": [
     {"item": 501, "title": "Gates are cheaper than rework", "score": 9.0, "url": "https://example.test/gates",
-     "href": "https://example.test/gates", "created": "2026-10-01"},
-    {"item": 502, "title": "An idea with no source", "score": None, "url": "", "href": None, "created": "2026-09-30"}]}
+     "href": "https://example.test/gates", "created": "2026-10-01", "area": "Work"},
+    {"item": 502, "title": "An idea with no source", "score": None, "url": "", "href": None, "created": "2026-09-30", "area": "Personal"}]}
 
 #: One piece per gate lamp the badge counts, beside the stories above (sd:3446).
 LAMPS = [
@@ -711,6 +733,26 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         out = self.run_page("", prelude=unread)
         self.assertIn("Not read: no such column: stage", out["html"]["view-board"])
         self.assertIn("vault ideas not read", out["html"]["strip"])
+
+    def test_the_ideas_column_has_an_area_tile_per_area_and_a_tile_narrows_it(self):
+        """pack sd:7670: Personal, Work and RWBP tiles, each with its count, then No area while one has none; a tile leaves
+        that area's ideas and counts them, a second press clears it, and each card names its area."""
+        out = self.run_page("""const press = v => ELS['view-board'].listeners.click.forEach(f => f({ target: { closest: s =>
+  s === '[data-f="area"]' ? { dataset: { f: 'area', v } } : null } }));
+R.all = ELS['view-board'].html; press('Work'); R.work = ELS['view-board'].html; press('Work'); R.off = ELS['view-board'].html;""")
+        def col(board):
+            return re.search(r'<div class="col vault".*?</div></div></div>', board, re.S).group(0)
+        r = out["R"]
+        self.assertEqual(re.findall(r'data-f="area" data-v="([^"]*)" aria-pressed="(\w+)"', col(r["all"])),
+                         [("Personal", "false"), ("Work", "false"), ("RWBP", "false"), ("none", "false")])
+        self.assertIn('title="RWBP: 0"', col(r["all"]))
+        self.assertIn('title="No area: 7"', col(r["all"]))
+        self.assertIn('<span class="area">Work</span>', col(r["all"]))
+        self.assertIn('data-v="Work" aria-pressed="true"', col(r["work"]))
+        self.assertIn("Gates are cheaper than rework", col(r["work"]))
+        self.assertNotIn("An idea with no source", col(r["work"]))
+        self.assertIn("Highest 1 of 50 Work ideas.", col(r["work"]))
+        self.assertIn("An idea with no source", col(r["off"]))
 
     def test_parked_shows_the_parked_pieces_alone_and_an_older_all_link_shows_open(self):
         def board(search):
