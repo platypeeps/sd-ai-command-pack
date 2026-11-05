@@ -43,7 +43,7 @@ def untracked(root: pathlib.Path) -> list[str]:
 # screenshot overruns the limit. UTF-8 (a `-diff` file) and BOM-marked UTF-16 go as text; anything else
 # stays base64, so the size check refuses honestly. Not media: zip, gzip (can carry source), ICO (weak magic).
 BINARY_MARKER = re.compile(r"(?m)^Binary files .* differ\n?")
-SUMMARY = re.compile(r"(?m)^\[(?:binary, not sent|renamed)\] ")  # a patch prefixes content lines
+SUMMARY = re.compile(r"(?m)^\[(?:binary, not sent\] |renamed\] .*; unchanged lines not sent$)")  # a patch prefixes content lines
 DELETED = re.compile(r"(?m)^deleted file mode ")  # sd:6088: with -D this header is all a deletion sends
 RENAMED = re.compile(r'(?m)^\[renamed\] ("(?:[^"\\]|\\.)*") -> "(?:[^"\\]|\\.)*"; unchanged lines not sent$')
 MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"wOFF", b"wOF2", b"%PDF-")
@@ -89,17 +89,17 @@ def file_material(root: pathlib.Path, name: str, change: str) -> tuple[str, bool
 
 
 def collect_review_material(root: pathlib.Path, subject: Any, limit: int = 2_000_000) -> tuple[str, list[dict[str, Any]]]:
-    """One entry per literal path; renames retain deletion and addition sides.
+    """One entry per literal path; renames keep both sides. Over `limit` (sd-review's MAX_OUTPUT_BYTES), text renames
+    go as their delta (sd:7598), then deleted files as their header (sd:6088); each such path is summarized."""
+    for whole, drop_deleted in ((True, False), (False, False), (False, True)):
+        if len((found := _collect(root, subject, drop_deleted, whole))[0].encode("utf-8")) <= limit:
+            break
+    return found
 
-    sd:6088: material over `limit` (sd-review's MAX_OUTPUT_BYTES) is collected again with deleted files
-    as their header only, and each such path is summarized; material within the limit sends deleted text."""
-    material, inventory = _collect(root, subject, False)
-    return (material, inventory) if len(material.encode("utf-8")) <= limit else _collect(root, subject, True)
 
-
-def _collect(root: pathlib.Path, subject: Any, drop_deleted: bool) -> tuple[str, list[dict[str, Any]]]:
+def _collect(root: pathlib.Path, subject: Any, drop_deleted: bool, whole: bool) -> tuple[str, list[dict[str, Any]]]:
     extra = set(untracked(root)) if subject.scope == "worktree" else set()
-    patches = {} if subject.scope == "planning" else tracked_material(root, subject, drop_deleted)
+    patches = {} if subject.scope == "planning" else tracked_material(root, subject, drop_deleted, whole)
     parts: list[str] = []
     inventory: list[dict[str, Any]] = []
     for name in subject.paths:
@@ -107,15 +107,14 @@ def _collect(root: pathlib.Path, subject: Any, drop_deleted: bool) -> tuple[str,
             part, summarized = file_material(root, name, "current" if subject.scope == "planning" else "added (untracked)")
         else:
             part, summarized = patches[name], bool(SUMMARY.search(patches[name]) or drop_deleted and DELETED.search(patches[name]))
-        part = ("\n" if parts else "") + part
-        parts.append(part)
+        parts.append(part := ("\n" if parts else "") + part)
         inventory.append({"path": name, "bytes": len(part.encode("utf-8")),
                           "boundary": name.split("/", 1)[0] if "/" in name else "repository-root",
                           **({"summarized": True} if summarized else {})})
     return "".join(parts), inventory
 
 
-def tracked_material(root: pathlib.Path, subject: Any, drop_deleted: bool = False) -> dict[str, str]:
+def tracked_material(root: pathlib.Path, subject: Any, drop_deleted: bool = False, whole: bool = False) -> dict[str, str]:
     common = ["--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", *(["--irreversible-delete"] if drop_deleted else []), subject.base,
               *([] if subject.head == "worktree" else [subject.head]), "--"]
     args = ["--no-renames", *common]
@@ -126,14 +125,14 @@ def tracked_material(root: pathlib.Path, subject: Any, drop_deleted: bool = Fals
         raise ValueError("review patch and path inventory disagree; no partial subject sent")
     material = dict(zip(names, pieces, strict=True))
     if any("\ndeleted file mode " in piece for piece in pieces) and any("\nnew file mode " in piece for piece in pieces):
-        material.update(renamed_material(root, common, material))
+        material.update(renamed_material(root, common, material, whole))
     binary = {name: piece for name, piece in material.items() if BINARY_MARKER.search(piece)}
     return {**material, **binary_material(root, subject, args, binary)} if binary else material
 
 
-def renamed_material(root: pathlib.Path, common: list[str], material: dict[str, str]) -> dict[str, str]:
-    """sd:2400: a rename sends git's rename patch under the new path and a record under the old.
-    Both sides stay listed, but unchanged lines are not sent, so both are summarized: partial coverage (sd:2181)."""
+def renamed_material(root: pathlib.Path, common: list[str], material: dict[str, str], whole: bool = False) -> dict[str, str]:
+    """sd:2400: a rename sends git's rename patch under the new path and a record under the old. `whole` adds a text
+    rename's new file in full, so both sides are read (sd:7598); a delta alone is partial coverage (sd:2181)."""
     rows = read_git_material(root, ["diff", "--name-status", "-z", "-M", *common]).split("\0")
     entries, index = [], 0
     while index < len(rows) and rows[index]:
@@ -150,10 +149,11 @@ def renamed_material(root: pathlib.Path, common: list[str], material: dict[str, 
     for (status, paths), piece in zip(entries, pieces, strict=True):
         if status.startswith("R"):
             old, new = paths
-            record = f"[renamed] {json.dumps(old)} -> {json.dumps(new)}; unchanged lines not sent"
+            full = whole and not BINARY_MARKER.search(piece)
+            record = f"[renamed] {json.dumps(old)} -> {json.dumps(new)}; {'new file sent whole' if full else 'unchanged lines not sent'}"
             side = [json.dumps(f) if re.search(r'[\x00-\x1f"\\\x7f]', f) else f for f in (f"a/{old}", f"b/{old}")]
             renamed[old], (head, _, rest) = f"diff --git {side[0]} {side[1]}\n{record}\n", piece.partition("\n")
-            renamed[new] = f"{head}\n{record}\n{rest}"
+            renamed[new] = f"{head}\n{record}\n{rest}" + (material[new] if full else "")
     return renamed
 
 

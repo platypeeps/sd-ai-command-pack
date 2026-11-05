@@ -69,7 +69,7 @@ EXEMPT = frozenset({
     ("AGENTS.md",
      "- Do not create pull requests in the upstream `Trellis` repository without"),
     ("AGENTS.md",
-     "`sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the"),
+     "`sd-workflow` work uncovers a `Trellis`-owned change, document the"),
     ("AGENTS.md",
      "finding and provide a paste-ready handoff instead of opening a `Trellis` PR."),
     ("AGENTS.md",

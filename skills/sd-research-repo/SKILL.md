@@ -132,7 +132,7 @@ records the differences that are on purpose. Both are in
    `references/conventions.md` has the eight steps.
 7. Get the independent pass where the document carries a decision someone will
    act on. This is the research flow's review point *after the brief and
-   decisions*. Its cap is the one on that row in the sd-ai-command-pack
+   decisions*. Its cap is the one on that row in the sd-workflow
    checkout's `.claude/rules/sd-planning-adversarial-review.md`. A research
    repo does not carry that file; read it in the pack. The second reader is
    `sd-review --lens research-brief`, which takes the reviewer from the
@@ -186,7 +186,7 @@ basename begins `REPORT`, `SUMMARY`, `FINDINGS` or `ANALYSIS`, which collides
 with this standard's own `SUMMARY-` prefix. Both rules, with the verified
 mechanism behind them, are in `references/subagent-dispatch.md`; read it before
 planning a fan-out that ends in a written file. When to fan out, and the
-budget and deadline every worker carries, are the sd-ai-command-pack
+budget and deadline every worker carries, are the sd-workflow
 checkout's `WORKFLOW.md`, section **Parallel work**. The one write lane here
 is this session's own checkout; a second writer takes its own worktree.
 

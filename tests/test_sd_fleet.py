@@ -343,6 +343,13 @@ class DryRun(Fleet):
         self.assertNotIn(sd_fleet.DEPENDABOT_PATH, paths)
         self.assertIn(f"$/{sd_setup_github.ACTION_SUBPATH}", plan["changes"][0]["diff"])
 
+    def test_the_renamed_pack_gets_no_guard_either(self) -> None:
+        """sd:6027: the repository is `platypeeps/sd-workflow` now; its remote must still read as the pack."""
+        root, _ = self.repo("sd-workflow")
+        [plan] = self.plan([(root, "git@github.com:platypeeps/sd-workflow.git")])
+        paths = [change["path"] for change in plan["changes"]]
+        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, paths)
+
     def test_local_block_keeps_the_operators_answers(self) -> None:
         local = f"mine\n\n{sd_install.BLOCK_BEGIN}\n    test: make unit\n{sd_install.BLOCK_END}\n"
         root, remote = self.repo("answers", local=local)

@@ -134,7 +134,7 @@ SD_DB="$DIR/../lib"
 # The server's interpreter, and so the one the tiles a Resources view runs
 # inherit. One default, read by `serve`, `preflight`, `install`, `health` and
 # `grants`, so the path `grants` probes is the path `serve` would run.
-RUNTIME_PYTHON_DEFAULT="$HOME/repos/platypeeps/sd-ai-command-pack/.venv/bin/python"
+RUNTIME_PYTHON_DEFAULT="$HOME/repos/platypeeps/sd-workflow/.venv/bin/python"
 
 cmd_grants() {
   # Both interpreters the vault is read under (the comment at the top), each

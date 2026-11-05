@@ -343,7 +343,7 @@ run identity for manual replay. No extra scheduler or notification is started.
 Focused checks use disposable state:
 
 ```sh
-PYTHONPATH=~/repos/platypeeps/sd-ai-command-pack/lib:.:tests python3 -m unittest discover -s tests -t . -v
+PYTHONPATH=~/repos/platypeeps/sd-workflow/lib:.:tests python3 -m unittest discover -s tests -t . -v
 ```
 
 The service process-group and retained-clone checks live in the runner suite.

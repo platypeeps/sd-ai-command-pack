@@ -60,8 +60,8 @@ common directory does not settle this on its own, because
 The artifacts-as-product design created the current machine-scope model.
 Its documents remain in the historical snapshot:
 
-- [Design record](https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md)
-- [Implementation record](https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md)
+- [Design record](https://github.com/platypeeps/sd-workflow/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md)
+- [Implementation record](https://github.com/platypeeps/sd-workflow/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md)
 
 Treat those files as historical evidence.
 This page and current code define present behaviour.
