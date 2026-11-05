@@ -496,6 +496,22 @@ shellRun(cmd('asg.get'), C.get('run:{n}')); await flush(); R.details = ELS.detai
         self.assertNotIn('id="views"', page)
         self.assertNotIn("shell.views", ACTIVITY_JS)
 
+    def test_every_class_the_timeline_draws_keeps_its_rule(self):
+        """pack sd:7681 review: dropping the lane chart took the filter bar's and the ledger's rules with it, so the repo
+        list sat open in the flow and an empty note showed while [hidden]. Every class activity.html and activity.js
+        draw has a rule in a stylesheet the page loads, and the rules that hide and float keep their declarations."""
+        page = (V2 / "activity.html").read_text(encoding="utf-8")
+        css = re.sub(r"/\*.*?\*/", "", (V2 / "static" / "activity.css").read_text(encoding="utf-8"), flags=re.S)
+        loaded = css + "".join((V2 / "static" / f).read_text(encoding="utf-8") for f in ("shell.css", "annunciator-strip.css"))
+        drawn = {n for attr in re.findall(r'class="([^"]*)"', page + ACTIVITY_JS)
+                 for n in re.sub(r"\$\{[^}]*\}", " ", attr).split() if re.fullmatch(r"[a-z][\w-]*[a-z0-9]", n)}
+        self.assertEqual(sorted(n for n in drawn if not re.search(r"\." + re.escape(n) + r"(?![\w-])", loaded)), [])
+        for rule in (r"\.repo-pop \{ position: absolute; z-index: 30;", r"\.repo-pop\[hidden\] \{ display: none; \}",
+                     r"\.empty\[hidden\] \{ display: none; \}", r"\.ledger \.what button \{ all: unset;",
+                     r"\.ledger tr\.hour td \{", r"\.ledger tbody tr\[data-picked\] td:first-child \{", r"\.linkbtn \{",
+                     r"\.pager \{ display: flex;"):
+            self.assertRegex(css, rule)
+
     def test_only_a_link_reads_the_older_journal_records_and_its_token_goes_back_to_24h(self):
         """The 7d, 30d and All chips are gone; palette.py's range=all link still opens the older records."""
         older = self.ids["older"]
