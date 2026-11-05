@@ -53,6 +53,8 @@
     if (l.state === 'refused') return html`<span class="pt-last g warning"><span aria-hidden="true">${GLYPH.warning}</span> Not run${on}: ${l.reason}.</span>`;
     return html`<span class="pt-last g unknown"><span aria-hidden="true">${GLYPH.unknown}</span> Not known${on}: ${l.reason}.</span>${out}`;
   }
+  // pack sd:7675: an action asked, starting or running turns its button's icon (aria-busy); its last-run line says which.
+  const RUNS = new Set(['pending', 'starting', 'running']);
   function tileHTML(r) {
     const [st, words] = r.probe ? ANSWER[String(r.probe.answers)] : ['', () => 'no link'];
     const off = r.here || r.host ? '' : r.why;
@@ -66,6 +68,7 @@
       ${r.host ? html`<p class="why">Runs on ${r.host}; a press takes up to five minutes to start.</p>` : ''}
       <ul class="pt-acts">${r.actions.map(a => html`<li>${off
         ? html`<button class="btn sm" type="button" data-tile-act="${a.label}" aria-disabled="true" data-tip="${off}">${a.label}</button>`
+        : RUNS.has(a.last.state) ? html`<button class="btn sm" type="button" data-tile-act="${a.label}" aria-busy="true" data-tip="${tip(a)}">${window.shell.ICON('rotate-ccw')}${a.label}</button>`
         : html`<button class="btn sm" type="button" data-tile-act="${a.label}" data-tip="${tip(a)}">${a.label}</button>`} ${lastHTML(a.last)}</li>`)}</ul>
     </li>`;
   }

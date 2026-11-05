@@ -109,8 +109,9 @@ ROW = {
              "{pack}/dashboard/sd_dashboard/now_screen.py and the collector it calls, reproduce the failure, fix "
              "the cause, and land the fix through the lane."),
 }
-#: The dark rows a session is for, one per source Today lamps; the pull request collector's Fix is its sync, in the page.
-DARK = ("repos", "sessions", "jobs", "lane", "gate", "reports", "mail", "live")
+#: The dark rows a session is for, one per source Today lamps, and the flaky heads' partial lane row (pack sd:7706); the
+#: pull request collector's Fix is its sync, in the page.
+DARK = ("repos", "sessions", "jobs", "lane", "gate", "reports", "mail", "live", "flaky")
 ROW_ID = re.compile(r"(?:(ahead|dirty|pinned):(.+):[1-9][0-9]{0,8}|worktrees:[1-9][0-9]{0,8}|dark:(%s))" % "|".join(DARK))
 #: What a source's read may raise, as `now_screen.document` guards each one.
 UNREAD = (OSError, ValueError, TypeError, KeyError, SdDbError, sqlite3.Error)

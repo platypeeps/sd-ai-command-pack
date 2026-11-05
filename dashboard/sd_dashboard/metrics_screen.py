@@ -242,8 +242,9 @@ def _ci(connection, now, since=None):
             "repos": sorted(repos.values(), key=lambda r: (-r["gate"], r["repository"]))}
 
 
-def flaky(connection, now: str) -> list[dict]:
-    """The flaky heads of the last `CI_DAYS` (sd:5473), newest pass first; Today lists them (pack sd:7663).
+def flaky(connection, now: str) -> tuple[list[dict], int]:
+    """The flaky heads of the last `CI_DAYS` (sd:5473), newest pass first, and the count of bodies that are not lane
+    entries (`_entries`' `unreadable`); Today lists them (pack sd:7663) and says the count (pack sd:7706).
 
     A flaky head is one a gate failed at, and a later entry of the same repository passed at that same head: `head`, or
     `expected_head` where the failed entry names none, so a catch-up merge or a new commit is a new head. The pass falls
@@ -252,7 +253,8 @@ def flaky(connection, now: str) -> list[dict]:
     since = (_stamp(now) - timedelta(days=CI_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     failed: dict[tuple, list] = {}
     found = {}
-    for at, entry in _entries(connection)[0]:
+    ended, unreadable = _entries(connection)
+    for at, entry in ended:
         head = entry.get("head") or entry.get("expected_head")
         if not isinstance(head, str):
             continue
@@ -262,7 +264,7 @@ def flaky(connection, now: str) -> list[dict]:
         elif entry["status"] in PASSED and failed.get(key) and key not in found and at >= since:
             found[key] = {"repository": entry["repository"], "item": entry.get("item"), "title": entry.get("title") or "",
                           "head": head, "failed": failed[key], "passed": at, "status": entry["status"]}
-    return sorted(found.values(), key=lambda f: f["passed"], reverse=True)
+    return sorted(found.values(), key=lambda f: f["passed"], reverse=True), unreadable
 
 
 #: The weekly KISS audit's window, with the window that ended a week ago beside it (pack sd:6744).

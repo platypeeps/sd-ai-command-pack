@@ -219,6 +219,12 @@ body[data-rail="min"] .rail-grip { display: none; }
 .btn.sm { min-height: 2rem; padding: 0 var(--space-sm); font-size: var(--text-xs); }
 /* Read again (sd:5638): busy while its read is pending; at the head's end it keeps its height where a page stretches the head. */
 .btn[aria-busy="true"] { cursor: progress; }
+/* pack sd:7675: a button whose job runs (aria-busy) turns its icon the way its arrow points, linear as a dial; its words
+ * say it runs, so reduced motion holds the icon still and loses nothing. Disabled while it runs, it keeps its ink. */
+:is(.btn, .icon-btn)[aria-busy="true"] > svg.i { animation: busy-turn calc(var(--dur-lamp) * 3) linear infinite; }
+.btn[aria-busy="true"]:disabled { color: var(--color-ink-2); cursor: progress; }
+@keyframes busy-turn { to { transform: rotate(-1turn); } }
+@media (prefers-reduced-motion: reduce) { :is(.btn, .icon-btn)[aria-busy="true"] > svg.i { animation: none; } }
 .head > #read-again { align-self: end; }
 .icon-btn {
   display: inline-grid; place-items: center; width: 2rem; height: 2rem; padding: 0;

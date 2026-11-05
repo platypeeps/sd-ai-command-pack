@@ -333,6 +333,27 @@ class TheActBar(unittest.TestCase):
         # Nothing explains a command between the buttons and the fold: the off reasons are inside it.
         self.assertRegex(bar, r'</div>\s*<details class="cli-all">')
 
+    def test_a_command_whose_job_runs_shows_as_a_turning_button_not_an_off_line(self):
+        """pack sd:7675: Run now on a running job is off (launchd refuses a second start), so the bar folded it away and
+        nothing said the job runs. A command whose `busy(o)` holds shows as its button, disabled and aria-busy, with the
+        turning icon and words that say it runs; reduced motion holds the icon still."""
+        bar = re.search(r"  function bar\(id\) \{.*?\n  \}\n", SHELL_JS, re.S).group(0)
+        R = run_js("""const tipOf = c => c.label, cliOf = c => c.cli(), noCli = () => false,
+  executes = () => true, offWhy = (c, o) => { const w = c.when ? c.when(o) : true; return w === true ? '' : w; };
+const REGS = [{ id: 'jobs.retry', on: 'job', label: 'Run now', key: 't', cli: () => 'sd jobs retry x', when: o => !o.running || 'the job is already running', busy: o => o.running },
+  { id: 'jobs.cancel', on: 'job', label: 'Cancel', key: 'x', cli: () => 'sd jobs cancel x', when: o => o.running || 'not running', primary: o => o.running }];
+const OBJ = new Map([['job:a', { type: 'job', running: true }], ['job:b', { type: 'job', running: false }]]), cmdsFor = o => REGS.filter(c => c.on === o.type);
+""" + bar + "R.on = String(bar('job:a')); R.idle = String(bar('job:b'));")
+        self.assertRegex(R["on"], r'<button class="btn quiet" type="button" data-cmd="jobs.retry"[^>]* disabled aria-busy="true"><svg class="i" aria-hidden="true"><use href="#i-rotate-ccw"/></svg>Running')
+        self.assertRegex(R["on"], r'<button class="btn" type="button" data-cmd="jobs.cancel"')
+        self.assertNotIn("<b>Run now</b> is off", R["on"])
+        self.assertNotIn("aria-busy", R["idle"])
+        rules = re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", SHELL_CSS, flags=re.S))
+        turn = [sel for sel, body in rules if '[aria-busy="true"]' in sel and "svg" in sel and "animation:" in body and "none" not in body]
+        self.assertTrue(turn, "no rule turns a busy button's icon")
+        still = re.search(r"@media \(prefers-reduced-motion: reduce\) \{[^@]*?\[aria-busy=\"true\"\][^{]*svg[^{]*\{ animation: none; \}", SHELL_CSS)
+        self.assertIsNotNone(still, "reduced motion does not hold the busy icon still")
+
     def test_a_help_icon_with_a_command_copies_it_when_pressed(self):
         click = re.search(r"document\.addEventListener\('click', e => \{\n(?:    .*\n)?    const b = e\.target\.closest\('\.help'\);.*?\}, true\);", SHELL_JS, re.S)
         self.assertIsNotNone(click)

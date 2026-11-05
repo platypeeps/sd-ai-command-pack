@@ -90,6 +90,38 @@ class TheProblems(ReportsCase):
         self.assertEqual(today["attention"], {"state": "caution", "n": 1, "what": "rows to look at"})
 
 
+class TheClaims(ReportsCase):
+    """pack sd:7683: a report another session already took names who has it, so Today offers no second Fix on it.
+
+    Taken is `in_progress`, by the status change's `who`, or a note the dashboard's Fix wrote (`fix_session.NOTE`), by
+    its session. A report nobody took has no claim.
+    """
+
+    def test_an_untaken_report_has_no_claim(self):
+        self.report("nas-full-copy", "r1")
+        [row] = self.read()["problems"]
+        self.assertIsNone(row["claim"])
+
+    def test_an_in_progress_report_names_who_moved_it(self):
+        item = self.report("nas-full-copy", "r1")
+        writes.transition(self.connection, item, "in_progress", who="hub-triage", reason="triage")
+        [row] = self.read()["problems"]
+        self.assertEqual(row["claim"], "hub-triage has it (in_progress)")
+        today = self.today()
+        [needs] = [r for r in today["needs"] if r["id"] == f"report:{item}"]
+        self.assertIn("hub-triage has it (in_progress)", needs["detail"])
+
+    def test_a_fix_note_names_its_session_and_pane(self):
+        from sd_dashboard import fix_session
+        from sd_db import workflow
+
+        item = self.report("nas-full-copy", "r1")
+        body = fix_session.NOTE.format(session="debug", item=item, pane="w9:p1", where="~/repos/system")
+        workflow.add_item_note(self.connection, item, kind="comment", who="dashboard", body=body)
+        [row] = self.read()["problems"]
+        self.assertEqual(row["claim"], "dashboard has it (Fix: debug session, herdr pane w9:p1)")
+
+
 class TheBriefs(ReportsCase):
     def test_a_brief_from_the_last_week_shows_newest_first_and_an_older_one_does_not(self):
         self.brief("2026-09-04 - Weekly Intel Synthesis", at="2026-09-04T11:00:00Z")

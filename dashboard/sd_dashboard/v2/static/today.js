@@ -105,7 +105,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (r.kind === 'report') return html`${head}<h2>${r.title}</h2>
       <dl><dt>Filed</dt><dd>${day(r.at)} ${hm(r.at)} UTC</dd><dt>Job</dt><dd>${r.job || 'not recorded'}</dd>
         <dt>Host</dt><dd>${r.host || 'not recorded'}</dd><dt>Exit</dt><dd>${r.exit ?? 'not recorded'}</dd>
-        ${r.repeats ? html`<dt>Repeats</dt><dd>${r.repeats}</dd>` : ''}<dt>Item</dt><dd><a href="${shell.itemHref(r.item)}">#${r.item}</a></dd></dl>
+        ${r.repeats ? html`<dt>Repeats</dt><dd>${r.repeats}</dd>` : ''}<dt>Item</dt><dd><a href="${shell.itemHref(r.item)}">#${r.item}</a></dd>
+        ${r.claim ? html`<dt>Taken</dt><dd>${r.claim}</dd>` : ''}</dl>
       ${r.basis ? html`<h3>Why</h3><div class="mailbody">${r.basis}</div>` : ''}
       <h3>Log${r.cut ? ' · last lines' : ''}</h3><div class="mailbody">${r.body || 'no text kept'}</div>
       <p class="why">Acknowledge closes the report, not the fault. The next failure opens a new one.</p>${act}`;
@@ -250,7 +251,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     return { id: r.id, type: r.group ? GROUP[r.id] || 'item group' : TYPE[r.kind] || r.kind, label: r.what,
              failed: r.kind === 'job' && !!r.retry, retry: r.retry, job: job && job[1], service: r.service,
              exit: r.exit, revision: r.revision, capability: r.capability, repo: pr ? pr[1] : r.repo, number: pr && +pr[2], seen: r.seen,
-             item: r.item, itemKind: r.item_kind, state: r.state, url: r.url, fieldsRead: r.fields_read, until: r.until, login: r.login,
+             item: r.item, itemKind: r.item_kind, state: r.state, url: r.url, fieldsRead: r.fields_read, until: r.until, login: r.login, claim: r.claim,
              repoPath: r.repo_path, laneRevision: r.lane_revision, head: r.expected_head, runnerMerge: r.runner_merge,
              members: r.members && r.members.map(m => ({ id: m.id, seen: m.seen, until: m.until, item: m.item })), group: r.id };
   }
@@ -269,7 +270,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       <td class="detail">${r.detail}</td>
       <td class="src">${src ? I(src[1]) : ''}${r.source}</td>
       <td class="num age">${age(r.at)}</td>
-      <td class="act">${shell.commands.rowActions(r.id, { icons: r.band === 'broken' })}</td></tr>`;
+      <td class="act">${shell.commands.rowActions(r.id, { icons: r.band === 'broken' || r.kind === 'report' })}</td></tr>`;
   }
   // Needs you: the rows the lamp, the intent and the text keep, a band head where the band changes, and each open group's
   // members under it. Nothing hides a row after the draw: a filter draws the list again.
@@ -879,9 +880,10 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       { id: 'today.item.open', on: 'work item', label: 'Open', does: 'Opens the item on Tasks.', key: 'o', icon: 'arrow-up-right', risk: 'safe', executes: false, primary: () => true,
         cli: o => `sd task show ${o.item}`, run: o => shell.openItem(o.item) },
       // A problem report whose output shows an expired login (sd:6964): Fix opens its Credentials row, ahead of Acknowledge.
-      // Today starts no debug session on a report; one with no login cause keeps Acknowledge, and Fix stays on Reports.
-      { ...K.fix('report', { item: o => o.item, report: () => true, login: o => o.login, post: null,
-        when: o => !!o.login || 'no expired login in its log: Fix it from Reports' }), primary: o => !!o.login },
+      // Any other report's Fix is the Reports page's debug session, posted with the read's revision (pack sd:7683); one
+      // another session took names who has it instead, so a second session does not start on it.
+      { ...K.fix('report', { item: o => o.item, report: () => true, login: o => o.login, post: (o, path) => post(path, { revision: o.revision }),
+        when: o => !!o.login || !o.claim || `${o.claim}: open its session in herdr, or Fix it from Reports` }), primary: o => !!o.login },
       // A problem report (sd:5921): Acknowledge posts the Reports page's route with the revision the read gave.
       { id: 'today.report.ack', on: 'report', label: 'Acknowledge', does: 'Closes the report, not the fault: the next failure opens a new one.', key: 'a', icon: 'check', risk: 'safe', bulk: true, primary: o => !o.login,
         when: o => o.fieldsRead || `its fields cannot be read: sd reports acknowledge ${o.item}`,

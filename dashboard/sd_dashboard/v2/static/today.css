@@ -139,7 +139,8 @@
 .active .what a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .active .detail { min-width: 0; overflow-wrap: anywhere; }
 .active .sessions { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-2xs); }
-.active .via { display: block; color: var(--color-muted); }
+/* Details lists a group's members and a live item's sessions the same way: the detail on its own line (pack sd:7678). */
+.active .via, .details .via { display: block; color: var(--color-muted); }
 .active .num { white-space: nowrap; text-align: right; font: 400 var(--text-xs)/1.35 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
 /* The table says in one line what it holds (pack sd:6975), muted as the Reports and Health captions. */
 .active caption { text-align: left; padding: 0 0 var(--space-xs); font: 400 var(--text-xs)/1.4 var(--font-ui); color: var(--color-muted); }
