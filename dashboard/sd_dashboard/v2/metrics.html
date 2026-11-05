@@ -44,6 +44,8 @@
     <!-- metrics.js draws the buttons (RANGES) and keeps the choice in the address, ?range=6mo (pack sd:7208). -->
     <div class="vseg" id="range" role="group" aria-label="Time range"></div>
     <button class="help" type="button" aria-label="Help: time range" data-help="<b>One range for the page.</b> 7d: CI reads 7 days; dollars, Usage and Providers read this calendar month. 6mo: Spend adds dollars by bill for each of the last six calendar months, this one to date, and Providers and CI read those months. The lamps, the 7-day window, the week and Usage keep their spans in both; Age counts open items now."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button>
+    <!-- The month Spend and Usage read, kept as ?month=YYYY-MM: the picker Operations Usage had (pack sd:7524). -->
+    <label class="month-pick" for="month">Month <input type="month" id="month" name="month"></label>
   </div>
 
   <div id="view-spend" aria-label="Spend">
@@ -54,11 +56,13 @@
         <div class="scroll-x"><table class="tbl" id="months-table" aria-labelledby="months-h"><thead id="months-head"></thead><tbody id="months-body"></tbody></table></div>
         <p class="foot-note" id="months-note"></p></div>
       <div class="cols">
-        <div><p class="sub">Dollars this month, by bill</p><ul class="hbars" id="bills"></ul>
+        <div><p class="sub" id="bills-h">Dollars by bill</p><ul class="hbars" id="bills"></ul>
           <p class="foot-note" id="bills-note"></p></div>
         <div><p class="sub">Budget used, now</p><ul class="hbars" id="windows"></ul>
           <p class="foot-note">Caution at 75% of a window; a full window blocks that provider until it resets.</p></div>
       </div>
+      <p class="sub gap">Burn against each cap</p>
+      <div class="multi" id="burns"></div>
       <p class="sub gap">7-day window, last reading each day</p>
       <div class="multi" id="trends"></div>
       <p class="sub gap">By model</p>
@@ -87,7 +91,7 @@
 
   <div id="view-ci" aria-label="CI" hidden>
     <section class="panel" id="ci" aria-labelledby="ci-h">
-      <div class="panel-head"><div><h2 id="ci-h">CI health <button class="help" type="button" aria-label="Help: CI health" data-help="<b>The merge lane's gate runs over the range: 7 days, or since the first of the six months.</b> A run is a lane entry that ended: merged or prepared passed the gate; failed means the checks failed; rate is passed over passed plus failed. A review stop or a merge conflict ran no gate, so it counts as stopped, not failed. Flaky means one head failed its gate, then passed it at that same head."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+      <div class="panel-head"><div><h2 id="ci-h">CI health <button class="help" type="button" aria-label="Help: CI health" data-help="<b>The merge lane's gate runs over the range: 7 days, or since the first of the six months.</b> A run is a lane entry that ended: merged or prepared passed the gate; failed means sd-check failed; rate is passed over passed plus failed. A review stop or a merge conflict ran no gate, so it counts as stopped, not failed. Flaky means one head failed its gate, then passed it at that same head."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p>The local gate as the merge lane ran it: each lane entry's last checkpoint.</p></div></div>
       <div id="ci-state"></div>
       <div class="scroll-x"><table class="tbl" id="ci-table" aria-labelledby="ci-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Repository</th><th scope="col" class="num hide-sm">Passed</th><th scope="col" class="num">Failed</th><th scope="col" class="num">Rate</th><th scope="col" class="num hide-sm">Stopped</th><th scope="col" class="hide-sm">Last failure</th></tr></thead><tbody id="ci-body"></tbody></table></div>
@@ -99,7 +103,7 @@
 
   <div id="view-times" aria-label="Lane times" hidden>
     <section class="panel" id="times" aria-labelledby="times-h">
-      <div class="panel-head"><div><h2 id="times-h">Lane times <button class="help" type="button" aria-label="Help: lane times" data-help="<b>Each lane's last 7 days, whatever the range.</b> Wait runs from enqueue to the runner's claim; gate is the speculative gate plus the prepare step; the slowest entry runs from enqueue to its end. Each is read from the entries' history rows. A median wait over an hour shows caution."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+      <div class="panel-head"><div><h2 id="times-h">Lane times <button class="help" type="button" aria-label="Help: lane times" data-help="<b>Each lane's last 7 days, whatever the range.</b> Wait runs from enqueue to the runner's claim; gate is the speculative gate plus the prepare step; the slowest entry runs from enqueue to its end. Each is read from the entries' history rows. A median wait past an hour is caution: the lane run files the parallel-lanes question then."><svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p>The merge lanes over the last 7 days: median wait, median gate time and the slowest entry.</p></div></div>
       <div class="scroll-x"><table class="tbl" id="times-table" aria-labelledby="times-h"><thead><tr><th scope="col" class="g"><span class="sr">State</span></th><th scope="col">Lane</th><th scope="col" class="num">Entries</th><th scope="col" class="num">Median wait</th><th scope="col" class="num">Median gate</th><th scope="col" class="hide-sm">Slowest entry</th></tr></thead><tbody id="times-body"></tbody></table></div>
       <p class="foot-note" id="times-note"></p>

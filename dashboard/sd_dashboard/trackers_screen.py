@@ -1,36 +1,30 @@
-"""Operations > Trackers: PRs and Issues from `sd_db.shadow` (sd:719 step 4).
+"""GitHub > Tracked (pack sd:7525): every open pull request and issue `sd shadow sync` keeps, of every tracker.
 
-The pack dashboard's PRs and Issues tabs read `index.sqlite`, a cache the pack
-filled with its own `sqlite3` connection -- the one thing a port of those
-tabs could not carry, because nothing in this package opens a database of its
-own (criterion 2). So the views land here as an Operations area, beside Ports
-and Resources, the two other pack tabs that came across, and read the rows
-`sd shadow sync` keeps in `shadow` through `progress.tracker_items`, with each
-tracker's health from `progress.tracker_freshness`. Both functions already
-take a tracker argument; this module adds no query of its own.
+Operations > Trackers drew these rows until pack sd:7525 (sd:719 step 4 brought them from the pack's PRs and Issues
+tabs). The other GitHub views list what is the operator's (`today_github`, `issues`); this one lists the whole open
+snapshot, so a watched row, another repository's pull request and a Jira issue nobody assigned have a home. It reads
+the rows `sd shadow sync` keeps in `shadow` through `progress.tracker_items`, and each tracker's health through
+`progress.tracker_freshness`; it adds no query of its own, and `/api/github/tracked` serves it to `tracked.js`.
 
-A row's reference is the last path segment of its URL, `url.rpartition("/")[2]`,
-for both trackers -- the rule sd:361 step 7b wrote into the pack's `where`,
-carried across rather than reinvented. It is derived and not stored: a `key`
-column would be a second copy of a fact the URL already holds (sd:603). For
-Jira it is the ticket, `LOG-23818`; the `repo` column is the project, `LOG`,
-and showing that would name the wrong thing. A GitHub row reads `repo#tail`.
+A row's reference is the last path segment of its URL, `url.rpartition("/")[2]`, for both trackers -- the rule sd:361
+step 7b wrote into the pack's `where`. It is derived and not stored: a `key` column would be a second copy of a fact the
+URL already holds (sd:603). For Jira it is the ticket, `LOG-23818`; the `repo` column is the project, `LOG`, and showing
+that would name the wrong thing. A GitHub row reads `repo#tail`. A URL that is not https with a host is no link.
 """
 
+from __future__ import annotations
+
+import sqlite3
 from datetime import datetime
 from urllib.parse import urlsplit
 
 from sd_db import progress
+from sd_db.errors import SdDbError
 from sd_db.shadow_sync import TRACKERS
 
-from .listing import Column, Listing
-from .markup import join, tag
-from .screens import readable_time
-
-#: The two views the pack had. PRs are GitHub `pull` rows; Issues are the
-#: `issue` rows of every tracker in `TRACKERS`, Jira's among them.
-VIEWS = (("prs", "PRs"), ("issues", "Issues"))
-KINDS = {"prs": ("pull",), "issues": ("issue",)}
+#: The kinds listed: Trackers' PRs view held GitHub `pull` rows, its Issues view every tracker's `issue` rows.
+KINDS = ("pull", "issue")
+READ_ERRORS = (SdDbError, sqlite3.Error, ValueError, TypeError, KeyError)
 
 
 def reference(row):
@@ -39,65 +33,29 @@ def reference(row):
     return f"{row['repo']}#{tail}" if row["tracker"] == "github" and row["repo"] else tail
 
 
-def _link(row):
-    url = row["url"] or ""
+def _safe(url):
     try:
-        parsed = urlsplit(url)
+        parsed = urlsplit(url or "")
         # `hostname`, not `netloc`: `https://@/x` has an authority and no host.
-        safe = parsed.scheme == "https" and bool(parsed.hostname)
+        return url if parsed.scheme == "https" and parsed.hostname else None
     except ValueError:
-        safe = False
-    label = reference(row)
-    return tag("a", label, href=url, rel="noopener noreferrer") if safe else tag("span", label)
+        return None
 
 
-def _rows(connection, view):
-    trackers = ("github",) if view == "prs" else TRACKERS
-    kinds = KINDS[view]
-    return [row for tracker in trackers
-            for row in progress.tracker_items(connection, tracker=tracker)
-            if (row["kind"] or "") in kinds]
-
-
-def _health(connection, view, now):
+def document(connection: sqlite3.Connection, *, now: str) -> dict:
+    """`rows`, every open pull request and issue of every tracker, last seen first; `trackers`, each one's health;
+    `error`, the reason nothing could be read, else ""."""
     moment = datetime.fromisoformat(now.replace("Z", "+00:00"))
-    lines = []
-    for tracker in ("github",) if view == "prs" else TRACKERS:
-        freshness = progress.tracker_freshness(connection, tracker=tracker, now=moment)
-        state = "never synced" if freshness["state"] == "never" else freshness["state"]
-        text = f"{tracker}: {state}"
-        if freshness["last_success_at"]:
-            text = join((text, " · last successful sync ", readable_time(freshness["last_success_at"])))
-        if freshness["reason"]:
-            text = join((text, " · ", freshness["reason"]))
-        lines.append(tag("li", text))
-    return tag("ul", join(lines), class_="hint tracker-health")
-
-
-def trackers_panel(connection, parameters, *, now):
-    view = (parameters.get("view") or ["prs"])[0]
-    if view not in dict(VIEWS):
-        view = "prs"
-    query, number, selected = Listing.read_query(parameters)
-    listing = Listing("trackers", (
-        Column("reference", "Reference", _link, text=reference, css="tracker-reference"),
-        Column("title", "Title", lambda row: row["title"] or ""),
-        Column("repo", "Repository" if view == "prs" else "Repository or project", lambda row: row["repo"] or ""),
-        Column("author", "Author", lambda row: row["author"] or ""),
-        Column("state", "State", lambda row: row["state"] or ""),
-        Column("last_seen", "Last seen", lambda row: readable_time(row["last_seen"]), text=lambda row: row["last_seen"]),
-    ), _rows(connection, view), path="/operations", query=query, page_number=number,
-        selected=selected, extra={"area": "trackers", "view": view},
-        empty="No open rows in the local snapshot for this view.")
-    # Through the listing's own link, as the Backlog's view toggle is, so the
-    # filter and the page ride along: a toggle written as a bare path reset
-    # both, and switching from a filtered or paged view lost it (PR #411
-    # review). A page past the other view's count lands on its last page,
-    # which is what `Listing.page` does with any page number.
-    navigation = tag("nav", join(tag("a", label, href=listing.link(view=key),
-        class_="toggle-current" if key == view else None,
-        aria_current="page" if key == view else None) for key, label in VIEWS),
-        class_="view-toggle", aria_label="Trackers")
-    return tag("section", tag("h2", "Trackers"), navigation,
-        tag("p", "Open pull requests and issues as of the last GitHub sync. External state is context and does not hold a local item open.", class_="hint"),
-        _health(connection, view, now), listing.render())
+    try:
+        trackers, rows = [], []
+        for tracker in TRACKERS:
+            health = progress.tracker_freshness(connection, tracker=tracker, now=moment)
+            trackers.append({"tracker": tracker, **{k: health[k] for k in ("state", "last_success_at", "reason")}})
+            rows += [{"key": row["url"], "tracker": tracker, "kind": row["kind"], "ref": reference(row),
+                      "title": row["title"] or "", "repo": row["repo"] or "", "author": row["author"] or "",
+                      "state": row["state"] or "", "last_seen": row["last_seen"], "url": _safe(row["url"])}
+                     for row in progress.tracker_items(connection, tracker=tracker) if row["kind"] in KINDS]
+    except READ_ERRORS as failure:
+        return {"rows": [], "trackers": [], "error": str(failure) or "the tracker rows could not be read"}
+    rows.sort(key=lambda row: row["last_seen"] or "", reverse=True)
+    return {"rows": rows, "trackers": trackers, "error": ""}

@@ -615,7 +615,7 @@ class TileClock(unittest.TestCase):
 
         called = time.monotonic()
         with patch.object(tile, "load_collectors", load_collectors), \
-                patch.dict(tile.TABS, {"toolbox": lambda collectors: {"html": ""}}), \
+                patch.dict(tile.TABS, {"toolbox": lambda collectors: {"sections": []}}), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(tile.main(["toolbox"]), 0)
         [(seconds, started)] = deadlines

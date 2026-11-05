@@ -1,9 +1,9 @@
 // v2 shell: grouped rail, right pane (Details | Chat), help popovers, palette, toast, keys.
 // Build port (dashboard): the design source's products/system/designs/v2/shell.js at d82daa1 (sd:2124; first ported
 // at a3861c9 for sd:2110). The reference carries the build hooks below; the build adds only what is marked "build (sd:2163)".
-// build (sd:2163): /ui/sections.js sets window.SHELL_CLASSIC, the server-drawn screen a section opens (Operations, pack
-// sd:7266; the rail draws it as any other section), and window.SHELL_SCREENS, old screens without a section, which the
-// palette offers.
+// build (sd:2163): /ui/sections.js sets window.SHELL_CLASSIC, the server-drawn screen a section opens (none since
+// Operations went, pack sd:7517; the rail draws one as any other section), and window.SHELL_SCREENS, old screens without
+// a section, which the palette offers.
 // Markup (sd:2127, from the build's sd:2110 port): every string of markup is html`…` from markup.js, which escapes each
 // value put in it; put() is the only way in. rowActions, bar, time and ICON return html`…` for a page to compose.
 // Help text renders <b> and <code> only, without attributes.
@@ -60,7 +60,7 @@
     ['Work',      [['Tasks', 'list-todo', 'k'], ['GitHub', 'git-branch', 'b'], ['Writing', 'pen-line', 'w'], ['Research', 'flask-conical', 'r'], ['Contributions', 'git-pull-request', 'c']]],
     ['Knowledge', [['Documents', 'file-text', 'd'], ['Notes', 'notebook-pen', 'n'], ['Watches', 'eye', 'y'], ['Studio', 'mic', 'z']]],
     ['Places',    [['HOA', 'droplets', 'h'], ['Home', 'house', 'o']]],
-    ['Fleet',     [['Skills', 'sparkles', 's'], ['Metrics', 'chart-no-axes-column', 'm'], ['Management', 'settings', 'g'], ['Health', 'heart-pulse', 'e'], ['Operations', 'gauge', 'u'], ['Activity', 'activity', 'a'], ['Reports', 'clipboard-list', 'p'], ['Designs', 'palette', 'x'], ['Settings', 'sun-moon', 'v']]],
+    ['Fleet',     [['Skills', 'sparkles', 's'], ['Metrics', 'chart-no-axes-column', 'm'], ['Management', 'settings', 'g'], ['Health', 'heart-pulse', 'e'], ['Activity', 'activity', 'a'], ['Reports', 'clipboard-list', 'p'], ['Designs', 'palette', 'x'], ['Settings', 'sun-moon', 'v']]],
   ];
   // build: a page that is built sets window.SHELL_PAGES; a section missing from it shows as not built yet.
   const PAGES = window.SHELL_PAGES || { Today: 'today.html', Briefs: 'briefs.html', Tasks: 'tasks.html', Research: 'research.html', Documents: 'documents.html', HOA: 'hoa.html', Home: 'home.html', Skills: 'skills.html', Metrics: 'metrics.html', Activity: 'activity.html', Reports: 'reports.html', Writing: 'writing.html', Notes: 'notes.html', Contributions: 'contributions.html', Health: 'health.html', Management: 'management.html', Designs: 'designs.html', Watches: 'watches.html', Studio: 'studio.html' };
@@ -295,7 +295,7 @@
   // shell.filter() is the shown view's filter text; shell.filter(q) sets it (a page's Clear all). The bar reads ?q= at load.
   // A page with a bar of its own (Skills, Tasks) hands its filter text over with shell.filter(q) at each change, so the
   // tables it does not filter itself (Skills' tracked repositories) take it as their text filter too.
-  // A server-drawn list (listing.py, on Operations, Protection, an item page) filters on the server, before its pages: its
+  // A server-drawn list (listing.py, on Protection, an item page) filters on the server, before its pages: its
   // section names its query key (data-listing-q), the bar opens with that key's text, and Enter in filter mode loads the
   // page with the text in every list's key, each list from its first page.
   // window.PAGE_FILTER = { <view id, or '' on a page without views>: 'reports, bodies included' } says what the filter

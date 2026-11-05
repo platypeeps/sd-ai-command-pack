@@ -12,6 +12,8 @@
   Hide and Unhide (sd:6175) on a row of either post /api/github/issues/view; Open | Hidden, at each filter bar's left (sd:6701), is ?hidden=1.
   Dependabot (pack sd:7515): each managed repo's open Dependabot alerts, /api/github/dependabot, read by dependabot.js
   when the view first shows: a band per repo (the shell's fold) with Health's Fix, a row per alert with Open on GitHub.
+  Tracked (pack sd:7525, Operations > Trackers until then): every open pull request and issue sd shadow sync keeps, of
+  every tracker, watched and Jira rows too, /api/github/tracked, read by tracked.js when the view first shows.
   Refresh from GitHub, on every view, starts shadow-sync-nightly through the shared Run now (pack sd:6702);
   github.js draws the line.
   The page's styles are Today's (today.css) and the issue ledger's (issues.css): the rows moved, their look did not.
@@ -103,6 +105,23 @@
         <p class="why" id="dependabot-notes"></p>
       </section>
     </div>
+    <div id="view-tracked" aria-label="Tracked" hidden>
+      <section class="issues-sec" aria-labelledby="tracked-h">
+        <div class="sec-head">
+          <h2 id="tracked-h">Tracked <button class="help" type="button" aria-label="Help: Tracked" data-help="&lt;b&gt;Everything the GitHub sync keeps open.&lt;/b&gt; Every open pull request and issue of every tracker, as of the last sync: watched repos, other people&#39;s pull requests elsewhere, and Jira issues nobody assigned to you, which the other views leave out. A GitHub row reads owner/name#N, a Jira row its ticket. External state is context and holds no local item open. Under the table, each tracker&#39;s last sync. Refresh from GitHub syncs in the background.">
+            <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+          <p class="tally" id="tracked-tally"></p>
+          <div class="tools"><span id="tracked-sync"></span></div>
+        </div>
+        <div class="filters toolbar-2" id="tracked-filters"></div>
+        <p class="why" id="tracked-said"></p>
+        <table class="ledger issues tracked" aria-labelledby="tracked-h" data-toolbar="tracked-filters">
+          <thead><tr><th scope="col">Reference</th><th scope="col">Title</th><th scope="col">Repo or project</th><th scope="col">Kind</th><th scope="col">Author</th><th scope="col">Last seen</th></tr></thead>
+          <tbody id="tracked"><tr class="empty"><td colspan="6">Reading tracked rows…</td></tr></tbody>
+        </table>
+        <p class="why" id="tracked-health"></p>
+      </section>
+    </div>
   </main>
 
   <div class="details" id="details"><p class="why">Press a pull request or an issue for its details.</p></div>
@@ -112,6 +131,7 @@
 <script src="/ui/github.js"></script>
 <script src="/ui/issues.js"></script>
 <script src="/ui/dependabot.js"></script>
+<script src="/ui/tracked.js"></script>
 <script src="/ui/today-github.js"></script>
 <script src="/ui/shell.js"></script>
 </body>

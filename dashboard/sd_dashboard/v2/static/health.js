@@ -360,7 +360,7 @@
   const can = action => o => revised(o) === true ? (o.can[action].allowed || o.can[action].reason) : revised(o);
   window.PAGE_COMMANDS = [
     { label: 'Read Health again', icon: 'rotate-ccw', run: () => load() },
-    { label: 'Open Sessions in Operations', icon: 'folder-x', run: () => { location.href = '/operations?area=sessions'; } },
+    { label: 'Open Sessions in Management', icon: 'folder-x', run: () => { location.href = '/management#view=sessions'; } },
   ];
   window.PAGE_LIST = { rows: () => document.querySelectorAll('.ledger tbody tr[data-id]'), current: () => selected,
     select: id => select(id, false), clear: () => clearFilters() };

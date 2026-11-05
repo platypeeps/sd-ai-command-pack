@@ -1,4 +1,8 @@
-"""Database reports and bounded, read-only legacy resource views.
+"""Database reports, and the bounded, read-only machine and vault views other pages show.
+
+The views (`VIEWS`) are `sd_tile.py` tabs, each run as a child under its budget by `collect` and served by `view`:
+Toolbox as Management's Machine view, Research as its Repos filter, Vault on Notes and Queues on Tasks (pack sd:7527).
+They were Operations > Resources until then.
 
 Since sd:2121 it also builds the documents behind the default UI's Reports
 page (`v2/reports.html`, at `/reports`); the page holds no rows:
@@ -22,7 +26,6 @@ import subprocess
 import sys
 import time
 from datetime import date, datetime, timedelta
-from html.parser import HTMLParser
 from pathlib import Path
 
 from sd_db import operations, reads, reporting
@@ -32,7 +35,7 @@ from . import job_failures
 from .controls import form
 from .documents import _config_dir, pipe_lines
 from .management_screen import log_tail, unreadable
-from .markup import Markup, escape, join, tag
+from .markup import join, tag
 
 # Queues joined this tuple rather than taking a screen of its own (sd:719 step
 # 2). `collectors.py` has no `collect_queues` to call, but `sd_tile.py queues`
@@ -63,31 +66,6 @@ TILE = Path(__file__).resolve().parents[1] / "sd_tile.py"
 VIEW_SECONDS = {"toolbox": 5.0, "vault": 5.0, "research": 5.0, "queues": 5.0}
 
 
-class SafeFragment(HTMLParser):
-    """Keep structural text/table markup; never trust returned active content."""
-    allowed = frozenset({"h3", "p", "table", "thead", "tbody", "tr", "th", "td", "dl", "dt", "dd", "ul", "li", "a"})
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.output = []
-
-    def handle_starttag(self, name, attrs):
-        if name not in self.allowed:
-            return
-        attributes = dict(attrs)
-        extra = ' class="listing-table"' if name == "table" else ""
-        if name == "a" and str(attributes.get("href", "")).startswith(("https://", "http://")):
-            extra = f' href="{escape(attributes["href"])}" rel="noopener noreferrer"'
-        self.output.append(f"<{name}{extra}>")
-
-    def handle_endtag(self, name):
-        if name in self.allowed:
-            self.output.append(f"</{name}>")
-
-    def handle_data(self, data):
-        self.output.append(str(escape(data)))
-
-
 def _collectors():
     # `Budget` is defined once, in the collectors this dashboard owns, and read
     # by path as `ports_screen.py` reads it.
@@ -116,34 +94,60 @@ def collect(area):
         raise ValueError(f"resource inspection was stopped at its budget: {error}") from None
     if process.returncode:
         raise ValueError(process.stderr.strip() or f"resource collector exited {process.returncode} without a reason")
-    raw = process.stdout
-    result = json.loads(raw)
-    if not isinstance(result, dict) or not isinstance(result.get("html"), str):
+    result = json.loads(process.stdout)
+    if not isinstance(result, dict) or not _sections(result.get("sections")):
         raise ValueError("resource collector returned incomplete output")  # noqa: TRY004 - external document validation
     rows = result.get("rows", [])
     if not isinstance(rows, list) or any(not isinstance(row, dict)
             or not isinstance(row.get("what"), str) or not isinstance(row.get("detail"), str) for row in rows):
         raise ValueError("resource collector returned incomplete observations")  # noqa: TRY004 - external document validation
-    parser = SafeFragment()
-    parser.feed(result["html"])
-    notices = tag("section", tag("h3", "Needs attention"),
-        tag("dl", join(tag("div", tag("dt", row["what"]), tag("dd", row["detail"])) for row in rows)),
-        class_="notice") if rows else ""
-    return join((Markup("".join(parser.output)), notices))
+    paths = result.get("paths", [])
+    if not isinstance(paths, list) or not all(map(_text, paths)):
+        raise ValueError("resource collector returned incomplete output")  # noqa: TRY004 - external document validation
+    return {"title": str(result.get("title") or dict(VIEWS)[area]), "sections": result["sections"],
+            "rows": [{"what": row["what"], "detail": row["detail"]} for row in rows]} | ({"paths": paths} if "paths" in result else {})
 
 
-def resources(parameters, *, backend=None):
-    area = (parameters.get("resource") or ["toolbox"])[0]
-    if area not in dict(VIEWS):
-        area = "toolbox"
-    navigation = tag("nav", join(tag("a", label, href=f"/operations?area=resources&resource={key}",
-        aria_current="page" if key == area else None) for key, label in VIEWS), class_="view-toggle", aria_label="Resources")
+def _text(value):
+    return isinstance(value, str)
+
+
+def _cell(value):
+    return (isinstance(value, dict) and _text(value.get("text")) and set(value) <= {"text", "title", "href", "num"}
+            and all(_text(value[key]) for key in ("title", "href") if key in value)
+            and str(value.get("href", "https://")).startswith(("https://", "http://")))
+
+
+def _section(section):
+    """One of sd_tile.py's sections (its docstring): figures, a heading, a table or a listing, all text."""
+    if not isinstance(section, dict) or len(section) != 1:
+        return False
+    (kind, value), = section.items()
+    if kind == "heading":
+        return _text(value)
+    if kind == "listing":
+        return isinstance(value, list) and all(map(_text, value))
+    if kind == "figures":
+        return isinstance(value, list) and all(isinstance(pair, list) and len(pair) == 2 and all(map(_text, pair)) for pair in value)
+    if kind == "table":
+        return (isinstance(value, dict) and set(value) == {"columns", "rows", "search"} and _text(value["search"])
+                and isinstance(value["columns"], list) and isinstance(value["rows"], list)
+                and all(isinstance(column, list) and len(column) == 2 and all(map(_text, column)) for column in value["columns"])
+                and all(isinstance(row, list) and len(row) == len(value["columns"]) and all(map(_cell, row)) for row in value["rows"]))
+    return False
+
+
+def _sections(sections):
+    return isinstance(sections, list) and all(map(_section, sections))
+
+
+def view(area):
+    """A moved view's API document (pack sd:7527): the tile's `{title, sections, rows}`, or 503 with the reason it
+    could not be observed, never an empty view."""
     try:
-        content = (backend or collect)(area)
+        return collect(area)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        content = tag("p", "This resource could not be observed: " + str(error), class_="notice")
-    return tag("section", tag("h2", "Resources"), navigation,
-        tag("p", "Read-only observations from the existing local collectors. Nothing here starts jobs or edits vault notes.", class_="hint"), content)
+        return 503, {"error": f"{dict(VIEWS)[area]} could not be observed: {error}"}
 
 
 def report_controls(connection, row, revision):
