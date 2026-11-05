@@ -512,11 +512,15 @@ def _open(fd: int) -> bool:
 
 def _end(child: subprocess.Popen) -> None:
     """TERM, then KILL whatever of the step's group outlived TERM, and reap it; the group is gone once killpg finds
-    no member."""
+    no member. macOS answers EPERM now and then for a group whose last members are exiting (sd:7704): the step itself
+    is then KILLed alone, so the reap below cannot wait on it."""
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(child.pid, sig)
         except ProcessLookupError:
+            break
+        except PermissionError:
+            child.kill()
             break
         try:
             child.wait(timeout=5)

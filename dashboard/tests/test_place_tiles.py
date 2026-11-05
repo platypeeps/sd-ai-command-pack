@@ -580,6 +580,25 @@ class TheRefreshSteps(Case):
         self.assertFalse(self.alive("upd"), "the Update outlived Refresh")
         self.assertIn("ended by signal 15", last["output"])
 
+    def test_a_group_macos_answers_eperm_for_while_it_dies_is_ended_not_a_traceback(self):
+        # sd:7704: macOS killpg answers EPERM, not ESRCH, now and then for a group whose last members are exiting; the
+        # KILL after TERM raised it, and Refresh ended in a traceback, not 124 or 128+signal. Seen in the gate's shards.
+        child = subprocess.Popen(["sh", "-c", "sleep 30 & wait"], start_new_session=True)
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        real = os.killpg
+        sent = []
+
+        def killpg(pid, sig):
+            sent.append(sig)
+            if sig == signal.SIGKILL:
+                raise PermissionError(1, "Operation not permitted")
+            real(pid, sig)
+
+        with mock.patch.object(place_tiles.os, "killpg", killpg):
+            place_tiles._end(child)
+        self.assertEqual(sent, [signal.SIGTERM, signal.SIGKILL])
+        self.assertIsNotNone(child.returncode, "the step was not reaped")
+
     def test_a_hosted_refresh_says_the_start_button_here_does_not_show_its_start(self):
         # The host's Refresh starts Start there under its own lock and writes no Start row, so the hub's Start reads
         # its last answered request: a limit the button's hover says.
