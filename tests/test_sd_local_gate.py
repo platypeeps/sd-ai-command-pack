@@ -1509,6 +1509,25 @@ class RamDiskGate(Repository):
         with mock.patch.object(os, "confstr", return_value=str(self.disk)):
             self.assertIsNone(sd_tmpdisk.system_temporary(), "a per-user name on the disk is refused too")
 
+    def test_a_python_that_does_not_name_the_per_user_dir_still_reads_it_by_number(self) -> None:
+        """Lane review: the hub's Python registers no `CS_DARWIN_USER_TEMP_DIR`, so the name raised, the dir read None,
+        and a Cargo gate under a `TMPDIR` on the disk landed on it. `<unistd.h>` numbers it 65537."""
+        self.nested_on_disk()
+
+        def confstr(name: str | int) -> str:  # as Python answers where it does not know the name
+            if name != 65537:
+                raise ValueError("unrecognized configuration name")
+            return str(self.system)
+
+        (self.root / "Cargo.toml").write_text('[package]\nname = "f"\nversion = "0.1.0"\n', encoding="utf-8")
+        head = self.commit(self.recipe())
+        env = {**os.environ, sd_gate_cache.CARGO_TARGETS_VARIABLE: "0"}
+        names = {key: value for key, value in os.confstr_names.items() if key != "CS_DARWIN_USER_TEMP_DIR"}
+        with mock.patch.object(os, "confstr_names", names), mock.patch.object(os, "confstr", confstr):
+            self.assertEqual(sd_tmpdisk.system_temporary(), str(self.system))
+            self.assertEqual(sd_gate_run.check_in_worktree(self.root, head, environ=env)["status"], "success")
+        self.assertEqual([place.is_relative_to(self.system) for place in self.places()], [True, True])
+
     def test_a_test_run_puts_its_temp_dir_on_a_ready_disk(self) -> None:
         code = ("import os, pathlib, sys; sys.path.insert(0, 'bin'); import sd_tmpdisk; "
                 f"sd_tmpdisk.ROOT = pathlib.Path({str(self.disk)!r}); sd_tmpdisk.ismount = lambda path: True; "

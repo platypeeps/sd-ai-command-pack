@@ -91,7 +91,9 @@ def system_temporary() -> str | None:
     """The per-user system temp dir, whatever `TMPDIR` says, as macOS names it (`CS_DARWIN_USER_TEMP_DIR`);
     None where it names none or names one on the disk. Only macOS has the disk, so no fixed path stands in."""
     try:
-        named = os.confstr("CS_DARWIN_USER_TEMP_DIR")
+        # A Python may register no name for it (the hub's 3.15 does not): 65537 is `_CS_DARWIN_USER_TEMP_DIR`
+        # in macOS's <unistd.h>, the value `getconf DARWIN_USER_TEMP_DIR` reads (sd:7557 lane review).
+        named = os.confstr(os.confstr_names.get("CS_DARWIN_USER_TEMP_DIR", 65537))
     except (ValueError, OSError):
         return None
     return os.path.normpath(named) if named and not within(named) else None
