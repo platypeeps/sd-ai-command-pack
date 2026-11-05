@@ -40,6 +40,9 @@ SD_SECONDS = 5.0
 FLEET = ("fleet_owners", "copilot_review", "hub_name", "status_companions",
          "notion_private_folder", "notion_team_folder", "notion_experiments", "notion_experiment_tasks")
 
+#: Plain names for the deep review's settings, where the key's last word is not one.
+DEEP_NAMES = {"bound_minutes": "time limit", "agents": "most helper agents at once"}
+
 #: A pattern that is a list of words, which the page offers as a select.
 CHOICES = re.compile(r"[a-z]+(\|[a-z]+)+")
 
@@ -125,7 +128,7 @@ def _scalars() -> dict:
     from .realm_sweep import SETTINGS as SWEEP
 
     return {**{key: (text, None) for key, text in SWEEP.items()}, **{key: (text, PATTERNS[key]) for key, text in REVIEW.items()},
-            **{key: (f"The Deep review's {key.rsplit('.', 1)[1].replace('_', ' ')}: {wants}. Unset is {default}.", pattern)
+            **{key: (f"The deep review's {DEEP_NAMES.get(key.rsplit('.', 1)[1], key.rsplit('.', 1)[1])}: {wants}. Unset is {default}.", pattern)
                for key, (default, pattern, wants) in DEEP.items()}}
 
 

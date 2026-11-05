@@ -500,8 +500,8 @@ class TheFix(ReaderCase):
 R.task = cmd('work item.fix').consequence(C.get('item:{self.task}')); R.report = cmd('work item.fix').consequence(C.get('item:{self.report}'));
 R.on = cmd('work item.fix').when(C.get('item:{self.task}')) === true; // a listed work row is open, so Fix is always on
 shellRun(cmd('work item.fix'), C.get('item:{self.task}')); await flush();""")
-        self.assertIn(f"starts claude as a builder on #{self.task}", out["R"]["task"])
-        self.assertIn(f"starts claude on report #{self.report}: the sd-debug skill", out["R"]["report"])
+        self.assertIn(f"Opens a Claude session on #{self.task} in herdr", out["R"]["task"])
+        self.assertIn(f"Opens a Claude session on report #{self.report} in herdr. It finds the cause", out["R"]["report"])
         self.assertTrue(out["R"]["on"])
         self.assertEqual(out["confirms"], ["work item.fix"])
         self.assertEqual(out["posts"], [[f"/api/items/{self.task}/fix", {"revision": self.revisions[self.task]}, 64]])

@@ -89,7 +89,7 @@
         ${facts.map(([k, x]) => html`<dt>${k}</dt><dd>${x}</dd>`)}
         <dt>URL</dt><dd>${link(r.url) ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer">${r.url}</a>` : r.url_text ? html`${r.url_text} <span class="why">(not a link that parses)</span>` : '— none in its Sources'}</dd>
         <dt>Item</dt><dd><a href="${window.shell.itemHref(r.item)}">#${r.item}</a></dd></dl>
-      <p class="why">The date is the newest one market-watch wrote into the profile. Refresh watch starts claude on this one watch; the date moves when its run writes the profile. Activate, Pause and Unpause move the status.</p>`);
+      <p class="why">The date is the newest one market-watch wrote into the profile. Refresh watch opens a Claude session on this one watch; the date moves when its run writes the profile. Activate, Pause and Unpause move the status.</p>`);
     window.shell.commands.select(r.id);
   }
   function unselect() {
@@ -143,10 +143,10 @@
     undo: (o, v) => stage(o, from, v.revision) });
   const register = () => window.shell.commands.register(
     { ...window.commands.retry({ job, run: kick }), label: 'Refresh watches', primary: () => true,
-      does: 'Runs the market-watch job now: it refreshes the next three active watches in its queue and writes their profiles.' },
-    { id: 'watch.refresh', on: 'watch', label: 'Refresh watch', does: 'Starts claude in herdr to refresh this one watch; it writes the watch\'s profile.', key: 'r', icon: 'rotate-ccw', risk: 'confirm', executes: true,
+      does: 'Starts the market-watch job now; it refreshes the next three active watches.' },
+    { id: 'watch.refresh', on: 'watch', label: 'Refresh watch', does: 'Opens a Claude session that refreshes only this watch\'s profile.', key: 'r', icon: 'rotate-ccw', risk: 'confirm', executes: true,
       primary: o => o.fresh === 'stale' || o.fresh === 'never', when: o => o.stage === 'active' || `${o.stage}: market-watch refreshes active watches only`,
-      consequence: o => `This opens herdr workspace watch-${o.item} in the vault and starts claude on the market-watch routine's per-entity refresh for ${o.title} only. It writes the profile's sections; the session is yours to steer or close.`,
+      consequence: o => `This opens a Claude session (herdr workspace watch-${o.item}) in the vault that refreshes ${o.title} only. It rewrites the profile's sections; the session is yours to steer or close.`,
       cli: o => `claude ${shq(`Run the market-watch routine's per-entity refresh for ${o.title} only.`)}`, sends: o => `POST /api/actions/run {action: watch.refresh, item: ${o.item}}`,
       run: o => window.commands.runAction(o, 'watch.refresh', { item: o.item }) },
     { id: 'watch.open', on: 'watch', label: 'Open link', does: 'Opens the watch\'s first source in a new tab.', key: 'o', icon: 'arrow-up-right', risk: 'safe',
@@ -157,7 +157,7 @@
     { id: 'watch.add', on: 'watch list', label: 'Add watch', does: 'Files a candidate watch for a URL; Activate makes it active.', key: 'a', icon: 'plus', risk: 'safe', executes: true, primary: () => true,
       fields: () => [{ name: 'url', label: 'URL', required: true, placeholder: 'https://', help: 'An http or https link: a company site or a repository.' },
         { name: 'name', label: 'Name', placeholder: 'optional', help: 'Empty: the repository\'s name or the site\'s host.' }],
-      consequence: () => 'This files a candidate market row with sd store add: the URL is its first source. market-watch refreshes it once you make it active.',
+      consequence: () => 'This adds the company as a candidate watch, with the URL as its first source. It refreshes once you make it active.',
       cli: (o, v) => `sd store add sdw.market ${shq(v?.name || 'NAME')} --field content-type=company --section ${shq(`Sources=- ${v?.url || 'URL'}`)}`,
       sends: () => 'POST /api/actions/run {action: watch.add, url, name}',
       run: (o, v) => window.commands.runAction(o, 'watch.add', { url: v?.url || '', name: v?.name || '' }).then(said => reader.reread().then(() => said)) },
@@ -166,7 +166,7 @@
     move('watch.pause', 'Pause', 'p', 'active', 'paused', 'Pauses this watch; market-watch stops refreshing it.', 'market-watch skips it until it is unpaused'),
     move('watch.unpause', 'Unpause', 'p', 'paused', 'active', 'Makes this paused watch active again.', 'market-watch refreshes it from its next run'),
     // sd:6703: Remove retires (stage declined, which market-watch skips); Delete removes the row for good.
-    { id: 'watch.remove', on: 'watch', label: 'Remove', does: 'Declines the watch: market-watch stops refreshing it; its profile stays.', key: 'm', risk: 'confirm', executes: true,
+    { id: 'watch.remove', on: 'watch', label: 'Remove', does: 'Declines the watch; it stops refreshing. Its profile stays.', key: 'm', risk: 'confirm', executes: true,
       when: o => o.stage !== 'declined' || 'declined already', consequence: o => `This moves ${o.title} to declined. market-watch refreshes it no more; its profile and Sources stay, and Delete removes it for good.`,
       cli: o => `no sd verb: the dashboard moves #${o.item} to declined, as Tasks moves it`, sends: o => `POST /api/actions/run {action: watch.remove, item: ${o.item}}`,
       run: o => window.commands.runAction(o, 'watch.remove', { item: o.item }).then(said => reader.reread().then(() => said)) },
@@ -175,7 +175,7 @@
       cli: o => `no sd verb: the dashboard moves #${o.item} to candidate, as Tasks moves it`, sends: o => `POST /api/actions/run {action: watch.restore, item: ${o.item}}`,
       run: o => window.commands.runAction(o, 'watch.restore', { item: o.item }).then(said => reader.reread().then(() => said)) },
     { id: 'watch.delete', on: 'watch', label: 'Delete', does: 'Deletes the watch\'s row for good, with its profile and Sources.', key: 'x', risk: 'confirm', executes: true,
-      consequence: o => `This deletes ${o.title} (#${o.item}) for good: its profile, its Sources and its notes are lost. sd-db item remove files a removal record and backs the store up first. Remove keeps them.`,
+      consequence: o => `This deletes ${o.title} (#${o.item}) for good: its profile, its Sources and its notes are lost. A backup and a removal record are made first. Remove keeps them.`,
       cli: o => `sd-db item remove ${o.item} --who dashboard --reason ${shq(`Deleted on the dashboard: sdw.market ${o.title}`)}`, sends: o => `POST /api/actions/run {action: watch.delete, item: ${o.item}}`,
       run: o => window.commands.runAction(o, 'watch.delete', { item: o.item }).then(said => reader.reread().then(() => said)) });
   window.PAGE_LIST = { rows: () => $('rows').querySelectorAll('tr[data-id]'), current: () => SELECTED, select: key => show(key) };

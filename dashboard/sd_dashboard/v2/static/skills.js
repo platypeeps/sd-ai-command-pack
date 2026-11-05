@@ -187,7 +187,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
     return html`<figure class="weeks"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${s.name} use per week: ${s.weeks.map((n, i) => `week of ${weekOf(i)}, ${n}`).join('; ')}">
       <line class="base" x1="0" x2="${W}" y1="84.5" y2="84.5"/>
       ${s.weeks.map((v, i) => { const x = gap / 2 + i * (bw + gap); return html`<rect class="bar${i === 2 ? ' now' : ''}" x="${x}" y="${y(v)}" width="${bw}" height="${84 - y(v)}" rx="2"/><text class="v" x="${x + bw / 2}" y="${y(v) - 5}">${v}</text><text class="x" x="${x + bw / 2}" y="100">wk ${weekOf(i)}${i === 0 && late ? '*' : ''}</text>`; })}
-    </svg><figcaption>Uses per Monday-start week from <code>skill_use</code>, every surface it records.${late ? ` *Recording starts ${late}.` : ''}</figcaption>
+    </svg><figcaption>Uses per Monday-start week, from every tool that records skill use.${late ? ` *Recording starts ${late}.` : ''}</figcaption>
     <table class="sr"><caption>${s.name} uses per week</caption><tbody>${s.weeks.map((n, i) => html`<tr><th scope="row">week of ${weekOf(i)}</th><td>${n}</td></tr>`)}</tbody></table></figure>`;
   }
   const mark = () => tbody.querySelectorAll('tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', String(tr.dataset.id === selected)));
@@ -228,7 +228,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
         cli: "sqlite3 'file:sd.db?mode=ro' \"select * from skill_use where skill like '%/%'\"" }
       : { g: others() ? ['●', 'ok'] : ['▨', 'unknown'], kind: 'Use records · surfaces', title: others() ? 'Use is recorded from more than one surface' : 'Codex and opencode use is not read',
         facts: [['Rows by surface', by], ['Writer', 'sd skill scan reads ~/.codex/sessions']],
-        why: others() ? 'Each chart here counts every surface skill_use records.' : 'No row from another surface means the scan has not run, not that Codex used no skills. Until it runs, every usage chart here is claude-only.',
+        why: others() ? 'Charts count skill use from Claude and Codex.' : 'Codex use is not scanned yet, which does not mean Codex used no skills. Until Scan runs, charts show Claude only.',
         cli: 'sd skill scan' };
     const act = C.bar(id);
     put(details, html`<p class="kind"><span class="g-${note.g[1]}" aria-hidden="true">${note.g[0]}</span> ${note.kind}</p><h2>${note.title}</h2>
@@ -263,7 +263,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
   function showAdopt(prefill = '') {
     selected = 'adopt'; C.select(null); mark();
     put(details, html`<p class="kind">${I('download')} Adopt a skill</p><h2>Adopt from GitHub</h2>
-      <p class="desc">Evaluate runs <code>sd skill intake</code>: it fetches the skill at one commit, scores its risk, its overlap with your skills and its value, and shows the diff. Nothing installs until you approve the revision its report printed.</p>
+      <p class="desc">Evaluate fetches the skill at one commit, scores its risk, its overlap with your skills and its value, and shows the diff. Nothing installs until you approve the revision its report printed.</p>
       <form class="form" id="adopt-form" novalidate><label>Source<input id="ad-src" value="${prefill}" placeholder="https://github.com/owner/repo/tree/main/path/to/skill" autocomplete="off" aria-describedby="ad-err"></label>
         <div class="parsed" id="ad-parsed" aria-live="polite"></div>
         <div class="row"><label class="target">Install to<select id="ad-scope"><option value="pack">pack · contrib/</option><option value="user">user · ~/.claude/skills</option></select></label>
@@ -272,7 +272,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
       ${U.length ? html`<h3>Imported to ~/.claude/skills</h3><ul class="imported">${U.map(u => html`<li><span><b>${u.name}</b><span class="src">${u.url} at ${u.commit.slice(0, 12)}</span></span>${C.rowActions(u.id)}</li>`)}</ul>` : ''}
       <div id="intake-slot"></div>
       <h3>Same thing from the CLI</h3><div class="cli"><code id="ad-intake"></code><button class="icon-btn" type="button" id="ad-intake-copy" aria-label="Copy the intake line">${I('copy')}</button></div>
-      <h3>Or adopt with claude</h3><p class="why"><code>sd-skill-adopt</code> also takes owner/repo shorthand. Adopt asks first, then starts it in a new herdr workspace in the pack.</p>
+      <h3>Or adopt with Claude</h3><p class="why">Adopt also takes owner/repo shorthand. It asks first, then opens a Claude session that adopts the skill as a pull request you review.</p>
       <div class="row"><button class="btn quiet" type="button" id="ad-run">${I('play')} Adopt</button></div>
       <div class="cli"><code id="ad-cli"></code><button class="icon-btn" type="button" id="ad-copy" aria-label="Copy the adopt line">${I('copy')}</button></div>`);
     const src = details.querySelector('#ad-src'), out = details.querySelector('#ad-parsed'), cli = details.querySelector('#ad-cli'), copy = details.querySelector('#ad-copy');
@@ -439,7 +439,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
     return { objects: [...doc.repos.map(r => ({ id: `repo:${r.url}`, type: 'tracked repo', label: r.url, url: r.url, scope: r.scope })),
       ...doc.untracked.map(u => ({ id: `source:${u.url}`, type: 'untracked repo', label: u.url, url: u.url, scope: scopeOf(u.skills) }))],
       state: n || doc.untracked.length ? null : { kind: 'empty', title: 'No tracked repository',
-        text: doc.seeded ? 'No installed skill was adopted by sd skill intake, so nothing seeds the list. Track a repository adds one.'
+        text: doc.seeded ? 'No skill was installed from a tracked repo yet, so the list is empty. Track a repository adds one.'
           : 'The list is empty. Track a repository adds one.', source: '/api/skills/intake/repos' } };
   }
   function drawRepos() {
@@ -652,21 +652,21 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
   // workspace with the text typed in, as Fix does; the session is the operator's. The repo list is read once, at start.
   let CHECKOUTS = [];
   window.shell.repos?.().then(list => { CHECKOUTS = list; }, () => {});
-  const RUN = { id: 'skill.run', on: 'skill', label: 'Run', does: 'Starts claude with this skill in herdr, in the repo you pick.', key: 'r', icon: 'play', risk: 'confirm', executes: true,
+  const RUN = { id: 'skill.run', on: 'skill', label: 'Run', does: 'Opens a Claude session in the repo you pick, with this skill started.', key: 'r', icon: 'play', risk: 'confirm', executes: true,
     when: o => sk(o).status !== 'contrib' || 'not installed · try it first',
     fields: () => [{ name: 'repo', label: 'Repo', required: true, options: CHECKOUTS.map(r => ({ value: r.path, label: r.name })), help: CHECKOUTS.length ? '' : 'The repo list was not read; Reload retries it.' }],
-    consequence: o => `This opens herdr workspace skill-${o.id} and starts claude in the repo's checkout with /${o.id} typed in. The session is yours to steer or close.`,
+    consequence: o => `This opens a Claude session (herdr workspace skill-${o.id}) in the repo you picked, with /${o.id} typed in. The session is yours to steer or close.`,
     cli: (o, v) => `cd ${shq(v.repo || 'REPO')} && claude ${shq('/' + o.id)}`, sends: o => `POST /api/actions/run {action: skill.run, skill: ${o.id}, repo}`,
     run: (o, v) => window.commands.runAction(o, 'skill.run', { skill: o.id, repo: v?.repo || '' }) };
-  const ADOPT = { id: 'skill.adopt', on: 'adopt form', label: 'Adopt', does: 'Starts claude with sd-skill-adopt in a new herdr workspace in the pack.', risk: 'confirm', executes: true,
-    consequence: o => `This opens herdr workspace skill-adopt and starts claude in the pack checkout with /sd-skill-adopt ${o.source} typed in. It lands as a pull request you review.`,
+  const ADOPT = { id: 'skill.adopt', on: 'adopt form', label: 'Adopt', does: 'Opens a Claude session that adopts this skill as a pull request you review.', risk: 'confirm', executes: true,
+    consequence: o => `This opens a Claude session (herdr workspace skill-adopt) in the pack that adopts ${o.source}. It ends as a pull request you review.`,
     cli: o => `claude ${shq(`/sd-skill-adopt ${o.source}`)}`, sends: o => `POST /api/actions/run {action: skill.adopt, source: ${o.source}}`,
     run: o => window.commands.runAction({ ...o, id: 'adopt' }, 'skill.adopt', { source: o.source }) };
   function registerCommands() {
     C.register(
       { id: 'skill.try', on: 'skill', label: 'Try', does: 'Starts a 30-day trial at the next install; it cannot end early.', key: 't', icon: 'flask-conical', risk: 'confirm', bulk: true, primary: o => sk(o).status === 'contrib',
         when: o => sk(o).status !== 'contrib' ? `already installed · ${sk(o).status}` : asked(o, 'trial queued'),
-        consequence: o => `This starts a 30-day trial of ${o.id}; it installs at the next sd install. No verb ends a trial early.`,
+        consequence: o => `This starts a 30-day trial of ${o.id} at the next install. The trial cannot end early.`,
         cli: o => `sd skill try ${shq(o.id)}`, run: o => write(o, 'try', 'trial queued', () => `Trial of ${o.id} starts at the next install`) },
       { id: 'skill.review', on: 'skill', label: 'Review', does: 'Files an item in Tasks for an independent review of this skill.', key: 'v', risk: 'safe', askFirst: true, bulk: true, when: o => asked(o, 'review filed'),
         consequence: o => `This files an item in Tasks for a review of ${o.id} by a reviewer independent of its latest author.`,
@@ -677,22 +677,22 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
         when: o => sk(o).status === 'path' ? asked(o, 'demotion filed') : 'not on a path',
         consequence: o => `This files a task in Tasks to move ${o.id} from skills/ to contrib/ and off every path, with one pull request. Close the task there to drop it.`,
         cli: o => `sd skill demote ${shq(o.id)}`, run: o => write(o, 'demote', 'demotion filed', out => `Removal of ${o.id} from paths filed${itemOf(out)}`) },
-      { id: 'skill.reimport', on: 'skill', label: 'Re-import', does: 'Reads the skill\'s source again and shows the intake report.', key: 'i', risk: 'safe', when: o => !!sk(o).imported || 'not installed by sd skill intake',
+      { id: 'skill.reimport', on: 'skill', label: 'Re-import', does: 'Reads the skill\'s source again and shows the intake report.', key: 'i', risk: 'safe', when: o => !!sk(o).imported || 'not installed through Evaluate',
         cli: o => `sd skill intake ${shq(o.id)}`, run: o => { select(o.id, true); return evaluate(o.id, { source: o.id }); } },
       { id: 'skill.reimport.user', on: 'user skill', label: 'Re-import', does: 'Reads this user skill\'s source and shows the intake report.', key: 'i', icon: 'download', risk: 'safe', primary: () => true,
         cli: o => `sd skill intake ${shq(o.name)} --scope user`, run: o => { showAdopt(); return evaluate('adopt', { source: o.name, scope: 'user' }); } },
-      { id: 'skill.rollback', on: 'skill', label: 'Rollback', does: 'Shows the swap back to the copy the last install replaced.', key: 'b', risk: 'safe', when: o => !!sk(o).imported || 'not installed by sd skill intake',
+      { id: 'skill.rollback', on: 'skill', label: 'Rollback', does: 'Shows the swap back to the copy the last install replaced.', key: 'b', risk: 'safe', when: o => !!sk(o).imported || 'not installed through Evaluate',
         cli: o => `sd skill intake ${shq(o.id)} --rollback`, run: o => { select(o.id, true); return evaluate(o.id, { source: o.id, rollback: true }); } },
       { id: 'skill.rollback.user', on: 'user skill', label: 'Rollback', does: 'Shows the swap back to the copy this user skill\'s last install replaced.', key: 'b', risk: 'safe',
         cli: o => `sd skill intake ${shq(o.name)} --rollback --scope user`, run: o => { showAdopt(); return evaluate('adopt', { source: o.name, scope: 'user', rollback: true }); } },
       RUN,
-      { id: 'skill.schedule', on: 'skill', label: 'Schedule', does: 'Says why not: a scheduled job is a launchd agent, and sd adds none.', key: 's', risk: 'safe', executes: false, when: o => sk(o).status !== 'contrib' || 'not installed · try it first',
-        cli: () => 'no sd verb: a job is a launchd agent', run: () => 'No sd verb adds a job: a job is a launchd agent' },
+      { id: 'skill.schedule', on: 'skill', label: 'Schedule', does: 'Says why a skill cannot be scheduled here.', key: 's', risk: 'safe', executes: false, when: o => sk(o).status !== 'contrib' || 'not installed · try it first',
+        cli: () => 'no sd verb: a job is a launchd agent', run: () => 'Skills cannot be scheduled here: the dashboard adds no scheduled jobs' },
       // build: applying review notes lives on the review item's page, where the notes are.
-      { id: 'skill.apply', on: 'skill', label: 'Apply', does: 'Applies review notes to the skill; run it from the review item.', key: 'a', risk: 'confirm', when: () => 'apply review notes from the review item',
+      { id: 'skill.apply', on: 'skill', label: 'Apply', does: 'Applies a review\'s notes to this skill; use it on the review task.', key: 'a', risk: 'confirm', when: () => 'apply review notes from the review task, where the notes are',
         cli: () => 'sd skill apply ITEM NOTE…' },
       // sd:5886: Scan runs `sd skill scan` on the server and shows its report in Details; Read again shows the new counts.
-      { id: 'skill.scan', on: 'use surfaces', label: 'Scan', does: 'Reads codex sessions into skill use records, then shows the report in Details.', key: 's', icon: 'search', risk: 'safe', executes: true, primary: () => true,
+      { id: 'skill.scan', on: 'use surfaces', label: 'Scan', does: 'Counts skill use in Codex sessions, then shows the report in Details.', key: 's', icon: 'search', risk: 'safe', executes: true, primary: () => true,
         cli: () => 'sd skill scan', sends: () => 'POST /api/actions/run {action: skill.scan}', run: o => window.commands.runAction(o, 'skill.scan') },
       ...REPO_COMMANDS,
     );

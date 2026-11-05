@@ -434,12 +434,14 @@ window.shell.view.current = () => 'tasks'; read(); await flush(); R.tasks = ELS.
         self.assertNotEqual(out["R"]["tasks"], "<h2>A brief</h2>")
 
     def test_every_lamp_says_what_it_measures_and_its_source_on_hover_and_focus(self):
-        # sd:5287: the shell's tip (data-tip) on each lamp: what it measures, then its source.
+        # sd:5287: the shell's tip (data-tip) on each lamp: what it measures, then its source. Pack sd:7536: the source in
+        # plain words, with no file name, script or command line.
         out = self.run_page("R.lamps = ELS.annunciator.html;")
         tips = dict(re.findall(r'data-cell="(\w+)"[^>]*data-tip="([^"]+)"', out["R"]["lamps"]))
         self.assertEqual(sorted(tips), ["alarms", "aquifer", "mission", "pumps", "tank", "tasks", "water"])
-        self.assertIn("Source: alarm-events.csv", tips["alarms"])
-        self.assertIn("CLI: python3 tools/source-ages.py", tips["mission"])
+        self.assertIn("From Mission&#39;s alarm export.", tips["alarms"])
+        self.assertEqual(tips["mission"], "How old the newest Mission data is.")
+        self.assertEqual([k for k, tip in tips.items() if re.search(r"\.csv|\.py|CLI:", tip)], [])
         self.assertNotIn('id="refresh"', out["R"]["lamps"], "sd:6697: Read again is the one re-read")
 
     def test_each_cell_is_a_reading_or_unknown_with_its_reason(self):
@@ -717,7 +719,7 @@ shellRun(cmd('item.email'), OBJ.get('{self.late}')); await flush();""", doc)
     def test_a_missing_config_is_the_empty_state_and_no_cell_is_lit(self):
         out = self.run_page("R.lamps = ELS.annunciator.html; R.map = ELS.map.html;", self.bare("/work/other"))
         self.assertEqual(out["states"][-1]["kind"], "empty")
-        self.assertIn("Register the HOA checkout", out["states"][-1]["text"])
+        self.assertIn("No HOA folder is registered. Add the repo whose folder is named hoa", out["states"][-1]["text"])
         self.assertNotRegex(out["R"]["lamps"], r'data-state="(ok|caution|warning)"')
         self.assertIn("Not read.", out["R"]["map"])
         self.assertEqual(out["attention"][-1], {"state": "ok", "n": 0, "what": "HOA water system"})

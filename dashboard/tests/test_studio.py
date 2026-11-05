@@ -799,10 +799,10 @@ class TheServer(BrowserSession):
                                        "take the key twin (a/twin, b-twin): neither is served. No repository was read, so this is "
                                        "not a sign that no project exists.")
         self.assertIn("The scan named a problem, so nothing is selected.", out["R"]["details"])
-        self.assertNotIn("No project.json is under the repositories", json.dumps(out["states"]) + out["R"]["details"])
+        self.assertNotIn("No studio project found yet", json.dumps(out["states"]) + out["R"]["details"])
         out = self.run_page({**doc, "problems": []}, "R.details = ELS.details.html;")
         self.assertEqual(out["states"][-1]["kind"], "empty")
-        self.assertIn("No project.json is under the repositories yet.", out["R"]["details"])
+        self.assertIn("No studio project found yet: a project is a repo folder with a project.json file.", out["R"]["details"])
 
     def test_a_scan_that_read_repositories_and_found_no_project_says_how_many_it_read(self):
         """sd:7392: a problem beside repositories that were read is not 'No project was read': the banner counts them."""

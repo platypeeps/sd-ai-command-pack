@@ -12,7 +12,7 @@
     const places = realms.filter(r => r.place);
     window.PAGE_STATE = places.length
       ? { kind: 'empty', title: 'Pick a place', text: html`${places.map((r, i) => html`${i ? ' · ' : ''}<a href="/places?realm=${r.id}">${r.label}</a>`)}` }
-      : { kind: 'empty', title: 'No realm place', text: 'A realm is a place when dashboard.report_families has a family with its id: add family|<id>|<label>|<icon>|<job>,... on Settings.' };
+      : { kind: 'empty', title: 'No realm place', text: 'This realm has no page yet. Add a report family with its id on Settings: family|<id>|<label>|<icon>|<job>,...' };
     return;
   }
   const realm = realms.find(r => r.id === id);

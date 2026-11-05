@@ -136,10 +136,6 @@ def declarations(text):
     return out
 
 
-# The pages whose commands do not say yet what they do: other branches own these scripts now (sd:4963). Each leaves this
-# list when its texts land; once it is empty, every page's commands are held to the rule. Tasks' commands moved to
-# task-details.js (sd:5635).
-NOT_YET = {"hoa.js", "task-details.js"}
 # `does: '…'`, or `does: o => …` for a text that differs per row: each text a person reads is about 12 words at most.
 DOES = re.compile(r"\bdoes:\s*")
 TEXT = re.compile(r"'((?:[^'\\]|\\.)*)'|`([^`]*)`")
@@ -151,17 +147,16 @@ def block(name):
     return re.search(rf"  function {name}\(.*?\n  \}}\n", SHELL, re.S).group(0)
 
 
+def block_tip():
+    return re.search(r"  const tipOf = \(c, o\) => \{\n.*?\n  \};\n", SHELL, re.S).group(0)
+
+
 class EveryCommandSaysWhatItDoes(unittest.TestCase):
-    def test_every_command_on_a_converted_page_has_does(self):
-        missing = [f"{name}: {found}" for name, text in SCRIPTS.items() if name not in NOT_YET
+    def test_every_command_has_does(self):
+        # Pack sd:7536: HOA and Tasks were the last pages without one; the button's tip is its does alone.
+        missing = [f"{name}: {found}" for name, text in SCRIPTS.items()
                    for found, body in declarations(text) if "does:" not in body]
         self.assertEqual(missing, [], "give each command a does: one sentence of what pressing it does")
-
-    def test_the_not_yet_list_names_only_pages_that_still_lack_one(self):
-        for name in sorted(NOT_YET):
-            with self.subTest(page=name):
-                self.assertTrue(any("does:" not in body for _, body in declarations(SCRIPTS[name])),
-                                f"{name} says what every command does: take it off NOT_YET")
 
     def test_the_scan_finds_the_shared_and_template_declarations(self):
         found = {i for text in SCRIPTS.values() for i, _ in declarations(text)}
@@ -190,7 +185,7 @@ class EveryCommandSaysWhatItDoes(unittest.TestCase):
         self.assertIn('data-tip="${tipOf(c, o)}"', bar)
         self.assertIn("return html`<div class=\"actions\">${on.map(button)}</div>", bar)
         self.assertIn("const doesOf = (c, o) => (typeof c.does === 'function' ? c.does(o) : c.does) || '';", SHELL)
-        self.assertIn("const s = shownCli(c, o), d = doesOf(c, o)", SHELL)
+        self.assertIn("const d = doesOf(c, o)", block_tip())
         self.assertIn("document.addEventListener('focusin', e => { const b = e.target.closest?.('.help, [data-tip]');", SHELL)
 
     def test_a_command_a_field_covers_stays_off_the_act_bar_but_not_off_the_menu(self):

@@ -91,8 +91,8 @@
     // name why a move is off, in the reference's words where it had them.
     function legal(t, to) {
       if (t.status === to) return { ok: false, reason: 'Already here.' };
-      if (t.assignment === 'running') return { ok: false, reason: 'A runner assignment is running. Status is locked until it ends.' };
-      if (t.assignment === 'queued') return { ok: false, reason: 'A runner assignment is queued. Status is locked until it ends.' };
+      if (t.assignment === 'running') return { ok: false, reason: 'An agent is working on this task. Status is locked until it ends.' };
+      if (t.assignment === 'queued') return { ok: false, reason: 'An agent run is queued for this task. Status is locked until it ends.' };
       if (t.kind === 'work' && to === 'done') return { ok: false, reason: 'Work items close through verified completion (sd work), not a status write.' };
       if (!(t.allowed || []).includes(to)) return { ok: false, reason: t.allowed?.length ? `sd task status refuses ${slabel(to)} for this ${t.kind} item.` : `A ${t.kind} item takes no status write here; it has its own workflow.` };
       return { ok: true };
@@ -281,8 +281,9 @@
     }
     // note.resolve: one declaration, copied on every page that lists followups (Tasks, Today; commands.md § Shared declarations).
     const NOTE_RESOLVE = done => ({ id: 'note.resolve', on: 'note', label: 'Resolve', key: 'v', risk: 'confirm', icon: 'check', primary: o => o.kind === 'followup' && !o.resolved,
+      does: 'Closes this followup; nothing reopens it.',
       when: o => o.kind !== 'followup' ? `a ${o.kind} note has nothing to resolve` : o.resolved ? `resolved ${o.resolved.slice(0, 10)}` : true,
-      cli: o => `sd note resolve ${o.note}`, consequence: () => 'Closes the followup. sd note has resolve and list only, so no verb reopens it.',
+      cli: o => `sd note resolve ${o.note}`, consequence: () => 'Closes the followup. Nothing reopens it.',
       run: o => done(o) });
     const rowOr = (o, f) => { const t = T(o); return t ? f(t) : 'no CLI: the task is no longer listed'; };
     const coarse = matchMedia('(pointer: coarse)');
@@ -301,6 +302,7 @@
     const STATUS_CMD = Object.fromEntries(STATUSES.map(([s, name], i) => [s, {
       id: `item.status.${s}`, on: 'item', label: `Status → ${name}`, key: String(i + 1), risk: 'undo', bulk: true, icon: STATUS_ICON[s], bar: false, menu: false,
       primary: o => !draftFirst(T(o)) && nextIs(o, s) && !(s === 'done' && repeats(T(o))),
+      does: `Moves the task to ${name}.`,
       when: o => { const t = T(o); return t ? moveOn(s, t) : 'the task is no longer listed'; },
       cli: o => rowOr(o, t => cliMove(t, s)),
       run: o => { const t = must(o); let from = t.status;
@@ -316,6 +318,7 @@
     const completeOn = t => { if (!repeats(t)) return 'the task does not repeat; Status → Done completes it'; const L = legal(t, 'done'); return L.ok || L.reason; };
     const COMPLETE = { id: 'item.complete', on: 'item', label: 'Done → next occurrence', key: '5', risk: 'confirm', executes: true, icon: 'calendar-clock', bar: false,
       primary: o => !draftFirst(T(o)) && nextIs(o, 'done') && repeats(T(o)),
+      does: 'Completes this repeating task and opens its next occurrence.',
       when: o => { const t = T(o); return t ? completeOn(t) : 'the task is no longer listed'; },
       cli: o => rowOr(o, t => cliMove(t, 'done')),
       // build: next_due is workflow.next_occurrence_due, the date the completion computes. null is its "none": the
@@ -350,12 +353,14 @@
       ...Object.values(STATUS_CMD), COMPLETE,
       // Edit sets priority and due date in one dialog. Its save carries the Undo, so the shell's own feedback stays safe.
       { id: 'item.edit', on: 'item', label: 'Edit', key: 'e', risk: 'safe', icon: 'pen-line', bar: false,
+        does: 'Opens a form to change the priority and due date.',
         when: o => { const t = T(o); return !t ? 'the task is no longer listed' : EDITABLE(t) || noEdit(t); },
         cli: o => rowOr(o, t => `sd task edit ${t.id} --priority ${t.p || 'N'} ${t.due ? '--due ' + t.due : '--due YYYY-MM-DD'}`),
         run: o => { askEdit(T(o)); return `Editing ${label(T(o))}`; } },
       // Move to: the status moves without drag (touch, or anyone). One form lists every column; a refused one is off with its reason.
       { id: 'item.move', on: 'item', label: 'Move to', key: 'm', risk: 'safe', icon: 'kanban', bar: false,
         primary: () => view() === 'board' && coarse.matches,
+        does: 'Opens the list of statuses to move the task to.',
         when: o => { const t = T(o); if (!t) return 'the task is no longer listed'; const L = STATUSES.map(([s]) => legal(t, s)); return L.some(x => x.ok) || L.find(x => x.reason !== 'Already here.').reason; },
         cli: o => rowOr(o, t => `sd task status ${t.id} <status>`),
         run: o => { askMove(T(o)); return null; } },
@@ -363,6 +368,7 @@
       // already at the priority is refused as its write leaves, not by `when`: the bar offers only what every picked row is
       // on for, so a pick that mixes priorities would otherwise offer none.
       ...[1, 2, 3, 4].map(n => ({ id: `item.p${n}`, on: 'item', label: `Edit → P${n}`, risk: 'undo', bulk: true, icon: 'flag-triangle-right', bar: false, menu: false,
+        does: `Sets the priority to P${n}.`,
         when: o => { const t = T(o); return !t ? 'the task is no longer listed' : EDITABLE(t) || noEdit(t); },
         cli: o => rowOr(o, t => `sd task edit ${t.id} --priority ${n}`),
         run: o => { const t = must(o), was = t.p; return editRun(t, { p: n }, () => `${label(t)} P${was || '–'} → P${n}`, { check: r => r.p !== n || `it is already P${n}` }); },
@@ -370,18 +376,20 @@
       // Close is sd task cancel (sd:3012): done, with a cancelled receipt and the reason, through progress.task_guard. A bulk
       // close asks once for one reason and runs every picked row with its own revision. No Undo: no sd verb takes it back.
       { id: 'item.close', on: 'item', label: 'Close', risk: 'confirm', executes: true, bulk: true, icon: 'ban',
-        when: o => { const t = T(o); return !t ? 'the task is no longer listed' : !CLOSES.includes(t.kind) ? `sd task cancel closes a task or followup; this is a ${t.kind} item`
+        does: 'Closes the task as done, with your reason; it cannot be reopened.',
+        when: o => { const t = T(o); return !t ? 'the task is no longer listed' : !CLOSES.includes(t.kind) ? `Close works on a task or followup; this is a ${t.kind} item`
           : t.status === 'done' ? 'it is done' : repeats(t) ? 'a recurring task cannot be cancelled; clear its recurrence first, or complete it'
-          : t.assignment === 'running' || t.assignment === 'queued' ? `a runner assignment is ${t.assignment}` : true; },
+          : t.assignment === 'running' || t.assignment === 'queued' ? `an agent run is ${t.assignment} for it` : true; },
         fields: () => [{ name: 'reason', label: 'Reason', required: true, placeholder: 'why nobody will do it', help: 'Recorded on each closed task. A close without a reason is refused.' }],
         cli: (o, v = {}) => rowOr(o, t => `sd task cancel ${t.id} --reason ${v.reason ? window.shell.shq(v.reason) : "'<why>'"}`),
         sends: o => `POST /api/items/${T(o).id}/cancel-task {reason}`,
-        consequence: () => 'Each task closes as done, with a cancelled receipt and your reason. No sd verb takes it back.',
+        consequence: () => 'Each task closes as done, marked cancelled, with your reason. This cannot be undone.',
         run: (o, v) => { const t = must(o);
           return landing(write(t.key, x => `/api/items/${x.id}/cancel-task`, { reason: v.reason }), () => `${label(t)} closed · sd task cancel ${t.id} --reason ${window.shell.shq(v.reason)}`); } },
       // Park (sd:5906) sets parked_at to now through the item edit route, by hand, as the nightly prune does; its Undo
       // unparks. The route takes a parked_at only from a pack with sd task edit --park (pack sd:5905).
       { id: 'item.park', on: 'item', label: 'Park', risk: 'undo', executes: true, bulk: true, icon: 'archive',
+        does: 'Sets the task aside; it leaves the open lists until you unpark it.',
         when: o => { const t = T(o); return !t ? 'the task is no longer listed' : t.parked ? 'it is already parked' : t.status === 'done' ? 'it is done' : EDITABLE(t) || noEdit(t); },
         cli: o => rowOr(o, t => `sd task edit ${t.id} --park`),
         sends: o => `POST /api/items/${T(o).id} {parked_at: <now>}`,
@@ -392,12 +400,14 @@
       // Unpark (sd:3012) clears parked_at through the item edit route, as the item page's Unpark does (sd:3007). No Undo:
       // Park is a separate command, so an unpark is taken back by Park.
       { id: 'item.unpark', on: 'item', label: 'Unpark', risk: 'safe', executes: true, bulk: true, icon: 'archive-restore',
+        does: 'Brings a parked task back into the open lists.',
         when: o => { const t = T(o); return !t ? 'the task is no longer listed' : !t.parked ? 'it is not parked' : true; },
         cli: o => rowOr(o, t => `sd task edit ${t.id} --unpark`),
         sends: o => `POST /api/items/${T(o).id} {parked_at: null}`,
         run: o => { const t = must(o);
           return landing(write(t.key, x => `/api/items/${x.id}`, { parked_at: null }), () => `${label(t)} unparked · sd task edit ${t.id} --unpark`); } },
       { id: 'item.note', on: 'item', label: 'Note', key: 'n', risk: 'safe', icon: 'notebook-pen',
+        does: 'Opens a form to add a note to this task.',
         when: o => !!T(o) || 'the task is no longer listed',
         cli: o => rowOr(o, t => `sd task note ${t.id} "…" --kind comment`),
         run: o => { window.shell.capture(o); const r = document.querySelector('dialog.capture input[value="note"]'); if (r && !r.disabled) { r.checked = true; r.form.dispatchEvent(new Event('input')); } return 'Write the note'; } },
@@ -419,6 +429,7 @@
       // (HOA's followups) take it as their first action.
       { id: 'item.email', on: 'item', label: 'Draft email', key: 'd', risk: 'safe', askFirst: true, executes: true, icon: 'mail',
         primary: o => draftFirst(T(o)),
+        does: 'Has Claude draft an email about this task in Gmail; sends nothing.',
         when: o => { const t = T(o); return !t ? 'the task is no longer listed' : CLOSES.includes(t.kind) || `Draft email writes about a task or followup; this is a ${t.kind} item`; },
         cli: () => 'no sd verb: the dashboard runs claude -p and saves the draft through workspace-mcp',
         sends: o => `POST /api/items/${T(o).id}/draft-email {revision}`,
@@ -471,7 +482,8 @@
         sends: o => `POST /api/issue-runs/${o.run.id}/discard`,
         run: o => window.shell.post(`/api/issue-runs/${encodeURIComponent(o.run.id)}/discard`, {}).then(run => { followIssue(run); return `Draft discarded · run ${run.id}; ${o.run.state === 'unknown' ? 'whether it filed is not known' : 'nothing was filed'}`; }) },
       { id: 'item.delete', on: 'item', label: 'Delete', risk: 'confirm', icon: 'x',
-        when: () => 'no CLI verb: sd task has no delete; move it to Done to keep a record',
+        does: 'Deletes the task with its notes and history.',
+        when: () => 'a task cannot be deleted; move it to Done to keep a record',
         cli: o => rowOr(o, t => `sd task delete ${t.id}`),
         consequence: () => 'The task, its notes and its history go. Its assignments stay in the runner log. This cannot be undone; to keep a record, move it to Done instead.' },
       // Artifact and cancel are sd work verbs (review item 17). build (sd:2200, the design's sd:2199): both post to the routes v1's
@@ -479,7 +491,8 @@
       // reason, is a confirm field; OK stays off until it is typed. Availability is progress.work_controls, read with the Details.
       // Neither has Undo: relinking back is another relink, and no sd verb reopens a cancelled item.
       { id: 'work.relink', on: 'item', label: 'Relink', key: 'l', risk: 'safe', executes: true, icon: 'link-2',
-        when: o => { const t = T(o), d = detOf(t); return !t ? 'the task is no longer listed' : t.kind !== 'work' ? `sd work relink acts on a work item; this is a ${t.kind}`
+        does: 'Points the work item at its file again after the file moved.',
+        when: o => { const t = T(o), d = detOf(t); return !t ? 'the task is no longer listed' : t.kind !== 'work' ? `Relink works on a work item; this is a ${t.kind}`
           : !d ? 'the artifact was not read for this row' : !d.work.relink ? d.work.reason : d.item.path ? true : 'the item has no artifact to relink'; },
         fields: o => { const d = detOf(T(o)); return [{ name: 'path', label: 'Moved path', required: true, placeholder: d.item.path,
           help: `Relative to ${d.item.repo}. The item keeps its history; only the artifact path changes.` }]; },
@@ -488,12 +501,13 @@
         run: (o, v) => { const t = must(o);
           return landing(write(t.key, x => `/api/items/${x.id}/relink`, { path: v.path }), () => `${label(t)} relinked → ${v.path} · sd work relink ${t.id} ${window.shell.shq(v.path)}`); } },
       { id: 'work.cancel', on: 'item', label: 'Cancel', key: 'w', risk: 'confirm', executes: true, icon: 'ban',
-        when: o => { const t = T(o), d = detOf(t); return !t ? 'the task is no longer listed' : t.kind !== 'work' ? `sd work cancel acts on a work item; this is a ${t.kind}`
+        does: 'Stops the work item as cancelled, with your reason.',
+        when: o => { const t = T(o), d = detOf(t); return !t ? 'the task is no longer listed' : t.kind !== 'work' ? `Cancel works on a work item; this is a ${t.kind}`
           : t.status === 'done' ? 'the work item is done' : !d ? 'its cancel availability was not read for this row' : d.work.cancel || d.work.reason; },
         fields: () => [{ name: 'reason', label: 'Reason', required: true, placeholder: 'why the work stops', help: 'Recorded with the cancellation. A cancel without a reason is refused.' }],
         cli: (o, v = {}) => rowOr(o, t => `sd work cancel ${t.id} --reason ${v.reason ? window.shell.shq(v.reason) : "'<why>'"}`),
         sends: o => `POST /api/items/${T(o).id}/cancel {reason}`,
-        consequence: () => 'Closes the work item as cancelled, with your reason. No sd verb takes it back.',
+        consequence: () => 'Closes the work item as cancelled, with your reason. This cannot be undone.',
         run: (o, v) => { const t = must(o);
           return landing(write(t.key, x => `/api/items/${x.id}/cancel`, { reason: v.reason }), () => `${label(t)} cancelled · sd work cancel ${t.id} --reason ${window.shell.shq(v.reason)}`); } },
       // A followup note closes with sd note resolve. sd note has resolve and list only, so nothing reopens it: confirm, no Undo.
@@ -504,6 +518,7 @@
       // build (sd:3041): cancel is sd assignments cancel, POST /api/assignments/<n>/cancel with the revision the Details read
       // (operations.assignment_state); the runner's cancel went with the runner. No verb reopens a cancelled row: confirm, no Undo.
       { id: 'asg.cancel', on: 'assignment', label: 'Cancel', key: 'x', risk: 'confirm',
+        does: 'Ends this agent run; the task keeps its status.',
         when: o => o.can.allowed || o.can.reason, cli: o => `sd assignments cancel ${o.n}`,
         consequence: o => `Ends assignment #${o.n} in ${o.repo} as cancelled. The item's status is unchanged.`,
         run: o => landing(cancelAsg(o), () => `Cancelled · #${o.n} · sd assignments cancel ${o.n}`) },
@@ -546,7 +561,7 @@
           <dt><label for="det-repo">Repo</label>${hint('Repo', 'The checkout this item belongs to; a work item keeps the one its folder is in.')}</dt><dd><select id="det-repo" class="fld"${t.kind === 'work' && !off ? html` disabled title="A work item belongs to the checkout its folder is in."` : dis}>${repoOptions(t, null)}</select></dd>
           <dt>Urgent${hint('Urgent', 'Set by the dashboard from the due date and the item\'s state, not by hand.')}</dt><dd>${urgent(t) ? 'yes' : 'no'} <span class="why">(derived)</span></dd>
           <dt><label for="det-q">Quadrant</label>${hint('Quadrant', 'Where urgency and importance place the item; a move sets its priority or due date.')}</dt><dd>${t.status === 'done' ? 'not placed' : html`<select id="det-q" class="fld"${dis}>${QUADS.map(q => html`<option value="${q[0]}"${q[0] === quadOf(t) ? html` selected` : ''}>${q[1]}</option>`)}</select>`}</dd>
-          ${t.assignment ? html`<dt>Assignment${hint('Assignment', 'The state of the runner assignment working on this item.')}</dt><dd>${t.assignment}</dd>` : ''}
+          ${t.assignment ? html`<dt>Assignment${hint('Assignment', 'Whether an agent is working on this task now.')}</dt><dd>${t.assignment}</dd>` : ''}
         </dl>
         ${off ? html`<p class="why" id="det-off">The fields are off: ${off}.</p>` : ''}
         <h3>Act</h3>${gone ? html`<p class="why">This task was not read again after the change, so no command runs on it. Reload reads it.</p>` : act}
@@ -654,9 +669,9 @@
       // build (sd:3467): the description edits in place, as the classic item page's Details textarea did; it saves on leaving.
       // edit_item takes a body for a task or a followup only.
       const desc = body === undefined || !['task', 'followup'].includes(t.kind) ? ''
-        : body === null ? html`<h3>Description</h3><p class="why">The stored description is not valid JSON, so the field is withheld and no save here can overwrite it. Repair it with <code>sd task edit ${t.id} --body</code>.</p>`
+        : body === null ? html`<h3>Description</h3><p class="why">The saved description is not valid JSON, so it is hidden and nothing here can overwrite it. Fix it from the terminal: <code>sd task edit ${t.id} --body</code>.</p>`
         : html`<h3><label for="det-body">Description</label></h3><textarea id="det-body" class="fld" rows="4"${dis}>${body}</textarea>`;
-      if (!d) return html`${desc}<h3>History, notes and assignments</h3><p class="why">${DET.failed[t.id] ? `Not read: ${DET.failed[t.id]}` : `Reading sd task show ${t.id} --json…`}</p>`;
+      if (!d) return html`${desc}<h3>History, notes and assignments</h3><p class="why">${DET.failed[t.id] ? `Not read: ${DET.failed[t.id]}` : 'Reading the history, notes and assignments…'}</p>`;
       const it = d.item;
       // The item's cost (sd:6031): each assignment's spent cost rows, `~` when any is an estimate (`bound`); no cap.
       const spent = x => ({ usd: x.assignments.reduce((n, a) => n + (a.usd || 0), 0), estimated: x.assignments.some(a => a.estimated) });
@@ -664,19 +679,19 @@
       const open = d.notes.filter(n => n.kind === 'followup' && !n.resolved).length;
       const docs = d.documents || [];
       return html`${desc}${baseOf(t, d)}
-        <h3>Documents ${src('Documents', `/api/tasks/${t.id} · the item's path and work folder, docs/work files naming sd:${t.id}, paths its notes name`)}</h3>
+        <h3>Documents ${src('Documents', `The files linked to this task: its path, its work folder, design files that name sd:${t.id}, and paths its notes name.`)}</h3>
         ${docs.length ? html`<ol class="rec">${docs.map(x => html`<li><span>${x.url ? html`<a class="ext" href="${x.url}" target="_blank" rel="noopener noreferrer">${x.path}</a>` : html`<code>${x.path}</code>`} <small>${x.why}</small></span></li>`)}</ol>` : html`<p class="why">No design or document names this item.</p>`}
         ${published(t, d.published || [])}
         ${experiment(t, d.experiment)}
-        <h3>Status history ${src('Status history', `sd task show ${t.id} --json · notes of kind status_change`)}</h3>
+        <h3>Status history ${src('Status history', 'Every status change, from the task\'s history.', `sd task show ${t.id} --json`)}</h3>
         ${d.history.length ? html`<ol class="rec">${d.history.map(n => html`<li><time class="rel" datetime="${n.at}"></time><span>${n.body}</span></li>`)}</ol>` : html`<p class="why">This item has never changed status.</p>`}
-        <h3>Notes <span class="n">${plural(d.notes.length, 'note')} · ${open} open ${plural.word(open, 'followup')}</span> ${src('Notes', `sd task show ${t.id} --json · every other note kind`)}</h3>
+        <h3>Notes <span class="n">${plural(d.notes.length, 'note')} · ${open} open ${plural.word(open, 'followup')}</span> ${src('Notes', 'Every note on this task but its status changes.', `sd task show ${t.id} --json`)}</h3>
         ${d.notes.length ? html`<ol class="rec">${d.notes.map(n => html`<li data-note="${String(n.id)}"><time class="rel" datetime="${n.at}"></time><span><b>${n.kind}</b>${n.kind === 'followup' ? (n.resolved ? ' · resolved' : ' · open') : ''} ${n.body}</span>${C.rowActions('note:' + n.id)}</li>`)}</ol>` : html`<p class="why">No notes on this item.</p>`}
-        <h3>Assignments${d.assignments.length ? html` <span class="n">${cost(spent(d))} spent</span>` : ''} ${src('Assignments', `sd assignments list --json · item ${t.id}; not in sd task show · cost: the run and bound cost rows of each assignment`)}</h3>
+        <h3>Assignments${d.assignments.length ? html` <span class="n">${cost(spent(d))} spent</span>` : ''} ${src('Assignments', 'Agent runs on this task, with what each cost; ~ marks an estimate.', 'sd assignments list --json')}</h3>
         ${d.assignments.length ? html`<ol class="rec">${d.assignments.map(a => html`<li><span class="mono">#${String(a.id)}</span><span>${a.role} · ${a.provider || 'no provider'} · <b>${a.status}</b>${a.usd ? ` · ${cost(a)}` : ''}${a.ended ? html` · ended <time class="rel" datetime="${a.ended.replace('+00:00', 'Z')}"></time>` : ''}${a.cancel.allowed ? '' : html`<br><small>sd assignments cancel: ${a.cancel.reason}</small>`}</span>${C.rowActions('asg:' + a.id)}</li>`)}</ol>` : html`<p class="why">No assignment has run on this item.</p>`}
-        <h3>Artifact ${src('Artifact', `sd task show ${t.id} --json · item.path`)}</h3>
+        <h3>Artifact ${src('Artifact', 'The file, repo and branch this task points to.', `sd task show ${t.id} --json`)}</h3>
         <dl><dt>Path</dt><dd>${it.path || 'none'}</dd><dt>Repo</dt><dd>${it.repo || 'none'}</dd>${it.branch ? html`<dt>Branch</dt><dd>${it.branch}</dd>` : ''}</dl>
-        <h3>Recurrence ${src('Recurrence', `sd task show ${t.id} --json · item.recurrence`)}</h3>
+        <h3>Recurrence ${src('Recurrence', 'How this task repeats, and when its next occurrence opens.', `sd task show ${t.id} --json`)}</h3>
         <dl><dt>Repeats</dt><dd>${it.recurrence || 'no'}</dd>${it.recurrence_anchor ? html`<dt>Anchor</dt><dd>${it.recurrence_anchor}</dd>` : ''}${it.recurrence && 'recurrence_lead' in it ? html`<dt>Lead</dt><dd>${plural(it.recurrence_lead ?? 0, 'day')}</dd>` : ''}${opens(t) ? html`<dt>Opens</dt><dd>${t.opensOn}</dd>` : ''}<dt>Revision</dt><dd>${d.revision.slice(0, 12)}…</dd></dl>
         ${external(d)}`;
     }
@@ -684,7 +699,7 @@
     // `href` only for an address the page may open, so any other shows as text. Nothing published shows no section.
     function published(t, list) {
       if (!list.length) return '';
-      return html`<h3>Published ${src('Published', `/api/tasks/${t.id} · fields.published, fields.writing.published_urls, publication claims`)}</h3>
+      return html`<h3>Published ${src('Published', 'Where this work was published, under each document\'s title.')}</h3>
         <ol class="rec">${list.map(p => html`<li><span><b>${p.title}</b> <small>${p.where}</small>${p.links.map(l => html`<br>${l.channel} ${l.href ? html`<a class="ext" href="${l.href}" target="_blank" rel="noopener noreferrer">${l.url}</a>` : html`<code>${l.url}</code>`}`)}</span></li>`)}</ol>`;
     }
     // sd:4639: the item's row in the team experiments database (pack sd:3982). The select and the row field post what
@@ -695,7 +710,7 @@
       const off = x.reason ? html` disabled aria-describedby="det-exp-off"` : live(t.key) ? '' : html` disabled`;
       const opt = (value, name) => html`<option value="${value}"${value === x.value ? html` selected` : ''}>${name}</option>`;
       const lost = x.value && x.value.startsWith('of:') && !x.choices.some(c => c.value === x.value);
-      return html`<h3><label for="det-exp">Experiments</label> ${src('Experiments', `sd task edit ${t.id} --experiment · fields.experiments; the row's link shows under Published once a drain records it`)}</h3>
+      return html`<h3><label for="det-exp">Experiments</label> ${src('Experiments', 'This task\'s row in the experiments database. Its link shows under Published once it is copied there.')}</h3>
         <select id="det-exp" class="fld"${off}>${x.value ? '' : html`<option value="" selected>not projected</option>`}${opt('yes', 'experiment')}${x.choices.map(c => opt(c.value, c.label))}${lost ? opt(x.value, `task of #${x.value.slice(3)}`) : ''}${x.value ? opt('off', 'off, keep the row') : ''}</select>
         ${x.value ? html`<dl class="fields"><dt><label for="det-exp-row">Row</label>${hint('Row', 'The page id or URL of this item\'s row in the experiments database.')}</dt><dd><input id="det-exp-row" class="fld" value="${x.row || ''}" placeholder="a page id or URL"${off}></dd></dl>` : ''}
         ${x.reason ? html`<p class="why" id="det-exp-off">${x.reason}.</p>` : ''}`;
@@ -705,7 +720,7 @@
     function baseOf(t, d) {
       const b = d.base; if (!b) return '';
       const off = b.reason || (!live(t.key) && 'this task was not read again after the change') || (!b.stages.length && 'no move leaves this stage');
-      return html`<h3>Base · ${b.kind} ${src('Base', `sd-db records render ${b.kind} · the kind's rules from sd plugin list --json`)}</h3>
+      return html`<h3>Base · ${b.kind} ${src('Base', `This record's stage and fields, as the ${b.kind} base defines them.`, `sd-db records render ${b.kind}`)}</h3>
         <dl class="fields"><dt><label for="det-stage">Stage</label>${hint('Stage', 'The row\'s stage in its base; a change moves the row.')}</dt><dd><select id="det-stage" class="fld"${off ? html` disabled aria-describedby="det-base-off"` : ''}><option value="${b.stage}" selected>${b.stage}</option>${b.stages.map(s => html`<option value="${s}">${s}</option>`)}</select></dd>
           ${b.declared.map(f => html`<dt>${f}${hint(f, `A field the ${b.kind} base declares, as the row holds it.`)}</dt><dd>${Array.isArray(b.fields[f]) ? b.fields[f].join(', ') : b.fields[f] ?? '—'}</dd>`)}
           <dt>Mirror${hint('Mirror', 'The section of the vault mirror page that shows this row.')}</dt><dd>${!b.mirror ? 'no vault named' : b.mirror.url ? html`<a href="${b.mirror.url}" target="_blank" rel="noopener">its section</a>` : html`<code>${b.mirror.path}</code>`}</dd></dl>
@@ -716,16 +731,17 @@
     function hint(name, text) {
       return html`<button class="help" type="button" aria-label="Help: ${name}" data-help="${text}">${ICON('circle-help')}</button>`;
     }
-    // Each Details section names its read in a help icon beside its heading; pressing the icon copies the command (sd:3444).
-    function src(name, s) {
-      const at = s.indexOf(' · '), cmd = at < 0 ? s : s.slice(0, at), why = at < 0 ? '' : s.slice(at + 3);
-      return html`<button class="help src" type="button" aria-label="Help: ${name}" data-help="${`<code>${cmd}</code>${why ? ` · ${why}` : ''}. Press to copy.`}" data-copy="${cmd}">${ICON('circle-help')}</button>`;
+    // Each Details section says what it shows in a help icon beside its heading (sd:3444). Pack sd:7536: plain words first;
+    // a section with a command that prints the same reading names it after them, and pressing the icon copies it.
+    function src(name, says, cmd = '') {
+      if (!cmd) return hint(name, says);
+      return html`<button class="help src" type="button" aria-label="Help: ${name}" data-help="${`${says} Press to copy the command: <code>${cmd}</code>`}" data-copy="${cmd}">${ICON('circle-help')}</button>`;
     }
     // build: v1's External context (screens.external_context), the shadow row and its collector's freshness, when the item
     // has a tracker reference. Local status is the item's own; the tracker's state is dated context beside it.
     function external(d) {
       const x = d.external; if (!x) return '';
-      return html`<h3>External context ${src('External context', `sd shadow · ${x.tracker} · progress.tracker_freshness`)}</h3>
+      return html`<h3>External context ${src('External context', 'What the tracker says about this task, and how fresh the last sync is.')}</h3>
         <dl><dt>Tracker</dt><dd>${x.tracker}</dd><dt>External state</dt><dd>${x.state || (x.last_seen ? 'unknown' : 'not in the local snapshot')}</dd>
           <dt>Reference</dt><dd>${x.url}</dd><dt>Last seen</dt><dd>${x.last_seen ? html`<time class="rel" datetime="${x.last_seen}"></time>` : 'never'}</dd>
           <dt>Sync health</dt><dd>${x.freshness.state}</dd><dt>Last sync</dt><dd>${x.freshness.last_success_at ? html`<time class="rel" datetime="${x.freshness.last_success_at}"></time>` : 'never'}</dd></dl>

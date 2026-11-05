@@ -134,9 +134,9 @@ CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},
     "copilot_review": {"pattern": "|".join(COPILOT_REVIEW_POLICIES),
-                       "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
-                                      "changes only, always on every reviewing tier, never on none; a repository's "
-                                      "review declaration's copilot_review overrides deep and always, and never wins over it."},
+                       "description": "When a merge asks GitHub for a Copilot review on its own. deep (the default): only "
+                                      "changes that get a deep review; always: every reviewed change; never: none. "
+                                      "A repo's review rules override deep and always; never wins over them."},
     "gate_slots": {"pattern": "[0-9]+",
                    "description": "How many gates (sd-check runs, sd gate run, the pack's make test) may run at once on this "
                                   "machine; 0 is no cap. Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it "
@@ -159,44 +159,44 @@ CORE_CONFIG = {
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
     "fleet_owners": {"pattern": r"[A-Za-z0-9](-?[A-Za-z0-9])*(,[A-Za-z0-9](-?[A-Za-z0-9])*)*",
-                     "description": "Comma-separated GitHub logins whose repositories `sd fleet stamp` treats as the "
-                                    "operator's own; any other owner's protection stands. Unset reads the deprecated "
-                                    "fleet.owners list, then platypeeps. It grants nothing."},
+                     "description": "Your GitHub logins, comma-separated: their repos count as yours when the fleet stamp "
+                                    "sets branch protection; any other owner's protection stands. Unset reads the "
+                                    "deprecated fleet.owners list, then platypeeps. It grants nothing."},
     "bulk_storage_root": {"pattern": r"[~/][^\x00]*",
                           "description": "The folder for large uncommitted data -- run outputs, logs, captures, "
                                          "scratch evidence -- as <root>/<repository>/; never build output or "
                                          "permission-dependent data. Unset is no bulk root. It grants nothing."},
     "hub_name": {"pattern": r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*",
-                 "description": "The hub's tailnet name, the MagicDNS name or the bare machine name. A machine "
-                                "with its own database serves it, runs its lanes and pushes hub-pin only while its "
-                                "tailnet name matches (`sd-db fence`). Unset is no fence. It grants nothing."},
+                 "description": "Which machine is the hub, by its tailnet or bare machine name. A machine with its "
+                                "own database serves it, runs merge lanes and moves the hub pin only while its name "
+                                "matches. Unset means no check. It grants nothing."},
     "jira_recent_days": {"pattern": "[1-9][0-9]{0,4}",
                          "description": "The days `sd-status` looks back for Jira rows: it lists the assigned or "
                                         "filed rows Jira updated inside them and counts the rest. Unset reads 30. "
                                         "It grants nothing."},
     "status_companions": {"pattern": r"[~/][^=;,\x00]*=[~/][^=;,\x00]*(,[~/][^=;,\x00]*)*(;[~/][^=;,\x00]*=[~/][^=;,\x00]*(,[~/][^=;,\x00]*)*)*",
-                          "description": "Repositories `sd-status` lists beside the one it runs in, as "
-                                         "<repo>=<other>[,<other>], one entry per repository, `;` between them; "
-                                         "each repository as `sd-db repo list` names it. Unset lists none. It "
+                          "description": "Repos the status report shows beside the one it runs in, as "
+                                         "<repo>=<other>[,<other>], one entry per repo, `;` between them; "
+                                         "each repo as `sd-db repo list` names it. Unset shows none. It "
                                          "grants nothing."},
     "privacy_patterns": {"pattern": r"[~/][^\x00]*",
                          "description": "The privacy-pattern file a pull request body is checked against, one "
                                         "extended regular expression per line. It grants nothing."},
     "notion_private_folder": {"pattern": NOTION_PAGE,
-                              "description": "The Notion page id (or page URL) of the private briefs folder a "
-                                             "notion= mirror goes to. Unset reads $SD_NOTION_PRIVATE_FOLDER while "
+                              "description": "The Notion page (id or URL) where private briefs publish, for "
+                                             "a notion= mirror. Unset reads $SD_NOTION_PRIVATE_FOLDER while "
                                              "no row exists. It grants nothing."},
     "notion_team_folder": {"pattern": NOTION_PAGE,
-                           "description": "The Notion page id (or page URL) of the team briefs folder a "
-                                          "notion=dict(team=True) mirror goes to. Unset reads $SD_NOTION_TEAM_FOLDER "
+                           "description": "The Notion page (id or URL) where team briefs publish, for a "
+                                          "notion=dict(team=True) mirror. Unset reads $SD_NOTION_TEAM_FOLDER "
                                           "while no row exists. It grants nothing."},
     "notion_experiments": {"pattern": NOTION_DATA_SOURCE,
-                           "description": "The data source id of the team experiments database `sd-research-kit "
-                                          "project` writes rows to. Unset reads $SD_NOTION_EXPERIMENTS while no row "
+                           "description": "The team's Notion experiments database (data source id) that research "
+                                          "projects add rows to. Unset reads $SD_NOTION_EXPERIMENTS while no row "
                                           "exists. It grants nothing."},
     "notion_experiment_tasks": {"pattern": NOTION_DATA_SOURCE,
-                                "description": "The data source id of the experiment tasks database `sd-research-kit "
-                                               "project` writes rows to. Unset reads $SD_NOTION_EXPERIMENT_TASKS while "
+                                "description": "The team's Notion experiment tasks database (data source id) that "
+                                               "research projects add rows to. Unset reads $SD_NOTION_EXPERIMENT_TASKS while "
                                                "no row exists. It grants nothing."},
 }
 

@@ -319,7 +319,7 @@ class TheDigest(TodayCase):
         self.assertEqual([(pr["item"], pr["repo"], pr["pr"]) for pr in digest["prs"]],
                          [(three, "system", 7), (two, "pack", 13), (one, "pack", 12)])
         self.assertEqual([(row["what"], row["fix"]) for row in digest["failed"]],
-                         [("backup failed with exit 1", "retry: launchctl kickstart fixture/backup"),
+                         [("backup failed with exit 1", "Retry it from Today, or run: launchctl kickstart fixture/backup"),
                           ("system sd:5 blocked at prepare", "Retry it in Needs you or on Queue")])
         self.assertTrue(all(row["why"] for row in digest["failed"]))
         self.assertEqual(digest["failed"][1]["why"], "lane: sd-check: a suite failed")
@@ -359,7 +359,7 @@ class TheDigest(TodayCase):
 DIGEST = {"merged": [{"repo": "pack", "n": 2, "titles": ["Fix the link", "Port the page"]}], "more": 1,
           "prs": [{"item": 7, "title": "Fix the link", "repo": "pack", "pr": 13}],
           "failed": [{"what": "backup failed with exit 1", "why": "the disk was full",
-                      "fix": "retry: launchctl kickstart fixture/backup"}], "questions": 2, "error": ""}
+                      "fix": "Retry it from Today, or run: launchctl kickstart fixture/backup"}], "questions": 2, "error": ""}
 
 
 class TheDigestCard(ReaderCase):
@@ -370,7 +370,7 @@ class TheDigestCard(ReaderCase):
         self.assertIn("and 1 more repo", card)
         self.assertIn("<details><summary>1 merged item</summary>", card)
         self.assertIn("#7 Fix the link</a> · pack · PR #13", card)
-        self.assertIn("backup failed with exit 1</b> · the disk was full · retry: launchctl kickstart fixture/backup", card)
+        self.assertIn("backup failed with exit 1</b> · the disk was full · Retry it from Today, or run: launchctl kickstart fixture/backup", card)
         self.assertIn('<a href="/decide">2 questions wait</a>', card)
 
     def test_a_quiet_night_says_so_and_a_failed_read_says_why(self):

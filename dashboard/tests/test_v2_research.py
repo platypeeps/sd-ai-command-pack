@@ -1111,7 +1111,7 @@ R.start = ELS['shift-hint'].html;""")
         self.assertEqual(out["states"][0]["kind"], "loading")
         last = out["states"][-1]
         # system sd:5659: the banner said rounds are not read on every load; the rows and the Details' Rounds line say it.
-        self.assertEqual(last, {"kind": "partial", "text": "1 project with a config or render the collector could not read.",
+        self.assertEqual(last, {"kind": "partial", "text": "1 project with a config or page that could not be read.",
                                 "source": "/api/research"})
 
     def test_a_board_read_whole_shows_no_banner(self):
@@ -1710,7 +1710,7 @@ R.det = ELS.details.html; R.lit = ELS.reader.html;""")
         self.assertIn("shell.read(", RESEARCH_JS)
         self.assertNotIn("getJSON('/api/research')", RESEARCH_JS)
         out = self.run_page("")
-        self.assertEqual(out["states"][0]["text"], "Reading the research checkouts. Rows appear when /api/research answers.")
+        self.assertEqual(out["states"][0]["text"], "Reading the research checkouts. Rows appear when the read finishes.")
 
     def test_the_badge_rule_counts_render_stale_projects_and_an_unread_board_is_unknown(self):
         # sd:3446: the read's rule, which every page's rail shows; Gamma's unread config is unknown and counts nothing.

@@ -175,7 +175,7 @@ def backbone_rows(repos: list[dict]) -> list[dict]:
                 "kind": "pinned",
                 "id": f"pinned:{name}:{behind}",
                 "what": f"{name} pinned {behind} behind {target}",
-                "detail": f"merged commits on {target} are not live here until a refresh · refresh: {REFRESH}",
+                "detail": f"merged commits on {target} are not live here until the next refresh · to refresh now: {REFRESH}",
                 "source": "repos",
             })
         if ahead:
@@ -260,7 +260,7 @@ def session_rows(trees: list[dict]) -> list[dict]:
         "kind": "worktree",
         "id": f"worktrees:{count}",
         "what": f"{count} abandoned {plural(count, 'worktree', 'worktrees')}",
-        "detail": "registered in .git/worktrees with no directory left; "
+        "detail": "worktrees whose folders are gone; "
                   "`git worktree prune` clears them",
         "source": "sessions",
     }]
@@ -788,7 +788,7 @@ def digest(connection: sqlite3.Connection, now: str, *, rows: list[dict], lanes:
     for row in landed:
         by_repo.setdefault(repo(row), []).append(row)
     ranked = sorted(by_repo.items(), key=lambda pair: -len(pair[1]))
-    failed = [{"what": row["what"], "why": (row.get("triage") or {}).get("why") or row["detail"], "fix": f"retry: {row['retry']}"}
+    failed = [{"what": row["what"], "why": (row.get("triage") or {}).get("why") or row["detail"], "fix": f"Retry it from Today, or run: {row['retry']}"}
               for row in rows if row["kind"] == "job" and row.get("state") == "failed"]
     failed += [{"what": row["what"], "why": row["detail"], "fix": "Retry it in Needs you or on Queue"} for row in lane_rows(lanes)]
     return {"merged": [{"repo": name, "n": len(found), "titles": [row.get("title") or "" for row in found[:3]]}

@@ -28,7 +28,7 @@ INTAKE_SECONDS = 300
 #: A user-scope skill keeps its upstream name, so a name is any one path segment sd-skill-adopt accepts (SAFE_NAME_RE).
 SOURCE = re.compile(r"https://github\.com/[\x21-\x7e]{1,1000}|[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 APPROVE = re.compile(r"[0-9a-f]{16}")
-REFUSAL = "Give a https://github.com/ skill URL or the name of a skill sd skill intake installed."
+REFUSAL = "Give a https://github.com/ skill URL or the name of an installed skill."
 UNKNOWN = "Evaluate again: its next run finishes or undoes a stopped install, and its report says what is installed."
 ROLLBACK_UNKNOWN = "Rollback again: its report first finishes or undoes a stopped rollback, then shows both copies."
 #: A tracked repository: the pack's `repo_url` shape, owner then repository, nothing after.

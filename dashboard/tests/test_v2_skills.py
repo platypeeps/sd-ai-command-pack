@@ -674,7 +674,7 @@ class TheScript(Pack, ScreenCase):
         out = self.run_page("""const w = (id, key) => cmd(id).when(C.get(key));
 R.off = [w('skill.try', 'sd-used'), w('skill.promote', 'sd-used'), w('skill.demote', 'sd-extra'), w('skill.apply', 'sd-used'), w('skill.try', 'sd-extra')];""")
         self.assertEqual(out["R"]["off"], ["already installed · path", "on build already", "not on a path",
-                                           "apply review notes from the review item", True])
+                                           "apply review notes from the review task, where the notes are", True])
 
     def test_schedule_stays_copy_only_and_scan_runs_on_the_server(self):
         """sd:5886: Scan posts /api/actions/run and shows its report in Details; Schedule posts nothing: sd adds no launchd job."""
@@ -770,7 +770,7 @@ R.err = ELS['ad-err'].textContent;""")
         self.imported()
         out = self.run_page("R.off = [cmd('skill.reimport').when(C.get('sd-extra')), cmd('skill.reimport').when(C.get('sd-used'))];"
                             " R.cli = cmd('skill.reimport').cli(C.get('sd-extra'));")
-        self.assertEqual(out["R"]["off"], [True, "not installed by sd skill intake"])
+        self.assertEqual(out["R"]["off"], [True, "not installed through Evaluate"])
         self.assertEqual(out["R"]["cli"], "sd skill intake 'sd-extra'")
 
     def test_reimport_shows_the_report_and_approve_posts_the_exact_revision(self):
@@ -839,7 +839,7 @@ R.err = ELS['ad-err'].textContent;""")
         out = self.run_page("R.off = [cmd('skill.rollback').when(C.get('sd-extra')), cmd('skill.rollback').when(C.get('sd-used'))];"
                             " R.cli = cmd('skill.rollback').cli(C.get('sd-extra'));"
                             " shellRun(cmd('skill.reimport'), C.get('sd-extra')); await flush(); R.slot = ELS['intake-slot'].html;", answer=answer)
-        self.assertEqual(out["R"]["off"], [True, "not installed by sd skill intake"])
+        self.assertEqual(out["R"]["off"], [True, "not installed through Evaluate"])
         self.assertEqual(out["R"]["cli"], "sd skill intake 'sd-extra' --rollback")
         self.assertIn("sd-adapted (skills/sd-adapted/SKILL.md) names github.com/example/skills: abc1234", out["R"]["slot"])
 
@@ -1003,7 +1003,7 @@ R.err = ELS['ad-err'].textContent;""")
         empty = dict(TRACKED, seeded=True, repos=[], untracked=[])
         out = self.run_page(self.INTAKE_VIEW + " R.rows = ELS['intake-rows'].html;", answer=self.views(empty))
         self.assertIn("No repository is tracked.", out["R"]["rows"])
-        self.assertIn("No installed skill was adopted by sd skill intake", json.dumps(out["states"]))
+        self.assertIn("No skill was installed from a tracked repo yet", json.dumps(out["states"]))
         answer = "(path) => path === '/api/skills' ? [200, DOC] : [503, { error: 'The tracked repositories were not read: database is locked' }]"
         out = self.run_page(self.INTAKE_VIEW + " R.rows = ELS['intake-rows'].html;", answer=answer)
         self.assertIn("Not read: The tracked repositories were not read: database is locked", out["R"]["rows"])

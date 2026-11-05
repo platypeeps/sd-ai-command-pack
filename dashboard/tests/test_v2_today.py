@@ -348,6 +348,11 @@ JSON.stringify({
         self.assertEqual(got["allowed"], ['<div  class="x" a="1">', '<div title="&quot; onclick=alert(1)">',
                                           "<p title='it&#39;s'>onmouseover=alert(1)</p>", "<p> onmouseover=alert(1)</p>"])
 
+    def test_a_tips_second_line_shows_as_a_line_and_its_text_as_written(self):
+        # Pack sd:7536: a tile's hover is its help, then its command on a line of its own.
+        sunk = run_js(self, "const { html, put } = window.markup;\n" + HELP + 'put(target, tipLines("Starts <b>it</b>.\\n./run.sh a<b")); JSON.stringify(sunk)')
+        self.assertEqual(sunk[0][1], "Starts &lt;b&gt;it&lt;/b&gt;.<br>./run.sh a&lt;b")
+
     def test_help_renders_bare_b_and_code_and_drops_every_other_tag_and_attribute(self):
         text = ('Rank <b>broken</b> first; run <code>sd jobs</code>. <B class="x" onclick="alert(1)">loud</B> '
                 '<img src=x onerror=alert(1)><a href="javascript:alert(1)">link</a> <script>alert(2)</script><i>it</i> '

@@ -86,7 +86,7 @@ SETTINGS = {
     "sweep.work.notion_scope": "The Notion teamspaces or pages the Work sweep searches. Unset skips Notion.",
     "sweep.work.jira_scope": "The Jira projects the Work sweep searches, as JQL such as project in (ABC). Unset skips Jira.",
     "sweep.work.github_scope": "The GitHub owners the Work sweep searches, as qualifiers such as org:example. Unset skips GitHub.",
-    "sweep.work.followups_repo": "The registered repository the Work sweep files its followups under.",
+    "sweep.work.followups_repo": "The registered repo the Work sweep files its follow-up tasks under.",
 }
 REQUIRED = ("sweep.personal.mail_query", "sweep.work.mail_query", "sweep.work.followups_repo")
 #: Each realm's sources and the setting that switches one on; `None` is always read. Each keeps its own checkpoint.
