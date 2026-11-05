@@ -157,8 +157,12 @@ class TheDocument(ScreenCase):
         self.assertIn("{ id: 'pulls', label: 'Pull requests' }", (V2 / "static" / "github.js").read_text(encoding="utf-8"))
 
     def views(self):
-        html = (V2 / "github.html").read_text(encoding="utf-8")
-        return dict(re.findall(r'<div id="view-([a-z]+)"[^>]*>(.*?)(?=<div id="view-|</main>)', html, re.S))
+        # pack sd:7682: Your issues and Issue Intake are the Issues page's views, with the same heads and filter rows.
+        found = {}
+        for page in ("github.html", "issues.html"):
+            html = (V2 / page).read_text(encoding="utf-8")
+            found.update(re.findall(r'<div id="view-([a-z]+)"[^>]*>(.*?)(?=<div id="view-|</main>)', html, re.S))
+        return found
 
     def test_each_view_has_one_filter_row_its_table_joins(self):
         """pack sd:7215: a table that names no toolbar row gets its column filter as a second row (shell.js); each GitHub

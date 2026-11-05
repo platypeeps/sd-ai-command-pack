@@ -175,8 +175,9 @@ class ThePages(ScreenCase):
             found = github_issues(self.connection)
         self.assertEqual((found["issues_error"], [row["ref"] for row in found["intake"]]), ("database is locked", ["#21", "#22"]))
 
-    def test_github_draws_the_section_and_loads_its_script_before_the_shell(self):
-        html = (V2 / "github.html").read_text(encoding="utf-8")
+    def test_issues_draws_the_section_and_loads_its_script_before_the_shell(self):
+        # pack sd:7682: the Issues page holds Your issues, GitHub's view until then.
+        html = (V2 / "issues.html").read_text(encoding="utf-8")
         self.assertIn('<tbody id="issues">', html)
         self.assertIn('id="issues-tally"', html)
         self.assertIn('<link rel="stylesheet" href="/ui/issues.css">', html)
@@ -236,7 +237,7 @@ window.shell = { aside: (() => { const { html } = window.markup;
         drawn = self.drawn({"issues": rows, "error": ""})["issues"]
         self.assertIn('<td class="when"><time class="rel" datetime="2026-11-01T10:00:00Z"></time></td>', drawn)
         self.assertIn('<td class="when"><span class="ph">not stored</span></td>', drawn)
-        self.assertIn("<th>Updated</th>", (V2 / "github.html").read_text(encoding="utf-8"))
+        self.assertIn("<th>Updated</th>", (V2 / "issues.html").read_text(encoding="utf-8"))
 
     def test_a_closed_row_shows_with_closed_only_and_a_failed_github_read_is_said(self):
         # sd:5899: Your issues holds the operator's closed GitHub issues of the window; State open hides them.
@@ -396,8 +397,8 @@ class TheIntake(ScreenCase):
             found = github_issues(self.connection)
         self.assertEqual((found["intake_error"], len(found["issues"])), ("database is locked", 3))
 
-    def test_github_draws_the_section_and_hands_the_rows_over(self):
-        html = (V2 / "github.html").read_text(encoding="utf-8")
+    def test_issues_draws_the_section_and_hands_the_rows_over(self):
+        html = (V2 / "issues.html").read_text(encoding="utf-8")
         self.assertIn('<tbody id="intake">', html)
         self.assertIn('id="intake-tally"', html)
         self.assertIn("intake:read", (V2 / "static" / "github.js").read_text(encoding="utf-8"))
@@ -668,11 +669,12 @@ class TheGitHubPage(ScreenCase):
     def test_github_puts_refresh_in_each_section_heads_tools_and_its_line_under_it(self):
         """Pack sd:7084: a view's actions sit in its section head's tools; the line under the head says what it did. Pack
         sd:7214: the tally is the head's own item, beside .tools, so Refresh ends the row."""
-        html = (V2 / "github.html").read_text(encoding="utf-8")
-        for view, tally in (("pulls", "github-tally"), ("issues", "issues-tally"), ("intake", "intake-tally")):
+        # pack sd:7682: Your issues and Issue Intake are on the Issues page, which keeps Refresh from GitHub too.
+        for page, view, tally in (("github", "pulls", "github-tally"), ("issues", "issues", "issues-tally"), ("issues", "intake", "intake-tally")):
+            html = (V2 / f"{page}.html").read_text(encoding="utf-8")
             self.assertIn(f'<p class="tally" id="{tally}"></p>\n          <div class="tools"><span id="{view}-sync"></span></div>', html)
             self.assertIn(f'<p class="why" id="{view}-said"></p>', html)
-        self.assertIn('id="intake-filters"', html)
+        self.assertIn('id="intake-filters"', (V2 / "issues.html").read_text(encoding="utf-8"))
 
 
 class TheViewRoute(BrowserSession):

@@ -1,6 +1,8 @@
-// Your issues (sd:4628), on GitHub (sd:5781; Today drew them from sd:5645, Tasks before): each repo's Jira and GitHub
-// issues assigned to or filed by the operator.
-// Issue intake (sd:4840), GitHub's Intake view, is at the end.
+// Your issues (sd:4628), on Issues (pack sd:7682; GitHub from sd:5781, Today from sd:5645, Tasks before): each repo's
+// Jira and GitHub issues assigned to or filed by the operator.
+// Issue intake (sd:4840), Issues' Issue Intake view (GitHub's Intake until pack sd:7682), is at the end.
+// pack sd:7682: only issues.html loads this script, after github.js, so the Issues page's views are declared here.
+window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'intake', label: 'Issue Intake' }];
 // The rows are /api/github/issues' `issues` (issues.document over sd_db.repos.mine_issues); github.js hands them over
 // with an issues:read event after each read, `error` set when the read failed. A failure is a row naming it, never an empty list.
 // Markup is html`…` from markup.js: every value is escaped, and only an https address the server kept becomes a link.

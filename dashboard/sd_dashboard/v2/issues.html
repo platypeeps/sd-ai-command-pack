@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  Issues (pack sd:7682), at /issues: GitHub's Your issues and Intake views until then, in two views.
+  Your issues (sd:4628): each repo's issues assigned to or filed by the operator, and their other GitHub issues the
+  Pull requests view listed until sd:5899; Issue Intake (sd:4840, GitHub's Intake until pack sd:7682): each
+  policy.issues repo's open third-party issues no item carries, File as item posts /api/items with the ref. Both are
+  /api/github/issues (issues.document, issues.intake), read by github.js when either view first shows and on Read
+  again; issues.js draws them. An issue row of either selects into Details (sd:5877), from what the same read carries.
+  Hide and Unhide (sd:6175) on a row of either post /api/github/issues/view; Open | Hidden, at each filter bar's left
+  (sd:6701), is ?hidden=1. Refresh from GitHub, on both views, starts shadow-sync-nightly through the shared Run now
+  (pack sd:6702); github.js draws the line, as on GitHub.
+  The page's styles are Today's (today.css) and the issue ledger's (issues.css).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Issues · system</title>
+<link rel="stylesheet" href="/ui/fonts.css">
+<link rel="stylesheet" href="/ui/tokens.css">
+<script src="/ui/theme.js"></script>
+<script src="/ui/markup.js"></script>
+<link rel="stylesheet" href="/ui/shell.css">
+<link rel="stylesheet" href="/ui/today.css">
+<link rel="stylesheet" href="/ui/issues.css">
+</head>
+<body data-page="Issues" data-scope="fleet">
+<script src="/ui/icons.js"></script>
+<div class="shell">
+  <main>
+    <header class="head">
+      <div>
+        <h1>Issues</h1>
+      </div>
+    </header>
+    <!-- The toolbar standard (sd:5281): row 1, the views then the shell's Shapeshift bar (sd:5539). -->
+    <div class="toolbar" id="toolbar" data-shift></div>
+
+    <div id="view-issues" aria-label="Your issues">
+      <section class="issues-sec" aria-labelledby="issues-h">
+        <div class="sec-head">
+          <h2 id="issues-h">Your issues <button class="help" type="button" aria-label="Help: Your issues" data-help="&lt;b&gt;Issues that are yours.&lt;/b&gt; Open Jira and GitHub issues assigned to you or filed by you, from each repo&#39;s issue sources (set on Management), and your GitHub issues in any other repo. Watched issues stay synced and are not listed. State with closed adds your GitHub issues closed in the last 7 days; closed Jira issues are not read. Press an issue for its details: what the last sync saved, Open in Jira or Open on GitHub, and Open item. Hide takes an issue off the list and its counts until Unhide; Hidden lists the hidden ones. Refresh from GitHub syncs in the background, then the list refreshes; reading the page calls no tracker.">
+            <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+          <p class="tally" id="issues-tally"></p>
+          <div class="tools"><span id="issues-sync"></span></div>
+        </div>
+        <div class="filters toolbar-2" id="issues-filters"></div>
+        <p class="why" id="issues-said"></p>
+        <table class="ledger issues" aria-labelledby="issues-h" data-toolbar="issues-filters">
+          <thead><tr><th>Issue</th><th>Title</th><th>Repo</th><th>Why</th><th>Updated</th></tr></thead>
+          <tbody id="issues"><tr class="empty"><td colspan="5">Reading issues…</td></tr></tbody>
+        </table>
+      </section>
+    </div>
+    <div id="view-intake" aria-label="Issue Intake" hidden>
+      <section class="issues-sec" aria-labelledby="intake-h">
+        <div class="sec-head">
+          <h2 id="intake-h">Issue Intake <button class="help" type="button" aria-label="Help: Issue Intake" data-help="&lt;b&gt;Issues that need an item.&lt;/b&gt; Open GitHub issues someone else opened, in each repo with GitHub issues on (Management), that no item carries yet. File as item adds a task in that repo, linked to the issue, and the row leaves. Press an issue for its details, as on Your issues. Hide and Hidden work as on Your issues. Refresh from GitHub syncs in the background.">
+            <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+          <p class="tally" id="intake-tally"></p>
+          <div class="tools"><span id="intake-sync"></span></div>
+        </div>
+        <div class="filters toolbar-2" id="intake-filters"></div>
+        <p class="why" id="intake-said"></p>
+        <table class="ledger issues" aria-labelledby="intake-h" data-toolbar="intake-filters">
+          <thead><tr><th>Issue</th><th>Title</th><th>Repo</th><th>Opened by</th><th><span class="sr">File</span></th></tr></thead>
+          <tbody id="intake"><tr class="empty"><td colspan="5">Reading issue intake…</td></tr></tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+
+  <div class="details" id="details"><p class="why">Press an issue for its details.</p></div>
+</div>
+<script src="/ui/sections.js"></script>
+<script src="/ui/commands.js"></script>
+<script src="/ui/github.js"></script>
+<script src="/ui/issues.js"></script>
+<script src="/ui/shell.js"></script>
+</body>
+</html>

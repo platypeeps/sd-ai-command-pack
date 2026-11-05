@@ -11,7 +11,7 @@
 // view (#view=now|work|inbox|status) is this page now, so its hash leaves the address.
 {
   const was = (/^#view=([a-z]+)$/.exec(location.hash) || [])[1];
-  const moved = { decisions: '/decide#view=decisions', github: '/github#view=pulls', issues: '/github#view=issues' }[was];
+  const moved = { decisions: '/decide#view=decisions', github: '/github#view=pulls', issues: '/issues#view=issues' }[was];
   if (moved) location.replace(moved.replace('#', `${location.search}#`));
   else if (['now', 'work', 'inbox', 'status'].includes(was)) history.replaceState(null, '', `/today${location.search}`);
   // pack sd:7234: Queues and In motion are the Queue view now.

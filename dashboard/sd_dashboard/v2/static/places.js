@@ -95,7 +95,7 @@
     issuesHid ??= window.shell.aside.mode('issues-hidden');
     const hidden = doc.issues.filter(r => r.hidden).length, rows = doc.issues.filter(r => window.shell.aside.shows(issuesHid, r.hidden));
     const notes = [doc.issues_reason && `Not every issue was read: ${doc.issues_reason}.`, doc.issues_store?.reason && `Hide is off: ${doc.issues_store.reason}.`].filter(Boolean);
-    return html`<div class="place-issues-head"><h3>Issues</h3><div class="filters toolbar-2" id="place-issues-filters">${window.shell.aside.seg('issues-hidden', 'Hidden', issuesHid, { open: doc.issues.length - hidden, aside: hidden })}</div><p class="note">The realm's open GitHub and Jira issues assigned to you or filed by you, as GitHub's Your issues lists them.</p></div>
+    return html`<div class="place-issues-head"><h3>Issues</h3><div class="filters toolbar-2" id="place-issues-filters">${window.shell.aside.seg('issues-hidden', 'Hidden', issuesHid, { open: doc.issues.length - hidden, aside: hidden })}</div><p class="note">The realm's open GitHub and Jira issues assigned to you or filed by you, as Issues' Your issues lists them.</p></div>
       ${notes.map(n => html`<p class="note">${n}</p>`)}
       <table class="ledger place-issues" data-toolbar="place-issues-filters"><thead><tr><th scope="col">Source</th><th scope="col">Issue</th><th scope="col">Title</th><th scope="col" class="hide-sm">Repo</th><th scope="col" class="hide-sm">Why</th></tr></thead>
       <tbody>${rows.length ? rows.map(r => html`<tr${r.hidden ? html` class="hidden-row"` : ''}><td class="src">${r.tracker}</td>
