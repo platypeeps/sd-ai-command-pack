@@ -347,3 +347,63 @@ class TheUnread(ReportsCase):
 
         doc = self.today(lanes=odd)
         self.assertEqual(self.dark(doc), {"dark:lane": ("broken", "lane", "lane not read for pack", "pack: no reason given")})
+
+
+class TheFlakyHeads(ReportsCase):
+    """pack sd:7663: a head the gate failed and then passed at that head is a look row on Today, not a Metrics table.
+
+    Two or more fold into one group row that opens to its heads, as the work groups do; one is its own row. A lane read
+    that failed is a partial lane row, never a week with no flaky head.
+    """
+
+    def flaky(self, head, item, *, repository="example/alpha", day="2026-09-04"):
+        from test_v2_metrics import GATE, lane_run
+
+        lane_run(self.connection, f"f{item}", "failed", f"{day}T10:00:00Z", expected=head, reason=GATE, item=item,
+                 repository=repository)
+        lane_run(self.connection, f"p{item}", "merged", f"{day}T14:00:00Z", head=head, item=item,
+                 repository=repository)
+
+    def test_two_flaky_heads_are_one_look_group_on_the_lane_lamp(self):
+        self.flaky("1" * 40, 9)
+        self.flaky("2" * 40, 10, repository="example/beta", day="2026-09-05")
+        doc = self.today()
+        [group] = [row for row in doc["needs"] if row["id"] == "group:flaky"]
+        self.assertEqual((group["band"], group["lamp"], group["what"], group["detail"]),
+                         ("look", "lane", "2 flaky heads", "example/alpha · example/beta"))
+        self.assertEqual([(m["id"], m["kind"], m["item"], m["head"], m["band"]) for m in group["members"]],
+                         [("flaky:example/beta:" + "2" * 40, "flaky", 10, "2" * 40, "look"),
+                          ("flaky:example/alpha:" + "1" * 40, "flaky", 9, "1" * 40, "look")])
+        self.assertEqual(group["members"][1]["failed"], ["2026-09-04T10:00:00Z"])
+        self.assertEqual(doc["attention"], {"state": "caution", "n": 1, "what": "rows to look at"})
+
+    def test_one_flaky_head_is_its_own_row_and_a_snooze_hides_it(self):
+        self.flaky("1" * 40, 9)
+        [row] = [row for row in self.today()["needs"] if row["id"].startswith(("flaky:", "group:flaky"))]
+        self.assertEqual((row["id"], row["what"]), ("flaky:example/alpha:" + "1" * 40,
+                                                    "Flaky: example/alpha sd:9 at 111111111111"))
+        from sd_db import writes
+
+        writes.snooze(self.connection, f"today:{row['id']}", "2026-09-07T08:00:00Z", seen=row["seen"], now=NOW)
+        doc = self.today()
+        self.assertNotIn(row["id"], [r["id"] for r in doc["needs"]])
+        self.assertIn(row["id"], [r["id"] for r in doc["snoozed"]])
+
+    def test_a_flaky_head_older_than_the_week_is_not_listed(self):
+        # NOW is 2026-09-06T12:00Z: the week began 08-30 at noon.
+        self.flaky("1" * 40, 9, day="2026-08-28")
+        doc = self.today()
+        self.assertEqual([row["id"] for row in doc["needs"] if "flaky" in row["id"]], [])
+        self.flaky("3" * 40, 11)
+        self.assertEqual([row["id"] for row in self.today()["needs"] if "flaky" in row["id"]],
+                         ["flaky:example/alpha:" + "3" * 40])
+
+    def test_a_lane_entry_read_that_failed_is_a_partial_lane_row(self):
+        from sd_db import reads
+
+        with mock.patch.object(reads, "lane_entries", side_effect=sqlite3.OperationalError("database is locked")):
+            doc = self.today()
+        [row] = [row for row in doc["needs"] if row["id"] == "dark:flaky"]
+        self.assertEqual((row["band"], row["lamp"], row["partial"], row["what"]),
+                         ("broken", "lane", True, "lane not read for flaky heads"))
+        self.assertIn("database is locked", row["detail"])

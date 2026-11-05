@@ -17,13 +17,12 @@ Each part is guarded on its own: one that fails is unknown with its reason,
 and the page reports a partial read. By model has no reader and always shows
 as unknown with the reason: the cost ledger has no model column.
 
-CI health and Flaky tests read the merge lane's gate runs (sd:5473): the last
+CI health reads the merge lane's gate runs (sd:5473): the last
 checkpoint of each lane entry (`reads.lane_entries`) that ended in the last 7
 days. Merged or prepared passed the gate. A failed entry is a gate failure
 when its reason is sd-ship's gate refusal; a review stop or a conflict ran no
-gate and counts as stopped. A flaky head failed its gate and later passed at
-that same head in the same repository. Flakiness is per head, not per test:
-no store names the failing test.
+gate and counts as stopped. The flaky heads moved to Today's Needs you
+(pack sd:7663), and light no Metrics lamp.
 
 Lane times took Queue's Last 7 days (pack sd:7233): each managed lane's
 median wait from enqueue to claim, median gate time (the speculative gate
