@@ -480,6 +480,13 @@ class TheTimeline(ReaderCase):
             self.assertIn(f"▨ unknown · {kind} not read:", plot)
         self.assertNotIn('<rect class="tick', plot)
 
+    def test_a_7_day_tick_and_row_open_activity_at_7_days(self):
+        """Activity reads 24 hours unless asked: an older event's link carries the range, or it opens with no row."""
+        out = self.run_timeline("showTimeline(); await flush(); R.day = ELS['track-plot'].html; range('7d');" + self.DRAWN)
+        self.assertIn('<a href="/activity?kind=merge&amp;row=merge%3A41">', out["R"]["day"])
+        self.assertIn('<a href="/activity?kind=command&amp;row=cmd%3A9&amp;range=7d">', out["R"]["plot"])
+        self.assertIn('<a href="/activity?kind=command&amp;row=cmd%3A9&amp;range=7d">', out["R"]["rows"])
+
 
 HELP = {
     "jobs": "Failed scheduled jobs. Press to list them in Needs you.",

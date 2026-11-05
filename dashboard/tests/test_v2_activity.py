@@ -512,6 +512,23 @@ shellRun(cmd('asg.get'), C.get('run:{n}')); await flush(); R.details = ELS.detai
                      r"\.pager \{ display: flex;"):
             self.assertRegex(css, rule)
 
+    def test_a_7_day_address_reads_and_keeps_7_days(self):
+        """pack sd:7681 review: Today's 7d Timeline links an older event as ?range=7d; Activity reads 7 days for it,
+        keeps the range in its address and shows it as a token, as range=all is; a range press reads 24 hours again."""
+        week = activity_screen.document(self.connection, now=NOW, jobs_backend=backend(self),
+                                        window=activity_screen.RANGES["7d"])
+        older = self.ids["older"]
+        out = self.run_page("""R.urls = OUT.urls.slice(); R.bar = ELS.filters.html; R.rows = ELS.rows.html; R.ann = ELS.annunciator.html;
+ELS.filters.listeners.click[0]({ target: { closest: s => s === '[data-f="range"]' ? { dataset: { f: 'range', v: '7d' } } : null } });
+await flush(); R.after = OUT.urls[OUT.urls.length - 1];""", "p => p === '/api/activity?range=7d' ? [200, DOC] : [404, { error: 'no answer' }]",
+                            doc=week, pre="location.search = '?range=7d';")
+        self.assertEqual(out["gets"], ["/api/activity?range=7d", "/api/activity"])
+        self.assertEqual(out["R"]["urls"][-1], [None, "7d"])
+        self.assertIn('class="tok" data-f="range" data-v="7d" aria-label="Remove filter: Last 7 days"', out["R"]["bar"])
+        self.assertIn(f'data-id="cmd:{older}"', out["R"]["rows"], "the record 28 hours old is in the 7 days")
+        self.assertIn(" in 7 d</span>", out["R"]["ann"])
+        self.assertEqual(out["R"]["after"], [None, None])
+
     def test_only_a_link_reads_the_older_journal_records_and_its_token_goes_back_to_24h(self):
         """The 7d, 30d and All chips are gone; palette.py's range=all link still opens the older records."""
         older = self.ids["older"]

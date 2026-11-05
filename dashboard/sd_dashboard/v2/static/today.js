@@ -701,7 +701,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       err => { if (n === AV.n) { AV.doc = null; AV.error = err.message || 'the read failed'; } }).then(() => { if (n === AV.n && DOC) dayTrack(); });
   }
   const markHref = (lane, m) => lane === 'landed' || lane === 'live' ? shell.itemHref(m.item) : `?row=${encodeURIComponent(m.id)}`;
-  const eventHref = e => `/activity?kind=${e.k}&row=${encodeURIComponent(e.id)}`;
+  // Activity reads 24 hours unless asked, so a 7d link carries the range, or an older event opens with no row.
+  const eventHref = e => `/activity?kind=${e.k}&row=${encodeURIComponent(e.id)}${span === '7d' ? '&range=7d' : ''}`;
   function rangeTiles() {
     put($('track-range'), html`${Object.keys(SPAN).map(v => html`<button type="button" data-range="${v}" aria-pressed="${String(span === v)}">${v}</button>`)}`);
     $('track-h').textContent = `The ${SPAN_SAID[span].toLowerCase()}`;

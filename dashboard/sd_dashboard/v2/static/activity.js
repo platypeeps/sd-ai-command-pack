@@ -25,7 +25,8 @@ addEventListener('DOMContentLoaded', () => {
   const kindOf = id => KINDS.find(k => k.id === id);
   const hhmm = iso => iso.slice(11, 16);
   const ago = iso => { const m = Math.round((OBSERVED - Date.parse(iso)) / 60000); return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`; };
-  // The document holds the 24 hours and, for the journal, older records too; the 24h range is the window.
+  // The document holds the 24 hours, or the 7 days a ?range=7d link asks for (Today's Timeline, pack sd:7681), and, for the
+  // journal, older records too; the document's range is the window.
   const inWindow = e => Date.parse(e.at) >= RANGE.from;
 
   // ---------- Data (build) ----------
@@ -40,7 +41,7 @@ addEventListener('DOMContentLoaded', () => {
   // an event the read no longer lists loses its pick and runs no command; a failed load leaves no row, object or observed
   // time from the last one; and a failed reread after a write keeps the rows and says the write landed.
   const activity = window.shell.read({
-    source: '/api/activity', what: 'the events',
+    source: () => F.week ? '/api/activity?range=7d' : '/api/activity', what: 'the events',
     adopt: doc => {
       DOC = doc; EVENTS = doc.events; OBSERVED = Date.parse(doc.read); RANGE = { from: Date.parse(doc.from), to: Date.parse(doc.to) };
       document.body.dataset.observed = doc.read;
@@ -50,7 +51,7 @@ addEventListener('DOMContentLoaded', () => {
       const failed = Object.entries(doc.sources).filter(([, why]) => why);
       return { objects: EVENTS.map(objectOf),
         state: failed.length ? { kind: 'partial', text: failed.map(([s, why]) => `${s}: ${why}`).join(' · '), source: '/api/activity' }
-          : !EVENTS.some(inWindow) ? { kind: 'empty', text: 'No merge, run, review or command in the last 24 hours.' } : null };
+          : !EVENTS.some(inWindow) ? { kind: 'empty', text: `No merge, run, review or command in the last ${F.week ? '7 days' : '24 hours'}.` } : null };
     },
     clear: () => { DOC = null; EVENTS = []; REPOS = []; Object.keys(OUTPUT).forEach(id => delete OUTPUT[id]); delete document.body.dataset.observed; },
     draw: () => update(),
@@ -66,14 +67,15 @@ addEventListener('DOMContentLoaded', () => {
   window.PAGE_AGAIN = { title: 'Read the events again', run: load };
 
   // ---------- State (mirrored in the URL) ----------
-  const F = { kind: new Set(), repo: new Set(), state: '', q: '', hour: false, all: false }; // all: every event read, the journal's older records too; only a link sets it (palette.py)
+  const F = { kind: new Set(), repo: new Set(), state: '', q: '', hour: false, all: false, week: false }; // all: every event read, the journal's older records too; only a link sets it (palette.py)
+  // week: the 7-day read; only a link sets it (Today's Timeline at 7d), and a range press or Clear all reads 24 hours again
   let page = 1, size = 50, selected = null;
   function readURL() {
     const p = new URLSearchParams(location.search);
     // A kind the page does not draw (an old link's deploy or mail) is dropped, or it would hide every row.
     (p.get('kind') || '').split(',').filter(v => kindOf(v)).forEach(v => F.kind.add(v));
     (p.get('repo') || '').split(',').filter(Boolean).forEach(v => F.repo.add(v));
-    F.state = p.get('state') || ''; F.q = p.get('q') || ''; F.hour = p.get('range') === '1h'; F.all = p.get('range') === 'all';
+    F.state = p.get('state') || ''; F.q = p.get('q') || ''; F.hour = p.get('range') === '1h'; F.all = p.get('range') === 'all'; F.week = p.get('range') === '7d';
     const asked = Number(p.get('page'));
     page = Number.isInteger(asked) && asked > 0 ? asked : 1; // a page is a positive integer; anything else is the first page
     size = [25, 50, 100, 200].includes(+p.get('size')) ? +p.get('size') : 50;
@@ -87,12 +89,13 @@ addEventListener('DOMContentLoaded', () => {
     if (F.q) p.set('q', F.q);
     if (F.hour) p.set('range', '1h');
     if (F.all) p.set('range', 'all');
+    if (F.week) p.set('range', '7d');
     if (page > 1) p.set('page', page);
     if (size !== 50) p.set('size', size);
     window.shell.url(p); // build: the shell keeps ?row=
   }
   const since = () => F.hour ? OBSERVED - 36e5 : 0;
-  const active = () => F.kind.size + F.repo.size + (F.state ? 1 : 0) + (F.q ? 1 : 0) + (F.hour || F.all ? 1 : 0);
+  const active = () => F.kind.size + F.repo.size + (F.state ? 1 : 0) + (F.q ? 1 : 0) + (F.hour || F.all || F.week ? 1 : 0);
   const match = e => (!F.kind.size || F.kind.has(e.k)) && (!F.repo.size || F.repo.has(e.repo)) && (!F.state || e.s === F.state) && (F.all || Date.parse(e.at) >= (since() || RANGE.from)) &&
     (!F.q || `${e.what} ${e.repo || ''} ${e.ref} ${e.detail || ''}`.toLowerCase().includes(F.q.toLowerCase())); // ?q= keeps its case
 
@@ -119,7 +122,7 @@ addEventListener('DOMContentLoaded', () => {
     const VAL = {
       merge: html`<span class="ph"><b>${n('merge')}</b> merged</span> · <span class="ph">${plural(new Set(shown.filter(e => e.k === 'merge').map(e => e.repo)).size, 'repo')}</span>`,
       run: html`<span class="ph"><b>${jobsFailed}</b> jobs failed</span> · <span class="ph">${asg.filter(e => e.status === 'blocked').length} of ${asg.length} runs blocked</span>`,
-      command: html`<span class="ph"><b>${n('command', 'warning')}</b> failed</span> · <span class="ph">${n('command')} ${F.all ? 'in the journal' : F.hour ? 'in 1 h' : 'in 24 h'}</span>`,
+      command: html`<span class="ph"><b>${n('command', 'warning')}</b> failed</span> · <span class="ph">${n('command')} ${F.all ? 'in the journal' : F.hour ? 'in 1 h' : F.week ? 'in 7 d' : 'in 24 h'}</span>`,
       // build: the design's "want changes · approve" has no source; a delivery records clean or adjudicated (sd:2211).
       review: html`<span class="ph"><b>${n('review', 'caution')}</b> adjudicated</span> · <span class="ph">${n('review', 'ok')} clean</span>${DOC?.review_unrecorded ? html` · <span class="ph">${plural(DOC.review_unrecorded, 'merge')} unrecorded</span>` : ''}`,
     };
@@ -145,9 +148,9 @@ addEventListener('DOMContentLoaded', () => {
     const { fseg, tok, fbar } = window.shell.list;
     put($('filters'), fbar(html`${fseg('state', 'State', STATES.map(([s, g, w]) => ({ v: s, pressed: F.state === s, title: `${w}: ${count(s)}`,
       label: html`<span class="g-${s}" aria-hidden="true">${g}</span><span class="n">${count(s)}</span><span class="sr"> ${w}</span>` })))}
-      ${fseg('range', 'Range', [{ v: '1h', label: '1h', pressed: F.hour }, { v: '24h', label: '24h', pressed: !F.hour && !F.all }])}
+      ${fseg('range', 'Range', [{ v: '1h', label: '1h', pressed: F.hour }, { v: '24h', label: '24h', pressed: !F.hour && !F.all && !F.week }])}
       ${REPOS.length || F.repo.size ? html`<button type="button" class="pick" id="repo-btn" aria-haspopup="listbox" aria-expanded="${String(!pop.hidden)}" aria-controls="repo-pop">Repo${F.repo.size ? html` <span class="n">· ${String(F.repo.size)}</span>` : ''}</button>` : ''}
-      ${[...F.kind].map(k => tok('kind', k, kindOf(k).name))}${[...F.repo].map(r => tok('repo', r, r))}${F.q ? tok('q', '', `“${F.q}”`) : ''}${F.all ? tok('range', 'all', 'Older journal records') : ''}`, { clear: active() }));
+      ${[...F.kind].map(k => tok('kind', k, kindOf(k).name))}${[...F.repo].map(r => tok('repo', r, r))}${F.q ? tok('q', '', `“${F.q}”`) : ''}${F.all ? tok('range', 'all', 'Older journal records') : ''}${F.week ? tok('range', '7d', 'Last 7 days') : ''}`, { clear: active() }));
     window.shell.view.count('timeline', shown);
   }
   $('filters').addEventListener('click', e => {
@@ -156,8 +159,8 @@ addEventListener('DOMContentLoaded', () => {
     const r = e.target.closest('[data-f="range"]');
     if (r) {
       const v = r.dataset.v;
-      // The All token removes itself to 24h.
-      F.hour = v === '1h'; F.all = false; page = 1; return update();
+      // The All and 7d tokens remove themselves to 24h; leaving 7 days reads the 24 hours again.
+      const was = F.week; F.hour = v === '1h'; F.all = false; F.week = false; page = 1; return was ? load() : update();
     }
     const c = e.target.closest('[data-f]'); if (!c) return;
     const { f, v } = c.dataset;
@@ -166,7 +169,7 @@ addEventListener('DOMContentLoaded', () => {
     if (f === 'q') { F.q = ''; window.shell.filter(''); }
     page = 1; update();
   });
-  function clearAll() { F.kind.clear(); F.repo.clear(); F.state = ''; F.q = ''; F.hour = false; F.all = false; window.shell.filter(''); page = 1; update(); }
+  function clearAll() { const was = F.week; F.kind.clear(); F.repo.clear(); F.state = ''; F.q = ''; F.hour = false; F.all = false; F.week = false; window.shell.filter(''); page = 1; was ? load() : update(); }
 
   // The repo picker: a listbox under the Repo button, every repo with its count, most events first. Typing filters it;
   // the arrows move, Enter or a tap picks, Esc closes and gives focus back to the button. A picked repo with no events
