@@ -33,9 +33,11 @@ no answer is a reason to stay, never a pass.
   (sd:5726: smbfs, nfs, afp, webdav, by one `mount`) gets no `du`, which
   ran past 120 s on an SMB share: one `df -kP <folder>` gives the share's
   use instead. A local folder's `df -kP` runs before its `du`, and its
-  drive's use stands in when `du` does not finish (sd:5879); that folder
-  gets no `du` for `DU_RETRY_SECONDS`, which spent 6 s of each read
-  (sd:7898). A mount table
+  drive's use stands in when `du` does not finish (sd:5879). A folder whose
+  `du` ran out at least half a read's time gets no `du` for
+  `DU_RETRY_SECONDS`, which spent 6 s of each read, and its row says until
+  when (sd:7898); one that could not start or was cut short is tried again
+  on the next read. A mount table
   that did not answer measures no folder: none is known to be local;
 - registered worktrees whose `HEAD` is in `origin/HEAD` and that still hold
   `target/`, `node_modules/` or `.venv/` (the 2026-09-25 rule: delete build
@@ -58,6 +60,7 @@ the subject again at the write and refuses a digest that changed.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import os
@@ -98,8 +101,11 @@ class Walk:
     """Commands run inside one overall budget; past it, `reads.OverBudget` names what was stopped."""
 
     def __init__(self, within: float, noun: str):
+        self.within = within
         self.stop = time.monotonic() + within
         self.refusal = f"{noun} ran past its budget of {within:g} seconds"
+        #: The timeout the last `run` used up, or None when it answered or could not start.
+        self.expired: float | None = None
 
     def left(self) -> float:
         return self.stop - time.monotonic()
@@ -110,12 +116,13 @@ class Walk:
         `spare` is for a command whose overrun is its own row: its timeout
         returns None and leaves the walk to say what it did not finish.
         """
-        timeout = min(COMMAND_SECONDS, self.left())
+        timeout, self.expired = min(COMMAND_SECONDS, self.left()), None
         if timeout <= 0:
             raise reads.OverBudget(self.refusal)
         try:
             return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
+            self.expired = timeout
             if not spare and self.left() <= 0:
                 raise reads.OverBudget(self.refusal) from None
             return None
@@ -480,9 +487,19 @@ def _storage(walk: Walk, roots: list[Path]) -> list[dict]:
             again = overran is None or time.monotonic() - overran >= DU_RETRY_SECONDS
             done = walk.run(["du", "-k", "-d", "1", str(root)], spare=True) if again else None
             if done is None:
-                if again:
-                    _DU_OVERRAN[str(root)] = time.monotonic()
-                entry["error"] = "du did not finish inside the Disk budget"
+                if not again:
+                    until = time.time() + overran + DU_RETRY_SECONDS - time.monotonic()
+                    entry["du"] = (f"du paused after an earlier overrun until "
+                                   f"{datetime.datetime.fromtimestamp(until).astimezone():%H:%M %Z}")
+                elif walk.expired is None:
+                    entry["du"] = "du could not run"
+                else:
+                    entry["du"] = "du did not finish inside the Disk budget"
+                    # Only a du that had most of a read's time shows the folder is too big; one cut short by a
+                    # spent walk may finish on the next read (sd:7898 review).
+                    if walk.expired >= min(COMMAND_SECONDS, walk.within) / 2:
+                        _DU_OVERRAN[str(root)] = time.monotonic()
+                entry["error"] = entry["du"]
                 if drive:
                     entry.update(error="", drive=drive)
             else:

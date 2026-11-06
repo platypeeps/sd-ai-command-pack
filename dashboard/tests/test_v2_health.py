@@ -1046,8 +1046,65 @@ class TheDocument(Collectors, ScreenCase):
             with patch.object(health_collectors, "DU_RETRY_SECONDS", 0):
                 scan()
         self.assertEqual(ran.read_text().split(), ["du", "du"], "a du past its retry time was not tried again")
-        self.assertEqual(first, second)
+        # The second read says du is paused, not that it did not finish (review of sd:7898); the rest is the same.
+        self.assertEqual([{**entry, "du": None} for entry in first], [{**entry, "du": None} for entry in second])
         self.assertEqual((second[0]["error"], second[0]["drive"]["mount"]), ("", "/Volumes/store"))
+
+    def du_twice(self, du, *, step=0.0, within=1):
+        """Two real Disk reads of one local folder, with `du(argv, timeout)` in place of du; each du's timeout, and the reads.
+
+        `step` seconds pass on the walk's clock while `df -kP <folder>` runs, so du gets what is left of `within`.
+        """
+        store = Path(self.tmp.name) / "store"
+        store.mkdir(exist_ok=True)
+        listed = (f"storage|{store}\n", "<config>/project-dashboard/disk.conf", "")
+        stub = self.stub("df", 'if [ "$1" = -kP ]; then printf "Filesystem 1024-blocks Used Available Capacity Mounted on'
+                               f'\\n{self.DRIVE}\\n"; else cat <<\'EOF\'\n{self.DF}EOF\nfi\n')
+        self.addCleanup(lambda: getattr(health_collectors, "_DU_OVERRAN", {}).clear())
+        clock, calls, real_run = HeldClock(), [], subprocess.run
+
+        def run(argv, **kwargs):
+            if argv[0] == "du":
+                calls.append(kwargs["timeout"])
+                return du(argv, kwargs["timeout"])
+            if argv[:2] == ["df", "-kP"] and argv[2] == str(store):
+                clock.held = clock.monotonic() + step
+            return real_run(argv, **{**kwargs, "timeout": 60})
+
+        def scan():
+            return REAL_DISK_SCAN(self.connection, within=within, listed=listed, repo_paths=[])
+        with patch.dict(os.environ, {"PATH": f"{stub}{os.pathsep}{os.environ['PATH']}"}), \
+                patch.object(health_collectors, "time", clock), patch.object(health_collectors.subprocess, "run", run):
+            first, second = scan(), scan()
+        return calls, first, second
+
+    def test_a_du_that_could_not_start_is_tried_again_on_the_next_read(self):
+        """sd:7898 review: only a du that ran out its time is paused; one that could not start says so."""
+        def refused(argv, timeout):
+            raise PermissionError(13, "Permission denied", argv[0])
+        calls, first, _ = self.du_twice(refused)
+        self.assertEqual(len(calls), 2, "a du that could not start was paused as if it had overrun")
+        self.assertEqual(first["storage"][0].get("du"), "du could not run")
+
+    def test_a_du_cut_short_by_a_spent_budget_is_tried_again_on_the_next_read(self):
+        """sd:7898 review: a du that got half a second of a spent walk did not show the folder is too big."""
+        def slow(argv, timeout):
+            raise subprocess.TimeoutExpired(argv, timeout)
+        calls, _, _ = self.du_twice(slow, step=7.5, within=8)
+        self.assertEqual(calls, [0.5, 0.5], "a du cut short by the walk's budget was paused as if it had overrun")
+
+    def test_a_paused_du_says_until_when_not_that_it_did_not_finish(self):
+        """sd:7898 review: the read that skips du says so, and when du runs again, in local time."""
+        def slow(argv, timeout):
+            raise subprocess.TimeoutExpired(argv, timeout)
+        calls, first, second = self.du_twice(slow)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(first["storage"][0].get("du"), "du did not finish inside the Disk budget")
+        paused = second["storage"][0].get("du") or ""
+        self.assertRegex(paused, r"^du paused after an earlier overrun until \d\d:\d\d \S+$")
+        rows, _ = health_screen._disk_rows({**second, "volumes": []})
+        self.assertEqual([row["detail"] for row in rows if row["id"].startswith("rs:")],
+                         [f"{second['storage'][0]['root']} · local drive at /Volumes/store · {paused}; folders not measured"])
 
     def test_a_du_that_does_not_finish_and_no_df_is_a_row_not_a_refusal_of_the_area(self):
         store, rows = self.stalled_du("exit 1")

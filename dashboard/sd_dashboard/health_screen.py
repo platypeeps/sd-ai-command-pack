@@ -464,7 +464,8 @@ def _disk_rows(scan: dict) -> tuple[list[dict], dict]:
                 "type": "volume",
                 "what": f"{Path(root).name} on a network mount: {use}" if "type" in share else f"{Path(root).name}: drive {use}",
                 "detail": f"{root} · {share['type']} share at {share['mount']} · folders not measured" if "type" in share else
-                          f"{root} · local drive at {share['mount']} · du did not finish inside the Disk budget; folders not measured",
+                          f"{root} · local drive at {share['mount']} · "
+                          f"{entry.get('du') or 'du did not finish inside the Disk budget'}; folders not measured",
                 "kind": "Disk · storage folder",
                 "facts": {"Path": root, "Mount": share["mount"], "File system": share.get("type", "local"), "Used": f"{capacity}%",
                           "Free": _size(free), "Size": _size(size)},
