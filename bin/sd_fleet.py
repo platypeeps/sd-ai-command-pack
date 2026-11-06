@@ -369,14 +369,33 @@ class Tree:
         return _git_show(self.root, f"{self.commit}:{rel}")
 
     def workflows(self) -> list[str]:
+        return self._workflows() or []
+
+    def _workflows(self) -> list[str] | None:
+        """Every workflow path, or None when git could not list them."""
         directory = ".github/workflows"
         if self.commit is None:
             found = sorted(p.name for p in (self.root / directory).glob("*") if p.is_file())
         else:
             listing = sd_lib.git_output(["ls-tree", "--name-only", "-z", self.commit, f"{directory}/"],
-                                        self.root) or ""
+                                        self.root)
+            if listing is None:
+                return None
             found = sorted(name.rsplit("/", 1)[-1] for name in listing.split("\0") if name)
         return [f"{directory}/{name}" for name in found if name.endswith((".yml", ".yaml"))]
+
+    def workflow_texts(self, besides: str) -> dict[str, str] | str:
+        """Every workflow but `besides`, by path; or the path that could not be read.
+
+        A read that failed is not a workflow naming no slug: counted as one,
+        the stamp lifted the guard that workflow's pin still needs (sd:7633).
+        """
+        paths = self._workflows()
+        if paths is None:
+            return ".github/workflows/"
+        texts = {rel: self.text_at(rel) for rel in paths if rel != besides}
+        unread = next((rel for rel, text in texts.items() if text is None), None)
+        return unread if unread is not None else {rel: text for rel, text in texts.items() if text is not None}
 
 
 def _git_show(root: pathlib.Path, spec: str) -> str | None:
@@ -646,6 +665,31 @@ def is_route_template(text: str, *, self_install: bool) -> bool:
     return text in sd_setup_guard.known_texts(sd_setup_github.workflow_text(sd_setup_github.action_reference(pin)))
 
 
+def guard_change(plan: Plan, tree: Tree, propose: Callable[[str, str], None], route: str | None) -> None:
+    """The Dependabot guard beside `route`, the route workflow's text after the stamp.
+
+    A guard stays while any workflow names its slug: a refused rewrite leaves
+    the old pin, and with it the old guard. A reworded guard, under either
+    slug, is refused as setup-github refuses it without --force, and so is a
+    workflow the stamp could not read (sd:7633).
+    """
+    others = tree.workflow_texts(besides=ROUTE_PATH)
+    if isinstance(others, str):
+        plan.refused.append(f"{DEPENDABOT_PATH}: could not read {others}, so the stamp keeps the guard as it is")
+        return
+    current = tree.text_at(DEPENDABOT_PATH)
+    differing = sd_setup_guard.differing(current, sd_setup_guard.DEFAULT_ACTION)
+    if differing:
+        plan.refused.append(f"{DEPENDABOT_PATH}: the guard for {', '.join(differing)} differs from the template, so "
+                            "the stamp keeps it; run `sd-review setup-github --force` there to replace it")
+        return
+    try:
+        slugs = sd_setup_guard.pinned_slugs([route or "", *others.values()])
+        propose(DEPENDABOT_PATH, sd_setup_guard.rendered(current, slugs=slugs))
+    except sd_setup_guard.GuardError as error:
+        plan.refused.append(f"{DEPENDABOT_PATH}: {error}")
+
+
 def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
                      self_install: bool) -> None:
     """Route workflow, its Dependabot guard, and the check workflow where none validates."""
@@ -666,14 +710,7 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
             plan.refused.append(f"{ROUTE_PATH}: differs from the template beyond its pin, so the stamp keeps it; "
                                 "run `sd-review setup-github --force` there to replace it")
         if not self_install:
-            try:
-                # A guard stays while any workflow names its slug: a refused
-                # rewrite leaves the old pin, and with it the old guard (sd:7633).
-                others = [tree.text_at(rel) or "" for rel in tree.workflows() if rel != ROUTE_PATH]
-                slugs = sd_setup_guard.pinned_slugs([route or "", *others])
-                propose(DEPENDABOT_PATH, sd_setup_guard.rendered(tree.text_at(DEPENDABOT_PATH), slugs=slugs))
-            except sd_setup_guard.GuardError as error:
-                plan.refused.append(f"{DEPENDABOT_PATH}: {error}")
+            guard_change(plan, tree, propose, route)
 
     # Check workflow, only where nothing else validates a pull request, and
     # create-only: a file already at the path is the repository's, whatever

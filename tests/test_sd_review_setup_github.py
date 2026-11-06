@@ -1374,6 +1374,109 @@ class OldSlugGuardTests(SetupFixture):
         self.assertIn(f"kept {guard.DEPENDABOT_RELATIVE_PATH}", stream.getvalue())
 
 
+#: An old-slug guard a consumer reworded by hand, at the minimal file's item indent.
+CUSTOM_OLD = (
+    "      # Kept by hand while the old pin lives on.\n"
+    f'      - dependency-name: "{OLD_SLUG}/actions/review-route"\n'
+)
+
+
+class EveryGuardTests(SetupFixture):
+    """sd:7633 round 4: every matching guard is read, under each slug, not the first."""
+
+    NEW = f"{setup.ACTION_REPOSITORY}/actions/review-route"
+    OLD = f"{OLD_SLUG}/actions/review-route"
+
+    def sibling(self, root: pathlib.Path, slug: str) -> None:
+        path = self.workflow(root).parent / "other.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"jobs:\n  x:\n    steps:\n      - uses: {slug}/actions/review-route@{PIN}\n",
+                        encoding="utf-8")
+
+    def names(self, text: str) -> list[str]:
+        return [line.split('"')[1] for line in text.splitlines() if "dependency-name:" in line]
+
+    def test_a_customised_old_guard_after_a_same_new_one_reads_differs(self) -> None:
+        text = guard.minimal_file() + CUSTOM_OLD
+        self.assertEqual(guard.guard_states(text), ("differs",))
+        self.assertEqual(guard.guard_state(text, guard.DEFAULT_ACTION), "differs")
+
+    def test_install_refuses_to_drop_a_customised_old_guard_without_force(self) -> None:
+        root = self.make_repo()
+        seeded = self.seed_dependabot(root, guard.minimal_file() + CUSTOM_OLD).read_text()
+        with self.assertRaises(setup.Refusal) as caught:
+            install(root)
+        self.assertIn(f"guard for {self.OLD} that differs", str(caught.exception))
+        self.assertIn("--force", str(caught.exception))
+        self.assertEqual(self.dependabot(root).read_text(), seeded)
+
+    def test_install_refuses_to_replace_a_customised_old_guard_a_sibling_pins(self) -> None:
+        root = self.make_repo()
+        seeded = self.seed_dependabot(root, guard.minimal_file() + CUSTOM_OLD).read_text()
+        self.sibling(root, OLD_SLUG)
+        with self.assertRaises(setup.Refusal):
+            install(root)
+        self.assertEqual(self.dependabot(root).read_text(), seeded)
+
+    def test_force_converges_both_guards_and_the_next_run_is_unchanged(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, guard.minimal_file() + CUSTOM_OLD)
+        self.sibling(root, OLD_SLUG)
+        install(root, force=True)
+        after = self.dependabot(root).read_text()
+        self.assertEqual(sorted(self.names(after)), sorted([self.NEW, self.OLD]))
+        self.assertEqual(guard.guard_state(after), "same")
+        self.assertEqual(install(root)["status"], "unchanged")
+
+    def test_force_keeps_one_guard_of_a_duplicated_dependency(self) -> None:
+        reworded = CUSTOM_OLD.replace(OLD_SLUG, setup.ACTION_REPOSITORY)
+        text = guard.minimal_file() + reworded
+        self.assertEqual(guard.guard_state(text), "differs")
+        after = guard.rendered(text)
+        self.assertEqual(self.names(after), [self.NEW])
+        self.assertEqual((guard.guard_state(after), guard.rendered(after)), ("same", after))
+
+    def test_remove_takes_every_copy_of_a_guard_out(self) -> None:
+        text = old_slug(guard.minimal_file()) + old_slug(guard.guard_block("      "))
+        entry = "".join(line + "\n" for line in guard.minimal_file().splitlines()[:7])
+        self.assertEqual(guard.unguarded(text), entry)
+
+    def test_remove_refuses_to_drop_a_customised_guard_without_force(self) -> None:
+        root = self.make_repo()
+        install(root)
+        seeded = self.seed_dependabot(root, self.dependabot(root).read_text() + CUSTOM_OLD).read_text()
+        with self.assertRaises(guard.GuardError) as caught:
+            setup.remove(root, setup_args(remove=True), io.StringIO())
+        self.assertIn("--force", str(caught.exception))
+        self.assertTrue(self.workflow(root).exists())
+        self.assertEqual(self.dependabot(root).read_text(), seeded)
+        self.assertEqual(setup.remove(root, setup_args(remove=True, force=True), io.StringIO()), 0)
+        self.assertEqual(self.names(self.dependabot(root).read_text()), [])
+
+    def test_remove_keeps_a_customised_guard_a_sibling_pins_without_force(self) -> None:
+        root = self.make_repo()
+        install(root)
+        self.seed_dependabot(root, self.dependabot(root).read_text() + CUSTOM_OLD)
+        self.sibling(root, OLD_SLUG)
+        self.assertEqual(setup.remove(root, setup_args(remove=True), io.StringIO()), 0)
+        self.assertEqual(self.names(self.dependabot(root).read_text()), [self.OLD])
+
+    def test_a_docs_gate_guard_and_pin_under_the_old_slug_read_as_the_packs(self) -> None:
+        old = guard.guard_lines(f"{OLD_SLUG}/actions/docs-gate")
+        self.assertIn("# The sd-ai-command-pack pin", old[0])
+        text = guard.minimal_file().replace(guard.guard_block("      "), guard.guard_block(
+            "      ", f"{OLD_SLUG}/actions/docs-gate"))
+        self.assertEqual((guard.guard_state(text), guard.guard_state(text, "docs-gate")), ("same", "same"))
+        self.assertEqual(guard.pinned_actions(f"      - uses: {OLD_SLUG}/actions/docs-gate@{PIN}\n"),
+                         ("docs-gate",))
+
+    def test_a_census_folds_every_action_in_one_entry(self) -> None:
+        docs = guard.guard_block("      ", "docs-gate").replace("# The sd-workflow pin", "# Our pin")
+        text = guard.minimal_file() + docs
+        self.assertEqual(guard.guard_states(text), ("differs",))
+        self.assertEqual(guard.guard_state(text, guard.DEFAULT_ACTION), "same")
+
+
 class RemoveTests(SetupFixture):
     """`--remove`: the supported way out of the lane (sd:1843 fleet cleanup)."""
 

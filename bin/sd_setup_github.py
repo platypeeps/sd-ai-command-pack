@@ -321,10 +321,9 @@ def guard_after(current: str | None, found: str, *, self_install: bool, force: b
     if self_install:
         return current
     if found == "differs" and not force:
-        raise Refusal(
-            f"{sd_setup_guard.DEPENDABOT_RELATIVE_PATH} carries a guard for "
-            f"{sd_setup_guard.DEPENDENCY} that differs from what this build writes; rerun "
-            "with --force to replace it")
+        names = ", ".join(sd_setup_guard.differing(current, sd_setup_guard.DEFAULT_ACTION))
+        raise Refusal(f"{sd_setup_guard.DEPENDABOT_RELATIVE_PATH} carries a guard for {names} that differs from "
+                      "what this build writes; rerun with --force to replace it")
     return sd_setup_guard.rendered(current, slugs=slugs)
 
 

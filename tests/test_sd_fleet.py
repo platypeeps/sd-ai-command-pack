@@ -857,6 +857,49 @@ class OldSlugGuard(Fleet):
         self.assertIn(f'-      - dependency-name: "{self.OLD}/actions/review-route"', change["diff"])
         self.assertIn('+      - dependency-name: "platypeeps/sd-workflow/actions/review-route"', change["diff"])
 
+    #: An old-slug guard a consumer reworded by hand, at the minimal file's item indent.
+    CUSTOM_OLD = ("      # Kept by hand while the old pin lives on.\n"
+                  f'      - dependency-name: "{OLD}/actions/review-route"\n')
+
+    def guard_refused(self, plan: dict) -> bool:
+        return (any(line.startswith(sd_fleet.DEPENDABOT_PATH) and "--force" in line for line in plan["refused"])
+                and sd_fleet.DEPENDABOT_PATH not in [change["path"] for change in plan["changes"]])
+
+    def test_the_stamp_refuses_to_drop_a_customised_old_guard(self) -> None:
+        dependabot = sd_setup_guard.minimal_file() + self.CUSTOM_OLD
+        root, remote = self.repo("custom", {sd_fleet.ROUTE_PATH: self.route(), sd_fleet.DEPENDABOT_PATH: dependabot})
+        [plan] = self.plan([(root, remote)])
+        self.assertTrue(self.guard_refused(plan), plan["refused"])
+
+    def test_the_stamp_refuses_to_reword_a_customised_new_guard(self) -> None:
+        dependabot = sd_setup_guard.minimal_file().replace("# The sd-workflow pin", "# Our pin")
+        root, remote = self.repo("reworded", {sd_fleet.ROUTE_PATH: self.route(),
+                                              sd_fleet.DEPENDABOT_PATH: dependabot})
+        [plan] = self.plan([(root, remote)])
+        self.assertTrue(self.guard_refused(plan), plan["refused"])
+
+    def test_an_unread_workflow_refuses_the_guard_rather_than_dropping_it(self) -> None:
+        other = ".github/workflows/other.yml"
+        root, remote = self.repo("unread", {
+            sd_fleet.ROUTE_PATH: self.route(), other: f"      - uses: {self.OLD}/actions/review-route@{PIN}\n",
+            sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())})
+        text_at = sd_fleet.Tree.text_at
+        with mock.patch.object(sd_fleet.Tree, "text_at",
+                               lambda tree, rel: None if rel == other else text_at(tree, rel)):
+            [plan] = self.plan([(root, remote)])
+        self.assertTrue(any(line.startswith(sd_fleet.DEPENDABOT_PATH) and other in line for line in plan["refused"]),
+                        plan["refused"])
+        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+
+    def test_an_unlisted_workflow_folder_refuses_the_guard_rather_than_dropping_it(self) -> None:
+        root, remote = self.repo("unlisted", {sd_fleet.ROUTE_PATH: self.route(),
+                                              sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())})
+        with mock.patch.object(sd_fleet.Tree, "_workflows", lambda tree: None):
+            [plan] = self.plan([(root, remote)])
+        self.assertTrue(any(line.startswith(f"{sd_fleet.DEPENDABOT_PATH}: could not read .github/workflows/")
+                            for line in plan["refused"]), plan["refused"])
+        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+
 
 class Wiring(unittest.TestCase):
     def test_sd_exposes_the_verb(self) -> None:
