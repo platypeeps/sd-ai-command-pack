@@ -24,7 +24,8 @@ family's. `realm_places` says which realms are places, for the rail: a realm or 
 
 **Which realm a row is in (sd:5064).** Tasks' realm tabs, Personal, Work and the others: the `dashboard.realms` setting row
 (sd:5109; Settings edits it) names each realm and the checkout path globs that are its (`realms`); `realm_of` gives a row the first realm whose glob matches its repo path. The
-hoa checkout's rows are HOA's before any glob (pack sd:7687). A row with no repo, or a repo no line claims, is Personal; a report is in no realm. Without a readable row a repo row's
+hoa checkout's rows are HOA's before any glob (pack sd:7687). A row with no repo, or a repo no line claims, is Personal; a report's realm is
+`report_realm`'s: its pull repo's for pr-attention, else its family's key when that is a realm (pack sd:7774). Without a readable row a repo row's
 realm is unknown (None), so Personal holds only the rows with no repo and the page says why.
 
 **What is not read.** A missing hoa checkout, family or list makes the view `unknown` with the reason and the line to
@@ -42,8 +43,8 @@ from sd_db import reads
 
 from .documents import _config_dir, pipe_lines
 
-__all__ = ["AREAS", "area_of", "briefs", "parse_realms", "realm_issues", "realm_of", "realm_places", "realms", "reports", "series_job",
-           "task_rows", "tasks"]
+__all__ = ["AREAS", "area_of", "briefs", "parse_realms", "pull_url", "realm_issues", "realm_of", "realm_places", "realms", "report_realm",
+           "reports", "series_job", "task_rows", "tasks"]
 
 #: The places, by family key, and their labels.
 AREAS = {"hoa": "HOA", "home": "Home"}
@@ -103,7 +104,7 @@ def realm_of(repo: str | None, kind: str, rules: list | None, hoa: str | None = 
     """The realm of an item: `hoa` for the hoa checkout's (`hoa`, as `area_of`), else the first `rules` realm a glob of
     which matches its repo path, else `personal`.
 
-    No repo is Personal. A report is in no realm: its family's Reports view lists it. pack sd:7687: the hoa checkout is
+    No repo is Personal. A report's realm is `report_realm`'s, here None. pack sd:7687: the hoa checkout is
     HOA before any glob and without a realm list, so its rows leave Personal for the HOA tab. `rules` None (no realm
     list, or one not read) leaves any other repo row's realm unknown, None.
     """
@@ -117,6 +118,34 @@ def realm_of(repo: str | None, kind: str, rules: list | None, hoa: str | None = 
     if rules is None:
         return None
     return next((r["id"] for r in rules if any(fnmatch.fnmatchcase(path, glob) for glob in r["globs"])), "personal")
+
+
+#: A GitHub pull's address in a pr-attention report's basis, `<state> <url>` (`sd_db.pr_attention.alert`).
+PULL = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/[1-9][0-9]*")
+
+
+def pull_url(job: str | None, basis: str | None) -> str | None:
+    """The GitHub pull a pr-attention report is about, from its attention basis; None for any other report or basis
+    (pack sd:7774, sd:7776). Tasks reads its repo's realm from it, and Today's Needs you links it."""
+    from sd_db.pr_attention import JOB
+
+    found = PULL.search(basis) if job == JOB and isinstance(basis, str) else None
+    return found[0] if found else None
+
+
+def report_realm(job: str | None, basis: str | None, rules: list | None, hoa: str | None, *, checkouts: dict,
+                 families: list) -> str | None:
+    """A report's realm (pack sd:7774): a pr-attention report's is its pull repo's registered checkout's (`checkouts`,
+    `(owner, name)` lower-cased to path, by `realm_of`); any other's is its family's key when that key is a realm id
+    (`families`, `reports_screen.families`' list). No match is Personal; without a realm list it is unknown, None."""
+    if rules is None:
+        return None
+    found = PULL.fullmatch(pull_url(job, basis) or "")
+    if found:
+        path = checkouts.get((found[1].lower(), found[2].lower()))
+        return realm_of(path, "task", rules, hoa) if path else "personal"
+    ids = {realm["id"] for realm in rules}
+    return next((family["key"] for family in families if family["key"] in ids and job in family["jobs"]), "personal")
 
 
 def area_of(repo: str | None, kind: str, hoa: str | None) -> str | None:

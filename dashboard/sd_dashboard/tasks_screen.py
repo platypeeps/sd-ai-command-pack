@@ -128,7 +128,7 @@ def _rows(connection, rows, found, *, now: str) -> list[dict]:
     `found` is `places.realms`, the realm rules each row's `realm` follows.
     """
     from .hoa_screen import checkout
-    from .places import area_of, realm_of
+    from .places import area_of, realm_of, report_realm
     from .screens import _repo_labels
 
     label = _repo_labels(row["repo"] for row in rows)
@@ -137,8 +137,11 @@ def _rows(connection, rows, found, *, now: str) -> list[dict]:
     rules = found["list"] if found["state"] in ("read", "partial") else None
     out = []
     filing = {}
+    sources = None
     for row in rows:
         state = workflow.item_state(connection, row["id"])
+        if row["kind"] == "report" and sources is None:
+            sources = _report_sources(connection)
         if row["repo"] not in filing:
             filing[row["repo"]] = issue_filing.targets(connection, row["repo"])
         out.append({
@@ -165,13 +168,38 @@ def _rows(connection, rows, found, *, now: str) -> list[dict]:
             # The place Tasks' Realm HOA and Home filter on: the HOA and Home pages' Tasks rule (`places.area_of`).
             "area": area_of(row["repo"], row["kind"], hoa),
             # The realm Tasks' Realm filter narrows to: Personal, Work and the others (sd:5064, `places.realm_of`).
-            "realm": realm_of(row["repo"], row["kind"], rules, hoa),
+            "realm": (report_realm(*_job_basis(state["item"]), rules, hoa, **sources) if row["kind"] == "report"
+                      else realm_of(row["repo"], row["kind"], rules, hoa)),
             # File GitHub issue and File Jira issue (sd:5103): where each would file, or why it is off; and the
             # issue the item's ref names, for the row's link icon.
             "issue_targets": filing[row["repo"]], "issue_link": issue_filing.link_of(state["item"]),
             **_base_fields(state["item"]),
         })
     return out
+
+
+def _report_sources(connection) -> dict:
+    """What `places.report_realm` reads (pack sd:7774): each registered GitHub checkout by `(owner, name)` lower-cased,
+    and the report families; a family list that did not read gives no report a family's realm."""
+    from sd_db.protection import github_slug
+
+    from .reports_screen import families
+
+    checkouts = {}
+    for path, remote in connection.execute("SELECT path, remote FROM repo WHERE remote IS NOT NULL ORDER BY path"):
+        slug = github_slug(remote)
+        if slug:
+            checkouts.setdefault((slug[0].lower(), slug[1].lower()), path)
+    return {"checkouts": checkouts, "families": families(connection)["list"]}
+
+
+def _job_basis(item) -> tuple[str | None, str | None]:
+    """A report item's job and attention basis, or Nones when its fields do not read."""
+    try:
+        report = (json.loads(item["fields"] or "{}") or {}).get("report")
+    except (ValueError, AttributeError):
+        return None, None
+    return (report.get("job"), report.get("attention_basis")) if isinstance(report, dict) else (None, None)
 
 
 def _column(row, name: str):
