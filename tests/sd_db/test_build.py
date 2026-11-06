@@ -4,6 +4,7 @@ The design's failure table names most of these tests: system
 `docs/work/2026-10-24-build-dispatcher/design.md`.
 """
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -300,6 +301,13 @@ class Claim(Case):
         self.assertEqual([row["status"] for row in queued], ["queued"])
         taken = self.claim()
         self.assertEqual(([m["item"] for m in taken["members"]], self.statuses([item])), ([item], ["in_progress"]))
+
+    def test_a_kill_whose_descendants_did_not_read_passes_once_its_group_is_gone(self):
+        """Review of 3072db937: a failed `ps` read with the recorded group gone blocked every reap, managed too."""
+        gone = subprocess.Popen(["true"], start_new_session=True)
+        gone.wait()
+        with mock.patch.object(build, "descendant_groups", return_value=None):
+            self.assertTrue(build.kill_group(gone.pid))
 
     def test_pickup_queues_an_unmanaged_task(self):
         """Pack sd:7868: auto-pickup, once on, picks what a press takes."""

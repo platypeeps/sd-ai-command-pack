@@ -1079,7 +1079,13 @@ def descendant_groups(pgid: int) -> dict[int, str] | None:
 
 def kill_group(pgid: int) -> bool:
     """SIGKILL a builder's process group and each group its members' descendants run in; True once ESRCH
-    answers on every one, False while one may live or the descendants did not read."""
+    answers on every one, False while one may live.
+
+    A `ps` that did not answer leaves only the recorded group to signal and
+    read: its ESRCH is True, as `end_group` reads it. A failed read blocked
+    every reap, of managed builds too, with every group gone (review of
+    3072db937).
+    """
     if not isinstance(pgid, int) or pgid <= 1 or pgid == os.getpgrp():
         return False
     below = descendant_groups(pgid)
@@ -1091,7 +1097,7 @@ def kill_group(pgid: int) -> bool:
             pass  # ESRCH: gone; EPERM may be a group of zombies only: the probe decides
     for _ in range(20):
         if all(Probe.group(group) is False for group in groups):
-            return below is not None
+            return True
         time.sleep(0.1)
     return False
 
