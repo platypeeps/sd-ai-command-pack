@@ -786,7 +786,7 @@ def mine_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
             continue
         match = " OR ".join("(tracker = ? AND repo = ? COLLATE NOCASE)" for _ in sources)
         rows = connection.execute(
-            "SELECT tracker, url, number, title, state, reason, last_seen FROM shadow "
+            "SELECT tracker, repo, url, number, title, state, reason, last_seen FROM shadow "
             f"WHERE ({match}) AND kind = 'issue' AND state = 'open' "
             f"AND reason IN ({', '.join('?' * len(MINE))}) ORDER BY last_seen DESC, id DESC",
             [value for pair in sources.items() for value in pair] + list(MINE)).fetchall()

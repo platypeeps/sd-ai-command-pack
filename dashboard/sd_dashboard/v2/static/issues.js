@@ -25,6 +25,10 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
 // Details post /api/github/issues/view with the category, each with Undo. New category, in the section head, and a group's
 // Rename and Remove post /api/github/issues/categories with the list the page read; Remove asks nothing, offers Undo,
 // and leaves the group's issues uncategorized. A view store not read groups nothing: a line says why, and the commands are off.
+// pack sd:7841: a GitHub row whose issue a pull request closes (`pulls`, issues.with_pulls) shows a pull request icon that
+// opens the first on GitHub in a new tab, as Today's pull request icon does (pack sd:7776); Details' Open PR opens the
+// same one. The first is the newest open one, else the newest settled: the open one is the work in flight. Details' Pull
+// requests names each, and links the others, which no command opens. A row with none draws neither.
 (() => {
   const { html, put, plural } = window.markup;
   const $ = id => document.getElementById(id);
@@ -64,6 +68,10 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   const hiddenSeg = (open, hidden) => window.shell.aside.seg('hidden', 'Hidden', hid(), { open, aside: hidden });
   const oid = r => `iss:${r.key}`;
   const title = r => html`<button type="button" data-iss-open="${oid(r)}">${r.title || r.ref}</button>`;
+  const pullsOf = r => Array.isArray(r.pulls) ? r.pulls.filter(p => /^https:\/\/github\.com\//.test(String(p?.url || ''))) : [];
+  const prIcon = r => { const P = pullsOf(r); if (!P.length) return '';
+    const more = P.length > 1 ? `; Details name ${plural(P.length - 1, 'more pull request')}` : '';
+    return html`<a class="icon-btn" href="${P[0].url}" target="_blank" rel="noopener noreferrer" aria-label="${`Open pull request ${P[0].ref} on GitHub`}" data-tip="${`Pull request ${P[0].ref} (${P[0].state}) closes this issue: opens on GitHub in a new tab${more}`}">${I('git-pull-request')}</a>`; };
   const selected = r => html` data-id="${oid(r)}" aria-selected="${String(window.shell?.row?.() === oid(r))}"`;
   let READ = {};
   const isOpen = r => (r.state || 'open') === 'open';
@@ -74,7 +82,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
         <td class="repo">${r.repo}</td>
         <td class="why">${isOpen(r) ? r.reason : `${r.state} · ${r.reason}`}</td>
         <td class="when">${r.updated_at ? html`<time class="rel" datetime="${r.updated_at}"></time>` : ph(r)}</td>
-        <td class="act">${actions(oid(r))}</td></tr>`;
+        <td class="act">${prIcon(r)}${actions(oid(r))}</td></tr>`;
   // The GitHub repo groups, then the Jira category groups; a view store not read groups no Jira row and says so above them.
   function body(rows) {
     const J = rows.filter(jira), G = [...repoGroups(rows.filter(r => !jira(r))), ...(STORE ? [] : groups(J))];
@@ -125,12 +133,11 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     draw(); drawIntake();
   }
   const NO_VIEW_CLI = 'no CLI: view state; the dashboard writes it (POST /api/github/issues/view)';
-  // pack sd:7787: a bulk Hide sends one write per row at once; the page reads again once, when the last of them settles.
-  let WRITING = 0;
-  const settled = () => { if (--WRITING === 0) window.githubIssues?.again(); };
-  const view = (o, hidden) => { WRITING++;
-    return window.shell.post('/api/github/issues/view', { key: o.key, hidden })
-      .then(v => { landed(o.key, hidden); settled(); return v; }, e => { settled(); throw e; }); };
+  // pack sd:7787: a bulk Hide sends one write per row, BULK_RUNS at a time (shell.js, pack sd:7852); the page reads
+  // again once, after the group (shell.afterBulk), and after a refusal too.
+  const settled = () => window.shell.afterBulk('issues', () => window.githubIssues?.again());
+  const view = (o, hidden) => window.shell.post('/api/github/issues/view', { key: o.key, hidden })
+    .then(v => { landed(o.key, hidden); settled(); return v; }, e => { settled(); throw e; });
   // pack sd:7708: a category set or cleared moves its row at once and opens the group it went to; the page then reads again.
   const NO_CAT_CLI = 'no CLI: issue categories are view state; the dashboard writes them';
   const categorize = (key, category) => window.shell.post('/api/github/issues/view', { key, category })
@@ -184,7 +191,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
         <td class="what">${title(r)}</td>
         <td class="repo">${r.repo}</td>
         <td class="why">${r.author}</td>
-        <td class="act">${control(r)}</td></tr>`)}`
+        <td class="act">${prIcon(r)}${control(r)}</td></tr>`)}`
       : html`<tr class="empty"><td colspan="6">${showHidden() ? 'No intake issue is hidden.' : 'No third-party issue waits for an item in a repo with GitHub issues on.'}</td></tr>`);
     // The head box: on when every row shown is picked, mixed when some are, off with no row to pick.
     const all = $('intake-all'), seen = onScreen(), n = seen.filter(r => PICKED.has(oid(r))).length;
@@ -281,7 +288,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     const keep = new Set();
     rows().forEach(r => { keep.add(oid(r)); C.put({ id: oid(r), type: typeOf(r), label: `${r.tracker || 'GitHub'} ${r.ref} ${r.title}`.trim(),
       url: r.url, item: r.item, ref: r.ref, slug: r.slug, key: r.key, hidden: !!r.hidden, category: r.category || null,
-      intake: !!r.intake, repo_path: r.repo_path, title: r.title }); });
+      intake: !!r.intake, repo_path: r.repo_path, title: r.title, pulls: pullsOf(r) }); });
     // pack sd:7708: each category is an object for its group row's Rename and Remove; isscats holds New category.
     if (!FAILED_ISSUES()) {
       CATS.forEach(name => { keep.add(`isscat:${name}`); C.put({ id: `isscat:${name}`, type: 'issue category', label: name, name }); });
@@ -301,6 +308,10 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   const category = r => !jira(r) ? '' : html`<dt>Category</dt><dd>${STORE ? html`<span class="ph">not read: ${STORE}</span>`
     : !CATS.length ? html`<span class="ph">none yet: New category, in the list's head, adds one</span>`
     : html`<select class="cap-in" data-iss-cat="${oid(r)}" aria-label="Category">${[...byName().map(n => [n, n]), ['', 'None (Uncategorized)']].map(([v, l]) => html`<option value="${v}"${(r.category || '') === v ? html` selected` : ''}>${l}</option>`)}</select>`}</dd>`;
+  // pack sd:7841: the pull requests that close the issue; Open PR opens the first, so only the others are links.
+  const pullsFact = r => { const P = pullsOf(r); if (!P.length) return '';
+    return html`<dt>${P.length > 1 ? 'Pull requests' : 'Pull request'}</dt><dd>${P.map((p, i) => html`${i ? ', ' : ''}${i
+      ? html`<a href="${p.url}" target="_blank" rel="noopener noreferrer">${p.ref}</a>` : p.ref} · ${p.state}`)}</dd>`; };
   const stamp = (r, v) => v ? html`<time class="rel" data-long datetime="${v}"></time>` : ph(r);
   function details(id, open = true) {
     const r = rowOf(id); if (!r) return;
@@ -310,7 +321,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
       <h2>${r.title || r.ref}</h2>
       <dl><dt>Issue</dt><dd>${tracker} ${r.ref}</dd><dt>Repo</dt><dd>${r.repo}${r.slug ? ` · ${r.slug}` : ''}</dd>
         <dt>State</dt><dd>${fact(r, r.state)}${r.status ? ` · ${r.status}` : ''}</dd>
-        ${r.reason ? html`<dt>Why</dt><dd>${r.reason}</dd>` : ''}${category(r)}
+        ${r.reason ? html`<dt>Why</dt><dd>${r.reason}</dd>` : ''}${category(r)}${pullsFact(r)}
         <dt>Assignee</dt><dd>${fact(r, r.assignee)}</dd><dt>Reporter</dt><dd>${fact(r, r.reporter || r.author)}</dd>
         <dt>Opened</dt><dd>${stamp(r, r.created_at)}</dd><dt>Updated</dt><dd>${stamp(r, r.updated_at)}</dd>
         <dt>Labels</dt><dd><span class="ph">not stored</span></dd><dt>Priority</dt><dd><span class="ph">not stored</span></dd>
@@ -355,11 +366,18 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
         : BUSY.has(o.key) ? 'it is being filed now' : true,
       cli: o => `cd ${window.shell.shq(o.repo_path || '')} && sd task add --ref ${window.shell.shq(o.key)} ${window.shell.shq(o.title || '')}`,
       run: o => file(o.key).then(id => `Filed sd:${id} · ${o.label}`) };
+    // pack sd:7841: Open PR, the pull request the row's icon opens: the shared Open on GitHub of a pull request
+    // (commands.openPullRequest), under its own id, label and key, since this type's Open on GitHub opens the issue.
+    const firstPull = o => { const p = o.pulls?.[0]; return p ? { repo: String(p.ref || '').split('#')[0], number: p.number, url: p.url } : {}; };
+    const PR_CMD = { ...window.commands.openPullRequest({ on: 'github issue', pr: firstPull, primary: () => false }),
+      id: 'github issue.pr', label: 'Open PR', key: 'p', icon: 'git-pull-request',
+      does: 'Opens the pull request that closes this issue on GitHub, in a new tab.',
+      when: o => o.pulls?.length ? true : 'no pull request closes this issue' };
     const listOf = w => w.categories;
     C.register(
       opens('jira issue', 'Open in Jira', o => `open ${window.shell.shq(o.url || '')}`), item('jira issue'), ...hides('jira issue'),
       opens('github issue', 'Open on GitHub', o => o.slug ? `gh issue view ${o.ref.replace('#', '')} --repo ${o.slug} --web` : `open ${window.shell.shq(o.url || '')}`),
-      item('github issue'), ...hides('github issue'), FILE_CMD,
+      item('github issue'), ...hides('github issue'), FILE_CMD, PR_CMD,
       REG_CAT,
       { id: 'issue categories.add', on: 'issue categories', label: 'New category', key: 'a', risk: 'undo',
         does: 'Adds a category to group your Jira issues by. Nothing is written to Jira.',

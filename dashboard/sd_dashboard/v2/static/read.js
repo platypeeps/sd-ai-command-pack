@@ -29,7 +29,7 @@
 // rows.reread();   after a write landed. A refused write calls load(): only reread() says the change landed.
 (() => {
   const capital = s => s.charAt(0).toUpperCase() + s.slice(1);
-  window.SHELL_READ = ({ fetch, commands: C, state: shellState, row, listen }) => spec => {
+  window.SHELL_READ = ({ fetch, commands: C, state: shellState, row, listen, afterBulk = (key, fn) => fn() }) => spec => {
     const { what } = spec, state = s => shellState(s, spec.slot), open = () => !spec.active || spec.active();
     const at = () => typeof spec.source === 'function' ? spec.source() : spec.source;
     let generation = 0, applied = 0, putIds = new Set(), picks = [], flight = null, queued = null;
@@ -87,8 +87,12 @@
       return f.p;
     }
     // A read in flight may have started before this write landed, so a reread never joins it: it queues one read behind
-    // it, and every reread called before that read starts shares it. N writes in one bulk run end in at most two reads.
-    function reread() {
+    // it, and every reread called before that read starts shares it. N writes in one bulk run end in at most two reads:
+    // the bulk runner sends a group's writes a few at a time (pack sd:7852), so their rereads wait for the group to settle
+    // (afterBulk) and read once.
+    const token = {};
+    const reread = () => afterBulk(token, readAgain);
+    function readAgain() {
       if (queued) return queued;
       if (!flight) return start(true);
       const q = queued = flight.p.catch(() => {}).then(() => { queued = null; return start(true); });

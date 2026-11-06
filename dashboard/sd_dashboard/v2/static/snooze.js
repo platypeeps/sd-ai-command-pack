@@ -24,8 +24,10 @@
 
   // `types` are the page's row types; `off(o)` names why a row has nothing to snooze, or is false; `reread` reads the page
   // again, so a snoozed row leaves the list and an unsnoozed one comes back. Undo writes the other way.
+  // pack sd:7852: a bulk group's rows read the page again once, after the group (shell.afterBulk).
   function register(C, { page, types, off = () => false, reread, ignore = false }) {
-    const post = (row, until, seen) => window.shell.post('/api/snooze', { page, row, until, seen }).then(v => { reread(); return v; });
+    const post = (row, until, seen) => window.shell.post('/api/snooze', { page, row, until, seen })
+      .then(v => { window.shell.afterBulk(`snooze:${page}`, reread); return v; });
     const fields = () => [{ name: 'until', label: 'Snooze until', options: CHOICES.map(ch => ({ value: ch.id, label: ch.label })) }];
     types.forEach(t => C.register({ id: `${t}.snooze`, on: t, label: 'Snooze', does: 'Hides the row until the time you pick; Undo shows it again.', key: 'z', risk: 'undo', bulk: true,
       when: o => off(o) || true, cli: CLI, fields,

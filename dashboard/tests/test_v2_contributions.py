@@ -744,8 +744,9 @@ R.off = [cmd('contribution.task').when(ext), cmd('contribution.ack').when(one)];
         newer = dict(self.doc, rows=[r for r in self.doc["rows"] if r["key"] != ext["key"]])
         answer = """(() => { let n = 0; return path => path !== '/api/contributions/page' ? [200, { ok: true }]
           : (n++, n === 2 ? later([200, DOC], 60) : n === 3 ? [200, """ + json.dumps(newer) + """] : [200, DOC]); })()"""
-        out = self.run_page("""shellBulk(cmd('contribution.ack'), [C.get('github:https://github.com/example/project/pull/1'), C.get('github:""" + EXTERNAL + """')]);
-await flush(); R.rows = ELS.rows.html;""", answer=answer)
+        # Two single runs: a bulk group's rows now read again once, after the group (pack sd:7852).
+        out = self.run_page("""shellRun(cmd('contribution.ack'), C.get('github:https://github.com/example/project/pull/1'));
+shellRun(cmd('contribution.ack'), C.get('github:""" + EXTERNAL + """')); await flush(); R.rows = ELS.rows.html;""", answer=answer)
         self.assertEqual(len(out["gets"]), 3)
         self.assertNotIn(EXTERNAL, out["R"]["rows"])
 
@@ -1169,8 +1170,9 @@ R.rows = ELS.rows.html; R.type = C.get('{ONE}').type; R.bars = ELS.bars.html;"""
 
     def test_a_reread_waits_for_a_read_that_started_before_its_write_landed(self):
         # The write barrier (PR 73, r4167523338): the second write lands while the first write's reread is in flight.
+        # Two single runs: a bulk group's rows now read again once, after the group (pack sd:7852).
         out = self.run_page(f"""held.shift()(); await flush();
-shellBulk(cmd('contribution.ack'), [C.get('{ONE}'), C.get('github:{EXTERNAL}')]); await flush();
+shellRun(cmd('contribution.ack'), C.get('{ONE}')); shellRun(cmd('contribution.ack'), C.get('{ONE}')); await flush();
 R.mid = OUT.gets.length; await answerAll(); R.end = OUT.gets.length;""", extra=HELD, answer="HELD_ANSWER")
         self.assertEqual(out["R"]["mid"], 2, "a reread joined or overtook a read started before its write landed")
         self.assertEqual(out["R"]["end"], 3)
