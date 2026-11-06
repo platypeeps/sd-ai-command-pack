@@ -298,16 +298,26 @@ class RemoteAccess(ScreenCase):
         return gate, inside, held
 
     def local_reads(self, count, results):
-        headers = [("Host", f"127.0.0.1:{self.port}")]
-        threads = [threading.Thread(target=lambda: results.append(self.request("/api/github/issues", headers=headers)))
-                   for _ in range(count)]
+        """`count` local reads, each on its own thread, with room to wait for a slot on a loaded machine."""
+        def read():
+            client = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+            try:
+                client.request("GET", "/api/github/issues", headers={"Host": f"127.0.0.1:{self.port}"})
+                answer = client.getresponse()
+                results.append((answer.status, dict(answer.getheaders()), answer.read().decode()))
+            finally:
+                client.close()
+
+        threads = [threading.Thread(target=read) for _ in range(count)]
         for thread in threads:
             thread.start()
         return threads
 
-    def until(self, test, seconds=3.0):
+    def until(self, test, seconds=10.0):
+        """Wait for `test`, and fail if it never holds: a loaded machine starts the request threads late."""
         deadline = time.monotonic() + seconds
-        while not test() and time.monotonic() < deadline:
+        while not test():
+            self.assertLess(time.monotonic(), deadline, "the held reads never filled the slots")
             time.sleep(0.02)
 
     def test_reads_past_the_bound_wait_for_a_slot_not_another_connection(self):
