@@ -9,9 +9,16 @@ attention states:
 | ----------------- | ---------- | ------------------------------------------ |
 | review requested  | another's  | the `user-review-requested:@me` search     |
 | changes requested | yours      | `reviewDecision` CHANGES_REQUESTED         |
-| checks failing    | yours      | the head commit's rollup FAILURE or ERROR  |
+| checks failing    | yours      | a red required check on the head commit    |
 | merge conflict    | yours      | `mergeable` CONFLICTING                    |
-| ready to merge    | yours      | approved, mergeable, checks green or none  |
+| ready to merge    | yours      | approved, mergeable, required checks green |
+
+Only a required check blocks the merge, so a red optional one (a Snyk scan)
+is no alert (sd:7862). The search cannot say which checks are required:
+`isRequired` takes the pull's number, and `mergeStateStatus` reads BLOCKED
+for a missing review too. So a pull whose whole rollup is red costs one
+batched `CHECKS` query, all such pulls in one call, which reads its head's
+required checks; a pull with no red rollup costs none.
 
 A state new since the last read files one `reporting.ingest` report, job
 `JOB`, basis `<state> <url>`: the reports path the operator already triages,
@@ -25,6 +32,7 @@ what it read and clears nothing: absence from it is unknown.
 | budget check    | none                   | the sync spent it  | named; read and clear nothing    |
 | search          | none                   | gh fails or cut    | file what was read, clear none   |
 | search shape    | none                   | malformed answer   | cut read: file valid, clear none |
+| required checks | none                   | gh fails, partial  | no checks state; cut read        |
 | file one alert  | one report row         | ingest refuses     | left out of seen: next run files |
 | clear one alert | one report to done     | acknowledge fails  | named; next run clears again     |
 | record seen     | the `SEEN_KEY` row     | write fails        | next run files again; ingest folds |
@@ -50,18 +58,33 @@ PAGE = 100
 QUERY = """query($q: String!, $n: Int!) { search(query: $q, type: ISSUE, first: $n) { issueCount nodes {
   ... on PullRequest { url number title repository { nameWithOwner } reviewDecision mergeable
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } } }"""
+#: One red rollup's head contexts and which are required, per pull: aliased `p<i>` in one query.
+CHECKS = """p{i}: repository(owner: {owner}, name: {name}) {{ pullRequest(number: {n}) {{ commits(last: 1) {{ nodes {{
+  commit {{ statusCheckRollup {{ contexts(first: 100) {{ pageInfo {{ hasNextPage }} nodes {{
+    ... on CheckRun {{ conclusion isRequired(pullRequestNumber: {n}) }}
+    ... on StatusContext {{ state isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }} }}"""
+#: A check run's conclusion or a status's state that fails the check; GREEN passes it; any other is pending.
+RED = frozenset({"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"})
+GREEN = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
 SEARCHES = (("author", "is:pr is:open archived:false author:@me"),
             ("requested", "is:pr is:open archived:false user-review-requested:@me"))
 LABELS = {"review_requested": "review requested of you", "changes_requested": "changes requested",
           "checks_failing": "checks failing", "conflict": "merge conflict", "ready": "approved, ready to merge"}
 
 
-def states(pull: dict, why: str) -> list[str]:
-    """The attention states of one search node, from `LABELS`."""
+def _rollup(pull: dict) -> str | None:
+    nodes = ((pull.get("commits") or {}).get("nodes") or [{}])
+    return (((nodes[-1] or {}).get("commit") or {}).get("statusCheckRollup") or {}).get("state")
+
+
+def states(pull: dict, why: str, required: str | None = None) -> list[str]:
+    """The attention states of one search node, from `LABELS`.
+
+    `required` is the rollup of the required checks alone, from `_required`; without it the whole rollup counts.
+    """
     if why == "requested":
         return ["review_requested"]
-    nodes = ((pull.get("commits") or {}).get("nodes") or [{}])
-    rollup = (((nodes[-1] or {}).get("commit") or {}).get("statusCheckRollup") or {}).get("state")
+    rollup = required if required is not None else _rollup(pull)
     decision, mergeable = pull.get("reviewDecision"), pull.get("mergeable")
     found = []
     if decision == "CHANGES_REQUESTED":
@@ -99,6 +122,50 @@ def _well_formed(node) -> bool:
     return rollup is None or _has(rollup, "state", str)
 
 
+def _verdict(answer) -> str | None:
+    """FAILURE, PENDING or SUCCESS for one pull's required checks; None when the answer does not say."""
+    try:
+        block = answer["pullRequest"]["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]
+        if block["pageInfo"]["hasNextPage"] is not False or not isinstance(block["nodes"], list):
+            return None
+        required = []
+        for node in block["nodes"]:
+            if type(node["isRequired"]) is not bool:
+                return None
+            if node["isRequired"]:
+                required.append(node["conclusion"] if "conclusion" in node else node["state"])
+    except (KeyError, IndexError, TypeError):
+        return None
+    return "FAILURE" if RED.intersection(required) else "SUCCESS" if GREEN.issuperset(required) else "PENDING"
+
+
+def _required(pulls: list[dict], runner, timeout: float) -> tuple[dict[str, str], str]:
+    """`({url: rollup of its required checks}, problem)` for pulls whose whole rollup is red, in one call.
+
+    A pull the answer does not cover maps to UNKNOWN, which lights neither `checks_failing` nor `ready`,
+    and names a problem: a check we could not read is not a green one.
+    """
+    from .shadow_sync import _run
+
+    if not pulls:
+        return {}, ""
+    parts = []
+    for i, pull in enumerate(pulls):
+        owner, _, name = pull["repository"]["nameWithOwner"].partition("/")
+        parts.append(CHECKS.format(i=i, owner=json.dumps(owner), name=json.dumps(name), n=int(pull["number"])))
+    code, out, err = _run(["gh", "api", "graphql", "-f", "query=query { " + " ".join(parts) + " }"],
+                          runner, timeout=timeout)
+    try:
+        data = json.loads(out)["data"] if code == 0 else None
+    except (ValueError, KeyError, TypeError):
+        data = None
+    verdicts = {pull["url"]: (_verdict(data.get(f"p{i}")) if isinstance(data, dict) else None) or "UNKNOWN"
+                for i, pull in enumerate(pulls)}
+    unread = sum(verdict == "UNKNOWN" for verdict in verdicts.values())
+    said = (err or out).strip().splitlines()[0] if code != 0 and (err or out).strip() else ""
+    return verdicts, f"checks of {unread} red pull(s) not read{': ' + said if said else ''}" if unread else ""
+
+
 def read(runner=None, *, timeout: float = 60) -> tuple[dict[str, dict], bool, str]:
     """`({basis: pull}, complete, reason)`: every open pull's states, keyed `<state> <url>`."""
     from .shadow_sync import _run
@@ -124,8 +191,14 @@ def read(runner=None, *, timeout: float = 60) -> tuple[dict[str, dict], bool, st
             problems.append(f"{why}: {len(listed) - len(nodes)} malformed pull(s)")
         elif count > len(nodes):
             problems.append(f"{why}: more than {PAGE} open pulls")
+        required: dict[str, str] = {}
+        if why == "author":
+            required, problem = _required([node for node in nodes if _rollup(node) in ("FAILURE", "ERROR")],
+                                          runner, timeout)
+            if problem:
+                problems.append(f"{why}: {problem}")
         for node in nodes:
-            for state in states(node, why):
+            for state in states(node, why, required.get(node["url"])):
                 found[f"{state} {node['url']}"] = {"state": state, "url": node["url"], "number": node.get("number"),
                                                     "title": node.get("title") or "",
                                                     "repo": (node.get("repository") or {}).get("nameWithOwner") or ""}
