@@ -121,8 +121,12 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     draw(); drawIntake();
   }
   const NO_VIEW_CLI = 'no CLI: view state; the dashboard writes it (POST /api/github/issues/view)';
-  const view = (o, hidden) => window.shell.post('/api/github/issues/view', { key: o.key, hidden })
-    .then(v => { landed(o.key, hidden); window.githubIssues?.again(); return v; }, e => { window.githubIssues?.again(); throw e; });
+  // pack sd:7787: a bulk Hide sends one write per row at once; the page reads again once, when the last of them settles.
+  let WRITING = 0;
+  const settled = () => { if (--WRITING === 0) window.githubIssues?.again(); };
+  const view = (o, hidden) => { WRITING++;
+    return window.shell.post('/api/github/issues/view', { key: o.key, hidden })
+      .then(v => { landed(o.key, hidden); settled(); return v; }, e => { settled(); throw e; }); };
   // pack sd:7708: a category set or cleared moves its row at once and opens the group it went to; the page then reads again.
   const NO_CAT_CLI = 'no CLI: issue categories are view state; the dashboard writes them';
   const categorize = (key, category) => window.shell.post('/api/github/issues/view', { key, category })
@@ -135,42 +139,101 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
 
   // Issue intake (sd:4840), on GitHub: each policy.issues read or ask repo's open third-party issues no item carries (issues.intake over
   // sd_db.repos.intake_issues). File as item posts /api/items with the issue's title, repo and ref, the item `sd task add
-  // --ref github:<owner>/<repo>#N` files; the row then names the item until the next read leaves it out. A refusal, such as
-  // a ref another item already carries, stays on the row. Rows are keyed by that ref.
+  // --ref github:<owner>/<repo>#N` files. pack sd:7787: a filed row leaves the list at once, and a read that still lists
+  // it (one begun before the write) keeps it out; the toast names the item. A refusal, such as a ref another item already
+  // carries, stays on the row. Rows are keyed by that ref. File as item is the command `github issue.file`: the row's
+  // button, Details' Act bar and the shell's bulk bar run it, so each says the same thing.
+  // Bulk (pack sd:7787): a checkbox per row and one in the head pick rows into the shell's picked set (commands.pick, as
+  // Tasks' boxes do); the shell's bulk bar offers File as item, Hide or Unhide where every picked row allows it, runs each
+  // row's own call, and names each row not changed with its reason. The head box picks the rows shown, under Open or
+  // Hidden alone, less any the table's column filter or the Shapeshift text hides; a pick no longer listed (filed, hidden,
+  // unhidden, or another view shows) is dropped, so a bulk run does not reach a row that left the list.
   let INTAKE = [], FAILED = '';
   const FILED = new Map(), REFUSED = new Map(), BUSY = new Set();
+  let PICKED = new Set(); // a mirror of the shell's picked rows (shell:picked)
   function control(r) {
-    if (FILED.has(r.key)) return html`<a href="${window.shell.itemHref(FILED.get(r.key))}">Filed #${FILED.get(r.key)}</a>`;
     return html`<button type="button" class="btn quiet sm" data-key="${r.key}"${BUSY.has(r.key) ? html` disabled` : ''}>File as item</button>
-      ${REFUSED.has(r.key) ? html`<p class="refused" role="alert">Not filed: ${REFUSED.get(r.key)}</p>` : ''}`;
+      ${REFUSED.has(r.key) ? html`<p class="refused" role="alert">${REFUSED.get(r.key)}</p>` : ''}`;
   }
-  function drawIntake() {
-    put($('intake'), FAILED ? html`<tr class="empty"><td colspan="5">Issue intake could not be read: ${FAILED}. Read again tries again.</td></tr>`
-      : INTAKE.filter(inView).length ? html`${INTAKE.filter(inView).map(r => html`<tr${selected(r)}${BUSY.has(r.key) ? html` aria-busy="true"` : ''}>
+  const shownIntake = () => FAILED ? [] : INTAKE.filter(r => inView(r) && !FILED.has(r.key));
+  const intakeIds = () => new Set(INTAKE.map(oid));
+  // The rows the head box picks: those listed, less any the shell's table filter hides (data-tout).
+  const onScreen = () => { const out = new Set([...(document.querySelectorAll?.('#intake tr[data-tout]') || [])].map(tr => tr.dataset.id));
+    return shownIntake().filter(r => !out.has(oid(r))); };
+  // Many picks at once (the head box, a redraw's unpick) paint once, after the last.
+  let QUIET = false;
+  const picks = ids => { const C = window.shell?.commands; if (!C?.pick || !ids.length) return;
+    QUIET = true; try { ids.forEach(id => C.pick(id)); } finally { QUIET = false; } paintIntake(); };
+  const pickBox = r => html`<label class="pick"><input type="checkbox" data-intake-pick="${oid(r)}" aria-label="Select GitHub ${r.ref}"${PICKED.has(oid(r)) ? html` checked` : ''}><span></span></label>`;
+  // Each intake pick no longer shown leaves the picked set; with `all`, every intake pick does (another view shows).
+  function unpick(all = false) {
+    const shown = new Set(shownIntake().map(oid)), ours = intakeIds();
+    picks([...PICKED].filter(id => ours.has(id) && (all || !shown.has(id))));
+  }
+  function paintIntake() {
+    const rows = shownIntake();
+    put($('intake'), FAILED ? html`<tr class="empty"><td colspan="6">Issue intake could not be read: ${FAILED}. Read again tries again.</td></tr>`
+      : rows.length ? html`${rows.map(r => html`<tr${selected(r)}${BUSY.has(r.key) ? html` aria-busy="true"` : ''}${PICKED.has(oid(r)) ? html` data-picked` : ''}>
+        <td class="sel">${pickBox(r)}</td>
         <td class="ref">${r.url ? html`<a href="${r.url}">GitHub ${r.ref}</a>` : html`GitHub ${r.ref}`}</td>
         <td class="what">${title(r)}</td>
         <td class="repo">${r.repo}</td>
         <td class="why">${r.author}</td>
         <td class="act">${control(r)}</td></tr>`)}`
-      : html`<tr class="empty"><td colspan="5">${showHidden() ? 'No intake issue is hidden.' : 'No third-party issue waits for an item in a repo with GitHub issues on.'}</td></tr>`);
-    const waiting = INTAKE.filter(r => !FILED.has(r.key) && !r.hidden).length, hiddenN = INTAKE.filter(r => r.hidden).length;
+      : html`<tr class="empty"><td colspan="6">${showHidden() ? 'No intake issue is hidden.' : 'No third-party issue waits for an item in a repo with GitHub issues on.'}</td></tr>`);
+    // The head box: on when every row shown is picked, mixed when some are, off with no row to pick.
+    const all = $('intake-all'), seen = onScreen(), n = seen.filter(r => PICKED.has(oid(r))).length;
+    if (all) { all.checked = !!seen.length && n === seen.length; all.indeterminate = n > 0 && n < seen.length; all.disabled = !seen.length; }
+    // A redraw replaced the box that had focus: focus its replacement, so Space can pick the next one.
+    const f = document.activeElement?.dataset?.intakePick;
+    if (f) [...($('intake').querySelectorAll?.('[data-intake-pick]') || [])].find(b => b.dataset.intakePick === f)?.focus();
+  }
+  function drawIntake() {
+    unpick(); paintIntake();
+    const left = INTAKE.filter(r => !FILED.has(r.key)), waiting = left.filter(r => !r.hidden).length, hiddenN = left.length - waiting;
     put($('intake-tally'), INTAKE.length && !FAILED ? html`<span>${showHidden() ? `${hiddenN} hidden` : `${waiting} waiting`}</span>` : html``);
     const L = window.shell?.list;
-    if (L) put($('intake-filters'), FAILED ? html`` : L.fbar(hiddenSeg(INTAKE.length - hiddenN, hiddenN)));
+    if (L) put($('intake-filters'), FAILED ? html`` : L.fbar(hiddenSeg(waiting, hiddenN)));
     window.shell?.view?.count('intake', FAILED ? null : waiting); // the Intake tab
     objects();
   }
+  // Files one intake row: resolves to the new item's id, or rejects with why it did not file. An answer that names no
+  // item, or no answer at all, is not known to have filed or not: it says so, and the page reads again to settle it.
   function file(key) {
     const r = INTAKE.find(x => x.key === key);
-    if (!r || BUSY.has(key) || FILED.has(key)) return;
+    if (!r) return Promise.reject(new Error('the issue is no longer listed'));
+    if (FILED.has(key)) return Promise.reject(new Error(`already filed as sd:${FILED.get(key)}`));
+    if (BUSY.has(key)) return Promise.reject(new Error('it is being filed now'));
     BUSY.add(key); REFUSED.delete(key); drawIntake();
-    window.shell.post('/api/items', { title: r.title, repo: r.repo_path, ref: r.key })
-      .then(out => { FILED.set(key, out.item.id); }, e => { REFUSED.set(key, e.message); })
+    const unknown = why => Object.assign(new Error(`not known if it filed: ${why}; Read again shows whether an item carries it`), { unknown: true });
+    return window.shell.post('/api/items', { title: r.title, repo: r.repo_path, ref: r.key })
+      .then(out => { const id = out?.item?.id; if (id == null) throw unknown('the answer named no item'); FILED.set(key, id); return id; },
+        e => { throw e.status ? e : unknown(e.message); })
+      .catch(e => { REFUSED.set(key, e.unknown ? `Not known if it filed: ${e.message.replace(/^not known if it filed: /, '')}` : `Not filed: ${e.message}`);
+        if (e.unknown) window.githubIssues?.again(); throw e; })
       .finally(() => { BUSY.delete(key); drawIntake(); });
+  }
+  let FILE_CMD = null;
+  // The row's File as item runs the command, so it toasts as Details and the bulk bar do; without the shell's commands
+  // (a page stand-in) it files alone, and its refusal stays on the row.
+  function fileRow(key) {
+    const C = window.shell?.commands, o = C?.get?.(`iss:${key}`);
+    if (FILE_CMD && o && C.run) return C.run(FILE_CMD, o);
+    file(key).catch(() => {});
   }
   document.addEventListener('intake:read', e => {
     const { intake = [], error = '', store } = e.detail || {};
-    INTAKE = intake; FAILED = error; STORE = storeOff(store); FILED.clear(); REFUSED.clear(); BUSY.clear(); drawIntake();
+    // A filed issue the read no longer lists is done; one it still lists stays out until a read leaves it.
+    [...FILED.keys()].filter(k => !intake.some(r => r.key === k)).forEach(k => FILED.delete(k));
+    INTAKE = intake; FAILED = error; STORE = storeOff(store); REFUSED.clear(); drawIntake();
+  });
+  // The shell owns the picked set and its bar; the rows and the head box show it.
+  document.addEventListener('shell:picked', e => { PICKED = new Set(e.detail || []); if (!QUIET) paintIntake(); });
+  document.addEventListener('shell:view', e => { if (e.detail?.id !== 'intake') unpick(true); });
+  document.addEventListener('change', e => {
+    const t = e.target, C = window.shell?.commands; if (!t || !C?.pick) return;
+    if (t.id === 'intake-all') return picks(onScreen().map(oid).filter(id => PICKED.has(id) !== !!t.checked));
+    if (t.dataset?.intakePick) C.pick(t.dataset.intakePick);
   });
   document.addEventListener('click', e => {
     const s = e.target?.closest?.('#issues-filters [data-f="iss"]');
@@ -178,13 +241,14 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     const h = e.target?.closest?.('#issues-filters [data-aside="hidden"], #intake-filters [data-aside="hidden"]');
     if (h) return pickHidden(h.closest?.('#intake-filters') ? 'intake-filters' : 'issues-filters', h.dataset.v);
     const b = e.target && e.target.closest && e.target.closest('#intake button[data-key]');
-    if (b) return file(b.dataset.key);
+    if (b) return fileRow(b.dataset.key);
     const opened = e.target?.closest?.('[data-iss-open]');
     if (opened) return details(opened.dataset.issOpen);
     // A category group (pack sd:7708): its chevron, name or the rest of its row opens it and closes the open one.
     const g = e.target?.closest?.('[data-cat-open]') || (!e.target?.closest?.('a, button') && e.target?.closest?.('#issues tr.repo'));
     if (g) return toggle(g.dataset.catOpen ?? g.dataset.cat);
-    const tr = e.target?.closest && !e.target.closest('a, button') && e.target.closest('#issues tr[data-id], #intake tr[data-id]');
+    // A press on a row's checkbox picks it (the change listener above); it opens no Details.
+    const tr = e.target?.closest && !e.target.closest('a, button, label, input') && e.target.closest('#issues tr[data-id], #intake tr[data-id]');
     if (tr) details(tr.dataset.id);
   });
 
@@ -199,7 +263,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
 
   // ---------- Details (sd:5877) ----------
   // Both lists' rows by object id; an intake row filed here names its item until the next read.
-  const rows = () => [...ISSUES, ...(FAILED ? [] : INTAKE).map(r => FILED.has(r.key) ? { ...r, item: FILED.get(r.key) } : r)];
+  const rows = () => [...ISSUES, ...(FAILED ? [] : INTAKE).map(r => ({ ...r, intake: true, ...(FILED.has(r.key) ? { item: FILED.get(r.key) } : {}) }))];
   const rowOf = id => rows().find(r => oid(r) === id);
   const TYPE = { GitHub: 'github issue', Jira: 'jira issue' };
   const typeOf = r => TYPE[r.tracker || 'GitHub'];
@@ -209,7 +273,8 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     const C = window.shell?.commands; if (!C) return;
     const keep = new Set();
     rows().forEach(r => { keep.add(oid(r)); C.put({ id: oid(r), type: typeOf(r), label: `${r.tracker || 'GitHub'} ${r.ref} ${r.title}`.trim(),
-      url: r.url, item: r.item, ref: r.ref, slug: r.slug, key: r.key, hidden: !!r.hidden, category: r.category || null }); });
+      url: r.url, item: r.item, ref: r.ref, slug: r.slug, key: r.key, hidden: !!r.hidden, category: r.category || null,
+      intake: !!r.intake, repo_path: r.repo_path, title: r.title }); });
     // pack sd:7708: each category is an object for its group row's Rename and Remove; isscats holds New category.
     if (!FAILED_ISSUES()) {
       CATS.forEach(name => { keep.add(`isscat:${name}`); C.put({ id: `isscat:${name}`, type: 'issue category', label: name, name }); });
@@ -253,9 +318,10 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
       risk: 'safe', primary: () => true, when: o => !!o.url || 'the stored address is not a web address', cli,
       run: o => { window.open(o.url, '_blank', 'noopener'); return `${label} in a new tab`; } });
     // sd:6175: Hide and Unhide, the view state Contributions' Hide writes; Undo posts the other value. Nothing expires it.
+    // pack sd:7787: on a GitHub issue each is a bulk command too, for Issue Intake's picked rows.
     const hides = on => [[true, 'hide', 'Hide', 'Hides this issue from its list and counts; Undo shows it again.', 'eye-off', 'Hidden', '. Hidden lists it.'],
       [false, 'unhide', 'Unhide', 'Shows this issue in its list again; Undo hides it.', 'eye', 'Unhidden', '']].map(([hidden, id, label, does, icon, done, after]) => (
-      { id: `${on}.${id}`, on, label, does, key: 'h', icon, risk: 'undo',
+      { id: `${on}.${id}`, on, label, does, key: 'h', icon, risk: 'undo', bulk: on === 'github issue',
         when: o => o.hidden === hidden ? (hidden ? 'already hidden' : 'not hidden') : STORE ? `Hide is off: ${STORE}` : true,
         cli: () => NO_VIEW_CLI,
         run: o => view(o, hidden).then(() => `${done} · ${o.label}${after}`),
@@ -271,11 +337,19 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
       run: (o, v) => { const was = o.category || null, to = v?.category || null;
         return categorize(o.key, to).then(() => ({ text: to ? `Category ${to} · ${o.label}` : `Category cleared · ${o.label}`, was })); },
       undo: (o, v) => categorize(o.key, v ? v.was : o.category || null) };
+    // pack sd:7787: File as item, the intake row's button, in Details' Act bar and the shell's bulk bar: one POST
+    // /api/items per row, as `sd task add --ref` files it in the issue's repo. Filing has no Undo: the item is the record.
+    FILE_CMD = { id: 'github issue.file', on: 'github issue', label: 'File as item', key: 'f', risk: 'safe', bulk: true,
+      does: 'Adds a task linked to this issue in its repo; the row leaves.',
+      when: o => !o.intake ? 'only an Issue Intake row files an item here' : o.item ? `filed as sd:${o.item}`
+        : BUSY.has(o.key) ? 'it is being filed now' : true,
+      cli: o => `cd ${window.shell.shq(o.repo_path || '')} && sd task add --ref ${window.shell.shq(o.key)} ${window.shell.shq(o.title || '')}`,
+      run: o => file(o.key).then(id => `Filed sd:${id} · ${o.label}`) };
     const listOf = w => w.categories;
     C.register(
       opens('jira issue', 'Open in Jira', o => `open ${window.shell.shq(o.url || '')}`), item('jira issue'), ...hides('jira issue'),
       opens('github issue', 'Open on GitHub', o => o.slug ? `gh issue view ${o.ref.replace('#', '')} --repo ${o.slug} --web` : `open ${window.shell.shq(o.url || '')}`),
-      item('github issue'), ...hides('github issue'),
+      item('github issue'), ...hides('github issue'), FILE_CMD,
       REG_CAT,
       { id: 'issue categories.add', on: 'issue categories', label: 'New category', key: 'a', risk: 'undo',
         does: 'Adds a category to group your Jira issues by. Nothing is written to Jira.',

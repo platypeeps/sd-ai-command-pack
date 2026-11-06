@@ -339,6 +339,8 @@ window.shell = { itemHref: n => `/tasks?item=${n}`, openItem: n => `#${n} opens 
         self.assertEqual((out["selected"], out["panes"]), (["iss:github:example/project#12"], ["tab-details"]))
         self.assertEqual(out["ids"], ["jira issue.open", "jira issue.item", "jira issue.hide", "jira issue.unhide",
                                       "github issue.open", "github issue.item", "github issue.hide", "github issue.unhide",
+                                      # pack sd:7787: File as item, in Details and the bulk bar.
+                                      "github issue.file",
                                       # pack sd:7708: Set category, then the category list's commands.
                                       "jira issue.category", "issue categories.add", "issue category.rename", "issue category.remove"])
         self.assertEqual(sorted(set(out["types"])), ["github issue", "issue categories", "jira issue"])
@@ -521,7 +523,7 @@ class TheGitHubPage(ScreenCase):
     The stand-in server keeps the hidden keys a view POST writes and answers each read with them."""
 
     def run_page(self, body, *, issues_rows=None, intake_rows=None, sync=None, states=("idle",), store=None, synced=None,
-                 categories=()):
+                 categories=(), refuse=None):
         doc = {"issues": issues_rows if issues_rows is not None else [
                    {"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget",
                     "reason": "filed", "url": None, "state": None, "hidden": False},
@@ -534,8 +536,14 @@ class TheGitHubPage(ScreenCase):
                "intake_error": "", "store": store or {"available": True, "reason": ""}, "sync": sync or JOB, "synced": synced,
                "categories": list(categories)}
         # pack sd:7708: the stand-in keeps each row's category and the category list as the view store does.
-        answer = """(() => { const HID = new Set(), DOC = %s, STATES = %s, CAT = {}; let reads = 0;
+        # pack sd:7787: /api/items files sd:9NN for issue #NN, or refuses a ref `refuse` names with its reason (400, as the
+        # server answers a ref an item already carries); the next read leaves a filed issue out of intake.
+        # A row the doc hands over hidden starts in HID, so an Unhide shows it on the next read (pack sd:7787).
+        answer = """(() => { const DOC = %s, STATES = %s, CAT = {}, REFUSE = %s, FILED = new Set(); let reads = 0;
+  const HID = new Set([...DOC.issues, ...DOC.intake].filter(r => r.hidden).map(r => r.key));
   return (path, body) => {
+    if (path === '/api/items') { if (REFUSE[body.ref]) return [400, { error: REFUSE[body.ref] }];
+      FILED.add(body.ref); return [201, { item: { id: 900 + Number(body.ref.split('#')[1]) } }]; }
     if (path === '/api/github/issues/view' && 'category' in body) { CAT[body.key] = body.category; return [200, { key: body.key, category: body.category }]; }
     if (path === '/api/github/issues/categories') {
       DOC.categories = body.rename ? DOC.categories.map(n => n === body.rename ? body.to : n) : body.categories.map(n => n.trim());
@@ -544,9 +552,9 @@ class TheGitHubPage(ScreenCase):
     if (path === '/api/github/issues/view') { if (body.hidden) HID.add(body.key); else HID.delete(body.key); return [200, { key: body.key, hidden: body.hidden }]; }
     if (path.startsWith('/api/jobs/')) return [200, { request: { status: 'accepted', message: 'kickstarted' } }];
     const state = STATES[Math.min(reads++, STATES.length - 1)];
-    const mark = r => ({ ...r, hidden: HID.has(r.key) || r.hidden, ...(r.key in CAT ? { category: CAT[r.key] } : {}) });
-    return [200, { ...DOC, issues: DOC.issues.map(mark), intake: DOC.intake.map(mark), sync: DOC.sync.error ? DOC.sync : { ...DOC.sync, state } }];
-  }; })()""" % (json.dumps(doc), json.dumps(list(states)))
+    const mark = r => ({ ...r, hidden: HID.has(r.key), ...(r.key in CAT ? { category: CAT[r.key] } : {}) });
+    return [200, { ...DOC, issues: DOC.issues.map(mark), intake: DOC.intake.filter(r => !FILED.has(r.key)).map(mark), sync: DOC.sync.error ? DOC.sync : { ...DOC.sync, state } }];
+  }; })()""" % (json.dumps(doc), json.dumps(list(states)), json.dumps(refuse or {}))
         script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + COMMANDS_JS
                   + "\nANSWER = " + answer + ";\n"
                   + "window.shell.row = () => null; window.shell.url = q => { location.search = q ? '?' + q : ''; };\n"
@@ -695,6 +703,152 @@ class TheGitHubPage(ScreenCase):
             self.assertIn(f'<p class="why" id="{view}-said"></p>', html)
         self.assertIn('id="intake-filters"', (V2 / "issues.html").read_text(encoding="utf-8"))
 
+
+INTAKE_ROWS = [
+    {"repo": "anvil", "repo_path": "/home/example/repos/acme/anvil", "ref": f"#{n}", "key": f"github:example/project#{n}",
+     "title": title, "author": "octocat", "url": None, "hidden": hidden}
+    for n, title, hidden in ((21, "Docs typo", False), (22, "Odd link", True), (23, "Crash in CLI", False))]
+REFUSED_23 = "sd:5 (ready) already carries --ref github:example/project#23"
+
+
+class TheIntakeBulk(ScreenCase):
+    """pack sd:7787 on the stand-in page: a checkbox on each Issue Intake row and one in its head for the rows shown, the
+    shell's picked set and bulk bar, File as item, Hide and Unhide on the picked rows, and File as item in Details."""
+
+    run_page = TheGitHubPage.run_page
+
+    # The shell's picked set (shell.js commands.pick): a toggle that tells the page with shell:picked. change(target)
+    # is the page's change listener seeing a checkbox; shared() lists the bulk commands the bar offers for the picks.
+    PICK = ("const PICKED = new Set(); C.pick = id => { PICKED.has(id) ? PICKED.delete(id) : PICKED.add(id);"
+            " document.dispatchEvent(new CustomEvent('shell:picked', { detail: [...PICKED] })); };\n"
+            "const change = target => (DOC_LISTENERS.change || []).forEach(h => h({ target: { closest: () => null, dataset: {}, ...target } }));\n"
+            "const all = on => change({ id: 'intake-all', checked: on });\n"
+            "const shared = () => REG.filter(c => c.on === 'github issue' && c.bulk && [...PICKED].every(id => !C.offWhy(c, C.get(id)))).map(c => c.id);\n"
+            "const bulk = id => C.runBulk(cmd(id), [...PICKED].map(i => C.get(i)));\n")
+    ID = "iss:github:example/project#{}"
+
+    def page(self, body, **kwargs):
+        return self.run_page(self.PICK + body, intake_rows=INTAKE_ROWS, **kwargs)
+
+    def test_each_row_has_a_checkbox_that_picks_it_and_opens_no_details(self):
+        out = self.page("show('intake'); await flush(); R.rows = ELS.intake.html;"
+                        " change({ dataset: { intakePick: 'iss:github:example/project#21' } }); await flush();"
+                        " R.one = [...PICKED]; R.drawn = ELS.intake.html; R.head = [ELS['intake-all'].checked, ELS['intake-all'].indeterminate];"
+                        " R.details = (ELS.details || {}).html;"
+                        " (DOC_LISTENERS.click || []).forEach(h => h({ target: { closest: s => s.includes('label') ? {}"
+                        " : s.includes('#intake tr[data-id]') ? { dataset: { id: 'iss:github:example/project#21' } } : null } }));"
+                        " R.after = (ELS.details || {}).html;"
+                        " change({ dataset: { intakePick: 'iss:github:example/project#21' } }); await flush(); R.none = [...PICKED];")
+        r = out["R"]
+        for n in (21, 23):
+            self.assertIn(f'<td class="sel"><label class="pick"><input type="checkbox" data-intake-pick="{self.ID.format(n)}"'
+                          f' aria-label="Select GitHub #{n}"><span></span></label></td>', r["rows"])
+        self.assertNotIn(self.ID.format(22), r["rows"])
+        self.assertEqual(r["one"], [self.ID.format(21)])
+        self.assertIn(f'data-intake-pick="{self.ID.format(21)}" aria-label="Select GitHub #21" checked', r["drawn"])
+        self.assertIn(f'<tr data-id="{self.ID.format(21)}" aria-selected="false" data-picked>', r["drawn"])
+        self.assertEqual(r["head"], [False, True])
+        # A press on the box picks; it opens no Details.
+        self.assertEqual((r.get("details"), r.get("after")), (None, None))
+        self.assertEqual(r["none"], [])
+
+    def test_the_head_checkbox_picks_the_rows_shown_and_only_those(self):
+        out = self.page("show('intake'); await flush(); all(true); await flush(); R.open = [...PICKED];"
+                        " R.head = [ELS['intake-all'].checked, ELS['intake-all'].indeterminate, ELS['intake-all'].disabled];"
+                        " click('hidden'); await flush(); R.left = [...PICKED]; all(true); await flush(); R.hidden = [...PICKED];"
+                        " all(false); await flush(); R.none = [...PICKED];"
+                        # A row the table's column filter hides (data-tout) is not shown, so the head box leaves it.
+                        " click('hidden', 'open'); await flush();"
+                        " document.querySelectorAll = s => s === '#intake tr[data-tout]' ? [{ dataset: { id: 'iss:github:example/project#23' } }] : [];"
+                        " all(true); await flush(); R.filtered = [...PICKED];")
+        r = out["R"]
+        self.assertEqual(r["open"], [self.ID.format(21), self.ID.format(23)])
+        self.assertEqual(r["head"], [True, False, False])
+        # The Hidden filter shows other rows: a pick no longer shown is dropped, and the head box picks the hidden row alone.
+        self.assertEqual(r["left"], [])
+        self.assertEqual(r["hidden"], [self.ID.format(22)])
+        self.assertEqual(r["none"], [])
+        self.assertEqual(r["filtered"], [self.ID.format(21)])
+        html = (V2 / "issues.html").read_text(encoding="utf-8")
+        self.assertIn('<th class="sel"><label class="pick"><input type="checkbox" id="intake-all" aria-label="Select every intake issue shown">', html)
+        self.assertIn('<tbody id="intake"><tr class="empty"><td colspan="6">', html)
+
+    def test_file_as_item_on_the_picked_rows_files_each_and_names_the_one_refused(self):
+        out = self.page("show('intake'); await flush(); all(true); await flush(); R.bar = shared();"
+                        " bulk('github issue.file'); await flush(); R.toast = lastToast().msg; R.rows = ELS.intake.html;"
+                        " R.n = OUT.counts.intake;", refuse={"github:example/project#23": REFUSED_23})
+        r = out["R"]
+        self.assertEqual(r["bar"], ["github issue.hide", "github issue.file"])
+        self.assertEqual([p[:2] for p in out["posts"]], [
+            ["/api/items", {"title": "Docs typo", "repo": "/home/example/repos/acme/anvil", "ref": "github:example/project#21"}],
+            ["/api/items", {"title": "Crash in CLI", "repo": "/home/example/repos/acme/anvil", "ref": "github:example/project#23"}]])
+        # Never a partial batch said as success: the toast counts what landed and names the refusal with its reason.
+        self.assertIn("File as item · 1 github issue", r["toast"])
+        self.assertIn(f"1 of 2 not changed: GitHub #23 Crash in CLI ({REFUSED_23})", r["toast"])
+        self.assertNotIn("Docs typo", r["rows"])
+        self.assertIn("Crash in CLI", r["rows"])
+        self.assertIn(f"Not filed: {REFUSED_23}", r["rows"])
+        self.assertEqual(r["n"], 1)
+
+    def test_a_filing_with_no_answer_is_said_not_known_and_reads_again(self):
+        out = self.page("show('intake'); await flush(); R.gets = OUT.gets.length; const was = ANSWER;"
+                        " ANSWER = (p, b) => { if (p === '/api/items') throw new TypeError('Load failed'); return was(p, b); };"
+                        " act('github issue.file', 'iss:github:example/project#21'); await flush(); R.toast = lastToast().msg;"
+                        " R.gets = OUT.gets.length - R.gets;")
+        r = out["R"]
+        self.assertIn("not known if it filed: Load failed; Read again shows whether an item carries it", r["toast"])
+        self.assertEqual(r["gets"], 1)
+
+    def test_hide_on_the_picked_rows_hides_each_and_reads_again_once(self):
+        out = self.page("show('intake'); await flush(); all(true); await flush(); R.gets = OUT.gets.length;"
+                        " bulk('github issue.hide'); await flush(); R.gets = OUT.gets.length - R.gets;"
+                        " R.toast = lastToast().msg; R.rows = ELS.intake.html; R.left = [...PICKED]; R.n = OUT.counts.intake;")
+        r = out["R"]
+        self.assertIn("Hide · 2 github issues", r["toast"])
+        self.assertNotIn("Docs typo", r["rows"])
+        self.assertNotIn("Crash in CLI", r["rows"])
+        self.assertEqual((r["left"], r["n"]), ([], 0))
+        # Two writes, one read after the last of them.
+        self.assertEqual(r["gets"], 1)
+        self.assertEqual([p[1] for p in out["posts"]], [{"key": "github:example/project#21", "hidden": True},
+                                                        {"key": "github:example/project#23", "hidden": True}])
+
+    def test_unhide_on_the_picked_rows_under_hidden_shows_each_again(self):
+        out = self.page("show('intake'); await flush(); click('hidden'); await flush();"
+                        " all(true); await flush(); R.bar = shared(); R.picked = [...PICKED];"
+                        " bulk('github issue.unhide'); await flush(); R.toast = lastToast().msg; R.after = ELS.intake.html;"
+                        " click('hidden', 'open'); await flush(); R.open = ELS.intake.html;")
+        r = out["R"]
+        self.assertEqual(r["bar"], ["github issue.unhide", "github issue.file"])
+        self.assertEqual(r["picked"], [self.ID.format(22)])
+        self.assertIn("Unhide · 1 github issue", r["toast"])
+        self.assertEqual([p[1] for p in out["posts"]], [{"key": "github:example/project#22", "hidden": False}])
+        self.assertIn("No intake issue is hidden.", r["after"])
+        self.assertIn("Odd link", r["open"])
+
+    def test_details_and_the_row_button_file_through_one_command(self):
+        rows = [*INTAKE_ROWS, {"repo": "anvil", "tracker": "GitHub", "ref": "#12", "key": "github:example/project#12",
+                               "title": "Crash on start", "reason": "assigned", "url": None, "state": "open", "hidden": False}]
+        out = self.run_page(
+            self.PICK + "show('intake'); await flush(); const f = cmd('github issue.file');"
+            " R.on = C.offWhy(f, C.get('iss:github:example/project#21')); R.mine = C.offWhy(f, C.get('iss:github:example/project#12'));"
+            " R.cli = f.cli(C.get('iss:github:example/project#21')); R.inBar = f.bar !== false;"
+            " act('github issue.file', 'iss:github:example/project#21'); await flush(); R.toast = lastToast().msg; R.rows = ELS.intake.html;"
+            " R.filed = C.offWhy(f, C.get('iss:github:example/project#21'));"
+            " (DOC_LISTENERS.click || []).forEach(h => h({ target: { closest: s => s === '#intake button[data-key]'"
+            " ? { dataset: { key: 'github:example/project#23' } } : null } })); await flush(); R.refused = lastToast().msg; R.after = ELS.intake.html;",
+            intake_rows=INTAKE_ROWS, issues_rows=rows[3:], refuse={"github:example/project#23": REFUSED_23})
+        r = out["R"]
+        self.assertEqual((r["on"], r["inBar"]), ("", True))
+        self.assertEqual(r["mine"], "only an Issue Intake row files an item here")
+        self.assertEqual(r["cli"], "cd '/home/example/repos/acme/anvil' && sd task add --ref 'github:example/project#21' 'Docs typo'")
+        self.assertEqual(r["toast"], "Filed sd:921 · GitHub #21 Docs typo")
+        self.assertNotIn("Docs typo", r["rows"])
+        self.assertEqual(r["filed"], "filed as sd:921")
+        self.assertEqual(r["refused"], f"GitHub #23 Crash in CLI not changed: {REFUSED_23}")
+        self.assertIn(f"Not filed: {REFUSED_23}", r["after"])
+        self.assertEqual([p[1]["ref"] for p in out["posts"] if p[0] == "/api/items"],
+                         ["github:example/project#21", "github:example/project#23"])
 
 CATEGORY_ROWS = [
     {"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget", "reason": "filed",
