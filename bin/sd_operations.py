@@ -316,6 +316,21 @@ def enqueue_refusals(worktree: Path, base: str, head: str, title: str, body: str
     return found
 
 
+def own_checks(worktree: Path) -> list[list[str]]:
+    """The checks an unmanaged repository's build runs, as `sd-check` detects and picks them (pack sd:7868).
+
+    The aggregate `check` when the repository has one, else each of `test` and
+    `lint` it has; none is an empty list. A declaration that does not read is
+    ValueError, for the builder to see.
+    """
+    import sd_lib
+    try:
+        found = sd_lib.detect_entrypoints(worktree)
+    except sd_lib.ConfigError as error:
+        raise ValueError(str(error)) from error
+    return [list(found.commands[name]) for name in sd_lib._runs(found.commands)]
+
+
 def push_failures(connection: Any, environ: dict[str, str] | None = None) -> list[str]:
     """Push each lane entry or build run that failed or blocked, once, on ntfy (pack sd:6946); the keys sent.
 
@@ -448,7 +463,7 @@ def supervise_build(args: argparse.Namespace) -> int:
             result = build_run.DraftSupervisor(connection, args.run, tools=tools(build_run), log_root=root).run()
         else:
             result = build_run.Supervisor(connection, args.run, tools=tools(build_run), log_root=root,
-                                          cited=cited, checked=enqueue_refusals).run()
+                                          cited=cited, checked=enqueue_refusals, checks=own_checks).run()
     except (sd_db.SdDbError, ValueError) as error:
         raise WorkRefusal(str(error)) from error
     finally:

@@ -182,6 +182,33 @@ FAKE = textwrap.dedent('''
                  "expected_head": argv[argv.index("--expected-head") + 1]}
         lane.write_text(json.dumps(entries + [entry]))
         print(json.dumps({"ok": True, **entry}))
+    if role == "gh":  # pack sd:7868: an unmanaged repository's draft pull request, kept in `<plans>/pulls.json`
+        pulls_file = plans / "pulls.json"
+        pulls = json.loads(pulls_file.read_text()) if pulls_file.exists() else []
+        argv = sys.argv[1:]
+        def opt(name):
+            return argv[argv.index(name) + 1]
+        if argv[:2] == ["pr", "list"]:
+            print(json.dumps([{"url": row["url"]} for row in pulls
+                              if row["head"] == opt("--head") and row["state"] == "open"]))
+            sys.exit(0)
+        if argv[:2] == ["pr", "create"]:
+            assert "--draft" in argv and Path(opt("--body-file")).is_file(), argv
+            if mode == "refuse":
+                print("pull request create failed: GraphQL: not allowed", file=sys.stderr)
+                sys.exit(1)
+            url = f"https://github.com/{opt('--repo')}/pull/{len(pulls) + 1}"
+            pulls_file.write_text(json.dumps(pulls + [{"url": url, "head": opt("--head"), "state": "open",
+                                                       "base": opt("--base"), "title": opt("--title")}]))
+            print("Creating draft pull request", file=sys.stderr)
+            if mode != "mute":
+                print(url)
+            sys.exit(0)
+        sys.exit(f"gh fake: no such call {argv}")
+    if role == "gate":  # `sd gate run --label L -- <command>`: runs the command, its exit code its own
+        argv = sys.argv[1:]
+        assert argv[0] == "--label" and argv[2] == "--", argv
+        sys.exit(subprocess.run(argv[3:]).returncode)
     if role == "sd-docs-lint":
         _, args = real("sd-docs-lint")
         assert args.pr_body is not None and args.pr_body.is_file(), args
@@ -1002,6 +1029,179 @@ class Supervise(Case):
         with mock.patch.dict(os.environ, {"FAKE_PLANS": str(self.plans), "FAKE_BIN": str(BIN)}):
             moved = build_run.watch(self.db, lane=lane, probe=exited)
         self.assertEqual(moved, [{"run": self.bundle["id"], "step": "cleaning"}])
+
+
+#: An unmanaged repository's check: it passes once the builder's fix round wrote `fix` into work.txt.
+CHECK = [sys.executable, "-c", "import sys; sys.exit(0 if 'fix' in open('work.txt').read() else 1)"]
+PASS = [sys.executable, "-c", "print('ok')"]
+
+
+class Unmanaged(Case):
+    """Pack sd:7868: an unmanaged repository's run ends in a pushed branch and a draft pull request, no lane."""
+
+    def setUp(self):
+        super().setUp()
+        self.db.execute("UPDATE repo SET managed = 0")
+        tools = self.root / "tools"
+        for role in ("gh", "gate"):
+            (tools / f"{role}.py").write_text(FAKE, encoding="utf-8")
+        self.tools = dataclasses.replace(self.tools, gh=[sys.executable, str(tools / "gh.py")],
+                                         gate=[sys.executable, str(tools / "gate.py")])
+
+    def pulls(self):
+        path = self.plans / "pulls.json"
+        return json.loads(path.read_text()) if path.exists() else []
+
+    def contribution(self, item):
+        return json.loads(item_state(self.db, item)["item"]["fields"] or "{}").get("contribution") or {}
+
+    def test_a_clean_run_pushes_the_branch_and_opens_one_draft(self):
+        self.press(2)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended, {"run": self.bundle["id"], "outcome": None, "step": "enqueued"})
+        branch = self.bundle["branch"]
+        self.assertEqual(self.calls("sd-ship"), [], "no lane: not even its list")
+        self.assertIn(branch, self.remote_branches().split())
+        url = "https://github.com/fixture/repo/pull/1"
+        self.assertEqual([(row["url"], row["head"], row["base"]) for row in self.pulls()], [(url, branch, "main")])
+        create = next(call["argv"] for call in self.calls("gh") if call["argv"][:2] == ["pr", "create"])
+        self.assertEqual(create[create.index("--title") + 1], "feat(fixture): build the fixture")
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["step"], row["detail"], build.draft_pull(row)), ("enqueued", build.DRAFT_PULL + url, url))
+        self.assertEqual([m["status"] for m in row["members"]], ["done", "done"])
+        self.assertEqual(self.statuses(), ["in_progress", "in_progress"], "open until the owners merge")
+        self.assertEqual(self.contribution(self.items[0]).get("pull_url"), url)
+        self.assertEqual(build.pull_url(self.db, self.bundle["repo"], branch, self.items), url)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL").fetchone()[0], 0)
+        notes = [r["body"] for r in self.db.execute("SELECT body FROM note WHERE item = ?", (self.items[0],))]
+        self.assertTrue(any(f"`{sd_quote(PASS)}` passed at" in body for body in notes), notes)
+        self.assertTrue(any(url in body and "owners merge" in body for body in notes), notes)
+
+    def test_a_failing_check_goes_back_to_the_builder(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass", "fix"], sd_review=["clean", "clean"])
+        self.assertEqual(self.supervisor(checks=lambda work: [CHECK]).run()["step"], "enqueued")
+        self.assertEqual(len(self.calls("claude")), 2)
+        fix = self.calls("claude")[1]["argv"]
+        self.assertIn("exit 1", fix[fix.index("-p") + 1])
+        self.assertEqual(build.run(self.db, self.bundle["id"])["review_round"], 1)
+        self.assertEqual(len(self.pulls()), 1)
+
+    def test_no_check_entrypoint_runs_none_and_says_so(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.assertEqual(self.supervisor(checks=lambda work: []).run()["step"], "enqueued")
+        self.assertEqual(self.calls("gate"), [])
+        note = self.db.execute("SELECT body FROM note WHERE item = ? AND body LIKE '%no check entrypoint%'",
+                               (self.items[0],)).fetchone()
+        self.assertIsNotNone(note)
+
+    def test_a_refused_push_blocks_and_opens_nothing(self):
+        self.press()
+        self.write_pr()
+        support.git(self.repo, "remote", "set-url", "--push", "origin", str(self.root / "missing.git"))
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("git push", ended["blocked"])
+        self.assertEqual((self.calls("gh"), self.pulls()), ([], []))
+
+    def test_a_refused_create_blocks(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"], gh=["list", "refuse"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("gh pr create refused", ended["blocked"])
+        self.assertEqual(self.contribution(self.items[0]), {})
+
+    def test_a_retry_reuses_the_draft_a_lost_run_opened(self):
+        """Lost after the create (its url unread): the retry lists the branch's open pull request, opens none."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"], gh=["list", "mute"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], None)
+        self.assertIn("printed no pull-request url", ended["why"])
+        self.assertEqual(len(self.pulls()), 1)
+        row = self.latest()
+        build.end(self.db, row["id"], "interrupted", "lost after the create")
+        retry = self.latest()
+        self.assertEqual((retry["step"], retry["id"] != row["id"]), ("enqueuing", True))
+        self.assertEqual(self.supervisor(retry["id"], checks=lambda work: [PASS]).run()["step"], "enqueued")
+        self.assertEqual(len(self.pulls()), 1, "one draft, never two")
+        self.assertEqual(self.contribution(self.items[0]).get("pull_url"), self.pulls()[0]["url"])
+
+    def test_a_managed_run_never_calls_gh_or_its_checks(self):
+        self.db.execute("UPDATE repo SET managed = 1")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.assertEqual(self.supervisor(checks=lambda work: [CHECK]).run()["step"], "enqueued")
+        self.assertEqual((self.calls("gh"), self.calls("gate")), ([], []))
+        self.assertIsNone(build.run(self.db, self.bundle["id"])["detail"])
+
+    def observed(self, url, state):
+        from sd_db import contributions
+        with database.transaction(self.db):
+            snapshot = contributions.snapshot(self.db, "github:" + url)
+            snapshot["observation"] = {"state": state}
+            contributions._save(self.db, snapshot)
+
+    def watched(self):
+        def lane(row, items):
+            raise AssertionError("an unmanaged run reads no lane")
+        exited = build.Probe()
+        exited.alive = lambda pid: False if pid == os.getpid() else build.Probe.alive(pid)  # type: ignore[method-assign]
+        exited.group = lambda pgid: False if pgid == os.getpgrp() else build.Probe.group(pgid)  # type: ignore[method-assign]
+        return build_run.watch(self.db, lane=lane, probe=exited)
+
+    def test_the_owners_merge_closes_the_tasks_and_cleans(self):
+        self.press(2)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor(checks=lambda work: [PASS]).run()
+        url = self.pulls()[0]["url"]
+        self.assertEqual(self.watched(), [], "unobserved: nothing moves")
+        self.observed(url, "open")
+        self.assertEqual(self.watched(), [])
+        self.observed(url, "merged")
+        self.assertEqual(self.watched(), [{"run": self.bundle["id"], "step": "cleaning"}])
+        self.assertEqual(self.statuses(), ["done", "done"])
+        self.assertEqual(build.run(self.db, self.bundle["id"])["step"], "cleaning", "never checking")
+        self.assertEqual(self.supervisor().run()["outcome"], "done")
+        self.assertFalse(Path(self.bundle["work_path"]).exists())
+
+    def test_a_draft_closed_without_a_merge_ends_lane_failed(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor(checks=lambda work: [PASS]).run()
+        url = self.pulls()[0]["url"]
+        self.observed(url, "closed")
+        self.assertEqual(self.watched(), [{"run": self.bundle["id"], "outcome": "lane_failed"}])
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["outcome"], self.statuses()), ("lane_failed", ["in_progress"]))
+        self.assertIn("closed without a merge", row["detail"])
+
+    def test_own_checks_pick_as_sd_check_does(self):
+        """The adapter's `own_checks`: the aggregate `check` alone, else each of `test` and `lint`, else none."""
+        work = self.root / "checks"
+        work.mkdir()
+        self.assertEqual(ADAPTER.own_checks(work), [])
+        (work / "package.json").write_text(json.dumps({"scripts": {"test": "node t.js", "lint": "eslint ."}}))
+        self.assertEqual(len(ADAPTER.own_checks(work)), 2)
+        (work / "Makefile").write_text("check:\n\ttrue\ntest:\n\ttrue\n")
+        self.assertEqual(ADAPTER.own_checks(work), [["make", "check"]])
+
+
+def sd_quote(argv):
+    import shlex
+    return shlex.join(argv)
 
 
 class Tick(Case):

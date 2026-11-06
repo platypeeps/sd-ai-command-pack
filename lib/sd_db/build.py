@@ -103,6 +103,9 @@ LOSSES = ("interrupted", "timed_out", "error_max_turns", "denied")
 #: The steps from `enqueued` on: the lease is released, the members are `done`, and step 7 releases the run.
 #: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
+#: An unmanaged repository's run at `enqueued` names its draft pull request in `detail`, which a lane run leaves
+#: unset until it ends: the tick's watch reads that pull request, not the lane (pack sd:7868).
+DRAFT_PULL = "draft pull request "
 #: The steps a cancel may stop: from `enqueuing` on, the lane may hold the branch (design, "Liveness").
 CANCELLABLE = ("claimed", "worktree", "building", "reviewing", "fixing")
 ACTIVE = ("queued", "running", "ending")
@@ -634,9 +637,11 @@ def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str
 
     probe = paths.keys(repo)  # a run row written before migration 014 holds the absolute form
     row = connection.execute(
-        f"SELECT remote FROM repo WHERE path IN ({paths.placeholders(probe)})", probe).fetchone()
+        f"SELECT remote, managed FROM repo WHERE path IN ({paths.placeholders(probe)})", probe).fetchone()
     if not branch or row is None or not row["remote"]:
         return ""
+    if not row["managed"]:
+        return _contribution_pull(connection, items)
     try:
         repository = ship._github_repository(row["remote"])
         for item in items:
@@ -646,6 +651,19 @@ def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str
                 return url
     except WorkflowError:
         return ""
+    return ""
+
+
+def _contribution_pull(connection, items: list[int]) -> str:
+    """An unmanaged repository's build links its draft pull request on the first delivered task (pack sd:7868)."""
+    for item in items:
+        row = connection.execute("SELECT fields FROM item WHERE id = ?", (item,)).fetchone()
+        try:
+            url = (json.loads(row["fields"] or "{}").get("contribution") or {}).get("pull_url") if row else None
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(url, str) and url.startswith("https://github.com/"):
+            return url
     return ""
 
 
@@ -709,7 +727,7 @@ def enqueuing(connection, ident: str) -> bool:
             "AND cancel_requested IS NULL", (clock(), clock(), ident)).rowcount == 1
 
 
-def enqueued(connection, ident: str, delivered: Collection[int] | None = None) -> bool:
+def enqueued(connection, ident: str, delivered: Collection[int] | None = None, *, held_by: str = "the lane") -> bool:
     """The `enqueued` step: the lease released and the members `done`, the items left `in_progress` for the lane.
 
     `delivered` is the items the lane entry delivers; a member outside it
@@ -718,7 +736,8 @@ def enqueued(connection, ident: str, delivered: Collection[int] | None = None) -
     `released_at` and `outcome` null, until step 7 ends it; `reap` skips it
     meanwhile. One compare-and-set on the run, open and not yet at a lane
     step; False, with no row changed, for a late supervisor whose run was
-    reaped or retried, or one already enqueued.
+    reaped or retried, or one already enqueued. `held_by` names what holds
+    the branch now: the lane, or an unmanaged repository's draft pull request.
     """
     marks = ", ".join("?" for _ in LANE_STEPS)
     with transaction(connection):
@@ -737,7 +756,7 @@ def enqueued(connection, ident: str, delivered: Collection[int] | None = None) -
         for member in members:
             if member not in skipped:
                 connection.execute("UPDATE assignment SET status = 'done', ended = ?, result = ? WHERE id = ?",
-                                   (stamp, f"build run {ident} enqueued in the lane", member["id"]))
+                                   (stamp, f"build run {ident} enqueued in {held_by}", member["id"]))
         for member in skipped:
             _block(connection, [member], f"build run {ident} enqueued no commit with a `Closes: sd:{member['item']}` "
                                          "trailer, so the merge leaves this item open", stamp)
@@ -792,13 +811,47 @@ def merged(connection, read: dict) -> bool:
     tick spawns a fresh one and the reap judges it as any step.
     """
     with transaction(connection):
-        stamp = clock()
-        step = "checking" if picked(connection, read["assignment"]) else "cleaning"
-        return connection.execute(
-            f"UPDATE runner_run SET step = ?, heartbeat_at = ?, supervisor_pid = NULL, "
-            f"supervisor_pgid = NULL, supervisor_start = NULL, builder_pgid = NULL, builder_start = NULL, "
-            f"updated_at = ? WHERE id = ? AND step = 'enqueued' AND {_SAME}",
-            (step, stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount == 1
+        return _after_merge(connection, read, "checking" if picked(connection, read["assignment"]) else "cleaning")
+
+
+def _after_merge(connection, read: dict, step: str) -> bool:
+    stamp = clock()
+    return connection.execute(
+        f"UPDATE runner_run SET step = ?, heartbeat_at = ?, supervisor_pid = NULL, "
+        f"supervisor_pgid = NULL, supervisor_start = NULL, builder_pgid = NULL, builder_start = NULL, "
+        f"updated_at = ? WHERE id = ? AND step = 'enqueued' AND {_SAME}",
+        (step, stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount == 1
+
+
+def draft_pull(read: dict) -> str | None:
+    """The draft pull request an open `enqueued` run of an unmanaged repository waits on, or None (lane runs)."""
+    detail = read.get("detail") or ""
+    if read.get("step") != "enqueued" or read.get("outcome") is not None or not detail.startswith(DRAFT_PULL):
+        return None
+    return detail[len(DRAFT_PULL):].strip() or None
+
+
+def pull_merged(connection, read: dict, url: str) -> bool:
+    """The owners merged an unmanaged repository's draft pull request: the run goes to `cleaning`, never `checking`
+    (nothing of ours deploys), and each delivered task still `in_progress` moves to `done`, in one transaction.
+
+    The same compare-and-set as `merged`; False, with nothing written, when the run moved. A member the operator
+    moved on stays as it is, and one that is no task gets a note: only a task closes by status.
+    """
+    with transaction(connection):
+        if not _after_merge(connection, read, "cleaning"):
+            return False
+        for member in _members(connection, read["assignment"], "done"):
+            row = connection.execute("SELECT kind, status FROM item WHERE id = ?", (member["item"],)).fetchone()
+            if row is None or row["status"] != "in_progress":
+                continue
+            if row["kind"] != "task":
+                add_note(connection, member["item"], "followup",
+                         f"Build run {read['id']}: {url} merged; close this {row['kind']} item by hand")
+                continue
+            transition(connection, member["item"], "done", who="build",
+                       reason=f"build run {read['id']}: its draft pull request {url} merged")
+        return True
 
 
 def lane_failed(connection, read: dict, reason: str) -> bool:

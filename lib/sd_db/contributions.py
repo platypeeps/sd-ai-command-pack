@@ -50,6 +50,8 @@ EVENTS = frozenset({"comment", "label_added", "label_removed", "converted_to_dra
                     "closed", "closed_completed", "closed_not_planned", "reopened"})
 ISSUE_EVENTS = EVENTS - {"converted_to_draft", "ready_for_review"}
 # An issue observation carries none of these; one that does was read as a pull.
+#: The reason an item's open draft pull request reads `awaiting_you` (pack sd:7868).
+DRAFTED = "Draft pull request: mark it ready for review"
 PULL_ONLY = frozenset({"reviews", "ci", "ci_head", "ci_ids", "head", "base", "mergeable", "draft"})
 
 
@@ -811,7 +813,11 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
     active.sort(key=lambda a: (0 if any(e["kind"] == "newly_unblocked" for s in sources if s["key"] == a["key"] for e in s["attention"]) else 1, a["key"]))
     primary = active[0] if active else {"key": source["key"], "revision": source["revision"], "event_ids": [], "reasons": []}
     waiting = bool(metadata.get("blocked_on") or metadata.get("depends_on"))
-    needs_you = bool(active) or (not url and not waiting)
+    # An item's open draft the operator wrote waits on them to mark it ready, not on reviewers (pack sd:7868).
+    operator = str((observation.get("operator") or {}).get("id") or "")
+    drafted = bool(row.get("id")) and observation.get("state") == "open" and observation.get("draft") is True \
+        and bool(operator) and str((observation.get("author") or {}).get("id") or "") == operator
+    needs_you = bool(active) or (not url and not waiting) or drafted
     # An issue or a pull request closed without merge awaits no one; a later
     # observation that reads `open` returns the row to live work. A dismissed
     # row (sd:3432) is closed too, until new attention or a lifecycle change.
@@ -833,6 +839,8 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
         except WorkflowError:
             pass
     reasons = list(dict.fromkeys(reason for a in active for reason in a["reasons"]))
+    if drafted:
+        reasons.append(DRAFTED)
     if not url and draft:
         reasons.append("Issue draft has not been filed" if draft_verified else "Issue draft has not been filed; draft body is unverified")
     elif not url:
