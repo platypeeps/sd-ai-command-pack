@@ -2822,12 +2822,16 @@ def _accepted_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
     Not abnormal. An acceptance is a decision, and re-flagging a decision as a
     defect is how a banner becomes noise. It is listed because `until` is prose
     nothing re-evaluates: the entry stays true only for as long as somebody
-    looks at it, and this is the looking.
+    looks at it, and this is the looking. An entry whose `until` is
+    `never` has nothing to re-read, so it lists no row; Protection still
+    prints it as accepted (sd:7825).
     """
     rows = []
     for entry in protection.get("accepted") or []:
         ident = str(entry.get("id") or "")
         if not ident:
+            continue
+        if str(entry.get("until") or "").strip().lower() == "never":
             continue
         rows.append(_row(
             "accepted-gap-standing", ident, ident,

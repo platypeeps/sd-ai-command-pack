@@ -244,6 +244,8 @@ actor type and no other gap can be accepted that way.
 
 An acceptance nobody re-reads is itself a row: `accepted-gap-standing` at rank
 45 surfaces a written acceptance whose `until` condition nothing is watching.
+An entry whose `until` is `never` has no condition to watch, so it lists no
+row; Protection still prints it as accepted.
 
 ## Flags
 
