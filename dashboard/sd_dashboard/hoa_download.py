@@ -31,6 +31,7 @@ Exit codes: 0 done, 3 not possible now (signed out, no browser, another run), 1 
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import fcntl
 import json
@@ -265,26 +266,40 @@ def _bounded(proc: subprocess.Popen, seconds: float) -> threading.Timer:
     return timer
 
 
+class Unreadable(Exception):
+    """A run's output could not be read; only `_lines` raises it, so a caller's own error is not taken for it."""
+
+
 def _lines(proc: subprocess.Popen, timer: threading.Timer):
     """`proc`'s output lines until EOF, or until REAP_SECONDS after `timer` fired (sd:7910).
 
     A grandchild that a refused group kill left alive (EPERM, sd:7900) holds stdout open, so a read to EOF could wait
     on it for as long as it lives. A daemon thread reads the pipe and closes it at EOF; past the bound it is left to
     the grandchild, since closing a pipe another thread reads blocks on that read.
+
+    The bound is checked before each line, so a survivor that keeps printing cannot hold the read past it. A read
+    that fails, such as output that is not UTF-8, raises here, never leaves the caller waiting (sd:7920).
     """
     feed: queue.Queue = queue.Queue()
 
     def pump():
-        for line in proc.stdout:
-            feed.put(line)
-        proc.stdout.close()
-        feed.put(None)
+        try:
+            for line in proc.stdout:
+                feed.put(line)
+        except Exception as error:  # forwarded: the caller says why the read stopped
+            feed.put(error)
+        finally:
+            feed.put(None)
+            with contextlib.suppress(OSError, ValueError):
+                proc.stdout.close()
 
     threading.Thread(target=pump, daemon=True).start()
     deadline = None
     while True:
         if deadline is None and timer.fired:
             deadline = time.monotonic() + REAP_SECONDS
+        if deadline is not None and time.monotonic() >= deadline:
+            return
         try:
             line = feed.get(timeout=0.2 if deadline is None else max(0.0, deadline - time.monotonic()))
         except queue.Empty:
@@ -293,7 +308,17 @@ def _lines(proc: subprocess.Popen, timer: threading.Timer):
             continue
         if line is None:
             return
+        if isinstance(line, Exception):
+            raise Unreadable(f"{type(line).__name__}: {line}") from line
         yield line
+
+
+def _unread(proc: subprocess.Popen, timer: threading.Timer, what: str, error: Unreadable) -> tuple[int, str]:
+    """Stop `proc`, whose output could not be read, and say why (sd:7920)."""
+    timer.cancel()
+    timer.function()
+    proc.wait()
+    return EXIT_ERROR, f"cannot read {what}'s output: {error}"
 
 
 def _chrome_loaded(init: dict) -> bool | None:
@@ -319,33 +344,36 @@ def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiti
     except OSError as error:
         return EXIT_ERROR, f"cannot start {argv[0]}: {error}"
     timer, texts, waited, final, ended, chrome = _bounded(proc, LOGIN_SECONDS), [], False, None, "", None
-    for line in _lines(proc, timer):
-        try:
-            event = json.loads(line)
-        except ValueError:
-            event = None
-        if not isinstance(event, dict):
-            print(line.rstrip(), file=out, flush=True)
-            texts.append(line)
-            continue
-        if event.get("type") == "system" and event.get("subtype") == "init":
-            chrome = _chrome_loaded(event)
-            continue
-        if event.get("type") == "assistant":
-            said = "\n".join(block.get("text", "") for block in (event.get("message") or {}).get("content") or []
-                             if isinstance(block, dict) and block.get("type") == "text")
-        elif event.get("type") == "result":
-            said = str(event.get("result") or "")
-            ended = str(event.get("subtype") or "an unnamed result")
-            final = said if event.get("subtype") == "success" and event.get("is_error") is False else None
-        else:
-            continue
-        if said.strip():
-            print(said.rstrip(), file=out, flush=True)
-            texts.append(said)
-        if not waited and any(row.strip() == WAITING for row in said.splitlines()):
-            waited = True
-            on_waiting()
+    try:
+        for line in _lines(proc, timer):
+            try:
+                event = json.loads(line)
+            except ValueError:
+                event = None
+            if not isinstance(event, dict):
+                print(line.rstrip(), file=out, flush=True)
+                texts.append(line)
+                continue
+            if event.get("type") == "system" and event.get("subtype") == "init":
+                chrome = _chrome_loaded(event)
+                continue
+            if event.get("type") == "assistant":
+                said = "\n".join(block.get("text", "") for block in (event.get("message") or {}).get("content") or []
+                                 if isinstance(block, dict) and block.get("type") == "text")
+            elif event.get("type") == "result":
+                said = str(event.get("result") or "")
+                ended = str(event.get("subtype") or "an unnamed result")
+                final = said if event.get("subtype") == "success" and event.get("is_error") is False else None
+            else:
+                continue
+            if said.strip():
+                print(said.rstrip(), file=out, flush=True)
+                texts.append(said)
+            if not waited and any(row.strip() == WAITING for row in said.splitlines()):
+                waited = True
+                on_waiting()
+    except Unreadable as error:
+        return _unread(proc, timer, argv[0], error)
     proc.wait()
     timer.cancel()
     if timer.fired:
@@ -377,9 +405,12 @@ def download(source: str, place: Path, keep: tuple[int, ...], out) -> tuple[int,
     except OSError as error:
         return EXIT_ERROR, f"cannot start {_command(source)}: {error}"
     timer, last = _bounded(proc, DOWNLOAD_SECONDS), ""
-    for line in _lines(proc, timer):
-        print(line.rstrip(), file=out, flush=True)
-        last = line.strip() or last
+    try:
+        for line in _lines(proc, timer):
+            print(line.rstrip(), file=out, flush=True)
+            last = line.strip() or last
+    except Unreadable as error:
+        return _unread(proc, timer, _command(source), error)
     proc.wait()
     timer.cancel()
     if timer.fired:
