@@ -328,7 +328,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // its child rows under it and closes the row that was open, and a click on the open row closes it. The children, in order:
   // working (the live items of `active`, the build runs of /api/queue/builds, a builder's gate in the lane and the runner's
   // assignments no run holds), merging, next and blocked (the lane entries of /api/queue), suggested (what sd-next offers next,
-  // from `queues.suggested`, at most three, pack sd:7222 and sd:7314), open (All items: its other open tasks, from
+  // from `queues.suggested`, at most six, pack sd:7222, sd:7314 and sd:7869), open (All items: its other open tasks, from
   // /api/tasks) and ended (ended build runs, and the cancelled
   // and landed lane entries). Each row's marker is its state glyph and its type in words; the parent's glyph is its worst
   // child's. Suggested is on by default (pack sd:7314), All items and Ended builds are off; on, a repo with only those rows
@@ -344,7 +344,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // the merge, which nothing takes back. A build run's Cancel asks first and posts the assignment cancel route; an ended
   // blocked or cancelled bundle's Retry and Send to builder post /api/queue/builds/retry (pack sd:6020). The view reads its
   // three documents when it first shows and on each Today read after; a source that was not read is said under the table.
-  const QTYPES = ['working', 'merging', 'next', 'blocked', 'suggested', 'open', 'ended'], QSHOW = ['suggested', 'open', 'ended'], NEXT = 3;
+  const QTYPES = ['working', 'merging', 'next', 'blocked', 'suggested', 'open', 'ended'], QSHOW = ['suggested', 'open', 'ended'], NEXT = 6;
   const BOXES = ['merging', 'working', 'next', 'blocked', 'suggested']; // a repo row's boxes, left to right (pack sd:7470)
   const QV = { lanes: null, lanesErr: '', built: null, builtErr: '', runner: null, runnerErr: '', tasks: null, tasksErr: '', seen: false, busy: false };
   const QOTHER = new Map(); // the lane entries, selectable as Today's other rows are
@@ -521,7 +521,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     // pack sd:7470: merging is the leftmost box.
     const { working: w, merging: m, next: n, blocked: b, suggested: s } = g.n;
     // Each box says its count and what it counts, in its title (pack sd:7383); the label above says all five at once.
-    return html`<td class="detail pipe" aria-label="${m} merging, ${w} working, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane, or waiting on a pull request, until someone acts')}${pip(s, ' on', 'suggested: up to 3 ready or planned tasks to do next')}</td>`;
+    return html`<td class="detail pipe" aria-label="${m} merging, ${w} working, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane, or waiting on a pull request, until someone acts')}${pip(s, ' on', `suggested: up to ${NEXT} ready or planned tasks to do next`)}</td>`;
   }
   function queueView() {
     const unread = [];

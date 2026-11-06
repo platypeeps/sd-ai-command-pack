@@ -443,7 +443,7 @@ class TodayDraws(ScreenCase):
         # pack sd:7222, now the Queue view's: one parent row per repo; an item with no repo is Unassociated, last.
         self.grouped()
         out = self.draw("R.repos = repos(); open('alpha'); R.alpha = ELS.queue.html; open(''); R.none = ELS.queue.html;")
-        # pack sd:7679: both work one; beta's three suggested rows (counted while hidden) put it first.
+        # pack sd:7679: both work one; beta's four suggested rows (counted while hidden) put it first.
         self.assertEqual(out["R"]["repos"], ["beta", "alpha", ""])
         self.assertIn('data-type="working" data-item="7"', out["R"]["alpha"])
         self.assertNotIn('data-item="9"', out["R"]["alpha"])
@@ -451,7 +451,7 @@ class TodayDraws(ScreenCase):
         self.assertIn('data-type="working" data-item="11"', out["R"]["none"])
 
     def test_suggested_adds_each_repos_ready_items_that_the_default_hides(self):
-        # pack sd:7222's Live + next is the Suggested filter: each repo's ready items, at most 3, in their order; a repo
+        # pack sd:7222's Live + next is the Suggested filter: each repo's ready items, at most 6 (sd:7869), in order; a repo
         # with only ready items gets its row too. Off (`?show=` empty) shows none.
         self.grouped()
         out = self.draw("R.before = repos(); press('suggested'); R.after = repos(); R.bar = ELS['queue-filters'].html;"
@@ -460,7 +460,7 @@ class TodayDraws(ScreenCase):
         self.assertEqual(r["before"], ["beta", "alpha", ""])
         self.assertEqual(r["after"], ["beta", "alpha", "gamma", ""])
         self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="true"', r["bar"])
-        self.assertEqual([f"#{n} Ready {n}" in r["beta"] for n in (31, 32, 33, 34)], [True, True, True, False])
+        self.assertEqual([f"#{n} Ready {n}" in r["beta"] for n in (31, 32, 33, 34)], [True, True, True, True])
         self.assertIn("#21 Ready 21", r["alpha"])
         self.assertNotIn("#51 Ready 51", r["alpha"], "a build-queue row is no suggested item")
 

@@ -388,17 +388,26 @@ class Tree:
 
         Undecodable when it is not UTF-8, and Unread when git could not read
         it or could not say whether it is there: neither is a missing file.
+        An entry that is no blob, a directory or a submodule's gitlink, is
+        no file there (pack sd:7850).
         """
         try:
             if self.commit is None:
                 path = self.root / rel
                 return path.read_text(encoding="utf-8") if path.is_file() else None
             kind = sd_lib.git_output(["cat-file", "-t", f"{self.commit}:{rel}"], self.root)
-            if kind is None:  # missing, or git failed: ls-tree answers which
-                listed = sd_lib.git_output(["ls-tree", self.commit, "--", rel], self.root)
-                if listed is None or listed:
+            if kind is None:
+                # Missing, a gitlink (its commit is not in this repository),
+                # or git failed: the entry ls-tree lists, by its type, says which.
+                listed = sd_lib.git_output(["ls-tree", "-z", self.commit, "--", rel], self.root)
+                if listed is None:
                     raise Unread(rel)
-                return None
+                entry = listed.split("\0", 1)[0]
+                if not entry:
+                    return None
+                kind = entry.split("\t", 1)[0].split(" ")[1]
+                if kind == "blob":  # listed as a file, yet cat-file failed
+                    raise Unread(rel)
             if kind != "blob":
                 return None
             text = _git_show(self.root, f"{self.commit}:{rel}")
@@ -409,10 +418,11 @@ class Tree:
             raise Undecodable(rel, error) from error
 
     def workflows(self) -> list[str]:
-        return self._workflows() or []
+        """Every workflow path; Unread when git could not list them (pack sd:7850).
 
-    def _workflows(self) -> list[str] | None:
-        """Every workflow path, or None when git could not list them."""
+        A failed listing is not a folder with no workflows: read as one, the
+        plan laid the check workflow beside a workflow it did not see.
+        """
         directory = ".github/workflows"
         if self.commit is None:
             found = sorted(p.name for p in (self.root / directory).glob("*") if p.is_file())
@@ -420,22 +430,20 @@ class Tree:
             listing = sd_lib.git_output(["ls-tree", "--name-only", "-z", self.commit, f"{directory}/"],
                                         self.root)
             if listing is None:
-                return None
+                raise Unread(f"{directory}/")
             found = sorted(name.rsplit("/", 1)[-1] for name in listing.split("\0") if name)
         return [f"{directory}/{name}" for name in found if name.endswith((".yml", ".yaml"))]
 
-    def workflow_texts(self, besides: str) -> dict[str, str] | str:
-        """Every workflow but `besides`, by path; or the path that could not be read.
+    def workflow_texts(self, besides: str) -> dict[str, str]:
+        """Every workflow but `besides`, by path.
 
         A read that failed is not a workflow naming no slug: counted as one,
         the stamp lifted the guard that workflow's pin still needs (sd:7633).
+        It raises Unread, which refuses the repository (`plan_repo`). A
+        listed entry that is no file, such as a gitlink, is no workflow.
         """
-        paths = self._workflows()
-        if paths is None:
-            return ".github/workflows/"
-        texts = {rel: self.text_at(rel) for rel in paths if rel != besides}
-        unread = next((rel for rel, text in texts.items() if text is None), None)
-        return unread if unread is not None else {rel: text for rel, text in texts.items() if text is not None}
+        texts = {rel: self.text_at(rel) for rel in self.workflows() if rel != besides}
+        return {rel: text for rel, text in texts.items() if text is not None}
 
 
 def _git_show(root: pathlib.Path, spec: str) -> str | None:
@@ -642,8 +650,10 @@ def pull_request_workflows(tree: Tree, *, besides: Iterable[str]) -> list[str]:
     for path in tree.workflows():
         if path in skip:
             continue
-        lines = sd_lib.yaml_lines(tree.text_at(path) or "")
-        if "pull_request" in sd_lib.workflow_triggers(lines):
+        text = tree.text_at(path)
+        if text is None:  # a listed entry that is no file, such as a gitlink
+            continue
+        if "pull_request" in sd_lib.workflow_triggers(sd_lib.yaml_lines(text)):
             found.append(path)
     return found
 
@@ -710,13 +720,11 @@ def guard_change(plan: Plan, tree: Tree, propose: Callable[[str, str], None], ro
 
     A guard stays while any workflow names its slug: a refused rewrite leaves
     the old pin, and with it the old guard. A reworded guard, under either
-    slug, is refused as setup-github refuses it without --force, and so is a
-    workflow the stamp could not read (sd:7633).
+    slug, is refused as setup-github refuses it without --force. A workflow
+    the stamp could not read refuses the repository whole (sd:7633, pack
+    sd:7850): `workflow_texts` raises Unread.
     """
     others = tree.workflow_texts(besides=ROUTE_PATH)
-    if isinstance(others, str):
-        plan.refused.append(f"{DEPENDABOT_PATH}: could not read {others}, so the stamp keeps the guard as it is")
-        return
     current = tree.text_at(DEPENDABOT_PATH)
     differing = sd_setup_guard.differing(current, sd_setup_guard.DEFAULT_ACTION)
     if differing:

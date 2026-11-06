@@ -9,9 +9,23 @@ attention states:
 | ----------------- | ---------- | ------------------------------------------ |
 | review requested  | another's  | the `user-review-requested:@me` search     |
 | changes requested | yours      | `reviewDecision` CHANGES_REQUESTED         |
-| checks failing    | yours      | the head commit's rollup FAILURE or ERROR  |
+| checks failing    | yours      | red rollup unless every red is optional    |
 | merge conflict    | yours      | `mergeable` CONFLICTING                    |
 | ready to merge    | yours      | approved, mergeable, checks green or none  |
+
+Only a required check blocks the merge, so a red optional one (a Snyk scan)
+is no alert (sd:7862). The search cannot say which checks are required:
+`isRequired` takes the pull's number, and `mergeStateStatus` reads BLOCKED
+for a missing review too. So a pull whose whole rollup is red costs one
+batched `CHECKS` query, all such pulls in one call, which reads its head's
+required checks; a pull with no red rollup costs none.
+
+A red rollup is never ready to merge: `isRequired` covers only the checks
+that reported, so green ones cannot prove a required check is not missing.
+When the answer cannot say for one pull (more than 100 checks, a malformed
+or missing entry, a failed call), that pull keeps the whole rollup's rule,
+as before sd:7862, and the read stays complete: one pull's unread checks
+must not stop every alert from clearing.
 
 A state new since the last read files one `reporting.ingest` report, job
 `JOB`, basis `<state> <url>`: the reports path the operator already triages,
@@ -25,6 +39,7 @@ what it read and clears nothing: absence from it is unknown.
 | budget check    | none                   | the sync spent it  | named; read and clear nothing    |
 | search          | none                   | gh fails or cut    | file what was read, clear none   |
 | search shape    | none                   | malformed answer   | cut read: file valid, clear none |
+| required checks | none                   | gh fails, partial  | that pull: whole rollup; complete|
 | file one alert  | one report row         | ingest refuses     | left out of seen: next run files |
 | clear one alert | one report to done     | acknowledge fails  | named; next run clears again     |
 | record seen     | the `SEEN_KEY` row     | write fails        | next run files again; ingest folds |
@@ -50,23 +65,37 @@ PAGE = 100
 QUERY = """query($q: String!, $n: Int!) { search(query: $q, type: ISSUE, first: $n) { issueCount nodes {
   ... on PullRequest { url number title repository { nameWithOwner } reviewDecision mergeable
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } } }"""
+#: One red rollup's head contexts and which are required, per pull: aliased `p<i>` in one query.
+CHECKS = """p{i}: repository(owner: {owner}, name: {name}) {{ pullRequest(number: {n}) {{ commits(last: 1) {{ nodes {{
+  commit {{ statusCheckRollup {{ contexts(first: 100) {{ pageInfo {{ hasNextPage }} nodes {{
+    ... on CheckRun {{ conclusion isRequired(pullRequestNumber: {n}) }}
+    ... on StatusContext {{ state isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }} }}"""
+#: A check run's conclusion or a status's state that fails the check.
+RED = frozenset({"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"})
 SEARCHES = (("author", "is:pr is:open archived:false author:@me"),
             ("requested", "is:pr is:open archived:false user-review-requested:@me"))
 LABELS = {"review_requested": "review requested of you", "changes_requested": "changes requested",
           "checks_failing": "checks failing", "conflict": "merge conflict", "ready": "approved, ready to merge"}
 
 
-def states(pull: dict, why: str) -> list[str]:
-    """The attention states of one search node, from `LABELS`."""
+def _rollup(pull: dict) -> str | None:
+    nodes = ((pull.get("commits") or {}).get("nodes") or [{}])
+    return (((nodes[-1] or {}).get("commit") or {}).get("statusCheckRollup") or {}).get("state")
+
+
+def states(pull: dict, why: str, optional_red: bool = False) -> list[str]:
+    """The attention states of one search node, from `LABELS`.
+
+    `optional_red`, from `_optional_red`: every red check on the head is optional, so the red rollup blocks nothing.
+    """
     if why == "requested":
         return ["review_requested"]
-    nodes = ((pull.get("commits") or {}).get("nodes") or [{}])
-    rollup = (((nodes[-1] or {}).get("commit") or {}).get("statusCheckRollup") or {}).get("state")
+    rollup = _rollup(pull)
     decision, mergeable = pull.get("reviewDecision"), pull.get("mergeable")
     found = []
     if decision == "CHANGES_REQUESTED":
         found.append("changes_requested")
-    if rollup in ("FAILURE", "ERROR"):
+    if rollup in ("FAILURE", "ERROR") and not optional_red:
         found.append("checks_failing")
     if mergeable == "CONFLICTING":
         found.append("conflict")
@@ -99,6 +128,49 @@ def _well_formed(node) -> bool:
     return rollup is None or _has(rollup, "state", str)
 
 
+def _verdict(answer) -> bool | None:
+    """Whether a required check on one pull's head is red; None when the answer does not say."""
+    try:
+        block = answer["pullRequest"]["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]
+        if block["pageInfo"]["hasNextPage"] is not False or not isinstance(block["nodes"], list):
+            return None
+        red = False
+        for node in block["nodes"]:
+            key = "conclusion" if "conclusion" in node else "state"
+            if type(node.get("isRequired")) is not bool or key not in node or not (
+                    node[key] is None or isinstance(node[key], str)):
+                return None
+            red = red or node["isRequired"] and node[key] in RED
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return None
+    return red
+
+
+def _optional_red(pulls: list[dict], runner, timeout: float) -> set[str]:
+    """The URLs of pulls, all with a red rollup, whose head has no red required check: one call for all.
+
+    A pull the answer does not settle is left out, so it keeps the whole rollup's rule. gh exits non-zero
+    when one alias errors and still prints the others' data, so that data is read whatever the exit code.
+    """
+    from .shadow_sync import _run
+
+    if not pulls:
+        return set()
+    parts = []
+    for i, pull in enumerate(pulls):
+        owner, _, name = pull["repository"]["nameWithOwner"].partition("/")
+        parts.append(CHECKS.format(i=i, owner=json.dumps(owner), name=json.dumps(name), n=int(pull["number"])))
+    _code, out, _err = _run(["gh", "api", "graphql", "-f", "query=query { " + " ".join(parts) + " }"],
+                            runner, timeout=timeout)
+    try:
+        data = json.loads(out)["data"]
+    except (ValueError, KeyError, TypeError):
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    return {pull["url"] for i, pull in enumerate(pulls) if _verdict(data.get(f"p{i}")) is False}
+
+
 def read(runner=None, *, timeout: float = 60) -> tuple[dict[str, dict], bool, str]:
     """`({basis: pull}, complete, reason)`: every open pull's states, keyed `<state> <url>`."""
     from .shadow_sync import _run
@@ -124,8 +196,10 @@ def read(runner=None, *, timeout: float = 60) -> tuple[dict[str, dict], bool, st
             problems.append(f"{why}: {len(listed) - len(nodes)} malformed pull(s)")
         elif count > len(nodes):
             problems.append(f"{why}: more than {PAGE} open pulls")
+        optional = _optional_red([node for node in nodes if _rollup(node) in ("FAILURE", "ERROR")],
+                                 runner, timeout) if why == "author" else set()
         for node in nodes:
-            for state in states(node, why):
+            for state in states(node, why, node["url"] in optional):
                 found[f"{state} {node['url']}"] = {"state": state, "url": node["url"], "number": node.get("number"),
                                                     "title": node.get("title") or "",
                                                     "repo": (node.get("repository") or {}).get("nameWithOwner") or ""}

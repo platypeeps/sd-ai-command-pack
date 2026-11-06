@@ -73,6 +73,9 @@ SERIES = {"work": "Work sweep", "personal": "Personal sweep"}
 EXIT_OK, EXIT_NONE, EXIT_ERROR = 0, 3, 1
 TIMEOUT = 3600
 SD_SECONDS = 60
+#: How long a stopped run's pipes are read once it is killed: a grandchild a refused group kill left can hold
+#: them open (sd:7910).
+REAP_SECONDS = 5
 #: The checkout the briefs belong to: `sd reports brief add` files a brief only under a registered repository.
 REPO = DASHBOARD.parent
 
@@ -344,9 +347,19 @@ def ask(argv: list[str], cwd: Path, timeout: int, out, keep: tuple[int, ...] = (
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        with contextlib.suppress(ProcessLookupError):
+        try:
             os.killpg(proc.pid, signal.SIGKILL)
-        proc.communicate()
+        except ProcessLookupError:
+            pass
+        except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+            proc.kill()
+        try:
+            proc.communicate(timeout=REAP_SECONDS)
+        except subprocess.TimeoutExpired:
+            # A grandchild the group kill missed holds the pipes; the run is dead, so stop reading them.
+            proc.stdout.close()
+            proc.stderr.close()
+            proc.wait()
         return EXIT_ERROR, f"the run passed {timeout}s and was stopped", []
     print(stdout.rstrip(), file=out)
     if proc.returncode != 0:

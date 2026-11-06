@@ -176,8 +176,8 @@ class TheScript(unittest.TestCase):
         """pack sd:7756: the item is filed and the launch answers 503; the toast said "not changed" and the cause alone,
         so nothing named sd:77, the item filed for the repo, whose note now keeps the cause (fix_session._noted)."""
         doc = health_screen.dependabot_document(FOUND)
-        error = ("Fix failed: herdr.sh launch: session sd is not running; run herdr.sh start first."
-                 " A note on sd:77 keeps the cause.")
+        error = ("Fix failed: herdr.sh launch: session sd is not running and did not start: herdr --session sd server"
+                 " exited 1. A note on sd:77 keeps the cause.")
         answer = (f"(path, body) => path === '/api/github/dependabot' ? [200, {json.dumps(doc)}]"
                   " : path === '/api/items' ? [201, { item: { id: 77 }, revision: 'a'.repeat(64) }]"
                   f" : path === '/api/items/77/fix' ? [503, {{ error: {json.dumps(error)} }}] : [404, {{ error: 'no answer' }}]")
