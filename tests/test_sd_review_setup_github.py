@@ -1333,6 +1333,26 @@ class OldSlugGuardTests(SetupFixture):
     def test_a_guard_the_old_pack_wrote_reads_same(self) -> None:
         self.assertEqual(guard.guard_state(old_slug(guard.minimal_file())), "same")
 
+    def test_a_non_utf8_sibling_is_refused_by_name_not_a_traceback(self) -> None:
+        """pack sd:7821: install and --check read every sibling workflow; one that
+        is not UTF-8 is a refusal naming the file, not a UnicodeDecodeError."""
+        import os
+
+        root = self.make_repo()
+        install(root)
+        self.sibling(root, OLD_SLUG).write_bytes(b"jobs: \xff\xfe\n")
+        cwd = pathlib.Path.cwd()
+        os.chdir(root)
+        try:
+            for argv in (["--pin", PIN], ["--check"]):
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                    code = setup.main(argv, load_policy=sd_review.load_policy)
+                self.assertEqual(code, setup.EXIT_REFUSED, argv)
+                self.assertIn("other.yml", stderr.getvalue())
+        finally:
+            os.chdir(cwd)
+
     def test_install_keeps_the_old_guard_while_a_sibling_pins_the_old_slug(self) -> None:
         root = self.make_repo()
         self.seed_dependabot(root, old_slug(guard.minimal_file()))

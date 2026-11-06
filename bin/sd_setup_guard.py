@@ -101,11 +101,23 @@ def workflow_slugs(root: pathlib.Path, workflow: pathlib.Path, text: str) -> tup
 
 
 def sibling_workflows(root: pathlib.Path, workflow: pathlib.Path) -> dict[str, str]:
-    """Every other workflow beside `workflow`, by path relative to `root`."""
+    """Every other workflow beside `workflow`, by path relative to `root`.
+
+    One that is not UTF-8 is a GuardError naming it, so callers refuse by
+    name rather than raise a traceback (pack sd:7821).
+    """
 
     target = root / workflow
-    return {str(path.relative_to(root)): path.read_text(encoding="utf-8")
-            for path in sorted((root / workflow.parent).glob("*.y*ml")) if path != target}
+    found = {}
+    for path in sorted((root / workflow.parent).glob("*.y*ml")):
+        if path == target:
+            continue
+        rel = str(path.relative_to(root))
+        try:
+            found[rel] = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as error:
+            raise GuardError(f"{rel} is not UTF-8 ({error.reason}), so whether it pins the pack is not known") from error
+    return found
 
 
 DEPENDENCY = dependency_name(DEFAULT_ACTION)
