@@ -1022,6 +1022,33 @@ class TheDocument(Collectors, ScreenCase):
         self.assertIn("took longer than Disk's 8 s", row["note"])
         self.assertEqual(row["cli"], f"df -h {store}")
 
+    def test_a_du_that_did_not_finish_is_not_run_again_on_the_next_read(self):
+        """sd:7898: du on the 2.1 TB drive never finished, so each Disk read spent about 6 of its 8 s on it for nothing."""
+        store, ran = Path(self.tmp.name) / "store", Path(self.tmp.name) / "ran"
+        store.mkdir()
+        listed = (f"storage|{store}\n", "<config>/project-dashboard/disk.conf", "")
+        stub = self.stub("df", 'if [ "$1" = -kP ]; then printf "Filesystem 1024-blocks Used Available Capacity Mounted on'
+                               f'\\n{self.DRIVE}\\n"; else cat <<\'EOF\'\n{self.DF}EOF\nfi\n')
+        self.stub("du", f'echo du >> "{ran}"\n' + self.stalled())
+        self.addCleanup(lambda: getattr(health_collectors, "_DU_OVERRAN", {}).clear())
+        real_run = subprocess.run
+
+        def run(argv, **kwargs):
+            return real_run(argv, **{**kwargs, **({} if argv[0] == "du" else {"timeout": 60})})
+
+        def scan():
+            return REAL_DISK_SCAN(self.connection, within=1, listed=listed, repo_paths=[])["storage"]
+        with patch.dict(os.environ, {"PATH": f"{stub}{os.pathsep}{os.environ['PATH']}"}), \
+                patch.object(health_collectors, "time", HeldClock()), \
+                patch.object(health_collectors.subprocess, "run", run):
+            first, second = scan(), scan()
+            self.assertEqual(ran.read_text().split(), ["du"], "the second read ran the du that could not finish again")
+            with patch.object(health_collectors, "DU_RETRY_SECONDS", 0):
+                scan()
+        self.assertEqual(ran.read_text().split(), ["du", "du"], "a du past its retry time was not tried again")
+        self.assertEqual(first, second)
+        self.assertEqual((second[0]["error"], second[0]["drive"]["mount"]), ("", "/Volumes/store"))
+
     def test_a_du_that_does_not_finish_and_no_df_is_a_row_not_a_refusal_of_the_area(self):
         store, rows = self.stalled_du("exit 1")
         self.assertEqual(rows[f"rs:{store}"]["detail"], "du did not finish inside the Disk budget")
@@ -1609,6 +1636,42 @@ class ThePage(Collectors, BrowserSession):
         status, _, body = self.request("/api/health/nowhere", headers=cookie)
         self.assertEqual(status, 404)
         self.assertIn("Health has no view 'nowhere'", json.loads(body)["error"])
+
+    def free_slots(self):
+        """How many read slots a new read could take now (sd:7842), each given back at once."""
+        slots, taken = self.listening.RequestHandlerClass.reads, 0
+        while taken < server.READ_SLOTS and slots.acquire(blocking=False):
+            taken += 1
+        for _ in range(taken):
+            slots.release()
+        return taken
+
+    def test_a_view_waiting_on_a_walker_holds_no_read_slot(self):
+        # sd:7898: Disk took its whole 8 s budget on each read, and the view held a read slot all that time, so under
+        # load Health's reads filled the slots and the page's other reads waited behind them.
+        gate, started = threading.Event(), threading.Event()
+        self.addCleanup(gate.set)
+
+        def slow(connection, **_):
+            started.set()
+            gate.wait(10)
+            return DISK
+        answers = []
+        with patch.object(health_collectors, "disk_scan", slow):
+            reader = threading.Thread(target=lambda: answers.append(
+                self.request("/api/health/machine", headers={"Cookie": self.cookie})))
+            reader.start()
+            self.assertTrue(started.wait(10), "the Disk scan never started")
+            deadline = time.monotonic() + 5
+            while self.free_slots() < server.READ_SLOTS and time.monotonic() < deadline:
+                time.sleep(0.02)
+            free = self.free_slots()
+            gate.set()
+            reader.join(20)
+        self.assertEqual(free, server.READ_SLOTS, "the view held a read slot while it waited on the Disk walker")
+        (status, _, body), = answers
+        disk = next(area for area in json.loads(body)["areas"] if area["id"] == "disk")
+        self.assertEqual((status, disk["error"], disk["stale"]), (200, "", ""))
 
     def test_the_rail_badge_comes_from_the_summary(self):
         page = next(page for page in v2.registry.PAGES if page.section == "Health")

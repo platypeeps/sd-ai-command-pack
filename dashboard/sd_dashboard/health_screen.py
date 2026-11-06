@@ -1289,7 +1289,7 @@ def _tag_managed(rows: list[dict], flags: dict[str, bool]) -> None:
 
 def document(connection: sqlite3.Connection, *, now: str, fleet=None, ports=None, protection=None,
              disk=None, branches=None, credentials=None, doctor=None, services=None, served_commit=None,
-             view: str | None = None) -> dict:
+             view: str | None = None, release=None) -> dict:
     """Every area of the design, each with its rows, the reason it was not read, and what no reader covers.
 
     `fleet` is `fleet.collect`'s shape, `area -> document`, `ports`
@@ -1316,6 +1316,10 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, ports=None
     A row the operator snoozed (sd:1896) is in its area's `snoozed`, with its
     `until`, and not in `rows`; `snooze_error` says why none could be read.
     Each area as settled, before the snooze split, is kept for `summary`.
+
+    `release`, the server's, closes `connection` and gives its read slot back. The store areas are read first, then
+    it runs, then the walkers are waited on: a view waiting on Disk's 8 s held a slot all that time, and Health's reads
+    filled the slots under load (sd:7898).
     """
     keys = set(VIEW_AREAS[view]) if view else {key for key, *_ in AREAS}
     readers = _readers(connection, now=now, fleet=fleet, ports=ports, protection=protection, disk=disk,
@@ -1328,41 +1332,49 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, ports=None
         flags = {}  # no flag: every row shows, as under All
     running = {key: _SCANS.start(key, readers[key], now=now, fresh=DOCTOR_FRESH_SECONDS if key == "doc" else None)
                for key in POOLED if key in keys}
-    stop = time.monotonic() + PAGE_SECONDS
-    areas = []
+    settled = {}
     for key, name, source, missing in AREAS:
-        if key not in keys:
-            continue
-        area = _area(key, name, source, missing, at=now)
-        if key in running:
-            since, scan, joined = running[key]
-            # The doctor is last in AREAS: the page has waited on the others, and gives it only a short wait more. A run
-            # takes about 10 s, so with an answer kept the page shows that at once, marked stale (sd:5064).
-            wait = max(0.0, stop - time.monotonic())
-            if key == "doc":
-                wait = 0.0 if _SCANS.last.get(key) else min(wait, DOCTOR_WAIT_SECONDS)
-            try:
-                scan.result(timeout=wait)
-            except FutureTimeout:
-                why = (f"machine-setup.sh doctor started at {since} and is still running (its deadline is "
-                       f"{health_collectors.DOCTOR_SECONDS:g} seconds); read Health again for its answer" if key == "doc" else
-                       f"the {name} reader was still running at the page's budget of {PAGE_SECONDS:g} "
-                       "seconds and was left rather than waited on")
-                if joined:
-                    why += f"; that scan started at {since}, and no second one starts while it runs"
-                kept = _SCANS.last.get(key)
-                if kept:
-                    area["stale"], area["at"] = f"{why}; these rows are the read of {kept[0]}", kept[0]
-                    _settle(area, name, lambda *, kept=kept: kept[1])
-                else:
-                    area["error"], area["at"] = why, since
-            except BaseException:  # noqa: BLE001 - the reader's own error is settled below
-                pass
-            if not area["error"] and not area["stale"]:
-                area["at"] = since
-                _settle(area, name, scan.result)
-        else:
+        if key in keys and key not in running:
+            settled[key] = area = _area(key, name, source, missing, at=now)
             _settle(area, name, readers[key])
+    if release is not None:
+        release()
+    stop = time.monotonic() + PAGE_SECONDS
+    for key, name, source, missing in AREAS:
+        if key not in running:
+            continue
+        settled[key] = area = _area(key, name, source, missing, at=now)
+        since, scan, joined = running[key]
+        # The doctor is last in AREAS: the page has waited on the others, and gives it only a short wait more. A run
+        # takes about 10 s, so with an answer kept the page shows that at once, marked stale (sd:5064).
+        wait = max(0.0, stop - time.monotonic())
+        if key == "doc":
+            wait = 0.0 if _SCANS.last.get(key) else min(wait, DOCTOR_WAIT_SECONDS)
+        try:
+            scan.result(timeout=wait)
+        except FutureTimeout:
+            why = (f"machine-setup.sh doctor started at {since} and is still running (its deadline is "
+                   f"{health_collectors.DOCTOR_SECONDS:g} seconds); read Health again for its answer" if key == "doc" else
+                   f"the {name} reader was still running at the page's budget of {PAGE_SECONDS:g} "
+                   "seconds and was left rather than waited on")
+            if joined:
+                why += f"; that scan started at {since}, and no second one starts while it runs"
+            kept = _SCANS.last.get(key)
+            if kept:
+                area["stale"], area["at"] = f"{why}; these rows are the read of {kept[0]}", kept[0]
+                _settle(area, name, lambda *, kept=kept: kept[1])
+            else:
+                area["error"], area["at"] = why, since
+        except BaseException:  # noqa: BLE001 - the reader's own error is settled below
+            pass
+        if not area["error"] and not area["stale"]:
+            area["at"] = since
+            _settle(area, name, scan.result)
+    areas = []
+    for key, *_ in AREAS:
+        if key not in settled:
+            continue
+        area = settled[key]
         _SCANS.keep(area)
         _tag_managed(area["rows"], flags)
         area["rows"], area["snoozed"] = snooze.split("health", area["rows"], snoozes)
