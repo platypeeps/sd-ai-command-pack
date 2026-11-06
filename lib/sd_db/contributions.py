@@ -381,7 +381,7 @@ def configure(connection, item, changes, *, who, expected_revision=None) -> dict
                 for prefix, name in OBSERVED.items():
                     if value.get(name):
                         _save(connection, snapshot(connection, prefix + value[name]))
-            record_lane(connection, item)
+            _note_lane(connection, item)
         return item_state(connection, item)
 
 
@@ -603,7 +603,7 @@ def observe_pull(connection, url, observation, *, expected_revision) -> dict:
         result = _save(connection, state)
         record_state(connection, "heartbeat", key="contribution-observe:" + state["key"], body={"ok": True})
         if item is not None:
-            record_lane(connection, item)
+            _note_lane(connection, item)
         return result
 
 
@@ -789,7 +789,7 @@ def observe_dependencies(connection, item, observations, *, observed_at, expecte
         _publish_attention(connection, state, attention, item)
         result = _save(connection, state)
         record_state(connection, "heartbeat", key="contribution-observe:" + state["key"], body={"ok": True})
-        record_lane(connection, item)
+        _note_lane(connection, item)
         return result
 
 
@@ -941,6 +941,24 @@ def record_lane(connection, item) -> int | None:
                         session=OBSERVER)
 
 
+#: The failures of one row's data that the PR-lane pass says and skips (sd:7859): a refusal, or a stored value of the
+#: wrong shape. A store failure (`sqlite3.Error`) is none of these.
+ROW_ERRORS = (SdDbError, ValueError, TypeError, AttributeError, KeyError)
+
+
+def _note_lane(connection, item) -> None:
+    """`record_lane` beside the write its note describes (sd:7859, review round 2): a side observation.
+
+    A failure of the row's data (`ROW_ERRORS`) rolls back the note alone and leaves the write standing; the sync's lane pass,
+    `record_lanes`, tries that item again and says why it could not. A store failure (`sqlite3.Error`) still undoes
+    both, as it would the write alone.
+    """
+    try:
+        record_lane(connection, item)
+    except ROW_ERRORS:
+        pass
+
+
 def record_lanes(connection) -> tuple[list[int], list[str]]:
     """`record_lane` for every item with a `pull_url`, each in its own transaction: the refresh's pass (sd:7859).
 
@@ -953,7 +971,7 @@ def record_lanes(connection) -> tuple[list[int], list[str]]:
         if metadata.get("pull_url"):
             try:
                 note = record_lane(connection, row["id"])
-            except SdDbError as error:
+            except ROW_ERRORS as error:
                 errors.append(f"item {row['id']}: {error}")
                 continue
             if note is not None:
@@ -978,11 +996,15 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
     for key in _latest(connection, "checkpoint", "ship:"):
         try:
             receipts.append((key, ship.read(connection, key)[1]))
-        except SdDbError as error:
+        except ROW_ERRORS as error:
             errors.append(f"ship receipt {key}: {error}")
     linked: list[int] = []
     for key, receipt in sorted(receipts, key=lambda pair: str(pair[1].get("item"))):
-        url, item = (receipt.get("pull_request") or {}).get("url"), receipt.get("item")
+        pull = receipt.get("pull_request")
+        if pull is not None and not isinstance(pull, dict):
+            errors.append(f"ship receipt {key}: pull_request is not an object")
+            continue
+        url, item = (pull or {}).get("url"), receipt.get("item")
         if type(item) is not int or not isinstance(url, str) or receipt.get("phase") == "merged":
             continue
         try:
@@ -994,7 +1016,7 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
             if metadata.get("pull_url") or metadata.get("issue_url"):
                 continue
             configure(connection, item, {"pull_url": url}, who=OBSERVER)
-        except SdDbError as error:
+        except ROW_ERRORS as error:
             errors.append(f"ship receipt {key}: {error}")
             continue
         taken.add(url)
@@ -1241,9 +1263,10 @@ def acknowledge(connection, key, event_ids, *, who, expected_revision) -> dict:
         result = _save(connection, state)
         # The lane may move from on you to on reviewers now (sd:7859).
         url = _observed_url(state["key"])
-        for row, metadata in _registered(connection):
+        # Another item's malformed metadata is not this acknowledgement's concern: skipped, never raised here.
+        for row, metadata in _registered(connection, []):
             if state["key"] == f"item:{row['id']}" or (url and url == metadata.get("pull_url")):
-                record_lane(connection, row["id"])
+                _note_lane(connection, row["id"])
         return result
 
 

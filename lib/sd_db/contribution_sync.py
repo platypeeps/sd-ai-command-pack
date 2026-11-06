@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 
 from . import contribution_github as github
 from .database import transaction
-from .errors import SdDbError
 from .workflow import WorkflowError
 from .writes import record_state, resolve_state
 
@@ -172,6 +171,27 @@ def fold(connection, planned, key, url):
     return ""
 
 
+def note_lanes(connection) -> list[str]:
+    """Link the pull requests `sd-ship prepare` opened, then note each registered pull request's lane (sd:7859).
+
+    A side observation of the sync, as the protection collector is: what it could not do is returned, one line per
+    receipt or item, never raised, and never a failed sync or a held watermark (review round 2). Each pass is guarded
+    on its own, so a link pass that fails still lets the lane notes run.
+    """
+    from . import contributions as core
+
+    said: list[str] = []
+    try:
+        said += core.link_shipped(connection)[1]
+    except Exception as error:  # noqa: BLE001 - a side observation never fails the sync
+        said.append(f"pull-request links were not read: {type(error).__name__}: {error}")
+    try:
+        said += core.record_lanes(connection)[1]
+    except Exception as error:  # noqa: BLE001 - same rule
+        said.append(f"pull-request lane notes were not written: {type(error).__name__}: {error}")
+    return said
+
+
 def refresh(connection, planned, issues, *, client, observed_at, search_complete=False, reserve=0,
             reserve_seconds=0):
     """Stage discovered work durably, then collect details until the budget runs out.
@@ -187,15 +207,6 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
     """
     from . import contributions as core
 
-    # sd:7859: each registered pull request's lane note, and the backfill of one never noted, even a merged one the
-    # queue no longer observes. A failure is the run's error, never a quiet pass. The pull requests `sd-ship prepare`
-    # opened are linked to their items first, so their lanes are noted in the same pass. A bad receipt or item is said
-    # and skipped by its pass; a pass that fails as a whole, a store error too, is said once.
-    try:
-        lane_errors = [f"pull-request lane: {error}" for error in core.link_shipped(connection)[1]]
-        lane_errors += [f"pull-request lane: {error}" for error in core.record_lanes(connection)[1]]
-    except SdDbError as error:
-        lane_errors = [f"pull-request lane notes were not written: {error}"]
     known = {row["key"]: row for row in planned["pending"]}
     invalid = any(row.get("kind") == "pull" and "author" in row.get("why", [])
                   and not github.PULL.fullmatch(row["url"]) for row in issues)
@@ -210,7 +221,7 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
             why = row["why"] if search_complete is True and not invalid else sorted(set(current["why"]) | set(row["why"]))
             additions[index] = {**current, "why": why}
     pending = _merge(planned["pending"], additions)
-    errors = lane_errors + (["search returned a malformed contribution identity"] if invalid else [])
+    errors = ["search returned a malformed contribution identity"] if invalid else []
     if not pending:
         return {"errors": errors, "queued": 0, "attempted": 0, "completed_keys": [], "incomplete": [], "staged": not invalid}
     try:

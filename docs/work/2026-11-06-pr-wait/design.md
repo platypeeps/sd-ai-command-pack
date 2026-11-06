@@ -33,7 +33,7 @@ A pull request `sd-ship prepare` opened is linked the same way from its ship rec
    the shadow row's `created_at` (opened, on reviewers), each `contribution-observer` followup note on the item
    (on you from its timestamp to its `resolved_at`), and the shadow's `merged_at` or `closed_at`.
    Backfilled notes carry their historical time and end in `(backfilled)`.
-   `contribution_sync.refresh` calls `record_lanes` for every registered pull request once per run,
+   `contribution_sync.note_lanes`, which each shadow sync runs, calls `record_lanes` for every registered pull request,
    so an item no longer observed (merged, done) is backfilled too.
 3. **Durations.** `contributions.pr_waits(connection, now=)` reads the lane notes, oldest first.
    The time between a note and the next goes to its lane: `awaiting_you` and `newly_unblocked` are on you,
@@ -47,7 +47,7 @@ A pull request `sd-ship prepare` opened is linked the same way from its ship rec
    they are a live process.
 5. **Link.** `contributions.link_shipped` reads each `ship:` receipt's item and `pull_request.url` and sets that url as
    the item's `pull_url` through `configure`, in its one transaction, which notes the lane too.
-   `contribution_sync.refresh` calls it before `record_lanes`, so new pull requests and the open receipts from before
+   `note_lanes` calls it before `record_lanes`, so new pull requests and the open receipts from before
    this change are linked by the same pass. The operator's pull request is already observed as authored.
    Left alone: a merged receipt, a done item, an item that names a pull request or issue, and a url another item holds
    (a bundle's second item). A `prepared` lane entry, where a manual-merge lane stops for a person's review, no longer
@@ -74,19 +74,20 @@ and a read that joins three sources every page load is slower and drifts from wh
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
 | observe writes checkpoint, then lane note | checkpoint row and one note | process stops between the two | both are in one transaction: neither lands; the next observation writes both | `test_a_failed_lane_note_rolls_back_the_observation` |
+| note a lane beside observe, configure or acknowledge | the write and one note | the note fails on its row's data (`ROW_ERRORS`) | the note alone rolls back; the write stands; the sync's lane pass retries and says it | `test_a_lane_note_that_fails_on_its_data_does_not_roll_back_the_observation` |
 | backfill notes, then the current lane note | several notes for one item | process stops mid-backfill | one transaction per item; nothing lands, the next refresh backfills again | `test_a_backfill_that_fails_writes_no_note` |
 | rerun of observe or refresh | none | a second note for the same lane | `record_lane` compares with the newest note for the url and writes nothing | `test_an_observed_pull_writes_one_lane_note_and_a_rerun_writes_none` |
-| acknowledge moves attention | checkpoint, then lane note | lane changes on you to on reviewers without a note | `acknowledge` calls `record_lane` in its transaction | `test_a_maintainer_comment_is_on_you_and_acknowledging_it_is_on_reviewers_again` |
-| older state: item configured before this change | no lane notes | durations read nothing | refresh calls `record_lanes`, which backfills from shadow and followups | `test_backfill_reads_the_shadow_and_the_followups` |
+| acknowledge moves attention | checkpoint, then lane note | lane changes on you to on reviewers without a note | `acknowledge` notes the lane in its transaction | `test_a_maintainer_comment_is_on_you_and_acknowledging_it_is_on_reviewers_again` |
+| older state: item configured before this change | no lane notes | durations read nothing | the sync's `note_lanes` calls `record_lanes`, which backfills from shadow and followups | `test_backfill_reads_the_shadow_and_the_followups` |
 | link a receipt's pull request | item metadata, a comment, a lane note | process stops mid-pass | one transaction per item; a rerun skips linked items and links the rest | `test_a_pull_request_prepare_opened_is_linked_to_its_item_and_noted_on_reviewers` |
-| per-row loop: receipts in `link_shipped` | none for a bad receipt | a receipt `ship.read` or `_url` rejects, or `configure` refuses | said as `ship receipt <key>: <error>` and skipped; the rest are linked | `test_a_corrupt_receipt_is_reported_and_the_good_one_is_still_linked` |
+| per-row loop: receipts in `link_shipped` | none for a bad receipt | `ship.read` or `_url` rejects it, its `pull_request` is no object, or `configure` refuses | said as `ship receipt <key>: <error>` and skipped; the rest are linked | `test_a_corrupt_receipt_is_reported_and_the_good_one_is_still_linked`, `test_bad_receipts_are_said_and_the_good_one_is_linked_and_noted` |
 | per-row loop: items in `record_lanes` | none for a bad item | `record_lane` raises for one item | said as `item <n>: <error>` and skipped; the rest are noted | `test_one_item_that_fails_its_lane_note_is_reported_and_the_rest_are_noted` |
-| per-row loop: registered items in both passes | none | one item's contribution metadata is malformed | said and skipped by both passes (`_registered(errors=)`) | `test_an_item_with_malformed_metadata_is_reported_and_stops_neither_pass` |
+| per-row loop: registered items in both passes and in `acknowledge` | none | one item's contribution metadata is malformed | said and skipped by both passes (`_registered(errors=)`); `acknowledge` skips it and keeps the operator's acknowledgement | `test_an_item_with_malformed_metadata_is_reported_and_stops_neither_pass`, `test_an_unrelated_malformed_item_does_not_roll_back_an_acknowledgement` |
 | per-row loop: backfill events in `_history` | backfilled notes | a shadow or followup time names no zone | that event is skipped; a comment on the item names each skipped time | `test_a_backfill_event_with_no_zone_is_skipped_and_said_on_the_item` |
-| refresh runs both passes | as above | a store error (`SdDbError`) escapes a pass | the run's error, never a crash | `test_a_store_error_in_the_lane_pass_is_the_runs_error_not_a_crash` |
+| the sync runs `note_lanes` | as above | a pass raises anything | said in the sync's `lanes`; the other pass still runs | `test_a_pass_that_raises_anything_is_said_and_the_other_pass_still_runs` |
 | read loop: `pr_waits` | none | a malformed item or note | the read fails as a whole; Queue and Metrics say it was not read | `test_a_pr_wait_read_that_failed_says_so_and_shows_no_rows` |
-| refresh links, then notes lanes | as above | one receipt is corrupt | the run reports it; the good receipt is linked and its lane noted | `test_a_refresh_links_the_pull_request_prepare_opened_and_notes_its_lane` |
-| older state: open receipts from before this change | no item link | their waits never show | the first refresh links them | `test_a_refresh_links_the_pull_request_prepare_opened_and_notes_its_lane` |
+| a lane problem in a sync | none | a bad receipt every run | said in `lanes` and the report; the sync stays ok, the watermark moves, the heartbeat is ok | `test_a_bad_receipt_fails_no_sync_and_holds_no_watermark` |
+| older state: open receipts from before this change | no item link | their waits never show | the first sync links them | `test_bad_receipts_are_said_and_the_good_one_is_linked_and_noted` |
 | older state: rollback to the previous commit | lane notes and links stay | the old code ignores the notes | none needed: notes are plain comments; a linked item is an ordinary contribution there | not tested: no code reads the notes there |
 | shadow row missing | no opened time | first note is the first observation | durations start there; Metrics counts no first-to-merge without a merge note | `test_without_a_shadow_row_the_wait_starts_at_the_first_note` |
 

@@ -1288,6 +1288,31 @@ class LaneNoteTests(ContributionCase):
         self.assertEqual(self.lanes(item), [("awaiting_them", "open", False), ("awaiting_you", "open", False),
                                             ("awaiting_them", "open", False), ("merged", "merged", False)])
 
+    def test_an_unrelated_malformed_item_does_not_roll_back_an_acknowledgement(self):
+        # Review round 2 of sd:7859: acknowledge reads the registered items to note the lane; another item's bad
+        # metadata must not undo the operator's acknowledgement.
+        item = self.item()
+        self.observe()
+        result = self.observe(observed_at=T1, events=[self.event()])
+        broken = self.task("Broken")
+        set_item_fields(self.db, broken, fields={"contribution": "not an object"})
+        self.db.commit()
+        acknowledged = c.acknowledge(self.db, "github:" + URL, [result["attention"][0]["id"]],
+                                     expected_revision=result["revision"], who="operator")
+        self.assertEqual(acknowledged["attention"], [])
+        self.assertEqual(self.lanes(item)[-1], ("awaiting_them", "open", False))
+
+    def test_a_lane_note_that_fails_on_its_data_does_not_roll_back_the_observation(self):
+        # Review round 2: the lane note is a side observation of the observation. A data refusal (SdDbError) is left
+        # for the sync's lane pass to say; a store failure (sqlite3) still undoes both, as the next test shows.
+        item = self.item()
+        with mock.patch.object(c, "record_lane", side_effect=c.WorkflowError("contribution checkpoint is malformed")):
+            self.observe()
+        self.assertEqual(c.snapshot(self.db, "github:" + URL)["observation"]["state"], "open")
+        self.assertEqual(self.lanes(item), [])
+        self.assertEqual(c.record_lanes(self.db)[1], [])
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
+
     def test_a_failed_lane_note_rolls_back_the_observation(self):
         item = self.item()
         before = c.snapshot(self.db, "github:" + URL)
