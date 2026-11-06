@@ -274,6 +274,30 @@ class SecondBranch(Case):
             teammate.start(self.db, [self.item()], worktree="/w/pack-4", branch="feat/w", budget_minutes=90,
                            owner="lead", into="feat/q")
 
+    def test_side_branches_into_one_bundle_are_not_beside_each_other(self):
+        """pack sd:7748: a second side branch into the bundle starts; one into another bundle still refuses."""
+        bundle = self.start([self.item()])
+        self.second([self.item()], into="feat/x")
+        teammate.start(self.db, [self.item()], worktree="/w/pack-3", branch="feat/z", budget_minutes=90,
+                       owner="lead", into="feat/x")
+        teammate.end(self.db, bundle["members"][0]["item"])
+        with self.assertRaisesRegex(teammate.TeammateRefused,
+                                    r"open branch feat/[yz] in /w/pack-[23] .*side branch of feat/x.*--into feat/x "):
+            teammate.start(self.db, [self.item()], worktree="/w/pack-5", branch="feat/w", budget_minutes=90,
+                           owner="lead", into="feat/q")
+        teammate.start(self.db, [self.item()], worktree="/w/pack-4", branch="feat/x", budget_minutes=90,
+                       owner="lead")
+        with self.assertRaisesRegex(teammate.TeammateRefused, "--into names a branch"):
+            self.second([self.item()], into="feat/x extra")
+
+    def test_a_run_without_its_start_note_is_its_own_bundle(self):
+        """pack sd:7748: the side branch's target lives in its start note; a missing note refuses, not passes."""
+        side = self.second([self.item()], into="feat/x")
+        self.db.execute("DELETE FROM note WHERE item = ? AND body LIKE 'Teammate run %'", (side["members"][0]["item"],))
+        with self.assertRaisesRegex(teammate.TeammateRefused, r"open branch feat/y in /w/pack-2 \(teammate run \w+\)"):
+            teammate.start(self.db, [self.item()], worktree="/w/pack-3", branch="feat/z", budget_minutes=90,
+                           owner="lead", into="feat/x")
+
 
 class Ownership(Case):
     """An open teammate run owns its items against every pickup; the session's own writes still pass.
