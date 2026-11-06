@@ -134,7 +134,8 @@
       // Fix (sd:3456): the shared declaration (commands.js), on a report: a debug session for it, with the report's revision.
       // sd:6964: a report whose output shows an expired login opens that login's Credentials row instead, and leads the bar.
       { ...window.commands.fix('report', { item: o => o.n, report: () => true, login: o => o.source.login, when: o => !o.open ? 'already acknowledged' : true,
-        post: (o, path) => write(path, { revision: o.source.revision }) }), primary: o => o.open && !!o.source.login },
+        // pack sd:7783: a failed launch noted its cause on the report, so the page reads again (commands.js `again`).
+        post: (o, path) => write(path, { revision: o.source.revision }), again: () => load() }), primary: o => o.open && !!o.source.login },
       // Retry (commands.js): it posts /api/jobs/<name>/retry with the job's revision; operations.inventory's capability is the
       // off reason (sd:2118).
       { ...window.commands.retry({ job: o => ({ name: o.job, service: o.service, failed: o.failed, exit: o.exit, capability: o.caps.retry }),

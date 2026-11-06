@@ -799,6 +799,17 @@ shellRun(cmd('report.ack'), C.get('r{self.fun}')); await flush(); R.det = ELS.de
         self.assertEqual(out["toasts"][-1]["msg"], f"Acknowledged · #{self.fun}")
         self.assertIn(f"Database report #{self.fun} · ", out["R"]["det"])
 
+    def test_a_failed_fix_launch_in_a_reports_details_reads_the_view_again(self):
+        # pack sd:7783: a failed launch (5xx) notes its cause on the report, so the revision the view holds moved; the
+        # view reads again, or the next Fix is refused stale. A refusal that wrote nothing (400) reads nothing.
+        for status, reads in ((503, 2), (400, 1)):
+            docs = self.docs("home")
+            docs[f"/api/items/{self.fun}/fix"] = [status, {"error": "Fix failed: herdr.sh launch: session sd is not running."}]
+            out = self.run_page(self.BRIEF_CLICK + f"""await go('#view=reports'); clickRow('r{self.fun}'); await flush();
+shellRun(cmd('report.fix'), C.get('r{self.fun}')); await flush(); await flush();""", docs, place="home")
+            self.assertEqual([p[0] for p in out["posts"]], [f"/api/items/{self.fun}/fix"], status)
+            self.assertEqual(out["gets"], ["/api/home/reports"] * reads, status)
+
     def task_docs(self):
         docs = self.docs("home")
         docs[f"/api/tasks/{self.home_item}"] = [200, tasks_screen.details(self.connection, self.home_item, now=NOW)]
