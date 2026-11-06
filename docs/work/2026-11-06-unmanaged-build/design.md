@@ -171,6 +171,32 @@ link UI  | none (a read)          | operator cannot      | Details links pull_ur
          |                        | find the draft       | tab; Queue via sd:7859          | opens it (DOM test)
 ```
 
+Each git read the scan makes, by commit kind (review of 5a5adca64).
+All three run `git log base..head` with `--no-renames`,
+`--diff-merges=first-parent` and `log.showRoot=true`:
+
+```text
+Read      | Commit kind | What it reads                    | Test
+--------- | ----------- | -------------------------------- | ------------------------------
+messages  | merge       | its message (%B lists merges)    | covered by the merge test's
+          |             |                                  | message read; no own test
+messages  | root        | its message                      | none needed: same read
+messages  | rename      | its message                      | none needed: same read
+paths     | merge       | paths changed vs first parent;   | a value only a conflict
+          |             | before: none                     | resolution adds
+paths     | root        | every path it adds               | not alone: base..head holds a
+          |             |                                  | root only for a branch with no
+          |             |                                  | shared history, which the
+          |             |                                  | worktree step never makes
+paths     | rename      | old and new path (delete, add)   | a renamed file's new path
+patches   | merge       | lines added vs first parent,     | a value only a conflict
+          |             | resolution included; before:     | resolution adds; one side
+          |             | none. Main's lines too: a match  | taken passes
+          |             | there blocks, never leaks        |
+patches   | root        | every line, showRoot forced on   | as paths, root
+patches   | rename      | the whole file as added          | a renamed file's new path
+```
+
 How a run's check ends, one row per path. "Groups below" means the
 groups that the recorded group's descendants run in, read live; the
 check runs in one, under the gate. Each test is in test_build_run.

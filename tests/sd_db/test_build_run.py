@@ -126,6 +126,8 @@ FAKE = textwrap.dedent('''
         for name, data in extra.get("files", {}).items():
             Path(name).write_bytes(bytes.fromhex(data))
             git("add", "--", name)
+        for old, new in extra.get("move", {}).items():
+            git("mv", old, new)
         # One `Closes: sd:N` trailer per item the brief lists, as the brief asks; `skip` leaves out the last
         # one, as a builder that skips an item for the operator does, and `none` delivers nothing.
         prompt = sys.argv[sys.argv.index("-p") + 1]
@@ -134,6 +136,22 @@ FAKE = textwrap.dedent('''
         trailers = "".join(f"\\nCloses: sd:{item}" for item in items)
         message = f"fix: {mode}" + "".join("\\n\\n" + text for text in extra.get("message", []))
         git("-c", "commit.gpgsign=false", "commit", "-qm", message + (f"\\n{trailers}" if items else ""))
+        # `merge`: main moves `file` to `theirs`, and the builder merges it, resolving the conflict with
+        # `resolved`: bytes that only the merge commit adds, as a conflict resolution does.
+        merge = extra.get("merge")
+        if merge:
+            git("checkout", "-q", "-b", "sd-side", "origin/main")
+            Path(merge["file"]).write_bytes(bytes.fromhex(merge["theirs"]))
+            git("add", "--", merge["file"])
+            git("-c", "commit.gpgsign=false", "commit", "-qm", "chore: main moves on")
+            git("push", "-q", "origin", "sd-side:main")
+            git("checkout", "-q", "-")
+            git("branch", "-q", "-D", "sd-side")
+            git("fetch", "-q", "origin")
+            git("-c", "commit.gpgsign=false", "merge", "-q", "--no-edit", "origin/main")
+            Path(merge["file"]).write_bytes(bytes.fromhex(merge["resolved"]))
+            git("add", "--", merge["file"])
+            git("-c", "commit.gpgsign=false", "commit", "-q", "--no-edit")
         final = {"type": "result", "subtype": "success", "is_error": False, "permission_denials": [],
                  "session_id": session, "result": f"built ({mode})", "total_cost_usd": 0.42,
                  "usage": {"input_tokens": 10, "output_tokens": 20}}
@@ -1364,11 +1382,14 @@ class Unmanaged(Case):
         self.assertIn("feat(fixture): build the fixture", scanned.splitlines()[0], "the title is line 1")
         self.assertIn("work.txt", scanned, "the paths each commit touches")
 
-    def extra(self, files=None, message=None):
-        """A builder commit with `files` (name to bytes) and `message` lines, through the public scan."""
-        (self.plans / "extra.json").write_text(json.dumps({"files": {name: data.hex() for name, data in
-                                                                     (files or {}).items()},
-                                                           "message": message or []}))
+    def extra(self, files=None, message=None, move=None, merge=None):
+        """A builder commit with `files` (name to bytes), `message` lines and `move`s (old to new path), then a
+        `merge` of main (`file`, `theirs`, `resolved` bytes) when given, through the public scan."""
+        (self.plans / "extra.json").write_text(json.dumps({
+            "files": {name: data.hex() for name, data in (files or {}).items()}, "message": message or [],
+            "move": move or {},
+            "merge": merge and {"file": merge["file"], "theirs": merge["theirs"].hex(),
+                                "resolved": merge["resolved"].hex()}}))
         self.press()
         self.write_pr()
         self.plan(claude=["extra"], sd_review=["clean"])
@@ -1402,6 +1423,26 @@ class Unmanaged(Case):
     def test_the_scan_reads_a_binary_files_path(self):
         """A binary file has no `+++` line; its path still reaches the scan."""
         self.scan_blocks(files={"PRIVATE.bin": b"\x00\xff\x00"})
+
+    # Review of 5a5adca64, class: every git read the scan makes, for merge, root and renamed commits.
+
+    def test_the_scan_reads_a_value_only_a_conflict_resolution_adds(self):
+        """`git log -p` and `--name-only` print no diff for a merge, so a value typed while resolving a
+        conflict with main was pushed unscanned."""
+        self.scan_blocks(files={"conflict.txt": b"ours\n"},
+                         merge={"file": "conflict.txt", "theirs": b"theirs\n", "resolved": b"PRIVATE\n"})
+        commits = support.git(Path(self.bundle["work_path"]), "rev-list", "--merges", "origin/main..HEAD")
+        self.assertTrue(commits, "the branch holds a merge commit")
+
+    def test_a_merge_that_takes_one_side_passes(self):
+        """A clean resolution adds no new bytes beyond main's, which is the target repository's own text."""
+        ended = self.extra(files={"conflict.txt": b"ours\n"},
+                           merge={"file": "conflict.txt", "theirs": b"theirs\n", "resolved": b"ours\n"})
+        self.assertEqual(ended.get("step"), "enqueued", ended)
+
+    def test_the_scan_reads_a_renamed_files_new_path(self):
+        """With renames off a move reads as a delete and an add: the new path reaches the scan."""
+        self.scan_blocks(move={"README.md": "PRIVATE.md"})
 
     def test_binary_content_and_a_missing_final_newline_are_not_scanned(self):
         """Binary content is not read, as `leak-guard.sh check` reads none; `\\ No newline` is git's marker."""

@@ -863,8 +863,13 @@ class Supervisor:
         except OSError:
             body = b""
         span = f"{self.base()}..{head}"
-        git = [*self.tools.git, "-C", str(self.work), "-c", "core.quotePath=false", "log", "--no-color",
-               "--no-ext-diff", "--no-renames"]
+        # A merge commit's diff is against its first parent, the branch: every byte the merge adds to the
+        # branch, a conflict resolution's too, which plain `git log` leaves out (review of 5a5adca64). Beside it
+        # come main's bytes, already in the target repository: a match there blocks, it never leaks. `--cc`
+        # would show only the resolution, in a combined format this parse does not read. A root commit's diff
+        # is forced on, whatever `log.showRoot` says.
+        git = [*self.tools.git, "-C", str(self.work), "-c", "core.quotePath=false", "-c", "log.showRoot=true",
+               "log", "--no-color", "--no-ext-diff", "--no-renames", "--diff-merges=first-parent"]
         messages = _read_bytes([*git, "--format=%B", span], env=self.env)
         touched = _read_bytes([*git, "--format=", "--name-only", "-z", span], env=self.env)
         diff = _read_bytes([*git, "--format=", "-p", "--unified=0", span], env=self.env)
