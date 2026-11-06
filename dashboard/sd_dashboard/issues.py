@@ -139,6 +139,26 @@ def with_github(document: dict, github: dict) -> dict:
     return {**document, "issues": [*document["issues"], *extra], "github_error": ""}
 
 
+def with_pulls(document: dict, github: dict) -> dict:
+    """`document` with each Your issues and Intake row's `pulls` (pack sd:7841): the pull requests `github`
+    (`today_github.document`) lists that close it, as GitHub's search named them, each `{url, ref, number, state,
+    title}`. Open ones come first, then the settled, each newest first, as `github` orders them; a pull request with no
+    web address is left out, since there is nothing to open. A failed GitHub read names none: `github_error` says why."""
+    found: dict[str, list[dict]] = {}
+    for pull in (*github.get("pulls", ()), *(row for row in github.get("settled", ()) if row["kind"] == "pull")):
+        for url in dict.fromkeys(_address(url) for url in pull.get("closes") or ()):
+            if pull.get("url"):
+                found.setdefault(url, []).append({name: pull.get(name) for name in ("url", "ref", "number", "state", "title")})
+    for row in (*document.get("issues", ()), *document.get("intake", ())):
+        row["pulls"] = found.get(_address(row["url"]), []) if row.get("url") else []
+    return document
+
+
+def _address(url: str) -> str:
+    """An issue address as GitHub's two reads may spell it: case ignored, no trailing slash."""
+    return url.lower().rstrip("/")
+
+
 def intake(connection: sqlite3.Connection) -> dict:
     """`intake`, one object per open third-party issue no item carries, and `intake_error`, why none could be read or ""."""
     from .screens import _repo_labels
