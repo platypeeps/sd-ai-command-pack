@@ -2014,12 +2014,12 @@ open('{ask}'); await flush(); RELEASE(); await flush(); await flush(); R.det = E
 
     def test_a_refused_fix_says_why_and_offers_no_undo(self):
         plan = self.ids["plan"]
-        answer = """(path, body) => [503, { error: 'No session started: herdr.sh launch: session sd is not running; run herdr.sh start first' }]"""
+        answer = """(path, body) => [503, { error: 'No session started: herdr.sh launch: session sd is not running and did not start: herdr --session sd server exited 1' }]"""
         out = self.run_page(f"""R.on = cmd('item.fix').when(C.get('{plan}'));
 shellRun(cmd('item.fix'), C.get('{plan}')); await flush();""", answer)
         self.assertTrue(out["R"]["on"])
         self.assertEqual(len(out["posts"]), 1)
-        self.assertIn("run herdr.sh start first", out["toasts"][-1][0])
+        self.assertIn("did not start: herdr --session sd server exited 1", out["toasts"][-1][0])
         self.assertFalse(out["toasts"][-1][1])
 
     def test_a_failed_launch_reads_the_tasks_again_so_details_show_its_note(self):

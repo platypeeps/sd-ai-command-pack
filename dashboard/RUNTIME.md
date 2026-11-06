@@ -230,8 +230,10 @@ The run calls `gh` with the LaunchAgent's environment; gh's keychain login under
 Fix on Tasks, Reports and Today (sd:3456, `fix_session.py`) runs
 `local-herdr/herdr.sh launch` from this checkout: a new workspace in the
 operator's herdr session, with claude given a builder prompt for a task or an
-`sd-debug` prompt for a report. It never starts a process of its own: with
-herdr missing or its session down it answers 503 naming `herdr.sh start`.
+`sd-debug` prompt for a report. It never starts a process of its own:
+herdr.sh starts a down session as herdr's headless server (system sd:7847),
+and a 503 in herdr.sh's words means herdr is missing or that server did not
+start.
 `herdr` must be on the LaunchAgent's PATH (`/opt/homebrew/bin` is). A launch
 that does not answer in 90 seconds is a 504 whose outcome is not known.
 Today's Queue view (sd:3466, `active_sessions.py`) reads `herdr session list --json` and `herdr agent list` in that
