@@ -175,7 +175,8 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     picks([...PICKED].filter(id => ours.has(id) && (all || !shown.has(id))));
   }
   function paintIntake() {
-    const rows = shownIntake();
+    // pack sd:7794: the box with focus, read before the redraw replaces it: after, the browser has moved focus to the body.
+    const f = document.activeElement?.dataset?.intakePick, rows = shownIntake();
     put($('intake'), FAILED ? html`<tr class="empty"><td colspan="6">Issue intake could not be read: ${FAILED}. Read again tries again.</td></tr>`
       : rows.length ? html`${rows.map(r => html`<tr${selected(r)}${BUSY.has(r.key) ? html` aria-busy="true"` : ''}${PICKED.has(oid(r)) ? html` data-picked` : ''}>
         <td class="sel">${pickBox(r)}</td>
@@ -188,8 +189,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     // The head box: on when every row shown is picked, mixed when some are, off with no row to pick.
     const all = $('intake-all'), seen = onScreen(), n = seen.filter(r => PICKED.has(oid(r))).length;
     if (all) { all.checked = !!seen.length && n === seen.length; all.indeterminate = n > 0 && n < seen.length; all.disabled = !seen.length; }
-    // A redraw replaced the box that had focus: focus its replacement, so Space can pick the next one.
-    const f = document.activeElement?.dataset?.intakePick;
+    // A redraw replaced the box that had focus: focus its replacement, so Tab and Space go on from it.
     if (f) [...($('intake').querySelectorAll?.('[data-intake-pick]') || [])].find(b => b.dataset.intakePick === f)?.focus();
   }
   function drawIntake() {
@@ -206,12 +206,13 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   function file(key) {
     const r = INTAKE.find(x => x.key === key);
     if (!r) return Promise.reject(new Error('the issue is no longer listed'));
-    if (FILED.has(key)) return Promise.reject(new Error(`already filed as sd:${FILED.get(key)}`));
+    if (FILED.has(key)) return Promise.reject(new Error(`already filed as sd:${FILED.get(key).id}`));
     if (BUSY.has(key)) return Promise.reject(new Error('it is being filed now'));
     BUSY.add(key); REFUSED.delete(key); drawIntake();
     const unknown = why => Object.assign(new Error(`not known if it filed: ${why}; Read again shows whether an item carries it`), { unknown: true });
     return window.shell.post('/api/items', { title: r.title, repo: r.repo_path, ref: r.key })
-      .then(out => { const id = out?.item?.id; if (id == null) throw unknown('the answer named no item'); FILED.set(key, id); return id; },
+      .then(out => { const id = out?.item?.id; if (id == null) throw unknown('the answer named no item');
+        FILED.set(key, { id, at: window.githubIssues?.reads?.() ?? 0 }); return id; },
         e => { throw e.status ? e : unknown(e.message); })
       .catch(e => { REFUSED.set(key, e.unknown ? `Not known if it filed: ${e.message.replace(/^not known if it filed: /, '')}` : `Not filed: ${e.message}`);
         if (e.unknown) window.githubIssues?.again(); throw e; })
@@ -226,9 +227,11 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     file(key).catch(() => {});
   }
   document.addEventListener('intake:read', e => {
-    const { intake = [], error = '', store } = e.detail || {};
-    // A filed issue the read no longer lists is done; one it still lists stays out until a read leaves it.
-    [...FILED.keys()].filter(k => !intake.some(r => r.key === k)).forEach(k => FILED.delete(k));
+    const { intake = [], error = '', store, read } = e.detail || {};
+    // A filed issue the read no longer lists is done. pack sd:7794: one it still lists stays out only of a read begun
+    // before the filing landed (`read`, github.js's count, at or below the count then); a read begun after it is the
+    // server's answer, so the row shows again and File as item is on for it.
+    FILED.forEach((f, k) => { if (!intake.some(r => r.key === k) || !(read <= f.at)) FILED.delete(k); });
     INTAKE = intake; FAILED = error; STORE = storeOff(store); REFUSED.clear(); drawIntake();
   });
   // The shell owns the picked set and its bar; the rows and the head box show it.
@@ -267,7 +270,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
 
   // ---------- Details (sd:5877) ----------
   // Both lists' rows by object id; an intake row filed here names its item until the next read.
-  const rows = () => [...ISSUES, ...(FAILED ? [] : INTAKE).map(r => ({ ...r, intake: true, ...(FILED.has(r.key) ? { item: FILED.get(r.key) } : {}) }))];
+  const rows = () => [...ISSUES, ...(FAILED ? [] : INTAKE).map(r => ({ ...r, intake: true, ...(FILED.has(r.key) ? { item: FILED.get(r.key).id } : {}) }))];
   const rowOf = id => rows().find(r => oid(r) === id);
   const TYPE = { GitHub: 'github issue', Jira: 'jira issue' };
   const typeOf = r => TYPE[r.tracker || 'GitHub'];
@@ -284,6 +287,9 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
       CATS.forEach(name => { keep.add(`isscat:${name}`); C.put({ id: `isscat:${name}`, type: 'issue category', label: name, name }); });
       keep.add('isscats'); C.put({ id: 'isscats', type: 'issue categories', label: 'Issue categories' });
     }
+    // pack sd:7794: a retired row's pick goes first, as read.js retires: the shell refuses to toggle a pick on a type no
+    // bulk command is on, and the bulk bar would run on the retired object.
+    picks([...PICKED].filter(id => PUT.has(id) && !keep.has(id)));
     PUT.forEach(id => { if (!keep.has(id)) C.put({ id, type: 'not listed', label: `${C.get(id)?.label || id} (no longer listed)` }); });
     PUT = keep;
   }
