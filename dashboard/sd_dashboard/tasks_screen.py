@@ -179,18 +179,13 @@ def _rows(connection, rows, found, *, now: str) -> list[dict]:
 
 
 def _report_sources(connection) -> dict:
-    """What `places.report_realm` reads (pack sd:7774): each registered GitHub checkout by `(owner, name)` lower-cased,
+    """What `places.report_realm` reads (pack sd:7774): each registered GitHub checkout by lower-case `owner/name`,
     and the report families; a family list that did not read gives no report a family's realm."""
-    from sd_db.protection import github_slug
+    from sd_db.today import repo_keys
 
     from .reports_screen import families
 
-    checkouts = {}
-    for path, remote in connection.execute("SELECT path, remote FROM repo WHERE remote IS NOT NULL ORDER BY path"):
-        slug = github_slug(remote)
-        if slug:
-            checkouts.setdefault((slug[0].lower(), slug[1].lower()), path)
-    return {"checkouts": checkouts, "families": families(connection)["list"]}
+    return {"checkouts": repo_keys(connection), "families": families(connection)["list"]}
 
 
 def _job_basis(item) -> tuple[str | None, str | None]:

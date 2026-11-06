@@ -136,13 +136,13 @@ def pull_url(job: str | None, basis: str | None) -> str | None:
 def report_realm(job: str | None, basis: str | None, rules: list | None, hoa: str | None, *, checkouts: dict,
                  families: list) -> str | None:
     """A report's realm (pack sd:7774): a pr-attention report's is its pull repo's registered checkout's (`checkouts`,
-    `(owner, name)` lower-cased to path, by `realm_of`); any other's is its family's key when that key is a realm id
+    lower-case `owner/name` to path, `sd_db.today.repo_keys`, by `realm_of`); any other's is its family's key when that key is a realm id
     (`families`, `reports_screen.families`' list). No match is Personal; without a realm list it is unknown, None."""
     if rules is None:
         return None
     found = PULL.fullmatch(pull_url(job, basis) or "")
     if found:
-        path = checkouts.get((found[1].lower(), found[2].lower()))
+        path = checkouts.get(f"{found[1]}/{found[2]}".lower())
         return realm_of(path, "task", rules, hoa) if path else "personal"
     ids = {realm["id"] for realm in rules}
     return next((family["key"] for family in families if family["key"] in ids and job in family["jobs"]), "personal")

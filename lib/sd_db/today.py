@@ -284,7 +284,7 @@ def closed_by_hand(connection: sqlite3.Connection, *, repos: Iterable[str | None
     return [row for row in _closed(connection, repos, now, hours) if not row["commit"]]
 
 
-def _repo_keys(connection: sqlite3.Connection) -> dict[str, str]:
+def repo_keys(connection: sqlite3.Connection) -> dict[str, str]:
     """Each registered repository's key by its lower-case GitHub `owner/name`."""
     from .repos import parse_remote
 
@@ -333,7 +333,7 @@ def landing(connection: sqlite3.Connection, *, repos: Iterable[str | None] | Non
         """,
         (len(LANE_KEY_PREFIX), LANE_KEY_PREFIX),
     ).fetchall()
-    keys, keep = _repo_keys(connection), _keep(repos)
+    keys, keep = repo_keys(connection), _keep(repos)
     newest: dict[tuple[str, Any], tuple[int, dict]] = {}
     for row in rows:
         entry = json.loads(row["body"])
