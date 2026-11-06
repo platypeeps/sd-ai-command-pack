@@ -928,6 +928,36 @@ def record_lanes(connection) -> list[int]:
     return written
 
 
+def link_shipped(connection) -> list[int]:
+    """Link the pull request `sd-ship prepare` opened to its item as the item's `pull_url` (sd:7859).
+
+    The receipt holds the item and its `pull_request` url; the operator's own pull request is observed already, so
+    the link makes its lane the item's. A receipt that merged, an item that is done or names a pull request or
+    issue, and a url another item holds (a bundle's second item) are left alone; so a rerun links nothing.
+    Each link is `configure`'s one transaction, which notes the lane too. Returns the items linked.
+    """
+    from . import ship
+
+    taken = {metadata["pull_url"] for _, metadata in _registered(connection) if metadata.get("pull_url")}
+    receipts = [ship.read(connection, key)[1] for key in _latest(connection, "checkpoint", "ship:")]
+    linked = []
+    for receipt in sorted(receipts, key=lambda value: str(value.get("item"))):
+        url, item = (receipt.get("pull_request") or {}).get("url"), receipt.get("item")
+        if type(item) is not int or not isinstance(url, str) or receipt.get("phase") == "merged":
+            continue
+        url = _url(url)
+        row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
+        if url in taken or row is None or row["kind"] != "task" or row["status"] == "done":
+            continue
+        metadata = _metadata(dict(row)) or {}
+        if metadata.get("pull_url") or metadata.get("issue_url"):
+            continue
+        configure(connection, item, {"pull_url": url}, who=OBSERVER)
+        taken.add(url)
+        linked.append(item)
+    return linked
+
+
 def _seconds(start, end) -> int:
     return max(0, int((_moment(end) - _moment(start)).total_seconds()))
 

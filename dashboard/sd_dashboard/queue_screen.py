@@ -24,7 +24,8 @@ The six states, from each entry's `status`:
 
 Beside the lanes, `prs` (pack sd:7859): each item whose linked pull request (its contribution `pull_url`) is open and
 waits on review, from its lane notes (`contributions.pr_waits`): who it waits on, `you` or `reviewers`, since when and
-for how long. Today's Queue view draws it as blocked by its PR, not working. An item in the lane keeps its lane row.
+for how long. Today's Queue view draws it as blocked by its PR, not working. An item in the lane keeps its lane row;
+a `prepared` one, stopped for a person's review in a manual-merge lane, shows the wait on that row.
 
 An item's newest entry is the one with the highest `enqueue_seq`, not the last one listed: `lane move` can list a newer
 entry above older ones (sd:3419). `newest` is the one place that picks it.
@@ -398,6 +399,8 @@ def runner(connection) -> dict:
 
 
 #: The lane states that keep an item's row in the lane: its pull request waits there, not on review (pack sd:7859).
+#: A `prepared` blocked entry is the exception: in a repo whose `runner_merge` is manual the lane stops there and the
+#: pull request waits on a person's review, so its row shows the wait beside its Approve.
 LANED = ("merging", "next", "blocked")
 #: What the page reads of each pull-request wait (`contributions.pr_waits`).
 PR_FIELDS = ("item", "title", "repo", "url", "lane", "on", "since", "waited")
@@ -406,12 +409,14 @@ PR_FIELDS = ("item", "title", "repo", "url", "lane", "on", "since", "waited")
 def pr_rows(connection, lanes: list[dict], clock: float) -> dict:
     """Pack sd:7859: each item whose linked pull request is open in a waiting lane, `{"rows", "error"}`.
 
-    An item with a merging, next or blocked lane row keeps its lane state and is left out; so is a `done` one. A read
-    that failed is its `error` and no rows, never an empty answer.
+    An item with a merging, next or blocked lane row keeps its lane state and is left out; so is a `done` one. A
+    blocked row that stopped `prepared` waits on review: its item is a row here, and the page draws the two as one.
+    A read that failed is its `error` and no rows, never an empty answer.
     """
     from sd_db import contributions
 
-    laned = {row.get("item") for lane in lanes for row in lane["rows"] if row.get("state") in LANED}
+    laned = {row.get("item") for lane in lanes for row in lane["rows"]
+             if row.get("state") in LANED and not (row.get("state") == "blocked" and row.get("status") == "prepared")}
     try:
         waits = contributions.pr_waits(connection, now=time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(clock)))
     except READ_FAILURES as error:

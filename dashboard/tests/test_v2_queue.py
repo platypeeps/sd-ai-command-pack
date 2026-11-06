@@ -313,6 +313,16 @@ class TheRows(Lane, ScreenCase):
         self.list([*self.entries(), {"item": item, "title": "In the lane", "status": "pending", "expected_head": "e" * 40}])
         self.assertEqual(self.doc()["prs"]["rows"], [])
 
+    def test_a_manual_merge_prepared_entry_waits_on_review_and_a_self_merging_entry_keeps_its_lane(self):
+        # pack sd:7859: a manual-merge lane stops `prepared` and a person reviews the PR; an auto-merge lane merges it.
+        manual, _ = self.pr_item(905, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        auto, _ = self.pr_item(906, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        self.list([{"item": manual, "title": "Manual", "status": "prepared", "reason": "queued without --manual; merge by hand",
+                    "expected_head": "e" * 40, "finished_at": "2026-09-06T10:00:00Z"},
+                   {"item": auto, "title": "Auto", "status": "running", "expected_head": "f" * 40, "id": "e-6",
+                    "started_at": "2026-09-06T11:50:00Z", "step": "merge"}])
+        self.assertEqual([(r["item"], r["on"]) for r in self.doc()["prs"]["rows"]], [(manual, "reviewers")])
+
     def test_a_pr_wait_read_that_failed_says_so_and_shows_no_rows(self):
         from sd_db import contributions
 
@@ -1431,6 +1441,21 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertIn("<b>blocked: PR</b> · on reviewers · waited 2h 1m", rows["44"])
         self.assertEqual(out["R"]["kids"].count("working"), 2, "the lane builders stay; the live item is gone")
         self.assertIn('aria-label="1 merging, 2 working, 2 next, 4 blocked, 0 suggested"', html)
+
+    def test_a_prepared_entry_whose_pr_waits_on_review_is_one_row_that_leads_with_the_wait(self):
+        # pack sd:7859: item 5 stopped prepared in a manual-merge lane; its PR waits on reviewers. One row, Approve kept.
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["prs"] = {"error": "", "rows": [
+            {"item": 5, "title": "Prepared only", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/5",
+             "lane": "awaiting_them", "on": "reviewers", "since": "2026-09-06T10:00:00+00:00", "waited": 7200}]}
+        out = self.run_view("open('system'); R.html = ELS.queue.html;", answers={"/api/queue": [200, lanes]})
+        rows = re.findall(r'<tr class="child" data-type="blocked"[^>]*data-pr="5">(.*?)</tr>', out["R"]["html"], re.S)
+        self.assertEqual(len(rows), 1, "the lane row and the PR wait are one row")
+        self.assertIn("<b>blocked: PR</b> · on reviewers · waited 2h 0m", rows[0])
+        self.assertIn('<span class="sr">waiting · </span>blocked', rows[0])
+        self.assertIn('data-act="approve" data-item="5"', rows[0])
+        self.assertIn('href="https://github.com/example/system/pull/5"', rows[0])
+        self.assertEqual(out["R"]["html"].count('data-item="5"'), 2, "Retry and Approve, on that one row")
 
     def test_a_pr_wait_that_was_not_read_is_said_under_the_table(self):
         lanes = queue_screen.document(self.connection, now=NOW)

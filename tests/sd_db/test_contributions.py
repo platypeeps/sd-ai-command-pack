@@ -1299,6 +1299,41 @@ class LaneNoteTests(ContributionCase):
         self.observe()
         self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)], "the next observation writes both")
 
+    def shipped(self, item, phase="ready_to_send", url="https://github.com/Upstream/Project/pull/12"):
+        """A receipt `sd-ship prepare` left: the pull request it opened for `item` (sd:7859)."""
+        from sd_db import ship
+
+        key = ship.receipt_key("upstream/project", f"feat/sd-{item}", item)
+        ship.save(self.db, key, ship.read(self.db, key)[0],
+                  {"item": item, "repository": "upstream/project", "branch": f"feat/sd-{item}", "phase": phase,
+                   "pull_request": {"number": 12, "repository": "upstream/project", "base": "main", "url": url}})
+
+    def task(self, title="Shipped"):
+        from sd_db.workflow import capture_task
+
+        return capture_task(self.db, title=title, priority=3, who="operator")["item"]["id"]
+
+    def test_a_pull_request_prepare_opened_is_linked_to_its_item_and_noted_on_reviewers(self):
+        self.observe()
+        item, bundled, merged = self.task(), self.task("Bundled"), self.task("Merged")
+        self.shipped(item)
+        self.shipped(bundled)
+        self.shipped(merged, phase="merged", url="https://github.com/upstream/project/pull/13")
+        self.assertEqual(c.link_shipped(self.db), [item], "one item per pull request; a merged receipt is history")
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": URL})
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
+        self.assertEqual(c.link_shipped(self.db), [], "a rerun links nothing")
+        self.assertIsNone(c._metadata(item_state(self.db, bundled)["item"]))
+
+    def test_an_item_that_names_a_pull_request_or_is_done_keeps_what_it_has(self):
+        named = self.item()
+        done = self.task("Done")
+        transition(self.db, done, "done", who="operator")
+        self.shipped(named, url="https://github.com/upstream/project/pull/14")
+        self.shipped(done, url="https://github.com/upstream/project/pull/15")
+        self.assertEqual(c.link_shipped(self.db), [])
+        self.assertEqual((c._metadata(item_state(self.db, named)["item"]) or {}).get("pull_url"), URL)
+
     def history(self, item):
         upsert_shadow(self.db, tracker="github", url=URL, repo="upstream/project", number=12, kind="pull",
                       title="Contribution", state="merged", created_at=T0, merged_at=T3)

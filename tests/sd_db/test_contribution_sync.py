@@ -715,6 +715,23 @@ class LaneNotePass(SyncCase):
         self.assertEqual(result["errors"], [])
         self.assertEqual([(n["lane"], n["state"]) for n in core.lane_notes(self.db, item)], [("merged", "merged")])
 
+    def test_a_refresh_links_the_pull_request_prepare_opened_and_notes_its_lane(self):
+        from sd_db import ship
+        from sd_db.workflow import capture_task
+
+        item = capture_task(self.db, title="Shipped", priority=3, who="operator")["item"]["id"]
+        key = ship.receipt_key("example/project", "feat/x", item)
+        ship.save(self.db, key, 0, {"item": item, "repository": "example/project", "branch": "feat/x",
+                                    "phase": "ready_to_send", "pull_request": {"url": URL}})
+        state = core.snapshot(self.db, "github:" + URL)
+        state["observation"] = {"state": "open", "observed_at": AT}
+        with transaction(self.db):
+            core._save(self.db, state)
+        result = adapter.refresh(self.db, {"pending": [], "revision": None, "snapshots": {}}, [],
+                                 client=self.api.client(), observed_at=self.now.isoformat())
+        self.assertEqual(result["errors"], [])
+        self.assertEqual([(n["lane"], n["url"]) for n in core.lane_notes(self.db, item)], [("awaiting_them", URL)])
+
     def test_a_lane_pass_that_fails_is_the_runs_error(self):
         with patch.object(core, "record_lanes", side_effect=core.WorkflowError("item 7 has malformed contribution metadata")):
             result = adapter.refresh(self.db, {"pending": [], "revision": None, "snapshots": {}}, [],

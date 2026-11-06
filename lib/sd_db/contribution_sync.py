@@ -187,8 +187,10 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
     from . import contributions as core
 
     # sd:7859: each registered pull request's lane note, and the backfill of one never noted, even a merged one the
-    # queue no longer observes. A failure is the run's error, never a quiet pass.
+    # queue no longer observes. A failure is the run's error, never a quiet pass. The pull requests `sd-ship prepare`
+    # opened are linked to their items first, so their lanes are noted in the same pass.
     try:
+        core.link_shipped(connection)
         core.record_lanes(connection)
         lane_errors = []
     except WorkflowError as error:

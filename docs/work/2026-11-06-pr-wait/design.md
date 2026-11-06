@@ -21,6 +21,7 @@ So the history of a lane is lost once the next observation lands.
 ## Approach
 
 An item's linked pull request is its contribution `pull_url`, the one link `contributions.py` owns (ruling, note #45986).
+A pull request `sd-ship prepare` opened is linked the same way from its ship receipt (ruling, note #46009).
 
 1. **Record.** `contributions.record_lane(connection, item)` reads the item's lane the way the projection does,
    through one shared rule, `_lane`, and writes a `comment` note when the lane or the pull request's state changed:
@@ -43,7 +44,15 @@ An item's linked pull request is its contribution `pull_url`, the one link `cont
    Today's Queue view draws it as a `blocked` row, `blocked: PR · on you` or `on reviewers`, with how long it waited,
    and drops that item's live-session row and its suggested or open row. Build runs and runner assignments stay:
    they are a live process.
-5. **Metrics.** `/api/metrics` gains `prs`: totals on you, on reviewers, waiting, and first PR to merge,
+5. **Link.** `contributions.link_shipped` reads each `ship:` receipt's item and `pull_request.url` and sets that url as
+   the item's `pull_url` through `configure`, in its one transaction, which notes the lane too.
+   `contribution_sync.refresh` calls it before `record_lanes`, so new pull requests and the open receipts from before
+   this change are linked by the same pass. The operator's pull request is already observed as authored.
+   Left alone: a merged receipt, a done item, an item that names a pull request or issue, and a url another item holds
+   (a bundle's second item). A `prepared` lane entry, where a manual-merge lane stops for a person's review, no longer
+   hides the wait: Queue draws one row that leads with `blocked: PR` and keeps Retry and Approve.
+   A merging or next entry, as an auto-merge lane's is, keeps its lane row.
+6. **Metrics.** `/api/metrics` gains `prs`: totals on you, on reviewers, waiting, and first PR to merge,
    and the five slowest items. The Metrics page draws it as one ledger table, as it draws the lanes.
 
 `comment` is the note kind. `status_change` is `transition`'s alone and feeds status ages;
@@ -56,7 +65,6 @@ and a read that joins three sources every page load is slower and drifts from wh
 
 ## Non-goals
 
-- Pull requests the lane opens (`sd-ship prepare` receipts) are not contribution rows; linking them is a follow-up.
 - No new command, flag, table or setting. No change to how lanes are computed.
 - No GitHub read: the observer already reads GitHub.
 
@@ -69,7 +77,10 @@ and a read that joins three sources every page load is slower and drifts from wh
 | rerun of observe or refresh | none | a second note for the same lane | `record_lane` compares with the newest note for the url and writes nothing | `test_an_observed_pull_writes_one_lane_note_and_a_rerun_writes_none` |
 | acknowledge moves attention | checkpoint, then lane note | lane changes on you to on reviewers without a note | `acknowledge` calls `record_lane` in its transaction | `test_a_maintainer_comment_is_on_you_and_acknowledging_it_is_on_reviewers_again` |
 | older state: item configured before this change | no lane notes | durations read nothing | refresh calls `record_lanes`, which backfills from shadow and followups | `test_backfill_reads_the_shadow_and_the_followups` |
-| older state: rollback to the previous commit | lane notes stay | the old code ignores them | none needed: they are plain comments | not tested: no code reads them there |
+| link a receipt's pull request | item metadata, a comment, a lane note | process stops mid-pass | one transaction per item; a rerun skips linked items and links the rest | `test_a_pull_request_prepare_opened_is_linked_to_its_item_and_noted_on_reviewers` |
+| refresh links, then notes lanes | as above | the link pass fails | the run's error, as a failed lane pass is | `test_a_refresh_links_the_pull_request_prepare_opened_and_notes_its_lane` |
+| older state: open receipts from before this change | no item link | their waits never show | the first refresh links them | `test_a_refresh_links_the_pull_request_prepare_opened_and_notes_its_lane` |
+| older state: rollback to the previous commit | lane notes and links stay | the old code ignores the notes | none needed: notes are plain comments; a linked item is an ordinary contribution there | not tested: no code reads the notes there |
 | shadow row missing | no opened time | first note is the first observation | durations start there; Metrics counts no first-to-merge without a merge note | `test_without_a_shadow_row_the_wait_starts_at_the_first_note` |
 
 ## Acceptance criteria
