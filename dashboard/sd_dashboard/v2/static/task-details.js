@@ -419,7 +419,8 @@
         when: o => { const t = T(o); return !t ? 'the task is no longer listed' : t.status === 'done' ? 'it is done' : true; },
         post: (o, path) => { const t = must(o);
           return write(t.key, () => path, {}).then(v => { redrawDet(t.id); return v; }, err => { if (err.stale) refused(); throw err; }); },
-        again: o => { host.reread(); redrawDet(T(o).id); } }),
+        // pack sd:7820: a read during the post may have dropped the task; then no Details to redraw, and the 5xx toast stays.
+        again: o => { host.reread(); const t = T(o); if (t) redrawDet(t.id); } }),
       // Adversarial review (sd:5064): the shared declaration (commands.js); the server reviews the item in its repository,
       // so an item with none is off.
       window.commands.adversarialReview('item', { payload: o => ({ kind: 'task', target: T(o).id }),
