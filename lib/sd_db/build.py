@@ -131,12 +131,38 @@ def _repo_refusal(row) -> str | None:
     if row["repo_path"] is None:
         return f"item {item} needs a registered repository"
     if not row["managed"]:
-        return f"item {item}'s repository {row['repo']} is not managed"
+        # An unmanaged repository's build ends in a draft pull request the owners merge (pack sd:7868):
+        # it needs GitHub to open one, and a task to track it as the item's contribution `pull_url`.
+        if not github_repository(row["remote"]):
+            return (f"item {item}'s repository {row['repo']} is not managed and its remote is not on GitHub, "
+                    f"where its build opens a draft pull request")
+        if row["kind"] != "task":
+            return (f"item {item} is a {row['kind']} item; a build in the unmanaged repository {row['repo']} "
+                    f"takes task items only")
     if not row["remote"]:
         return f"item {item}'s repository {row['repo']} has no remote"
     if row["lane_host"] is not None:
         return f"item {item}'s lane runs on {row['lane_host']}; builds run on the hub only"
     return None
+
+
+def github_repository(remote: str | None) -> str:
+    """`owner/name` of a GitHub remote, or "" for none or another host."""
+    from .ship import _github_repository
+    from .workflow import WorkflowError
+
+    try:
+        return _github_repository(remote) if remote else ""
+    except WorkflowError:
+        return ""
+
+
+def unmanaged(connection, repo: str) -> bool:
+    """Whether the repository row reads `managed = 0`: its builds end in a draft pull request (pack sd:7868)."""
+    probe = paths.keys(repo)
+    row = connection.execute(f"SELECT managed FROM repo WHERE path IN ({paths.placeholders(probe)})",
+                             probe).fetchone()
+    return row is not None and not row["managed"]
 
 
 _REPO = ("SELECT item.*, repo.path AS repo_path, repo.remote, repo.managed, repo.lane_host "

@@ -101,6 +101,7 @@ class Queue(Case):
         busy = self.item()
         build.queue(self.db, [busy], who="operator")
         upsert_repo(self.db, "/fixture/off", remote="/fixture/r-off", managed=0)
+        upsert_repo(self.db, "/fixture/gh", remote="https://github.com/owner/third-party.git", managed=0)
         upsert_repo(self.db, "/fixture/none", managed=1)
         upsert_repo(self.db, "/fixture/sat", remote="/fixture/r-sat", managed=1)
         satellite = self.item(repo="/fixture/sat")
@@ -111,7 +112,8 @@ class Queue(Case):
         cases = {
             "is planning; a build takes a ready item": ([ready, planning], None),
             "has queued assignment": ([ready, busy], None),
-            "is not managed": ([ready, self.item(repo="/fixture/off")], None),
+            "is not managed and its remote is not on GitHub": ([ready, self.item(repo="/fixture/off")], None),
+            "takes task items only": ([ready, self.item(repo="/fixture/gh", kind="report")], None),
             "has no remote": ([ready, self.item(repo="/fixture/none")], None),
             "builds run on the hub only": ([ready, satellite], None),
             "is a followup item": ([ready, self.item(kind="followup")], None),
@@ -286,7 +288,26 @@ class Claim(Case):
         self.assertEqual([member["item"] for member in claims.popitem()[1]["members"]], [newer])
 
     def test_claim_skips_a_repository_unmanaged_after_the_press(self):
-        self.ineligible_after_press("UPDATE repo SET managed = 0 WHERE path = ?", "is not managed")
+        self.ineligible_after_press("UPDATE repo SET managed = 0 WHERE path = ?",
+                                    "is not managed and its remote is not on GitHub")
+
+    def test_a_press_takes_a_task_in_an_unmanaged_github_repository(self):
+        """Pack sd:7868: an unmanaged repository's task builds to a draft pull request, by press and by pickup."""
+        upsert_repo(self.db, "/fixture/gh", remote="git@github.com:owner/third-party.git", managed=0)
+        item = self.item(repo="/fixture/gh")
+        self.assertEqual([row["id"] for row in build.eligible(self.db)], [item])
+        queued = build.queue(self.db, [item], who="operator")
+        self.assertEqual([row["status"] for row in queued], ["queued"])
+        taken = self.claim()
+        self.assertEqual(([m["item"] for m in taken["members"]], self.statuses([item])), ([item], ["in_progress"]))
+
+    def test_pickup_queues_an_unmanaged_task(self):
+        """Pack sd:7868: auto-pickup, once on, picks what a press takes."""
+        upsert_repo(self.db, "/fixture/gh", remote="https://github.com/owner/third-party", managed=0)
+        item = self.item(repo="/fixture/gh")
+        build.set_pickup(self.db, True)
+        available = build.room(self.db, **IDLE)
+        self.assertEqual(build.pickup(self.db, available), [item])
 
     def test_claim_skips_a_repository_without_a_remote_after_the_press(self):
         self.ineligible_after_press("UPDATE repo SET remote = NULL WHERE path = ?", "has no remote")
