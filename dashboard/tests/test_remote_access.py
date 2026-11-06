@@ -313,12 +313,27 @@ class RemoteAccess(ScreenCase):
             thread.start()
         return threads
 
-    def until(self, test, seconds=10.0):
+    def until(self, test, seconds=10.0, why="the held reads never filled the slots"):
         """Wait for `test`, and fail if it never holds: a loaded machine starts the request threads late."""
         deadline = time.monotonic() + seconds
         while not test():
-            self.assertLess(time.monotonic(), deadline, "the held reads never filled the slots")
+            self.assertLess(time.monotonic(), deadline, why)
             time.sleep(0.02)
+
+    def slots_back(self):
+        """Wait for every read slot to come back: a handler gives its slot back in `finally`, after its answer is
+        sent, so a client can hold its 200 before the slot is free (sd:7842)."""
+        slots = self.listening.RequestHandlerClass.reads
+
+        def free():
+            taken = 0
+            while taken < server.READ_SLOTS and slots.acquire(blocking=False):
+                taken += 1
+            for _ in range(taken):
+                slots.release()
+            return taken == server.READ_SLOTS
+
+        self.until(free, why="every slot came back")
 
     def test_reads_past_the_bound_wait_for_a_slot_not_another_connection(self):
         # sd:7842: under load each in-flight read held its connection, and with no bound 136 store handles piled up.
@@ -335,8 +350,7 @@ class RemoteAccess(ScreenCase):
         self.assertEqual(most, 8)
         self.assertEqual(server.READ_SLOTS, 8)
         self.assertEqual(sorted(status for status, _, _ in results), [200] * 12)
-        slots = self.listening.RequestHandlerClass.reads
-        self.assertTrue(all(slots.acquire(blocking=False) for _ in range(8)), "every slot came back")
+        self.slots_back()
 
     def test_a_read_that_waits_too_long_for_a_slot_is_a_busy_503(self):
         gate, inside, held = self.held_reads()
@@ -358,5 +372,4 @@ class RemoteAccess(ScreenCase):
         with patch.object(server.sd_db, "connect", side_effect=OSError(errno.EMFILE, "Too many open files")):
             for _ in range(10):
                 self.assertEqual(self.request("/api/github/issues", headers=headers)[0], 503)
-        slots = self.listening.RequestHandlerClass.reads
-        self.assertTrue(all(slots.acquire(blocking=False) for _ in range(8)), "every slot came back")
+        self.slots_back()
