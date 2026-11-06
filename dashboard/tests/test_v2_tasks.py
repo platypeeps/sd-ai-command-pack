@@ -2029,7 +2029,9 @@ shellRun(cmd('item.fix'), C.get('{plan}')); await flush();""", answer)
         failed = """(path, body) => [503, { error: 'Fix failed: herdr.sh launch: session sd is not running.'
   + ' A note on sd:1 keeps the cause.' }]"""
         refused = """(path, body) => [400, { error: 'item 1 is done' }]"""
-        for answer, want in ((failed, 1), (refused, 0)):
+        # pack sd:7783: a post with no answer may have noted the cause too, so it reads again as a 5xx does.
+        silent = """(path, body) => { if (body) throw new TypeError('Load failed'); return [503, { error: 'store busy' }]; }"""
+        for answer, want in ((failed, 1), (silent, 1), (refused, 0)):
             out = self.run_page(f"""const before = OUT.gets.filter(g => g === '/api/tasks').length;
 shellRun(cmd('item.fix'), C.get('{plan}')); await flush(); await flush();
 R.reads = OUT.gets.filter(g => g === '/api/tasks').length - before;

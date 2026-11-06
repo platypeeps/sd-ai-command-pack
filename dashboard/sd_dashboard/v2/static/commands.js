@@ -18,9 +18,11 @@
   // session for a report. It asks first, naming that, and posts /api/items/<id>/fix with the row's revision through
   // post(o, path), which answers the server's reply. A post with no answer may have started a session, so it says that. No Undo:
   // a session runs on. `item(o)` is the item id; `report(o)` is true for a report.
+  // pack sd:7783: `again(o)` reads the page again after a launch that may have noted its cause on the item (`noted`), so
+  // the page's next press carries the moved revision; Fix, Grill, Apply answers and Apply review each take it.
   // sd:6964: `login(o)` is a report's expired login (job_failures.login): no session can sign in for the operator, so Fix
   // then opens that login's row on Health > Credentials, where Sign in is, and asks nothing first.
-  function fix(on, { item, report, login = () => null, when = () => true, post }) {
+  function fix(on, { item, report, login = () => null, when = () => true, post, again = () => {} }) {
     return { id: `${on}.fix`, on, label: 'Fix', does: o => login(o) ? 'Opens the expired login\'s row on Health, where Sign in is.' : report(o) ? 'Asks first, then opens a Claude session (herdr) to fix this report.' : 'Asks first, then opens a Claude session (herdr) to build this item.', key: 'f', risk: 'safe', askFirst: o => !login(o), executes: true, icon: 'bot', when,
       cli: o => login(o) ? `no CLI: opens ${login(o).href}` : 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
       sends: o => login(o) ? `GET ${login(o).href}` : `POST /api/items/${item(o)}/fix {revision}`,
@@ -29,8 +31,12 @@
         : `Opens a Claude session on #${item(o)} in herdr, in the item's repo. It builds the change in its own folder and sends it to the merge queue.`,
       run: o => login(o) ? (location.href = login(o).href, `Health opens on ${login(o).row ? login(o).row.replace(/^cred:/, '') : 'Credentials'}`) : Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`)).then(
         out => `Fix started · #${item(o)} · ${out.fix.session} session in herdr pane ${out.fix.pane}`,
-        err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) };
+        err => { if (noted(err)) again(o); throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) };
   }
+
+  // pack sd:7783: a failed launch (5xx) writes a comment note naming its cause (fix_session, pack sd:7756), and a post
+  // with no answer may have written one, so either moved the item's revision. A 4xx refusal wrote nothing.
+  const noted = err => !err?.status || err.status >= 500;
 
   // Fix on a repository's Dependabot alerts (sd:6685), on Health's Dependencies rows and GitHub's Dependabot groups
   // (pack sd:7515): files the repo's item under dependabot:<slug>, or reuses the open one, then starts claude on it through
@@ -62,7 +68,7 @@
     apply: { label: 'Apply answers', does: 'Asks first, then has Claude edit the draft to match your answers.',
       consequence: n => `Opens a Claude session on #${n} in the piece's repo (herdr). It edits the draft to match each answer. The edit stays uncommitted for you to read; nothing is published.` },
   };
-  function grill(on, step, { item, ready, post }) {
+  function grill(on, step, { item, ready, post, again = () => {} }) {
     const g = GRILL[step];
     return { id: `${on}.${step === 'ask' ? 'grill' : 'apply-answers'}`, on, label: g.label, does: g.does,
       icon: 'bot', risk: 'safe', askFirst: true, executes: true, when: ready,
@@ -71,13 +77,13 @@
       consequence: o => g.consequence(item(o)),
       run: o => Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`, { grill: step })).then(
         out => `${g.label} started · #${item(o)} · herdr pane ${out.fix.pane}`,
-        err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press ${g.label} again`); }) };
+        err => { if (noted(err)) again(o); throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press ${g.label} again`); }) };
   }
 
   // Apply review (pack sd:6699): Fix with apply: adversarial. claude edits the draft for each adversarial.md finding or
   // rejects it with a reason, and records each there; the edit stays uncommitted and nothing is published. `ready(o)` is
   // true or why not; `post(o, path, body)` answers the server's reply.
-  function applyReview(on, { item, ready, post }) {
+  function applyReview(on, { item, ready, post, again = () => {} }) {
     return { id: `${on}.apply-review`, on, label: 'Apply review', does: 'Asks first, then has Claude fix the draft for each review finding.',
       icon: 'bot', risk: 'safe', askFirst: true, executes: true, when: ready,
       cli: () => 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
@@ -85,7 +91,7 @@
       consequence: o => `Opens a Claude session on #${item(o)} in the piece's repo (herdr). For each review finding, it fixes the draft or says why not, and records each answer with the review. The edit stays uncommitted for you to read; nothing is published.`,
       run: o => Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`, { apply: 'adversarial' })).then(
         out => `Apply review started · #${item(o)} · herdr pane ${out.fix.pane}`,
-        err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Apply review again`); }) };
+        err => { if (noted(err)) again(o); throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Apply review again`); }) };
   }
 
   // Run now (jobs.retry): `sd jobs retry`, which sends the kickstart; the run-now pack allows an idle job's run too (sd:4982).
