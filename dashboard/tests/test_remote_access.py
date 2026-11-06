@@ -4,10 +4,13 @@ Identity headers and Serve observations are synthetic. These tests establish
 the server's policy, not physical iPad access or actual Tailscale forwarding.
 """
 
+import errno
 import http.client
 import json
 import re
+import subprocess
 import threading
+import time
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -19,6 +22,9 @@ from support import ScreenCase
 
 
 class RemoteAccess(ScreenCase):
+    #: What the front door check raises, when set: a check that could not run (sd:7842).
+    failure = None
+
     def setUp(self):
         super().setUp()
         self.origin = "https://fixture.tail-example.ts.net:8443"
@@ -45,6 +51,8 @@ class RemoteAccess(ScreenCase):
 
     def check_frontdoor(self):
         self.checks += 1
+        if self.failure is not None:
+            raise self.failure
         if self.unavailable:
             raise runtime.RuntimeRefused("fixture Tailscale inspection unavailable")
         return auth.validate_frontdoor(self.config, self.serve, self.port) == self.frontdoor
@@ -245,3 +253,123 @@ class RemoteAccess(ScreenCase):
             load.side_effect = runtime.RuntimeRefused("inspection unavailable")
             with self.assertRaises(runtime.RuntimeRefused):
                 check()  # Dashboard._context catches this and rejects the request.
+
+    def test_a_front_door_check_that_could_not_run_is_a_503_naming_why_not_a_host_refusal(self):
+        # sd:7842: out of file handles, the config read failed, and every tailnet request read "Untrusted dashboard
+        # host". The check never ran, so the answer is unknown: a 503 naming the cause. A mismatch stays a 403.
+        def wrapped(cause):
+            try:
+                raise runtime.RuntimeRefused(f"cannot read dashboard config: {cause}") from cause
+            except runtime.RuntimeRefused as refused:
+                return refused
+
+        emfile = OSError(errno.EMFILE, "Too many open files")
+        cookie, csrf, _ = self.session()
+        for name, failure, named in (
+                ("config read", wrapped(emfile), "Too many open files"),
+                ("raw", OSError(errno.EMFILE, "Too many open files"), "Too many open files"),
+                ("tailscale timeout", wrapped(subprocess.TimeoutExpired(["tailscale"], 20)), "timed out")):
+            with self.subTest(name):
+                self.failure = failure
+                status, _, body = self.request("/api/github/issues")
+                self.assertNotIn("Untrusted dashboard host", body)
+                self.assertEqual(status, 503)
+                self.assertIn("could not check its front door", json.loads(body)["error"])
+                self.assertIn(named, json.loads(body)["error"])
+                self.assertEqual(self.post(self.write_headers(cookie, csrf))[0], 503)
+        self.failure = None
+        self.unavailable = True
+        self.assertEqual(self.request("/health")[0], 403)
+
+    def held_reads(self):
+        """`Dashboard._api` held until released: each call holds the request's store connection, so the most calls
+        inside at once is the most connections open."""
+        gate, lock, inside = threading.Event(), threading.Lock(), {"now": 0, "most": 0}
+
+        def held(handler, *_):
+            with lock:
+                inside["now"] += 1
+                inside["most"] = max(inside["most"], inside["now"])
+            gate.wait(10)
+            with lock:
+                inside["now"] -= 1
+            return handler._json(200, {})
+
+        return gate, inside, held
+
+    def local_reads(self, count, results):
+        """`count` local reads, each on its own thread, with room to wait for a slot on a loaded machine."""
+        def read():
+            client = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+            try:
+                client.request("GET", "/api/github/issues", headers={"Host": f"127.0.0.1:{self.port}"})
+                answer = client.getresponse()
+                results.append((answer.status, dict(answer.getheaders()), answer.read().decode()))
+            finally:
+                client.close()
+
+        threads = [threading.Thread(target=read) for _ in range(count)]
+        for thread in threads:
+            thread.start()
+        return threads
+
+    def until(self, test, seconds=10.0, why="the held reads never filled the slots"):
+        """Wait for `test`, and fail if it never holds: a loaded machine starts the request threads late."""
+        deadline = time.monotonic() + seconds
+        while not test():
+            self.assertLess(time.monotonic(), deadline, why)
+            time.sleep(0.02)
+
+    def slots_back(self):
+        """Wait for every read slot to come back: a handler gives its slot back in `finally`, after its answer is
+        sent, so a client can hold its 200 before the slot is free (sd:7842)."""
+        slots = self.listening.RequestHandlerClass.reads
+
+        def free():
+            taken = 0
+            while taken < server.READ_SLOTS and slots.acquire(blocking=False):
+                taken += 1
+            for _ in range(taken):
+                slots.release()
+            return taken == server.READ_SLOTS
+
+        self.until(free, why="every slot came back")
+
+    def test_reads_past_the_bound_wait_for_a_slot_not_another_connection(self):
+        # sd:7842: under load each in-flight read held its connection, and with no bound 136 store handles piled up.
+        gate, inside, held = self.held_reads()
+        results = []
+        with patch.object(server.Dashboard, "_api", held):
+            threads = self.local_reads(12, results)
+            self.until(lambda: inside["now"] >= 8)
+            time.sleep(0.3)  # time for a read past the bound to get in, if one could
+            most = inside["most"]
+            gate.set()
+            for thread in threads:
+                thread.join(10)
+        self.assertEqual(most, 8)
+        self.assertEqual(server.READ_SLOTS, 8)
+        self.assertEqual(sorted(status for status, _, _ in results), [200] * 12)
+        self.slots_back()
+
+    def test_a_read_that_waits_too_long_for_a_slot_is_a_busy_503(self):
+        gate, inside, held = self.held_reads()
+        results, late = [], []
+        with patch.object(server.Dashboard, "_api", held), patch.object(server, "READ_WAIT", 0.2):
+            threads = self.local_reads(8, results)
+            self.until(lambda: inside["now"] >= 8)
+            self.local_reads(1, late)[0].join(5)
+            gate.set()
+            for thread in threads:
+                thread.join(10)
+        status, _, body = late[0]
+        self.assertEqual(status, 503)
+        self.assertIn("busy", json.loads(body)["error"])
+        self.assertEqual(sorted(status for status, _, _ in results), [200] * 8)
+
+    def test_a_read_whose_connection_fails_gives_its_slot_back(self):
+        headers = [("Host", f"127.0.0.1:{self.port}")]
+        with patch.object(server.sd_db, "connect", side_effect=OSError(errno.EMFILE, "Too many open files")):
+            for _ in range(10):
+                self.assertEqual(self.request("/api/github/issues", headers=headers)[0], 503)
+        self.slots_back()
