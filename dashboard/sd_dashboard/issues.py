@@ -79,15 +79,18 @@ def _stored_listed(connection: sqlite3.Connection, key: str) -> bool:
     and `repos.intake_issues`, without the details, the GitHub document or the views each page read joins in.
 
     A Hide read every list in full first, about a second a write, and a bulk Hide sends one write per row. True only for a key these rows give as `document` and `intake` do; False is not stale, since a row
-    GitHub's search adds, or one whose key fell back, is in neither: `view` then reads the lists in full."""
+    GitHub's search adds, or one whose key fell back, is in neither: `view` then reads the lists in full. So is a stored
+    read that fails: the full lists read with their own handling, as the page does."""
     wanted = key.lower()
-    mine = getattr(repos, "mine_issues", None)
-    for rows in (mine(connection) if mine else {}).values():
-        if any((_ref_key(row, _ref(row), row.get("repo")) or "").lower() == wanted for row in rows):
-            return True
-    found = getattr(repos, "intake_issues", None)
-    return any(f"github:{row['repo']}#{row['number']}".lower() == wanted
-               for rows in (found(connection) if found else {}).values() for row in rows)
+    mine, found = getattr(repos, "mine_issues", None), getattr(repos, "intake_issues", None)
+    try:
+        for rows in (mine(connection) if mine else {}).values():
+            if any((_ref_key(row, _ref(row), row.get("repo")) or "").lower() == wanted for row in rows):
+                return True
+        return any(f"github:{row['repo']}#{row['number']}".lower() == wanted
+                   for rows in (found(connection) if found else {}).values() for row in rows)
+    except (SdDbError, sqlite3.Error):
+        return False
 
 
 def _details(connection: sqlite3.Connection, pairs: list[tuple[dict, dict]]) -> None:

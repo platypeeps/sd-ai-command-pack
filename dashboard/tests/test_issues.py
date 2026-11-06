@@ -1280,6 +1280,23 @@ class TheHideCheck(ScreenCase):
         self.assertEqual(list(writes.views(self.connection)), ["issue:github:example/elsewhere#5"])
 
 
+    def test_a_stored_read_that_fails_falls_back_to_the_full_lists(self):
+        # Review of sd:7843: the stored reads had none of the handling `document` and `intake` have, so a locked store
+        # aborted the Hide. A failed stored read now falls back to the full lists, which hide a row they list.
+        calls = {"n": 0}
+
+        def mine(connection):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return self.MINE
+
+        with stub(side_effect=mine), stub_intake(return_value=INTAKE):
+            out = issues.view({"key": "jira:EXAMPLE-8", "hidden": True})(self.connection)
+        self.assertEqual((out["key"], out["hidden"]), ("jira:EXAMPLE-8", True))
+        self.assertEqual(calls["n"], 2, "the stored read, then the full lists' own read")
+
+
 class TheViewRoute(BrowserSession):
     """sd:6175: POST /api/github/issues/view writes a listed row's view state, as /api/contributions/view does; a key the
     issue read no longer lists writes nothing."""
