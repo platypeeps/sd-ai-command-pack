@@ -94,6 +94,15 @@ class TheFollow(FollowCase):
         self.assertEqual(self.reruns, [])
         self.assertIn("follow timed out after 0.5 s; the refusal stands", text)
 
+    def test_a_timeout_whose_group_kill_is_refused_kills_the_shell(self):
+        # sd:7900: macOS or a sandbox answers EPERM to killpg; the follow must still end, not raise.
+        root = self.script("sleep 30")
+        began = time.monotonic()
+        with mock.patch.object(follow.os, "killpg", side_effect=PermissionError(1, "Operation not permitted")):
+            text = self.attempt([root], timeout=0.5)
+        self.assertLess(time.monotonic() - began, 10)
+        self.assertIn("follow timed out after 0.5 s; the refusal stands", text)
+
     def test_a_timeout_kills_the_follows_descendants_not_just_its_shell(self):
         # The real follow execs refresh_drain.py, which holds the refresh and
         # lane locks and may start `make setup`; killing only the shell leaves

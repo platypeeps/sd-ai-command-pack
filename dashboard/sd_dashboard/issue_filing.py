@@ -485,7 +485,12 @@ def _model(document: dict, log: Path) -> str:
         try:
             out, _ = child.communicate(text, timeout=MODEL_TIMEOUT)
         except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+                child.kill()
             child.communicate()
             raise TimeoutError(f"claude -p gave no answer in {MODEL_TIMEOUT} s") from None
     if child.returncode != 0:

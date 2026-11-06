@@ -312,8 +312,8 @@ def read_output(collectors, argv, *, timeout=GIT_SECONDS, keep=None):
         # that was not must not keep the pipe.
         try:
             os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            pass
+        except OSError:  # gone, or EPERM (sd:7900): the leader at least goes, so the wait ends
+            proc.kill()
         proc.wait()
         proc.stdout.close()
     return out.decode("utf-8", "replace").strip(), cut, (None if cut else proc.returncode)

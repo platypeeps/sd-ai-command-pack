@@ -344,8 +344,12 @@ def ask(argv: list[str], cwd: Path, timeout: int, out, keep: tuple[int, ...] = (
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        with contextlib.suppress(ProcessLookupError):
+        try:
             os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+            proc.kill()
         proc.communicate()
         return EXIT_ERROR, f"the run passed {timeout}s and was stopped", []
     print(stdout.rstrip(), file=out)

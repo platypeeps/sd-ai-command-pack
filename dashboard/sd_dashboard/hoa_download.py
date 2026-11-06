@@ -253,6 +253,8 @@ def _bounded(proc: subprocess.Popen, seconds: float) -> threading.Timer:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+            proc.kill()
 
     timer = threading.Timer(seconds, kill)
     timer.fired = False

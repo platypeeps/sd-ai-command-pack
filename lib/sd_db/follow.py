@@ -69,6 +69,8 @@ DRAIN_WAIT = 120
 SCRIPT = Path("local-repo-sync") / "repo-sync.sh"
 #: Lines of the follow's output shown when it fails.
 TAIL = 6
+#: How long a killed follow's output is read when its group kill was refused (sd:7900).
+REAP_SECONDS = 5
 
 
 def script(roots) -> Path | None:
@@ -221,6 +223,18 @@ def _kill_group(process: subprocess.Popen) -> str:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+        process.kill()
+        try:
+            output, _ = process.communicate(timeout=REAP_SECONDS)
+        except subprocess.TimeoutExpired as error:
+            # A descendant the refused group kill left alive holds the pipe: stop reading it.
+            if process.stdout is not None:
+                process.stdout.close()
+            process.wait()
+            said = error.output or ""
+            return said.decode(errors="replace") if isinstance(said, bytes) else said
+        return output
     output, _ = process.communicate()
     return output
 
