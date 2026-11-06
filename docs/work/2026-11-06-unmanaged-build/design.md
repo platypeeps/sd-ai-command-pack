@@ -49,7 +49,11 @@ when the run's repository reads unmanaged.
   (`Tools.guard`) itself before the push: over the title, the body, and
   each commit's message, paths and added lines in base..head. A match,
   or a scan that cannot check (no pattern file is exit 3), blocks the
-  run with nothing pushed. `sd-docs-lint` gets `--body-only` there, so a
+  run with nothing pushed. The scan runs only when the repository is
+  public, the rule machine-setup uses for the pre-push guard (operator
+  ruling): the owners of a private one already see work names. `gh repo
+  view --json isPrivate` reads it; a visibility that did not read counts
+  as public, so the scan runs. `sd-docs-lint` gets `--body-only` there, so a
   foreign docs tree cannot block the run.
 - Reviewed head: no lane gate re-checks an unmanaged head, so
   `enqueuing` publishes only the head this supervisor's review and
@@ -139,6 +143,8 @@ review   | none                   | retry at enqueuing   | back to reviewing: re
          |                        | with no reviewed head| checks before the publish       | enqueuing reviews and tests
 push     | none                   | a private value in   | blocked before the push; the    | test_build_run: private
          |                        | title, body, commits | scan reads all three            | commit, title; no patterns
+push     | none                   | visibility unread    | read as public: the scan runs;  | test_build_run: private repo
+         |                        | or repo private      | private skips it, noted         | publishes; unread scans
 push     | none                   | foreign docs tree    | --body-only: the body alone     | test_build_run: body lint
          |                        | breaks the tree lint | is linted                       | skips a foreign docs tree
 flag     | none (a read)          | draft not marked     | lane awaiting_you with DRAFTED  | test_contributions: draft
@@ -171,8 +177,6 @@ link UI  | none (a read)          | operator cannot      | Details links pull_ur
 - The merge closes the items only once `contribution_sync` observes it,
   which runs on its own schedule.
 - The draft's "needs you" reason waits for the first observation.
-- The privacy patterns apply to the owners' repository too: a value
-  they hold private (an organization name) blocks a build there.
 - A supervisor killed outright leaves a check's own group to finish:
   the reap ends only the recorded group. Filed with the gate's exit
   125 reading as pack sd:7899.

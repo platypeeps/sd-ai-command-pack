@@ -789,9 +789,15 @@ class Supervisor:
         if not repository:
             return self.finish("blocked", "the repository's remote is not on GitHub, so no draft pull request opens")
         branch = self.row["branch"]
-        leaked = self.leaks(head, title)
-        if leaked:
-            return self.finish("blocked", f"nothing was pushed: {leaked}")
+        # The owners of a private repository already see work names; a public one, or one whose visibility did
+        # not read, is scanned first, as machine-setup guards only public clones (operator ruling, pack sd:7868).
+        if self.private(repository):
+            add_note(self.db, self.lead, "comment", f"Build run {self.ident}: {repository} is private, so the "
+                                                    f"privacy-pattern scan before the push was skipped")
+        else:
+            leaked = self.leaks(head, title)
+            if leaked:
+                return self.finish("blocked", f"nothing was pushed: {leaked}")
         if self.child([*self.tools.git, "-C", str(self.work), "push", "-q", "origin", f"{head}:refs/heads/{branch}"],
                       cwd=self.work, name="push") != 0:
             return self.finish("blocked", f"git push of {branch} to origin failed; see {self.out('push.err')}")
@@ -812,6 +818,17 @@ class Supervisor:
         if self.fresh()["cancel_requested"]:
             return self.finish("blocked", f"a cancel was asked after {url} opened; close it on GitHub")
         raise Lost
+
+    def private(self, repository: str) -> bool:
+        """True only when `gh repo view` reads `repository` as private; a failed or odd read is False (public)."""
+        try:
+            done = subprocess.run([*self.tools.gh, "repo", "view", repository, "--json", "isPrivate"],
+                                  capture_output=True, text=True, timeout=READ_SECONDS, check=False,
+                                  stdin=subprocess.DEVNULL, env=self.env)
+            answer = json.loads(done.stdout) if done.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        return isinstance(answer, dict) and answer.get("isPrivate") is True
 
     def leaks(self, head: str, title: str) -> str:
         """What the privacy-pattern scan refuses in the text a publish sends; "" when it passed.

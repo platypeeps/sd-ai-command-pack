@@ -60,8 +60,16 @@ FAKE = textwrap.dedent('''
         log.write(json.dumps({"role": role, "argv": sys.argv[1:], "cwd": os.getcwd()}) + "\\n")
     plan = plans / f"{role}.json"
     queue = json.loads(plan.read_text()) if plan.exists() else []
-    mode = queue.pop(0) if queue else "default"
+    # `gh repo view` (the visibility read) takes no plan: plans/visibility.txt answers it.
+    viewing = role == "gh" and sys.argv[1:3] == ["repo", "view"]
+    mode = queue.pop(0) if queue and not viewing else "default"
     plan.write_text(json.dumps(queue))
+    if viewing:  # `gh repo view R --json isPrivate`: public unless plans/visibility.txt says otherwise
+        said = (plans / "visibility.txt").read_text().strip() if (plans / "visibility.txt").exists() else "public"
+        if said == "unread":
+            sys.exit("gh: HTTP 502")
+        print(json.dumps({"isPrivate": said == "private"}))
+        sys.exit(0)
     def git(*args):
         return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
     def real(name):
@@ -1144,7 +1152,7 @@ class Unmanaged(Case):
         ended = self.supervisor(checks=lambda work: [PASS]).run()
         self.assertEqual(ended["outcome"], "blocked")
         self.assertIn("git push", ended["blocked"])
-        self.assertEqual((self.calls("gh"), self.pulls()), ([], []))
+        self.assertEqual(([c for c in self.calls("gh") if c["argv"][0] == "pr"], self.pulls()), ([], []))
 
     def test_a_refused_create_blocks(self):
         self.press()
@@ -1174,6 +1182,7 @@ class Unmanaged(Case):
 
     def test_a_private_value_in_a_commit_blocks_before_the_push(self):
         """Review of 8fa8c7cca: an unmanaged repository has no leak-guard hook; the scan runs before the push."""
+        (self.plans / "visibility.txt").write_text("public")
         self.press()
         self.write_pr()
         self.plan(claude=["PRIVATE"], sd_review=["clean"])
@@ -1185,6 +1194,29 @@ class Unmanaged(Case):
         scanned = (self.plans / "guard.txt").read_text()
         self.assertIn("feat(fixture): build the fixture", scanned.splitlines()[0], "the title is line 1")
         self.assertIn("work.txt", scanned, "the paths each commit touches")
+
+    def test_a_private_repository_publishes_without_the_scan(self):
+        """Operator ruling on sd:7868: a private repository's owners see work names already, so no scan runs."""
+        (self.plans / "visibility.txt").write_text("private")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["PRIVATE"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended.get("step"), "enqueued", ended)
+        self.assertEqual(self.calls("guard"), [])
+        self.assertIn(self.bundle["branch"], self.remote_branches().split())
+        self.assertEqual(len(self.pulls()), 1)
+
+    def test_an_unread_visibility_scans_as_public(self):
+        """Fail closed: a visibility `gh repo view` did not read is public, so the scan runs and blocks."""
+        (self.plans / "visibility.txt").write_text("unread")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["PRIVATE"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("nothing was pushed: a privacy pattern matches the commits", ended["blocked"])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
 
     def scan_refused(self, title, guard, said):
         self.press()
