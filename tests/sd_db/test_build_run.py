@@ -21,6 +21,7 @@ import textwrap
 import threading
 import time
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -249,6 +250,12 @@ FAKE = textwrap.dedent('''
             sys.exit(1)
         sys.exit(0)
 ''')
+
+
+def end(process):
+    """SIGKILL a process the test started, and reap it."""
+    process.kill()
+    process.wait()
 
 
 def group_gone(pgid):
@@ -1063,6 +1070,19 @@ class Supervise(Case):
 #: An unmanaged repository's check: it passes once the builder's fix round wrote `fix` into work.txt.
 CHECK = [sys.executable, "-c", "import sys; sys.exit(0 if 'fix' in open('work.txt').read() else 1)"]
 PASS = [sys.executable, "-c", "print('ok')"]
+#: A supervisor in a process of its own, as `spawn` starts one, so a test can SIGKILL or pause it mid-check.
+SUPERVISE = textwrap.dedent("""\
+    import json, os, sys
+    from pathlib import Path
+    spec = json.loads(sys.argv[1])
+    sys.path[:0] = spec["path"]
+    import sd_operations
+    from sd_db import build_run
+    from sd_db.database import connect
+    build_run.Supervisor(connect(spec["db"]), spec["ident"], tools=build_run.Tools(**spec["tools"]),
+                         log_root=Path(spec["logs"]), environ=dict(os.environ), cited=sd_operations.cited,
+                         checks=lambda work: [spec["check"]], beat_seconds=0.2, timeout=90, grace=0.5).run()
+""")
 
 
 class Unmanaged(Case):
@@ -1138,6 +1158,149 @@ class Unmanaged(Case):
         except ProcessLookupError:
             alive = False
         self.assertFalse(alive, f"the check {pid} outlived the run it was ended with")
+        self.assertEqual(self.pulls(), [])
+
+    def lose_the_supervisor_during_a_check(self, number):
+        """Run a supervisor in a process of its own up to a check that ignores SIGTERM, send it `number`, then
+        reap past a stale beat as the dispatcher's tick does; the check's pid and the reap's answer."""
+        pid_file = self.root / "check.pid"
+        hang = [sys.executable, "-c", "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(120)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        script = self.root / "supervise.py"
+        script.write_text(SUPERVISE, encoding="utf-8")
+        spec = {"path": [str(Path(build_run.__file__).resolve().parents[1]), str(BIN)], "db": str(self.database),
+                "ident": self.bundle["id"], "tools": dataclasses.asdict(self.tools), "logs": str(self.logs),
+                "check": hang}
+        with open(self.root / "supervise.err", "wb") as errors:
+            supervisor = subprocess.Popen([sys.executable, str(script), json.dumps(spec)], env=self.env,
+                                          stdin=subprocess.DEVNULL, stdout=errors, stderr=errors,
+                                          start_new_session=True)
+        self.addCleanup(end, supervisor)
+        deadline = time.monotonic() + 60
+        while not (pid_file.exists() and pid_file.read_text()):
+            self.assertIsNone(supervisor.poll(), (self.root / "supervise.err").read_text())
+            self.assertLess(time.monotonic(), deadline, "the check never started")
+            time.sleep(0.05)
+        check = int(pid_file.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(check)], capture_output=True, check=False))
+        os.kill(supervisor.pid, number)
+        if number == signal.SIGKILL:
+            supervisor.wait()
+        beat = datetime.fromisoformat(self.latest()["heartbeat_at"])
+        settled = build.reap(self.db, now=(beat + timedelta(seconds=build.STALE_SECONDS + 30)).isoformat())
+        return check, settled
+
+    def assert_ended(self, pid):
+        """`pid` ends within 5 s: a killed check is a zombie until its reparented parent reaps it."""
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            done = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False)
+            if done.returncode != 0 or done.stdout.strip().startswith("Z"):
+                return
+            time.sleep(0.05)
+        self.fail(f"the check {pid} outlived the reaped run, beside its retry")
+
+    def test_a_supervisor_killed_during_a_check_leaves_no_check_for_the_retry(self):
+        """Review of 4773ed48a: SIGKILL on the supervisor, then the reap; the check's own group goes too."""
+        check, settled = self.lose_the_supervisor_during_a_check(signal.SIGKILL)
+        self.assert_ended(check)
+        self.assertIsNotNone(settled[0]["retry"], settled)
+
+    def test_a_supervisor_whose_beat_stopped_during_a_check_leaves_no_check(self):
+        """Review of 4773ed48a: a paused supervisor (no beat), then the reap; the check's own group goes too."""
+        check, settled = self.lose_the_supervisor_during_a_check(signal.SIGSTOP)
+        self.assert_ended(check)
+        self.assertIsNotNone(settled[0]["retry"], settled)
+
+    def test_a_group_the_check_started_and_that_ended_is_not_signalled(self):
+        """Review of 4773ed48a: a pgid read during the run is no proof at its end, when the pid may be reused."""
+        pid_file = self.root / "short.pid"
+        hang = [sys.executable, "-c", "import os, signal, subprocess, time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "short = subprocess.Popen(['sleep', '1.5'], process_group=0); "
+                f"open({str(pid_file)!r}, 'w').write(str(short.pid)); short.wait(); time.sleep(120)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        with mock.patch("os.killpg", wraps=os.killpg) as killpg:
+            ended = self.supervisor(checks=lambda work: [hang], timeout=5).run()
+        self.assertEqual(ended["outcome"], "timed_out")
+        short = int(pid_file.read_text())
+        self.assertEqual([call.args for call in killpg.call_args_list if call.args[0] == short and call.args[1]],
+                         [], "the ended group was signalled")
+
+    def test_a_recorded_group_now_led_by_another_process_is_left_alone(self):
+        """Review of 4773ed48a: a recorded group whose leader started at another time is not the run's."""
+        self.press()
+        other = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(end, other)
+        leader = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(end, leader)
+        supervisor = self.supervisor()
+        supervisor.groups = {other.pid: "Thu Jan  1 00:00:00 2026"}
+        self.assertTrue(supervisor.end_group(leader.pid, leader))
+        self.assertIsNone(other.poll(), "a process the run did not start was signalled")
+
+    def test_a_cancel_during_a_check_ends_the_checks_own_group(self):
+        """End paths, cancel: the beat's cancel ends the gate's group and the check's, which ignores SIGTERM."""
+        pid_file = self.root / "check.pid"
+        hang = [sys.executable, "-c", "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(120)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+
+        def cancel():
+            other = connect(self.database)
+            try:
+                for _ in range(600):
+                    if pid_file.exists() and pid_file.read_text():
+                        break
+                    time.sleep(0.05)
+                state = operations.assignment_state(other, self.bundle["assignment"])
+                operations.cancel_assignment(other, self.bundle["assignment"], expected_revision=state["revision"],
+                                             who="operator")
+            finally:
+                other.close()
+
+        thread = threading.Thread(target=cancel)
+        thread.start()
+        ended = self.supervisor(checks=lambda work: [hang]).run()
+        thread.join()
+        check = int(pid_file.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(check)], capture_output=True, check=False))
+        self.assertEqual(ended["outcome"], "cancelled", self.latest()["detail"])
+        self.assert_ended(check)
+        self.assertEqual(self.pulls(), [])
+
+    def test_a_check_that_exits_leaves_no_process_of_its_group(self):
+        """End paths, normal exit: a process the check left in its own group goes once the gate returns."""
+        pid_file = self.root / "left.pid"
+        leave = [sys.executable, "-c", "import subprocess, time; left = subprocess.Popen(['sleep', '60']); "
+                 f"open({str(pid_file)!r}, 'w').write(str(left.pid)); time.sleep(1)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [leave]).run()
+        left = int(pid_file.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(left)], capture_output=True, check=False))
+        self.assertEqual(ended["step"], "enqueued", self.latest()["detail"])
+        self.assert_ended(left)
+
+    def test_a_gate_that_starts_no_check_leaves_no_group(self):
+        """End paths, gate refusal: `sd gate run` exits 125 with nothing started; its group reads gone."""
+        pid_file = self.root / "check.pid"
+        self.tools = dataclasses.replace(self.tools, gate=[sys.executable, "-c", "import sys; sys.exit(125)"])
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [[sys.executable, "-c",
+                                                      f"open({str(pid_file)!r}, 'w').write('ran')"]]).run()
+        self.assertFalse(pid_file.exists(), "the check ran")
+        self.assertTrue(group_gone(self.latest()["builder_pgid"]), ended)
         self.assertEqual(self.pulls(), [])
 
     def test_no_check_entrypoint_runs_none_and_says_so(self):

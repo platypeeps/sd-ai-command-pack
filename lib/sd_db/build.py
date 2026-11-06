@@ -1038,19 +1038,60 @@ def verdict(row: dict, *, probe=Probe) -> tuple[str, list[int]]:
     return state, [group for side, group in sides if side == OURS] if state == OURS else []
 
 
+def descendant_groups(pgid: int) -> dict[int, str] | None:
+    """The groups that descendants of `pgid`'s members run in now, apart from `pgid`, each with its leader's
+    start (`ps lstart`, "" when no leader lives); None when `ps` did not answer.
+
+    `sd gate run` puts an unmanaged run's check in a group of its own, so a kill of the recorded groups alone
+    left it running beside the retry (review of pack sd:7868). Read live, every group is one the run's own
+    processes started, not a recorded number a reused pid may hold now.
+    """
+    try:
+        listing = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,lstart="], capture_output=True, text=True,
+                                 timeout=10, check=False, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if listing.returncode != 0:
+        return None
+    children: dict[int, list[tuple[int, int]]] = {}
+    starts: dict[int, str] = {}
+    todo: list[int] = []
+    for line in listing.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 3 or not all(field.isdigit() for field in fields[:3]):
+            continue
+        pid, parent, group = map(int, fields[:3])
+        starts[pid] = " ".join(fields[3:])
+        children.setdefault(parent, []).append((pid, group))
+        if group == pgid:
+            todo.append(pid)
+    found: dict[int, str] = {}
+    seen = set(todo)
+    while todo:
+        for pid, group in children.get(todo.pop(), []):
+            if pid not in seen:
+                seen.add(pid)
+                todo.append(pid)
+                if group not in (pgid, os.getpgrp()) and group > 1:
+                    found[group] = starts.get(group, "")
+    return found
+
+
 def kill_group(pgid: int) -> bool:
-    """SIGKILL a builder's process group; True once no member lives (ESRCH), False while one may."""
+    """SIGKILL a builder's process group and each group its members' descendants run in; True once ESRCH
+    answers on every one, False while one may live or the descendants did not read."""
     if not isinstance(pgid, int) or pgid <= 1 or pgid == os.getpgrp():
         return False
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        return True
-    except OSError:
-        pass  # EPERM may be a group of zombies only: the probe decides
+    below = descendant_groups(pgid)
+    groups = [pgid, *sorted(below or ())]
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except OSError:
+            pass  # ESRCH: gone; EPERM may be a group of zombies only: the probe decides
     for _ in range(20):
-        if Probe.group(pgid) is False:
-            return True
+        if all(Probe.group(group) is False for group in groups):
+            return below is not None
         time.sleep(0.1)
     return False
 

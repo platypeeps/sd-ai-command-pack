@@ -60,9 +60,14 @@ when the run's repository reads unmanaged.
   checks passed. A run resumed or retried at `enqueuing` goes back to
   `reviewing` first.
 - Checks' processes: `sd gate run` starts its command in a process group
-  of its own. The supervisor reads the groups the gate's descendants run
-  in while it lives, and a timeout, cancel or lost run ends them with
-  the gate's group: TERM, the grace, then KILL.
+  of its own. Every stop reads, live from `ps`, the groups that the
+  recorded group's descendants run in, and ends them with it: the
+  supervisor's `end_group` (TERM, the grace, then KILL) and the reap's
+  `kill_group` (KILL). A live read names only groups this run's processes
+  started, so a recorded number a reused pid holds is never signalled.
+  The supervisor also records each group with its leader's start, to end
+  one that outlived its parent; it signals one only while that leader, or
+  no leader, runs in it.
 - `enqueued`: the tick's `watch` reads a run whose `detail` names a draft
   pull request from the contribution observation (`contribution_sync`
   observes every task `pull_url`), never the lane. Merged: the delivered
@@ -137,8 +142,6 @@ merge    | tasks done, run at     | observation unread   | nothing moves; next t
          | cleaning               | or stale             | again                           | unread
 merge    | run lane_failed        | closed unmerged      | operator reopens or cancels;    | watch: closed ends lane_failed
          |                        |                      | worktree kept                   |
-tests    | a check's own group    | check ignores TERM;  | its group is ended with the     | test_build_run: a check that
-         | (sd gate run's child)  | timeout or cancel    | gate's, TERM then KILL          | ignores SIGTERM ends with run
 review   | none                   | retry at enqueuing   | back to reviewing: review and   | test_build_run: a retry at
          |                        | with no reviewed head| checks before the publish       | enqueuing reviews and tests
 push     | none                   | a private value in   | blocked before the push; the    | test_build_run: private
@@ -168,6 +171,39 @@ link UI  | none (a read)          | operator cannot      | Details links pull_ur
          |                        | find the draft       | tab; Queue via sd:7859          | opens it (DOM test)
 ```
 
+How a run's check ends, one row per path. "Groups below" means the
+groups that the recorded group's descendants run in, read live; the
+check runs in one, under the gate. Each test is in test_build_run.
+
+```text
+End path            | Who stops the check's groups      | Test
+------------------- | --------------------------------- | ------------------------------
+normal exit         | the gate waits for the check;     | a check that exits leaves no
+                    | end_group ends what it left in    | process of its group
+                    | its group (recorded, leaderless)  |
+check failure       | as normal exit; then a blocker    | tests fail, fix, pass
+timeout             | end_group: groups below, TERM,    | a check that ignores SIGTERM
+                    | grace, KILL                       | ends with the run
+cancel              | the beat's end_group, as timeout  | a cancel during a check ends
+                    |                                   | the check's own group
+lost run (beat      | the beat's end_group, as timeout, | shares end_group with the two
+refused)            | then Lost                         | rows above
+supervisor SIGKILL, | the reap's kill_group: builder    | a supervisor killed during a
+then reap           | group and groups below, KILL      | check leaves no check
+heartbeat loss,     | kill_group on the supervisor's    | a supervisor whose beat
+then reap           | group, then the builder's         | stopped leaves no check
+gate refusal (125)  | none started; the gate's group    | a gate that starts no check
+                    | reads gone                        | leaves no group
+reused pid          | a group is signalled only if read | a group the check started and
+                    | live below, or its recorded       | that ended is not signalled;
+                    | leader (or none) still leads it   | one led by another process is
+                    |                                   | left alone
+```
+
+Not covered: a check that leaves a daemon in a new group and exits
+before a reap. Nothing then ties it to the run; the lane's gate has
+the same reach.
+
 ## Acceptance criteria
 
 - [ ] A press on a ready task in an unmanaged repository with a GitHub
@@ -191,9 +227,7 @@ link UI  | none (a read)          | operator cannot      | Details links pull_ur
 - The merge closes the items only once `contribution_sync` observes it,
   which runs on its own schedule.
 - The draft's "needs you" reason waits for the first observation.
-- A supervisor killed outright leaves a check's own group to finish:
-  the reap ends only the recorded group. Filed with the gate's exit
-  125 reading as pack sd:7899.
+- The gate's exit 125 and 127 readings are pack sd:7899.
 - Evidence: the watch ties a merge to the run by the pull request URL
   the run recorded and the observation keyed by that URL; the tests'
   pass is tied to the head the review read.

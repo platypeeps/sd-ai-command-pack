@@ -501,10 +501,10 @@ def _environ(environ: dict | None) -> dict:
 class Supervisor:
     """One run's supervisor: `run()` walks its steps and returns how it ended."""
 
-    #: While a child that asked for it runs, the process groups its descendants run in, apart from its own
-    #: (`sd gate run` starts its command in a new group): ended with it, so a check that ignores SIGTERM
-    #: cannot outlive the run. None for every other child.
-    groups: set[int] | None = None
+    #: While a child that asked for it runs, the groups its descendants started, apart from its own (`sd gate
+    #: run` starts its command in a new group), each with its leader's start: `end_group` ends one that
+    #: outlived its parent only while it is still that group. None for every other child.
+    groups: dict[int, str] | None = None
 
     def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path,
                  cited: Callable[[Path, str, str, str], Collection[int] | None], environ: dict | None = None,
@@ -1147,8 +1147,10 @@ class Supervisor:
         the child exits unrun. While it runs, the supervisor beats, stops at
         a requested cancel or a lost run, and ends it past `timeout`. Its
         group must read gone after it exits, or the run is a `Survivor`.
-        With `descendants`, the groups its descendants start (`sd gate run`
-        puts its command in one) are ended with it and must read gone too.
+        The groups its descendants run in (`sd gate run` puts its command in
+        one) are ended with it and must read gone too. With `descendants`,
+        each is also recorded while it runs, so one that outlives its parent
+        is still ended (`ours`).
         """
         target = out or self.out(name)
         read, gate = os.pipe()
@@ -1173,7 +1175,7 @@ class Supervisor:
             process.wait()
             raise Lost
         deadline = time.monotonic() + self.timeout
-        self.groups = set() if descendants else None
+        self.groups = {} if descendants else None
         while True:
             try:
                 code = process.wait(timeout=min(1.0, self.beat_seconds))
@@ -1181,7 +1183,8 @@ class Supervisor:
             except subprocess.TimeoutExpired:
                 pass
             if self.groups is not None:
-                self.groups |= descendant_groups(process.pid) or set()
+                for group, start in (build.descendant_groups(process.pid) or {}).items():
+                    self.groups.setdefault(group, start)
             try:
                 if session:
                     self.watch_session()
@@ -1236,26 +1239,33 @@ class Supervisor:
                     return
 
     def end_group(self, pgid: int, process: subprocess.Popen | None = None) -> bool:
-        """TERM the group, `grace` seconds, then SIGKILL; True once ESRCH answers.
+        """TERM the group and the groups below it, `grace` seconds, then SIGKILL; True once ESRCH answers on each.
 
+        The groups below are read live before each signal (`build.descendant_groups`), so each is one this
+        run's processes started; `ours` adds a group the child started that outlived its parent. A `ps` that
+        did not answer while the group lives is no proof that none runs: False, a survivor.
         The leader is reaped as it dies (`process.poll`): a zombie leader is
         still a member of its group, and would read as a survivor.
         """
-        # The child's descendants' own groups go too, read while the child still lives: once it is killed, they
-        # are orphans no listing ties to the run (review of pack sd:7868).
-        if self.groups is not None and process is not None and process.poll() is None:
-            self.groups |= descendant_groups(process.pid) or set()
-        groups = [pgid, *sorted((self.groups or set()) - {pgid})] if process is not None else [pgid]
+        groups, unread = {pgid}, False
+
+        def widen() -> None:
+            nonlocal unread
+            below = build.descendant_groups(pgid)
+            unread |= below is None and self.probe.group(pgid) is not False
+            groups.update(below or ())
+            groups.update(group for group, start in (self.groups or {}).items() if self.ours(group, start))
 
         def gone() -> bool:
             if process is not None:
                 process.poll()
             return all(self.probe.group(group) is False for group in groups)
 
-        if gone():
-            return True
         for sent, wait in ((signal.SIGTERM, self.grace), (signal.SIGKILL, 5.0)):
-            for group in groups:
+            widen()
+            if gone():
+                return not unread
+            for group in sorted(groups):
                 try:
                     os.killpg(group, sent)
                 except OSError:
@@ -1263,39 +1273,21 @@ class Supervisor:
             stop = time.monotonic() + wait
             while time.monotonic() < stop:
                 if gone():
-                    return True
+                    return not unread
                 time.sleep(0.05)
-        return gone()
+        return gone() and not unread
 
+    def ours(self, group: int, start: str) -> bool:
+        """Whether a group the child started, read with its leader's `start`, is still that group.
 
-def descendant_groups(pid: int) -> set[int] | None:
-    """The process groups `pid`'s descendants run in, apart from `pid`'s own; None when `ps` did not answer.
-
-    `sd gate run` starts its command in a group of its own, so ending the child's group alone left a check that
-    ignores SIGTERM running beside a released run (review of pack sd:7868).
-    """
-    try:
-        listing = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid="], capture_output=True, text=True,
-                                 timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if listing.returncode != 0:
-        return None
-    children: dict[int, list[tuple[int, int]]] = {}
-    for line in listing.stdout.splitlines():
-        fields = line.split()
-        if len(fields) == 3 and all(field.isdigit() for field in fields):
-            child, parent, group = map(int, fields)
-            children.setdefault(parent, []).append((child, group))
-    found, todo, seen = set(), [pid], {pid}
-    while todo:
-        for child, group in children.get(todo.pop(), []):
-            if child not in seen:
-                seen.add(child)
-                todo.append(child)
-                if group != pid:
-                    found.add(group)
-    return found
+        It must have a live member (EPERM is another user's group: never one this run started), and a leader
+        that started at `start`, or none: a pid is not reused while a group of that number has a member. So a
+        number a reused pid holds now is never signalled (review of pack sd:7868).
+        """
+        if self.probe.group(group) is not True:
+            return False
+        leader = self.probe.alive(group)
+        return leader is False or (leader is True and bool(start) and self.probe.started(group) == start)
 
 
 class DraftSupervisor(Supervisor):
