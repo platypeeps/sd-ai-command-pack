@@ -346,6 +346,18 @@ class Undecodable(UnicodeDecodeError):
         self.path = path
 
 
+class Unread(Exception):
+    """A file at the stamped commit that git could not read, naming its path (pack sd:7837).
+
+    Read as missing, it let the plan propose a template over the
+    repository's own file; `plan_repo` refuses the repository instead.
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__(path)
+        self.path = path
+
+
 @dataclasses.dataclass
 class Plan:
     root: str
@@ -372,28 +384,29 @@ class Tree:
         self.root, self.commit = root, commit
 
     def text_at(self, rel: str) -> str | None:
-        """`rel`'s text, or None when it is missing or did not read; Undecodable when not UTF-8."""
+        """`rel`'s text, or None when no file is there.
+
+        Undecodable when it is not UTF-8, and Unread when git could not read
+        it or could not say whether it is there: neither is a missing file.
+        """
         try:
             if self.commit is None:
                 path = self.root / rel
                 return path.read_text(encoding="utf-8") if path.is_file() else None
             kind = sd_lib.git_output(["cat-file", "-t", f"{self.commit}:{rel}"], self.root)
+            if kind is None:  # missing, or git failed: ls-tree answers which
+                listed = sd_lib.git_output(["ls-tree", self.commit, "--", rel], self.root)
+                if listed is None or listed:
+                    raise Unread(rel)
+                return None
             if kind != "blob":
                 return None
-            return _git_show(self.root, f"{self.commit}:{rel}")
+            text = _git_show(self.root, f"{self.commit}:{rel}")
+            if text is None:
+                raise Unread(rel)
+            return text
         except UnicodeDecodeError as error:
             raise Undecodable(rel, error) from error
-
-    def present(self, rel: str) -> bool | None:
-        """Whether `rel` is a file in this tree; None when git could not say.
-
-        `text_at` gives None for a missing file and a failed read alike; this
-        tells them apart (pack sd:7812).
-        """
-        if self.commit is None:
-            return (self.root / rel).is_file()
-        listed = sd_lib.git_output(["ls-tree", self.commit, "--", rel], self.root)
-        return None if listed is None else bool(listed)
 
     def workflows(self) -> list[str]:
         return self._workflows() or []
@@ -705,9 +718,6 @@ def guard_change(plan: Plan, tree: Tree, propose: Callable[[str, str], None], ro
         plan.refused.append(f"{DEPENDABOT_PATH}: could not read {others}, so the stamp keeps the guard as it is")
         return
     current = tree.text_at(DEPENDABOT_PATH)
-    if current is None and tree.present(DEPENDABOT_PATH) is not False:
-        plan.refused.append(f"{DEPENDABOT_PATH}: could not read it, so the stamp keeps the guard as it is")
-        return
     differing = sd_setup_guard.differing(current, sd_setup_guard.DEFAULT_ACTION)
     if differing:
         plan.refused.append(f"{DEPENDABOT_PATH}: the guard for {', '.join(differing)} differs from the template, so "
@@ -760,18 +770,19 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
 
 
 def plan_repo(root: pathlib.Path, remote: str | None, **kwargs: Any) -> Plan:
-    """`_plan_repo`, with a file that is not UTF-8 refusing this repository whole.
+    """`_plan_repo`, with a file that is not UTF-8, or did not read, refusing this repository whole.
 
     A traceback would stop the run for every repository after it, and a
     plan cut short at the bad read is not a plan to write (pack sd:7812).
     """
     try:
         return _plan_repo(root, remote, **kwargs)
-    except Undecodable as error:
+    except (Undecodable, Unread) as error:
         slug = owner_slug(remote)
         tree = kwargs["tree"]
         plan = Plan(root=str(root), slug=slug or (remote or ""), base=tree.commit or f"worktree {tree.root}")
-        plan.refused.append(f"{error.path}: not UTF-8 ({error.reason}); the stamp leaves this repository as it is")
+        why = f"not UTF-8 ({error.reason})" if isinstance(error, Undecodable) else f"could not read it at {tree.commit}"
+        plan.refused.append(f"{error.path}: {why}; the stamp leaves this repository as it is")
         return plan
 
 
