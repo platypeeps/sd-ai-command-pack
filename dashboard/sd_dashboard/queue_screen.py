@@ -22,6 +22,10 @@ The six states, from each entry's `status`:
   cancelled the newest entry of an item that was `cancelled`, in the last `BLOCKED_DAYS`, with its head.
   landed    `merged` today, in this machine's zone, with the merge commit and the pull request its subject names.
 
+Beside the lanes, `prs` (pack sd:7859): each item whose linked pull request (its contribution `pull_url`) is open and
+waits on review, from its lane notes (`contributions.pr_waits`): who it waits on, `you` or `reviewers`, since when and
+for how long. Today's Queue view draws it as blocked by its PR, not working. An item in the lane keeps its lane row.
+
 An item's newest entry is the one with the highest `enqueue_seq`, not the last one listed: `lane move` can list a newer
 entry above older ones (sd:3419). `newest` is the one place that picks it.
 
@@ -393,6 +397,29 @@ def runner(connection) -> dict:
     return {"live": [{key: row[key] for key in keys} for row in reads.assignment_ledger(connection, live=True)]}
 
 
+#: The lane states that keep an item's row in the lane: its pull request waits there, not on review (pack sd:7859).
+LANED = ("merging", "next", "blocked")
+#: What the page reads of each pull-request wait (`contributions.pr_waits`).
+PR_FIELDS = ("item", "title", "repo", "url", "lane", "on", "since", "waited")
+
+
+def pr_rows(connection, lanes: list[dict], clock: float) -> dict:
+    """Pack sd:7859: each item whose linked pull request is open in a waiting lane, `{"rows", "error"}`.
+
+    An item with a merging, next or blocked lane row keeps its lane state and is left out; so is a `done` one. A read
+    that failed is its `error` and no rows, never an empty answer.
+    """
+    from sd_db import contributions
+
+    laned = {row.get("item") for lane in lanes for row in lane["rows"] if row.get("state") in LANED}
+    try:
+        waits = contributions.pr_waits(connection, now=time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(clock)))
+    except READ_FAILURES as error:
+        return {"rows": [], "error": f"pull-request waits were not read: {type(error).__name__}: {error}"}
+    return {"rows": [{key: wait[key] for key in PR_FIELDS} for wait in waits
+                     if wait["open"] and wait["status"] != "done" and wait["item"] not in laned], "error": ""}
+
+
 def document(connection, *, now: str = "") -> dict:
     """The page's document: the header readings and one section per repository lane."""
     from sd_db import repos
@@ -430,7 +457,7 @@ def document(connection, *, now: str = "") -> dict:
                       "rows": rows(entries, path=path, lane=lane, now=clock, done=closed(connection, entries))})
     return {"read": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock)), "load": _load(), "gates": gates,
             "lanes": lanes, "problems": problems, "root": str(root) if root else None, "edits": EDITS,
-            "managed": len(managed),
+            "managed": len(managed), "prs": pr_rows(connection, lanes, clock),
             **(probe if lanes else {"retry": False, "requeue": False, "requeue_off": None})}
 
 

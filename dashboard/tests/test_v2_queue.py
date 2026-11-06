@@ -286,6 +286,40 @@ class TheRows(Lane, ScreenCase):
                          (1, "success", "sd-check pass", "b" * 12, False))
         self.assertEqual((second["position"], second["gate"], second["held"]), (2, "not gated", True))
 
+    def pr_item(self, n, *lanes):
+        """An item whose pull request #n has these `(at, lane)` lane notes (pack sd:7859)."""
+        from sd_db import contributions
+        from sd_db.writes import add_note
+
+        url = f"https://github.com/example/system/pull/{n}"
+        item = contributions.capture(self.connection, title=f"PR {n}", changes={"pull_url": url}, who="test")["item"]["id"]
+        for at, lane in lanes:
+            add_note(self.connection, item, "comment", f"PR lane: {lane} · open · {url}", session="contribution-observer",
+                     timestamp=at)
+        return item, url
+
+    def test_an_item_whose_pull_request_waits_on_review_is_a_pr_row_split_by_who_it_waits_on(self):
+        mine, url = self.pr_item(901, ("2026-09-06T09:00:00Z", "awaiting_them"), ("2026-09-06T11:00:00Z", "awaiting_you"))
+        theirs, _ = self.pr_item(902, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        self.pr_item(903, ("2026-09-06T10:00:00Z", "awaiting_them"), ("2026-09-06T11:00:00Z", "merged"))
+        prs = self.doc()["prs"]
+        self.assertEqual(prs["error"], "")
+        self.assertEqual([(r["item"], r["on"], r["since"], r["waited"]) for r in prs["rows"]],
+                         [(mine, "you", "2026-09-06T11:00:00+00:00", 3600), (theirs, "reviewers", "2026-09-06T10:00:00+00:00", 7200)])
+        self.assertEqual(prs["rows"][0]["url"], url)
+
+    def test_an_item_in_the_lane_keeps_its_lane_row_not_a_pr_row(self):
+        item, _ = self.pr_item(904, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        self.list([*self.entries(), {"item": item, "title": "In the lane", "status": "pending", "expected_head": "e" * 40}])
+        self.assertEqual(self.doc()["prs"]["rows"], [])
+
+    def test_a_pr_wait_read_that_failed_says_so_and_shows_no_rows(self):
+        from sd_db import contributions
+
+        with mock.patch.object(contributions, "pr_waits", side_effect=sqlite3.OperationalError("database is locked")):
+            prs = self.doc()["prs"]
+        self.assertEqual(prs, {"rows": [], "error": "pull-request waits were not read: OperationalError: database is locked"})
+
     def test_building_reads_the_builder_gate_logs(self):
         running, done = self.doc()["lanes"][0]["rows"][3:5]
         self.assertEqual((running["gate"], running["summary"]), ("running", None))
@@ -1206,7 +1240,7 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
     BOX = {"merging": "merging: claimed by the lane runner, being merged",
            "working": "working: live sessions, build runs and lane gates now running",
            "next": "next: queued in the lane, not started",
-           "blocked": "blocked: stopped in the lane until someone acts",
+           "blocked": "blocked: stopped in the lane, or waiting on a pull request, until someone acts",
            "suggested": "suggested: up to 3 ready or planned tasks to do next"}
 
     def test_each_box_says_its_count_and_what_it_counts_on_hover(self):
@@ -1371,6 +1405,38 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertNotIn("assignment 7 ·", out["R"]["alpha"])
         self.assertIn("<b>queued</b> · assignment 41", out["R"]["sd"])
         self.assertEqual(out["R"]["count"], 10)
+
+    def test_an_item_waiting_on_its_pull_request_is_blocked_by_it_not_working(self):
+        # pack sd:7859 (operator 2026-11-06): live item 40's PR waits on the operator, item 44's on reviewers. Each is a
+        # blocked row naming who it waits on and for how long; item 40 is no working row, and no suggested row either.
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["prs"] = {"error": "", "rows": [
+            {"item": 40, "title": "Live work", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/40",
+             "lane": "awaiting_you", "on": "you", "since": "2026-09-06T11:00:00+00:00", "waited": 3600},
+            {"item": 44, "title": "Reviewed", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/44",
+             "lane": "awaiting_them", "on": "reviewers", "since": "2026-09-06T10:00:00+00:00", "waited": 7260}]}
+        self.doc["queues"]["suggested"] = [{"id": 40, "repo": "~/repos/example/system", "title": "Live work", "status": "in_progress",
+                                            "why": "planned", "due": "2026-09-08", "priority": 1}]
+        out = self.run_view("open('system'); R.html = ELS.queue.html; R.kids = kids();", search="?show=suggested",
+                            answers={"/api/queue": [200, lanes]})
+        html = out["R"]["html"]
+        self.assertNotIn('data-id="live:40"', html)
+        self.assertNotIn('data-type="suggested" data-item="40"', html)
+        rows = dict(re.findall(r'<tr class="child" data-type="blocked" data-pr="(\d+)">(.*?)</tr>', html, re.S))
+        self.assertEqual(sorted(rows), ["40", "44"])
+        self.assertIn('<span class="g-warning" aria-hidden="true">■</span><span class="sr">needs you · </span>blocked', rows["40"])
+        self.assertIn("<b>blocked: PR</b> · on you · waited 1h 0m", rows["40"])
+        self.assertIn('href="https://github.com/example/system/pull/40"', rows["40"])
+        self.assertIn('<span class="sr">waiting · </span>blocked', rows["44"])
+        self.assertIn("<b>blocked: PR</b> · on reviewers · waited 2h 1m", rows["44"])
+        self.assertEqual(out["R"]["kids"].count("working"), 2, "the lane builders stay; the live item is gone")
+        self.assertIn('aria-label="1 merging, 2 working, 2 next, 4 blocked, 0 suggested"', html)
+
+    def test_a_pr_wait_that_was_not_read_is_said_under_the_table(self):
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["prs"] = {"rows": [], "error": "pull-request waits were not read: OperationalError: database is locked"}
+        out = self.run_view("R.note = ELS['queue-note'].textContent;", answers={"/api/queue": [200, lanes]})
+        self.assertIn("pull-request waits were not read: OperationalError: database is locked", out["R"]["note"])
 
     def test_a_click_on_a_live_row_shows_its_details_and_keeps_its_fix_and_open_commands(self):
         out = self.run_view("open('system'); ELS.queue.listeners.click[0]({ target: { closest: s => s === 'tr[data-id]' ? "
