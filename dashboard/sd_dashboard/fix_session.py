@@ -11,8 +11,9 @@ a report (kind `report`) starts a debug and fix session for that report. Tasks, 
    report names its job's repo.
 2. `local-herdr/herdr.sh launch <checkout> sd-<id> <prompt>`: a new herdr workspace with claude in it, given the
    prompt as typed text. The call is an argv, never a shell line, and the prompt is fixed text and the integer id,
-   never the item's title. herdr missing or its session down answers 503 with herdr.sh's own words, which name
-   `herdr.sh start`; nothing falls back to a hidden process. A later step that fails says what it left: a workspace at
+   never the item's title. herdr.sh starts a down session first as herdr's headless server (system sd:7847), so a
+   503 in herdr.sh's own words means herdr is missing or that server did not start; nothing falls back to a hidden
+   process. A later step that fails says what it left: a workspace at
    its shell prompt, or claude without its prompt. No answer within `TIMEOUT` is a 504 that says whether a session
    started is not known. Either failure leaves a comment note on the item that names its cause, `Fix: launch
    failed: ...` or the 504's words (pack sd:7756): a toast fades, and the journal keeps its record elsewhere.

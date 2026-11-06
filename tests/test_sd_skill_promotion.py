@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -344,6 +345,59 @@ class SkillRequests(SkillFixture):
             "shutil.move",
         ):
             self.assertNotIn(needle, source)
+
+
+class TheScanHoldsNoLock(SkillFixture):
+    """pack sd:7853: trial and request scanned every SKILL.md (glob, read,
+    hash) and ran git inside `with transaction`, so each call held the
+    database's write lock for a file-system scan. Each read of the catalog's
+    files or of git now runs before the transaction, and a second writer
+    gets the lock throughout."""
+
+    def locked_reads(self, call):
+        """Whether the write lock was held at each file or git read `call` made."""
+        held = []
+
+        def probe():
+            other = sqlite3.connect(self.dbpath, timeout=0, isolation_level=None)
+            try:
+                other.execute("BEGIN IMMEDIATE")
+                other.execute("ROLLBACK")
+                held.append(False)
+            except sqlite3.OperationalError:
+                held.append(True)
+            finally:
+                other.close()
+
+        snapshot, git = skills_catalog._snapshot, skills_catalog._git
+        with patch.object(skills_catalog, "_snapshot", lambda *args: (probe(), snapshot(*args))[1]), \
+                patch.object(skills_catalog, "_git", lambda *args: (probe(), git(*args))[1]):
+            call()
+        return held
+
+    def test_a_trial_scans_the_catalog_before_its_transaction(self):
+        held = self.locked_reads(lambda: skills_catalog.trial(self.db, "sd-candidate", root=self.repo, home=self.root))
+        self.assertTrue(held)
+        self.assertNotIn(True, held)
+
+    def test_a_request_scans_and_reads_git_before_its_transaction(self):
+        for name, action, path in (("sd-kept", "review", None), ("sd-candidate", "promote", "development"),
+                                   ("sd-kept", "demote", None)):
+            with self.subTest(action=action):
+                held = self.locked_reads(lambda name=name, action=action, path=path: skills_catalog.request(
+                    self.db, name, action, path_name=path, root=self.repo, home=self.root, who="test"))
+                self.assertGreater(len(held), 2)
+                self.assertNotIn(True, held)
+
+    def test_a_repeated_request_with_an_unreviewable_skill_still_returns_its_item(self):
+        """The authorship read moved before the transaction; its refusal
+        still waits until no earlier item answers the same intent."""
+        first = skills_catalog.request(self.db, "sd-kept", "review", root=self.repo, home=self.root, who="test")
+        with patch.object(skills_catalog, "_authorship", side_effect=workflow.WorkflowError("no attribution")):
+            again = skills_catalog.request(self.db, "sd-kept", "review", root=self.repo, home=self.root, who="test")
+            with self.assertRaisesRegex(workflow.WorkflowError, "no attribution"):
+                skills_catalog.request(self.db, "sd-candidate", "review", root=self.repo, home=self.root, who="test")
+        self.assertEqual(first["item"]["id"], again["item"]["id"])
 
 
 class SkillHelpText(SkillFixture):

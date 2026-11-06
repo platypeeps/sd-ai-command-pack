@@ -104,18 +104,16 @@ def _description(frontmatter):
     return "".join(folded)
 
 
-def catalog(connection, *, root=None, home=None, now=None):
+def _scan(*, root=None, home=None):
+    """The catalog's file-system half: paths.json, the installed copies, and
+    each skill's files, description and use. It reads no database row, so a
+    write runs it before its transaction and holds no lock for the scan
+    (pack sd:7853)."""
     root, receipt = location(root=root, home=home)
     definitions = _json_file(root / "skills/paths.json")
     paths = definitions.get("paths") if isinstance(definitions, dict) else None
     if not isinstance(paths, dict) or any(not isinstance(value, dict) or not isinstance(value.get("skills"), list) for value in paths.values()):
         raise workflow.WorkflowError("skills/paths.json has no valid path inventory")
-    trials = {row["skill"]: dict(row) for row in connection.execute("SELECT * FROM trial")}
-    use = {}
-    for row in connection.execute("SELECT skill,surface,mode,count(*) AS count FROM skill_use GROUP BY skill,surface,mode"):
-        use.setdefault(row["skill"], []).append({"surface": row["surface"] or "unknown", "mode": row["mode"] or "unknown", "count": row["count"]})
-    # Each skill's newest use, so a reader can list the skills nobody used lately (pack sd:5992).
-    last = dict(connection.execute("SELECT skill, max(timestamp) FROM skill_use GROUP BY skill").fetchall())
     installed = {}
     for entry in receipt.get("owned", []):
         if not isinstance(entry, dict) or not str(entry.get("kind", "")).startswith("skill:"):
@@ -126,7 +124,6 @@ def catalog(connection, *, root=None, home=None, now=None):
         if target.is_file() and target.stat().st_size <= MAX_TEXT:
             actual = "current" if hashlib.sha256(target.read_bytes()).hexdigest() == entry.get("sha256") else "changed"
         installed.setdefault(name, []).append({"surface": entry["kind"].split(":", 1)[1], "state": actual})
-    moment = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
     skills, names = [], set()
     for source in ("skills", "contrib"):
         directory = root / source
@@ -141,16 +138,38 @@ def catalog(connection, *, root=None, home=None, now=None):
             description = _description(frontmatter)
             when = re.search(r"(?is)## (?:When to use|Use when|When invoked)\s*\n(.+?)(?=\n## |\Z)", body)
             usage = " ".join((when[1] if when else description).split())[:1500]
-            trial = trials.get(name)
-            membership = [key for key, value in paths.items() if name in value["skills"]]
-            status = "path" if membership else "trial" if trial and trial["expires"] > moment else "contrib"
-            value = {"name": name, "description": description, "when": usage, "path": str(path.relative_to(root)),
-                     "paths": membership, "status": status, "trial": trial, "uses": use.get(name, []),
-                     "last": last.get(name),
-                     "installed": installed.get(name, []), "source_sha256": _hash(files), "files": files}
-            value["revision"] = _hash(value)
-            skills.append(value)
-    return {"root": str(root), "paths": paths, "skills": skills, "observed_at": moment}
+            skills.append({"name": name, "description": description, "when": usage, "path": str(path.relative_to(root)),
+                           "installed": installed.get(name, []), "files": files})
+    return {"root": root, "paths": paths, "skills": skills}
+
+
+def _composed(connection, scanned, now=None):
+    """The catalog from a `_scan` and the database's trial and use rows."""
+    paths = scanned["paths"]
+    trials = {row["skill"]: dict(row) for row in connection.execute("SELECT * FROM trial")}
+    use = {}
+    for row in connection.execute("SELECT skill,surface,mode,count(*) AS count FROM skill_use GROUP BY skill,surface,mode"):
+        use.setdefault(row["skill"], []).append({"surface": row["surface"] or "unknown", "mode": row["mode"] or "unknown", "count": row["count"]})
+    # Each skill's newest use, so a reader can list the skills nobody used lately (pack sd:5992).
+    last = dict(connection.execute("SELECT skill, max(timestamp) FROM skill_use GROUP BY skill").fetchall())
+    moment = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    skills = []
+    for found in scanned["skills"]:
+        name = found["name"]
+        trial = trials.get(name)
+        membership = [key for key, value in paths.items() if name in value["skills"]]
+        status = "path" if membership else "trial" if trial and trial["expires"] > moment else "contrib"
+        value = {"name": name, "description": found["description"], "when": found["when"], "path": found["path"],
+                 "paths": membership, "status": status, "trial": trial, "uses": use.get(name, []),
+                 "last": last.get(name),
+                 "installed": found["installed"], "source_sha256": _hash(found["files"]), "files": dict(found["files"])}
+        value["revision"] = _hash(value)
+        skills.append(value)
+    return {"root": str(scanned["root"]), "paths": paths, "skills": skills, "observed_at": moment}
+
+
+def catalog(connection, *, root=None, home=None, now=None):
+    return _composed(connection, _scan(root=root, home=home), now)
 
 
 def use_rows(connection):
@@ -158,8 +177,9 @@ def use_rows(connection):
     return [dict(row) for row in connection.execute("SELECT timestamp, skill, surface FROM skill_use ORDER BY timestamp")]
 
 
-def _selected(connection, name, expected_revision=None, **options):
-    inventory = catalog(connection, **options)
+def _selected(connection, scanned, name, expected_revision=None):
+    """`name`'s catalog entry, from a scan taken before the caller's transaction (pack sd:7853)."""
+    inventory = _composed(connection, scanned)
     matches = [skill for skill in inventory["skills"] if skill["name"] == name]
     if not matches:
         raise workflow.WorkflowError(f"no catalog skill {name}; available: {', '.join(skill['name'] for skill in inventory['skills'])}")
@@ -170,15 +190,32 @@ def _selected(connection, name, expected_revision=None, **options):
 
 
 def trial(connection, name, *, expected_revision=None, root=None, home=None):
+    scanned = _scan(root=root, home=home)
     with transaction(connection):
-        _, skill, _ = _selected(connection, name, expected_revision, root=root, home=home)
+        _, skill, _ = _selected(connection, scanned, name, expected_revision)
         if skill["paths"]:
             raise workflow.WorkflowError("this skill is already on a path")
         if skill["status"] == "trial":
             return skill
         expires = (datetime.now(timezone.utc) + timedelta(days=TRIAL_DAYS)).isoformat(timespec="seconds")
         start_trial(connection, name, expires)
-        return _selected(connection, name, root=root, home=home)[1]
+        return _selected(connection, scanned, name)[1]
+
+
+def _later(read, *args):
+    """`read(*args)` now, before a transaction; a refusal it raises waits until the answer is used.
+
+    So a read taken early still refuses only where the code that uses it is reached.
+    """
+    try:
+        value = read(*args)
+    except workflow.WorkflowError as error:
+        refusal = error
+
+        def refused():
+            raise refusal
+        return refused
+    return lambda: value
 
 
 def _git(root, *args):
@@ -247,8 +284,19 @@ def request(connection, name, action, *, expected_revision=None, path_name=None,
     """
     if action not in {"review", "promote", "demote"}:
         raise workflow.WorkflowError("skill action must be review, promote or demote")
+    # Files and git before the transaction (pack sd:7853): it holds the
+    # write lock, and a scan or a git call can take seconds.
+    scanned = _scan(root=root, home=home)
+    checkout = scanned["root"]
+    found = next((skill for skill in scanned["skills"] if skill["name"] == name), None)
+    # An unknown name is refused in the transaction (`_selected`) before this answer is used.
+    authorship = _later(_authorship, checkout, found) if found else _later(tuple)
+    head = _later(_git, checkout, "rev-parse", "HEAD")
+    moves = action in {"promote", "demote"}
+    paths_changed = _later(_git, checkout, "status", "--porcelain", "--", "skills/paths.json") if moves else _later(str)
+    paths_sha = hashlib.sha256((checkout / "skills/paths.json").read_bytes()).hexdigest() if moves else None
     with transaction(connection):
-        root, skill, inventory = _selected(connection, name, expected_revision, root=root, home=home)
+        root, skill, inventory = _selected(connection, scanned, name, expected_revision)
         from .repos import row_for
         registered = row_for(connection, str(root))
         if registered is None:
@@ -257,16 +305,16 @@ def request(connection, name, action, *, expected_revision=None, path_name=None,
         # identity (sd:1439).
         key = registered["path"]
         bound_files = dict(skill["files"])
-        if action in {"promote", "demote"}:
-            if _git(root, "status", "--porcelain", "--", "skills/paths.json"):
+        if moves:
+            if paths_changed():
                 raise workflow.WorkflowError("commit the workflow path changes before filing a skill move")
-            bound_files["skills/paths.json"] = hashlib.sha256((root / "skills/paths.json").read_bytes()).hexdigest()
+            bound_files["skills/paths.json"] = paths_sha
         bound_hash = _hash(bound_files)
         identity = _hash({"repo": key, "skill": name, "action": action, "source": bound_hash, "path": path_name})
         previous = connection.execute("SELECT id FROM item WHERE source='skill-request' AND external_id=?", (identity,)).fetchone()
         if previous:
             return workflow.item_state(connection, previous["id"])
-        latest, vendors = _authorship(root, skill)
+        latest, vendors = authorship()
         if action == "promote" and (skill["paths"] or path_name not in inventory["paths"]):
             raise workflow.WorkflowError("choose a declared path for a contrib skill")
         if action == "demote" and not skill["paths"]:
@@ -283,7 +331,7 @@ def request(connection, name, action, *, expected_revision=None, path_name=None,
                  " Preserve unrelated work, run the pack checks and follow its sd-ship skill to prepare one pull request. The operator owns merging.")
         item = create_item(connection, kind="task",
             title=f"{action.capitalize()} {name}", status="ready", repo=key,
-            branch=f"skill-{action}/{name}-{uuid.uuid4().hex[:10]}", source_commit=_git(root, "rev-parse", "HEAD"),
+            branch=f"skill-{action}/{name}-{uuid.uuid4().hex[:10]}", source_commit=head(),
             source="skill-request", external_id=identity,
             fields={"skill_review": source}, body={"text": brief}, session=who)
         set_item_fields(connection, item, body={"text": brief.replace("ITEM_ID", str(item))})

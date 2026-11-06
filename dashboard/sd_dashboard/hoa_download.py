@@ -35,14 +35,16 @@ import datetime
 import fcntl
 import json
 import os
+import queue
 import re
 import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
-from .realm_sweep import WITH_TOKEN, alive, claude_binary, write_record
+from .realm_sweep import REAP_SECONDS, WITH_TOKEN, alive, claude_binary, write_record
 from .sweep import DASHBOARD, _held, _since, spawn
 
 #: The login run's shell: env.sh's PATH and the rest, but no CLAUDE_CODE_OAUTH_TOKEN. The setup token's
@@ -253,12 +255,45 @@ def _bounded(proc: subprocess.Popen, seconds: float) -> threading.Timer:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+            proc.kill()
 
     timer = threading.Timer(seconds, kill)
     timer.fired = False
     timer.daemon = True
     timer.start()
     return timer
+
+
+def _lines(proc: subprocess.Popen, timer: threading.Timer):
+    """`proc`'s output lines until EOF, or until REAP_SECONDS after `timer` fired (sd:7910).
+
+    A grandchild that a refused group kill left alive (EPERM, sd:7900) holds stdout open, so a read to EOF could wait
+    on it for as long as it lives. A daemon thread reads the pipe and closes it at EOF; past the bound it is left to
+    the grandchild, since closing a pipe another thread reads blocks on that read.
+    """
+    feed: queue.Queue = queue.Queue()
+
+    def pump():
+        for line in proc.stdout:
+            feed.put(line)
+        proc.stdout.close()
+        feed.put(None)
+
+    threading.Thread(target=pump, daemon=True).start()
+    deadline = None
+    while True:
+        if deadline is None and timer.fired:
+            deadline = time.monotonic() + REAP_SECONDS
+        try:
+            line = feed.get(timeout=0.2 if deadline is None else max(0.0, deadline - time.monotonic()))
+        except queue.Empty:
+            if deadline is not None and time.monotonic() >= deadline:
+                return
+            continue
+        if line is None:
+            return
+        yield line
 
 
 def _chrome_loaded(init: dict) -> bool | None:
@@ -284,7 +319,7 @@ def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiti
     except OSError as error:
         return EXIT_ERROR, f"cannot start {argv[0]}: {error}"
     timer, texts, waited, final, ended, chrome = _bounded(proc, LOGIN_SECONDS), [], False, None, "", None
-    for line in proc.stdout:
+    for line in _lines(proc, timer):
         try:
             event = json.loads(line)
         except ValueError:
@@ -311,7 +346,6 @@ def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiti
         if not waited and any(row.strip() == WAITING for row in said.splitlines()):
             waited = True
             on_waiting()
-    proc.stdout.close()
     proc.wait()
     timer.cancel()
     if timer.fired:
@@ -343,10 +377,9 @@ def download(source: str, place: Path, keep: tuple[int, ...], out) -> tuple[int,
     except OSError as error:
         return EXIT_ERROR, f"cannot start {_command(source)}: {error}"
     timer, last = _bounded(proc, DOWNLOAD_SECONDS), ""
-    for line in proc.stdout:
+    for line in _lines(proc, timer):
         print(line.rstrip(), file=out, flush=True)
         last = line.strip() or last
-    proc.stdout.close()
     proc.wait()
     timer.cancel()
     if timer.fired:

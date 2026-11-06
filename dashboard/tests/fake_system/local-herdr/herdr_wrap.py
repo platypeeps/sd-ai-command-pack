@@ -1,7 +1,8 @@
 """A fake of the system checkout's `herdr_wrap.py` for the dashboard's tests (sd:6044).
 
-`active_sessions` reads `session_name` and `herdr_env`; `herdr.sh launch` runs `launch`: a workspace at the
-directory, claude started in its root pane, then the prompt, each through the `herdr` on PATH.
+`active_sessions` reads `session_name` and `herdr_env`; `herdr.sh launch` runs `launch`: a down session started
+headless, a workspace at the directory, claude started in its root pane, then the prompt, each through the `herdr` on
+PATH.
 """
 
 import json
@@ -42,12 +43,22 @@ def herdr_json(session, *args):
     raise Fail(f"herdr {' '.join(args)}: exit {code}, no JSON answer")
 
 
+def running(session):
+    listed = herdr_json(session, "session", "list", "--json").get("sessions", [])
+    return any(entry.get("name") == session and entry.get("running") for entry in listed)
+
+
 def launch(session, directory, label, prompt):
     if shutil.which("herdr") is None:
         raise Fail("herdr is not installed; install it, then run herdr.sh start", 3)
-    listed = herdr_json(session, "session", "list", "--json").get("sessions", [])
-    if not any(entry.get("name") == session and entry.get("running") for entry in listed):
-        raise Fail(f"session {session} is not running; run herdr.sh start first")
+    if not running(session):
+        # As the real one since system sd:7847: a down session is started as herdr's headless server first.
+        # The double's server answers at once; the real one stays up, and the wait for it is the system's to test.
+        code, out, err = herdr(session, "--session", session, "server")
+        if not running(session):
+            said = (err or out).strip()
+            raise Fail(f"session {session} is not running and did not start: "
+                       f"herdr --session {session} server exited {code}{': ' + said if said else ''}")
     created = herdr_json(session, "workspace", "create", "--cwd", directory, "--label", label, "--no-focus")
     pane = None if created.get("error") else created.get("result", {}).get("root_pane", {}).get("pane_id")
     if not pane:

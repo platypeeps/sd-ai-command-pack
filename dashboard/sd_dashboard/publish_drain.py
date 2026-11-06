@@ -374,7 +374,12 @@ def run(record: Path, lock: int | None = None) -> int:
         try:
             code = child.wait(timeout=document["timeout"])
         except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+                child.kill()
             child.wait()
             code = None
     results, reason = outcome(document)

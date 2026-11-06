@@ -363,9 +363,10 @@ class ContributionSync(SyncCase):
         self.assertTrue(first.watermark_moved)
         self.assertEqual(len(core.projection(self.db)), 4)
         saved = adapter._queue(self.db)
-        # The two head slots read 7 and 8, then the newest never-read pulls
-        # 14 and 13 (sd:7840); the oldest unread one heads the queue.
-        self.assertEqual(saved["pending"][0]["url"], urls[2])
+        # All eight are open and never read, so they go first in queue order
+        # (pack sd:7844, ahead of sd:7840's newest-first slots): 7 to 10 are
+        # read and 11 heads the queue.
+        self.assertEqual(saved["pending"][0]["url"], urls[4])
         self.assertLessEqual(first.requests, 40)
         second = self.run_sync(max_requests=40)
         self.assertEqual(second.queued, 4)
@@ -449,6 +450,45 @@ class ContributionSync(SyncCase):
         self.assertEqual((mine["protected"], mine["unknown"], mine["requests"]), (19, 0, 57))
         # The details that did not fit wait in the queue for the next run.
         self.assertGreater(result.queued, 0)
+
+    def queue_behind(self, settled):
+        """`settled` queued as authored pulls no run has read, as the hub's queue held 6,400 merged ones."""
+        planned = adapter._queue(self.db)
+        adapter._save_queue(self.db, [{"key": "github:" + url, "url": url, "why": ["author"], "blocking_labels": [],
+                                       "explicit": False} for url in settled], planned["revision"])
+
+    def test_a_new_open_pull_is_read_before_a_backlog_of_settled_ones(self):
+        """pack sd:7844: authored pulls ai-governance-service#147 and control-logdna#15528 joined the queue at
+        6,620 of 6,632, behind merged pulls no run had read, at about 47 details a run. Contributions lists a
+        pull only once read, so a new one waited weeks. A pull GitHub has open that no run has read goes first."""
+        urls = self.clone_pull(range(7, 11))
+        self.queue_behind(urls[1:])
+        # 14 requests: the search spends 4, the identity 1, so one pull fits.
+        result = self.run_sync([urls[0]], max_requests=14)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual([row["url"] for row in core.projection(self.db)], [urls[0]])
+
+    def test_an_open_pull_queued_by_an_earlier_run_is_read_first_too(self):
+        """The queue an older run left: the open pull sits behind settled ones and this run's search does not
+        return it. Its open shadow row still puts it first."""
+        from sd_db.shadow_sync import store
+
+        urls = self.clone_pull(range(7, 11))
+        self.queue_behind([*urls[1:], urls[0]])
+        with transaction(self.db):
+            store(self.db, [{"tracker": "github", "url": urls[0], "repo": "example/project", "number": 7,
+                             "kind": "pull", "title": "Contribution", "state": "open", "author": "operator",
+                             "updated_at": self.now.isoformat(), "why": ["author"]}])
+        result = self.run_sync(max_requests=14)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual([row["url"] for row in core.projection(self.db)], [urls[0]])
+
+    def test_an_open_pull_whose_read_failed_is_not_read_first_again(self):
+        """sd:7840's rule holds for open pulls too: a failed read leaves a heartbeat, the key is no longer fresh,
+        so it rotates and cannot take a first slot every run (pack sd:7844 with sd:7840)."""
+        found = [{"kind": "pull", "url": URL, "state": "open"}]
+        self.assertEqual(adapter._unread_open(self.db, found, {"github:" + URL}), {"github:" + URL})
+        self.assertEqual(adapter._unread_open(self.db, found, set()), set())
 
     def test_failed_first_record_rotates_and_explicit_work_retains_fairness(self):
         pending = [{"key": f"item:{n}", "explicit": True} for n in range(5)]

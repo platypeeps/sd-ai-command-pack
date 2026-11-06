@@ -1234,7 +1234,7 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         system = [f[1:] for f in found]
         self.assertEqual(system[0], ("warning", "■", "needs you", "repo"))
         self.assertEqual([f[3] for f in system[1:]], ["working"] * 3 + ["merging", "next", "next", "blocked", "blocked"]
-                         + ["suggested"] * 3 + ["ended", "ended"])
+                         + ["suggested"] * 4 + ["ended", "ended"])
         self.assertIn(("caution", "▲", "look", "next"), system, "a held next row is ▲")
         self.assertEqual([f[3] for f in system if f[3] == "blocked"], ["blocked", "blocked"])
         self.assertTrue(all(f[0] == "warning" and f[1] == "■" for f in system if f[3] == "blocked"))
@@ -1251,13 +1251,13 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
            "working": "working: live sessions, build runs and lane gates now running",
            "next": "next: queued in the lane, not started",
            "blocked": "blocked: stopped in the lane, or waiting on a pull request, until someone acts",
-           "suggested": "suggested: up to 3 ready or planned tasks to do next"}
+           "suggested": "suggested: up to 6 ready or planned tasks to do next"}
 
     def test_each_box_says_its_count_and_what_it_counts_on_hover(self):
         # Pack sd:7383: the native title names the count and the meaning; the aria-label stays.
         out = self.run_view("open('system'); R.html = ELS.queue.html;")
         titles = re.findall(r'<span class="pip[^"]*" title="([^"]*)">', self.repo_detail(out["R"]["html"], "system")[2])
-        self.assertEqual(titles, [f"{n} {self.BOX[k]}" for n, k in zip((1, 3, 2, 2, 3), self.BOX, strict=True)])
+        self.assertEqual(titles, [f"{n} {self.BOX[k]}" for n, k in zip((1, 3, 2, 2, 4), self.BOX, strict=True)])
 
     def test_each_repo_row_counts_working_merging_next_blocked_and_suggested_in_five_boxes(self):
         # pack sd:7470: merging is the leftmost box (operator 2026-11-04).
@@ -1265,21 +1265,21 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         # of the text tally. Pack sd:7314 adds working first and suggested last (operator 07:10 MST: a repo with five
         # working rows read 0 0 0). Each counts every row of the repo, so a filter hides no count. A box is lit only when
         # its count is not zero; blocked is the warning lamp; the label says all five in words. Suggested is off in the
-        # first read and on in the second: its count is 3 in both.
+        # first read and on in the second: its count is 4 in both, all of system's ready items (sd:7869).
         out = self.run_view("R.closed = ELS.queue.html; press('ended'); press('suggested'); open('system');"
                             " R.open = ELS.queue.html; R.tally = ELS['queue-tally'].html;")
         # Pack sd:7383: each box also carries its count and meaning in its title.
-        system = ' aria-label="1 merging, 3 working, 2 next, 2 blocked, 3 suggested"', \
+        system = ' aria-label="1 merging, 3 working, 2 next, 2 blocked, 4 suggested"', \
             (f'<span class="pip on" title="1 {self.BOX["merging"]}">1</span><span class="pip on" title="3 {self.BOX["working"]}">3</span>'
              f'<span class="pip on" title="2 {self.BOX["next"]}">2</span><span class="pip warn" title="2 {self.BOX["blocked"]}">2</span>'
-             f'<span class="pip on" title="3 {self.BOX["suggested"]}">3</span>')
+             f'<span class="pip on" title="4 {self.BOX["suggested"]}">4</span>')
         alpha = ' aria-label="0 merging, 1 working, 0 next, 0 blocked, 0 suggested"', \
             f'<span class="pip" title="0 {self.BOX["merging"]}">0</span><span class="pip on" title="1 {self.BOX["working"]}">1</span>' + "".join(
                 f'<span class="pip" title="0 {self.BOX[k]}">0</span>' for k in ("next", "blocked", "suggested"))
         for html in (out["R"]["closed"], out["R"]["open"]):
             self.assertEqual(self.repo_detail(html, "system"), (" pipe", *system))
             self.assertEqual(self.repo_detail(html, "alpha"), (" pipe", *alpha))
-        self.assertEqual(re.sub(r"<[^>]*>", "", self.repo_detail(out["R"]["closed"], "system")[2]), "13223", "the text tally is gone")
+        self.assertEqual(re.sub(r"<[^>]*>", "", self.repo_detail(out["R"]["closed"], "system")[2]), "13224", "the text tally is gone")
         self.assertRegex(out["R"]["tally"], r"<span>\d+ working</span>", "the page's tally stays")
 
     def test_the_boxes_recount_on_the_30_s_read_and_on_a_read_after_a_build_starts(self):
@@ -1313,14 +1313,14 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
             self.assertNotIn("pip", self.repo_detail(unread, key)[2], key)
             self.assertIn("lane not read", self.repo_detail(unread, key)[2], key)
 
-    def test_suggested_adds_three_ready_items_per_repo_and_a_repo_that_has_only_those(self):
+    def test_suggested_adds_each_repos_ready_items_and_a_repo_that_has_only_those(self):
         out = self.run_view("R.before = repos(); press('suggested'); open('system'); R.after = repos(); R.kids = kids();"
                             " R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;")
         self.assertNotIn("beta:false", out["R"]["before"])
         self.assertIn("beta:false", out["R"]["after"])
-        self.assertEqual(out["R"]["kids"].count("suggested"), 3)
+        self.assertEqual(out["R"]["kids"].count("suggested"), 4, "all four, under the cap of six (sd:7869)")
         self.assertIn("#60 Ready 60", out["R"]["html"])
-        self.assertNotIn("#63 Ready 63", out["R"]["html"])
+        self.assertIn("#63 Ready 63", out["R"]["html"])
         self.assertEqual(out["urls"], [{"show": "suggested"}])
         self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="true"', out["R"]["filters"])
         kept = self.run_view("R.repos = repos();", search="?show=suggested")
@@ -1341,9 +1341,17 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
                 self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="false"', kept["R"]["filters"])
                 self.assertNotIn("beta:false", kept["R"]["repos"])
 
-    def test_suggested_is_sd_nexts_order_less_live_items_three_per_repo_each_with_why(self):
+    def test_a_repo_with_seven_suggested_items_draws_six(self):
+        # sd:7869 (operator 2026-11-06): Suggested keeps at most six items per repo, in sd-next's order.
+        self.doc["queues"]["suggested"] = [{"id": n, "repo": "~/repos/example/system", "title": f"Next {n}", "status": "ready",
+                                            "why": "ready", "due": None, "priority": None} for n in range(61, 68)]
+        out = self.run_view("open('system'); R.html = ELS.queue.html;", search="?show=suggested")
+        drawn = re.findall(r'<tr class="child" data-type="suggested" data-item="(\d+)"', out["R"]["html"])
+        self.assertEqual(drawn, [str(n) for n in range(61, 67)])
+
+    def test_suggested_is_sd_nexts_order_less_live_items_six_per_repo_each_with_why(self):
         # pack sd:7314: Suggested is what sd-next offers next, ranked server-side (sd_db.today.suggested): ready, then
-        # planned, then unscheduled. The view drops a live item and keeps the first three per repo. Each detail says why;
+        # planned, then unscheduled. The view drops a live item and keeps the first six per repo (sd:7869). Each detail says why;
         # a row that is not ready shows its status and offers no Build.
         def row(n, why, status, priority=None, due=None):
             return {"id": n, "repo": "~/repos/example/system", "title": f"Next {n}", "status": status, "why": why,
@@ -1356,8 +1364,8 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         found = re.findall(r'<tr class="child" data-type="suggested" data-item="(\d+)".*?<td class="detail">(.*?)</td>',
                            out["R"]["html"], re.S)
         self.assertEqual(found, [("60", "ready · P1"), ("80", "planned for 2026-09-20 · P2 · planning"),
-                                 ("81", "unscheduled P0 · planning")])
-        self.assertIn('aria-label="1 merging, 3 working, 2 next, 2 blocked, 3 suggested"', out["R"]["html"])
+                                 ("81", "unscheduled P0 · planning"), ("82", "unscheduled · ready")])
+        self.assertIn('aria-label="1 merging, 3 working, 2 next, 2 blocked, 4 suggested"', out["R"]["html"])
         self.assertEqual(out["R"]["build"], "a build takes a ready task; this one is planning")
 
     def test_suggested_leaves_out_an_item_with_no_repo_so_no_unassociated_group_shows(self):
@@ -1674,7 +1682,7 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
     def test_each_filter_counts_the_rows_of_repos_it_would_add(self):
         out = self.run_view("R.filters = ELS['queue-filters'].html;")
         counts = dict(re.findall(r'data-v="(\w+)" aria-pressed="false">[^<]+<span class="n">(\d+)</span>', out["R"]["filters"]))
-        self.assertEqual(counts, {"suggested": "4", "open": "0", "ended": "3"})
+        self.assertEqual(counts, {"suggested": "5", "open": "0", "ended": "3"})
 
     # pack sd:7251 (#41066): with Suggested off, All items shows the ready items Suggested would; on, each shows once.
     def test_all_items_alone_shows_the_ready_items_suggested_holds(self):

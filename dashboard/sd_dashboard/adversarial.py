@@ -1162,7 +1162,12 @@ def _gate(document: dict, record: Path, lock: int | None) -> str | None:
         try:
             code = child.wait(timeout=document["timeout"] + GRACE)
         except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+                child.kill()
             child.wait()
             code = None
     said = log.read_text(encoding="utf-8", errors="replace")

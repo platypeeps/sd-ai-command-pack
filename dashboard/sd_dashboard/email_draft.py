@@ -24,7 +24,6 @@ the first one's note in the revision and is refused.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import re
@@ -120,8 +119,12 @@ def _model(text: str, line: str | None = None, *, cwd=None) -> str:
     try:
         out, err = child.communicate(text, timeout=MODEL_TIMEOUT)
     except subprocess.TimeoutExpired:
-        with contextlib.suppress(ProcessLookupError):
+        try:
             os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+            child.kill()
         try:
             child.communicate(timeout=REAP_TIMEOUT)
         except subprocess.TimeoutExpired:
