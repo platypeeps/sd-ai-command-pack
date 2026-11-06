@@ -48,6 +48,9 @@ CLOSED = ("done", "cancelled")
 #: The lane entry states whose items a delivery still holds (`sd_lane`): queued, in its runner, or
 #: prepared and waiting for a hand merge (lead ruling on pack sd:7288).
 LANE_LIVE = ("pending", "running", "prepared")
+#: Why a repository may hold a second open branch beside its open bundle (pack sd:7737): a change that moves
+#: state in steps gets its own PR, and a bundle already in the lane takes no more commits.
+SECOND_BRANCH = ("state-move", "in-lane")
 
 
 class TeammateRefused(SdDbError):
@@ -152,8 +155,16 @@ def _dispatched(connection, entry: dict) -> dict | Literal[False] | None:
     return receipt if receipt.get("phase") in ("merge_dispatch", "merged") else None
 
 
-def start(connection, items: list[int], *, worktree: str, branch: str, budget_minutes: int, owner: str) -> dict:
-    """Register one teammate run for `items`, the first its lead; the run, as `build.run` reads it."""
+def start(connection, items: list[int], *, worktree: str, branch: str, budget_minutes: int, owner: str,
+          into: str | None = None, reason: str | None = None) -> dict:
+    """Register one teammate run for `items`, the first its lead; the run, as `build.run` reads it.
+
+    pack sd:7737: one open bundle branch per repository. Another open run of
+    the repository on another branch refuses the start, naming its branch and
+    worktree, unless `into` names that branch (a side branch that merges into
+    the bundle) or `reason` is one of `SECOND_BRANCH`, which each item records.
+    An open run is never in the lane: enqueue refuses an item one holds.
+    """
     if not items or len(set(items)) != len(items) or any(type(item) is not int for item in items):
         raise TeammateRefused("name one or more distinct items")
     if type(budget_minutes) is not int or budget_minutes <= 0:
@@ -161,6 +172,8 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
     for name, value in (("worktree", worktree), ("branch", branch), ("owner", owner)):
         if not isinstance(value, str) or not value.strip():
             raise TeammateRefused(f"a teammate run names its {name}")
+    if reason is not None and reason not in SECOND_BRANCH:
+        raise TeammateRefused(f"a second open branch's reason is state-move or in-lane, not {reason!r}")
     with transaction(connection):
         if restoration_pending(connection):
             raise TeammateRefused("database restore reimport is incomplete; teammate runs are held")
@@ -190,6 +203,16 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
             repos.add(row["repo"])
         if len(repos) != 1:
             raise TeammateRefused("a teammate run's items share one repository")
+        repo = repos.pop()
+        beside = [run for run in open_runs(connection)
+                  if run["repo"] == repo and run["outcome"] is None and run["branch"] not in (branch, into)]
+        if beside and reason is None:
+            other = beside[0]
+            raise TeammateRefused(
+                f"{repo} has open branch {other['branch']} in {other['work_path']} (teammate run {other['id']}): "
+                "one open bundle branch per repository; build these items there, pass --into "
+                f"{other['branch']} for a side branch that merges into it, or --reason state-move or "
+                "--reason in-lane for a second pull request")
         stamp = clock()
         lead = None
         for item in items:
@@ -203,11 +226,15 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
             "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, start_step, "
             "step, heartbeat_at, created_at, updated_at) "
             "VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'building', 'building', ?, ?, ?)",
-            (run, lead, repos.pop(), branch, owner, worktree, worktree, stamp, stamp, stamp))
+            (run, lead, repo, branch, owner, worktree, worktree, stamp, stamp, stamp))
         for item in items:
+            if beside:
+                add_note(connection, item, "comment",
+                         f"Second open branch {branch} of {repo} beside "
+                         f"{', '.join(sorted({run['branch'] for run in beside}))}: {reason}")
             add_note(connection, item, "comment",
                      f"Teammate run {run} started by {owner}: worktree {worktree}, branch {branch}, "
-                     f"budget {budget_minutes} min")
+                     f"budget {budget_minutes} min" + (f"; merges into {into}" if into else ""))
         return run_state(connection, run)
 
 

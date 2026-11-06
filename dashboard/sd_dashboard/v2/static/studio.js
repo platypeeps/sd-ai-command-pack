@@ -11,6 +11,9 @@
 // and its films in illustrated-film/renders/ list under the role final (studio.OUTPUTS, sd:7514).
 // sd:7668: a File type tile per extension the listed files carry, read from the files and never a fixed list; a tile
 // leaves the projects that hold a file of that type.
+// sd:7700: a project pins in the same view state, keyed by its project.json (studio.project_key). Pinned projects list
+// first; the Pinned tile leaves only them; Pin and Unpin are the row's ⋯ menu and a button in Details. A view store that
+// did not read turns the tile off and says why, never an empty list.
 (() => {
   const { html, put, plural } = window.markup;
   const projects = n => plural(n, 'project', 'projects');
@@ -18,9 +21,9 @@
   const $ = id => document.getElementById(id);
   const KINDS = [['shirt', 'shirt'], ['song', 'song'], ['episode', 'episode']];
   const COLS = [[null, html`<span class="sr">State</span>`, 'g'], ['title', 'Project'], ['kind', 'Kind', 'repo'], ['repo', 'Repository', 'kind'],
-    ['files', 'Files', 'num'], ['updated', 'Updated', 'when']];
+    ['files', 'Files', 'num'], ['updated', 'Updated', 'when'], [null, html`<span class="sr">Actions</span>`, 'acts']];
   let DOC = null, ROWS = [], SELECTED = null, OPEN = null;
-  const F = { kind: '', type: '', q: '' }, L = { sort: 'title', dir: 1, page: 1, size: 50 };
+  const F = { kind: '', type: '', pinned: '', q: '' }, L = { sort: 'title', dir: 1, page: 1, size: 50 };
   const url = f => `/studio/files/${f.file.split('/').map(encodeURIComponent).join('/')}`;
   const count = r => r.roots.reduce((n, root) => n + root.files.length, 0);
   // A file's type is its name's extension, lower case; a name with no dot has none and takes no tile.
@@ -33,8 +36,9 @@
   function shown() {
     const key = { title: r => r.title.toLowerCase(), files: r => count(r), updated: r => r.updated || '' }[L.sort] || (r => String(r[L.sort] || '').toLowerCase());
     const q = F.q.toLowerCase().split(/\s+/).filter(Boolean);
-    return ROWS.filter(r => (!F.kind || r.kind === F.kind) && (!F.type || typesOf(r).has(F.type)) && q.every(w => `${r.title} ${r.kind} ${r.repo} ${r.folder} ${r.brief}`.toLowerCase().includes(w)))
-      .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * L.dir);
+    return ROWS.filter(r => (!F.kind || r.kind === F.kind) && (!F.type || typesOf(r).has(F.type)) && (!F.pinned || r.pinned)
+      && q.every(w => `${r.title} ${r.kind} ${r.repo} ${r.folder} ${r.brief}`.toLowerCase().includes(w)))
+      .sort((a, b) => (b.pinned - a.pinned) || (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * L.dir);
   }
   // A project's rendered results: the unhidden files of its result roots, newest first, as the command objects hold them.
   const results = r => r.roots.filter(root => root.result).flatMap(root => root.files.map(f => ({ ...f, role: root.role })))
@@ -44,25 +48,28 @@
   function sub(r, f) {
     return html`<tr class="sub">
       <td class="g"></td>
-      <td class="what" colspan="3"><span class="name">${f.name}</span><span class="file">${f.role} · ${r.folder === '.' ? f.path : f.path.slice(r.folder.length + 1)}</span></td>
+      <td class="what" colspan="4"><span class="name">${f.name}</span><span class="file">${f.role} · ${r.folder === '.' ? f.path : f.path.slice(r.folder.length + 1)}</span></td>
+      ${stamp(f.modified)}
       <td class="acts"><a class="btn quiet sm" href="${url(f)}" target="_blank" rel="noopener">Open</a>${r.render
-        ? html`<button class="btn quiet sm" type="button" data-cmd="studio.rerender" data-obj="${f.id}">Re-render</button>` : ''}</td>
-      ${stamp(f.modified)}</tr>`;
+        ? html`<button class="btn quiet sm" type="button" data-cmd="studio.rerender" data-obj="${f.id}">Re-render</button>` : ''}</td></tr>`;
   }
+  // A pressed File type tile narrows the expanded files to that type too (sd:7709).
   function subs(r) {
-    const list = results(r);
+    const all = results(r), list = all.filter(f => !F.type || typeOf(f) === F.type);
     if (list.length) return list.map(f => sub(r, f));
-    return html`<tr class="sub empty"><td class="g"></td><td colspan="5">No rendered file yet. Results list from a selected, print, stickers, previews or media root, and a song's final-video.mp4 or illustrated-film/renders films; a hidden one stays in Details.</td></tr>`;
+    if (F.type && all.length) return html`<tr class="sub empty"><td class="g"></td><td colspan="6">No rendered ${F.type} file; clear the File type filter to list the others.</td></tr>`;
+    return html`<tr class="sub empty"><td class="g"></td><td colspan="6">No rendered file yet. Results list from a selected, print, stickers, previews or media root, and a song's final-video.mp4 or illustrated-film/renders films; a hidden one stays in Details.</td></tr>`;
   }
   function row(r) {
     const [g, mark, word] = state(r), open = r.id === OPEN;
     return html`<tr data-id="${r.id}" aria-selected="${String(r.id === SELECTED)}">
       <td class="g g-${g}" title="${word}"><span aria-hidden="true">${mark}</span><span class="sr">${word}</span></td>
-      <td class="what"><div class="lead"><button class="expand" type="button" data-expand="${r.id}" aria-expanded="${String(open)}" aria-label="${`Rendered files: ${r.title}`}"><svg class="i" aria-hidden="true"><use href="#i-chevron-right"/></svg></button><button type="button">${r.title}</button><span class="file">${r.folder}</span></div></td>
+      <td class="what"><div class="lead"><button class="expand" type="button" data-expand="${r.id}" aria-expanded="${String(open)}" aria-label="${`Rendered files: ${r.title}`}"><svg class="i" aria-hidden="true"><use href="#i-chevron-right"/></svg></button><button type="button">${r.title}${r.pinned ? html`<span class="pinmark" title="Pinned"><svg class="i" aria-hidden="true"><use href="#i-pin"/></svg><span class="sr">pinned</span></span>` : ''}</button><span class="file">${r.folder}</span></div></td>
       <td class="repo" data-meta="${` · ${r.repo} · ${files(count(r))}`}">${r.kind || '—'}</td>
       <td class="kind">${r.repo}</td>
       <td class="num">${count(r)}</td>
-      ${stamp(r.updated)}</tr>${open ? subs(r) : ''}`;
+      ${stamp(r.updated)}
+      <td class="acts">${window.shell.commands.rowActions(r.id, { icons: [] })}</td></tr>${open ? subs(r) : ''}`;
   }
   // One row expanded at a time (sd:7490): opening one closes the other, a second press closes it; focus stays on its button.
   function expand(key) {
@@ -76,10 +83,14 @@
     const held = new Map();
     ROWS.forEach(r => typesOf(r).forEach(t => held.set(t, (held.get(t) || 0) + 1)));
     const types = [...held].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    // sd:7700: the Pinned tile counts the pinned projects; with no view store read it is off, its tip the reason.
+    const pins = ROWS.filter(r => r.pinned).length, store = storeOff();
+    const pinTile = L_.fseg('pinned', 'Pinned', [{ v: '1', pressed: F.pinned === '1', off: store !== true,
+      title: store === true ? `Pinned: ${projects(pins)}` : `Pinned: ${store}`, label: html`Pinned <span class="n">${store === true ? pins : '—'}</span>` }]);
     put($('sub'), html`${DOC ? `${projects(ROWS.length)}${flagged ? ` · ${flagged} with a problem` : ''}` : 'The projects were not read'}`);
     put($('filters'), L_.fbar(html`${L_.fseg('kind', 'Kind', KINDS.map(([k, w]) => ({ v: k, pressed: F.kind === k, title: `${w}: ${n(k)}`,
       label: html`${w} <span class="n">${n(k)}</span>` })))}${types.length ? L_.fseg('type', 'File type', types.map(([t, c]) => ({ v: t, pressed: F.type === t,
-      title: `${t}: ${projects(c)}`, label: html`${t} <span class="n">${c}</span>` }))) : ''}`, { clear: !!(F.kind || F.type) }));
+      title: `${t}: ${projects(c)}`, label: html`${t} <span class="n">${c}</span>` }))) : ''}${pinTile}`, { clear: !!(F.kind || F.type || F.pinned) }));
     put($('rows-head'), L_.sortHead(COLS, L));
     put($('rows'), html`${slice.map(row)}`);
     const empty = $('empty');
@@ -126,7 +137,8 @@
       ${problems.length ? html`<h3>Problems</h3><ul class="problems">${problems.map(p => html`<li>${p}</li>`)}</ul>` : ''}
       <h3>Facts</h3>
       <dl><dt>Folder</dt><dd>${r.repo}/${r.folder}</dd>
-        <dt>Item</dt><dd>${r.item ? html`<a href="${window.shell.itemHref(r.item)}">#${r.item}</a>` : '— none named'}</dd></dl>
+        <dt>Item</dt><dd>${r.item ? html`<a href="${window.shell.itemHref(r.item)}">#${r.item}</a>` : '— none named'}</dd>
+        <dt>Pinned</dt><dd>${storeOff() !== true ? `unknown: ${storeOff()}` : html`${r.pinned ? 'yes, it lists first' : 'no'} <button class="btn quiet sm" type="button" data-cmd="studio.project-${r.pinned ? 'unpin' : 'pin'}" data-obj="${r.id}">${r.pinned ? 'Unpin' : 'Pin'}</button>`}</dd></dl>
       ${strip(r)}
       ${r.roots.length ? r.roots.map(root => gallery(r, root)) : html`<p class="why">This project names no root that reads.</p>`}
       <p class="why">The files are read from disk, not git. Pin and Hide change this page only; no file moves.</p>`);
@@ -143,13 +155,15 @@
     adopt: doc => {
       DOC = doc;
       document.body.dataset.observed = doc.read;
-      ROWS = (doc.projects || []).map(r => ({ ...r, type: 'project', label: r.title }));
+      ROWS = (doc.projects || []).map(r => ({ ...r, type: 'project', label: r.title, pinned: !!r.pinned }));
+      // sd:7700: pins that did not read filter nothing: the tile turns off rather than leave an empty list.
+      if (storeOff() !== true) F.pinned = '';
       const FILES = ROWS.flatMap(r => r.roots.flatMap(root => root.files.map(f => ({ ...f, media: f.type, id: fileId(r, f), type: 'studio file',
         label: f.name, file: `${r.repo}/${f.path}`, pinned: !!f.pinned, hidden: !!f.hidden,
         project: r.id, folder: r.folder, kind: r.kind, title: r.title, role: root.role, result: !!root.result, render: r.render || '' }))));
       // sd:7151: a scan that could not read a folder says so first; only a clean scan with no project says there is none.
       // sd:7392: with no project, the banner says how many repositories the scan read, so a problem beside them is not "nothing read".
-      const problems = doc.problems || [], read = doc.repositories || 0;
+      const problems = [...(doc.problems || []), ...(storeOff() === true ? [] : [`Pins and hides were not read: ${doc.store.reason}`])], read = doc.repositories || 0;
       const none = read ? `The scan read ${plural(read, 'repository', 'repositories')} and found no project in ${read === 1 ? 'it' : 'them'}.`
         : 'No repository was read, so this is not a sign that no project exists.';
       return { objects: [...ROWS, ...FILES],
@@ -162,25 +176,28 @@
     select: key => show(key), unselect });
   const redraw = () => { L.page = 1; draw(); };
   $('filters').addEventListener('click', e => {
-    if (e.target.closest('[data-fclear]')) { F.kind = ''; F.type = ''; return redraw(); }
-    const c = e.target.closest('[data-f]'); if (!c || !(c.dataset.f in F) || c.dataset.f === 'q') return;
+    if (e.target.closest('[data-fclear]')) { F.kind = ''; F.type = ''; F.pinned = ''; return redraw(); }
+    const c = e.target.closest('[data-f]'); if (!c || !(c.dataset.f in F) || c.dataset.f === 'q' || c.getAttribute?.('aria-disabled') === 'true') return;
     F[c.dataset.f] = F[c.dataset.f] === c.dataset.v ? '' : c.dataset.v;
     redraw();
   });
   document.addEventListener('shell:filter', e => { if (e.detail.q === F.q) return; F.q = e.detail.q || ''; redraw(); });
-  $('empty').addEventListener('click', e => { if (e.target.closest('[data-fclear]')) { F.kind = ''; F.type = ''; F.q = ''; window.shell.filter(''); redraw(); } });
+  $('empty').addEventListener('click', e => { if (e.target.closest('[data-fclear]')) { F.kind = ''; F.type = ''; F.pinned = ''; F.q = ''; window.shell.filter(''); redraw(); } });
   $('rows-head').addEventListener('click', e => { if (window.shell.list.sortBy(e, L)) window.shell.list.keepFocus(e, draw); });
   $('pager').addEventListener('click', e => { if (window.shell.list.paging(e, L)) window.shell.list.keepFocus(e, draw); });
   $('rows').addEventListener('click', e => {
     const x = e.target.closest('[data-expand]'); if (x) { expand(x.dataset.expand); return; }
-    if (e.target.closest('a')) return;
+    if (e.target.closest('a') || e.target.closest('.rowact')) return;
     const tr = e.target.closest('tr[data-id]'); if (tr) { show(tr.dataset.id); window.shell.openPane('tab-details'); }
   });
-  const view = (o, change) => window.shell.post('/api/studio/view', { file: o.file, ...change }).then(v => reader.reread().then(() => v));
+  // A file posts its path; a project (sd:7700) its id.
+  const target = o => o.type === 'project' ? { project: o.id } : { file: o.file };
+  const view = (o, change) => window.shell.post('/api/studio/view', { ...target(o), ...change }).then(v => reader.reread().then(() => v));
   const NO_CLI = 'no CLI: view state; the dashboard writes it (POST /api/studio/view)';
-  const flag = (id, label, icon, key, field, to, does, already) => ({ id, on: 'studio file', label, icon, key, does, risk: 'undo', executes: true,
-    when: o => o[field] === to ? already : storeOff(),
-    cli: () => NO_CLI, sends: o => `POST /api/studio/view {file: ${o.file}, ${field}: ${to}}`,
+  // A project's Pin and Unpin are Details' own button, so its bar leaves them out (`bar: false`); the ⋯ menu keeps them.
+  const flag = (on, id, label, icon, key, field, to, does, already) => ({ id, on, label, icon, key, does, risk: 'undo', executes: true,
+    ...(on === 'project' ? { bar: false } : {}), when: o => o[field] === to ? already : storeOff(),
+    cli: () => NO_CLI, sends: o => `POST /api/studio/view {${o.type === 'project' ? `project: ${o.id}` : `file: ${o.file}`}, ${field}: ${to}}`,
     run: o => view(o, { [field]: to }).then(() => `${label} · ${o.label}`), undo: o => view(o, { [field]: !to }) });
   // Slice 4 (sd:6922): each runs one fixed row of /api/actions/run for the project; the server finds it again.
   const TOOLS = { song: 'tools/song_pipeline.py', episode: 'tools/episode.py' };
@@ -227,10 +244,12 @@
       sends: o => `POST /api/actions/run {action: studio.${o.kind}, project: ${o.project}, verb: ${o.render}}`,
       consequence: o => `This runs ${o.render} on ${o.title} again and replaces its last render; the tool keeps a backup.`,
       run: o => { const p = window.shell.commands.get(o.project) || { id: o.project }; show(o.project); return ran(p, `studio.${o.kind}`, { verb: o.render }); } },
-    flag('studio.pin', 'Pin', 'pin', 'p', 'pinned', true, 'Pins the file to the front of its root; Undo unpins it.', 'already pinned'),
-    flag('studio.unpin', 'Unpin', 'pin-off', 'p', 'pinned', false, 'Unpins the file; Undo pins it again.', 'not pinned'),
-    flag('studio.hide', 'Hide', 'eye-off', 'h', 'hidden', true, 'Hides the file under its root\'s Hidden fold; no file moves. Undo shows it.', 'already hidden'),
-    flag('studio.unhide', 'Unhide', 'eye', 'h', 'hidden', false, 'Shows the file in its root again; Undo hides it.', 'not hidden'));
+    flag('studio file', 'studio.pin', 'Pin', 'pin', 'p', 'pinned', true, 'Pins the file to the front of its root; Undo unpins it.', 'already pinned'),
+    flag('studio file', 'studio.unpin', 'Unpin', 'pin-off', 'p', 'pinned', false, 'Unpins the file; Undo pins it again.', 'not pinned'),
+    flag('studio file', 'studio.hide', 'Hide', 'eye-off', 'h', 'hidden', true, 'Hides the file under its root\'s Hidden fold; no file moves. Undo shows it.', 'already hidden'),
+    flag('studio file', 'studio.unhide', 'Unhide', 'eye', 'h', 'hidden', false, 'Shows the file in its root again; Undo hides it.', 'not hidden'),
+    flag('project', 'studio.project-pin', 'Pin', 'pin', 'p', 'pinned', true, 'Pins the project to the top of the list; Undo unpins it.', 'already pinned'),
+    flag('project', 'studio.project-unpin', 'Unpin', 'pin-off', 'p', 'pinned', false, 'Unpins the project; Undo pins it again.', 'not pinned'));
   window.PAGE_LIST = { rows: () => $('rows').querySelectorAll('tr[data-id]'), current: () => SELECTED, select: key => show(key) };
   document.addEventListener('DOMContentLoaded', () => {
     reader = start();

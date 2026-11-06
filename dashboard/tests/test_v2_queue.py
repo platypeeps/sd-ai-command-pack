@@ -35,7 +35,7 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
-from sd_dashboard import now_screen, pack_bin, places, queue_screen, v2
+from sd_dashboard import hoa_screen, now_screen, pack_bin, places, queue_screen, v2
 from sd_db import upsert_repo
 from support import NOW, ScreenCase
 from test_v2_registry import GROUP_BLOCK
@@ -166,6 +166,17 @@ class TheRows(Lane, ScreenCase):
                 conf.write_text(text)
             with self.subTest(realm=realm), mock.patch.object(places, "REALMS_CONFIG", conf):
                 self.assertEqual([lane["realm"] for lane in queue_screen.document(self.connection, now=NOW)["lanes"]], [realm])
+
+    def test_the_hoa_checkouts_lane_is_realm_hoa_before_a_glob_that_claims_it(self):
+        """pack sd:7687: the hoa checkout's lane is HOA's, as its items are on Tasks, with or without a realm list."""
+        conf = Path(self.tmp.name) / "realms.conf"
+        hoa = mock.patch.object(hoa_screen, "checkout", return_value=(str(self.checkout), self.checkout, []))
+        for text in (f"realm|work|Work|{self.checkout.parent}/*\n", None):
+            conf.unlink(missing_ok=True)
+            if text:
+                conf.write_text(text)
+            with self.subTest(text=text), hoa, mock.patch.object(places, "REALMS_CONFIG", conf):
+                self.assertEqual([lane["realm"] for lane in queue_screen.document(self.connection, now=NOW)["lanes"]], ["hoa"])
 
     def test_a_row_links_each_screenshot_the_lane_drew_and_says_why_it_drew_none(self):
         self.shot_entries()
@@ -1153,6 +1164,17 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["R"]["again"], [["system:false", "alpha:false", "sd:false"], []])
         self.assertEqual(out["gets"], ["/api/now", "/api/queue", "/api/queue/builds?show=all", "/api/queue/runner"])
 
+    def test_repos_order_by_merging_then_the_other_counts_then_name(self):
+        # pack sd:7679 (operator 2026-11-05): the busiest repo first, compared box by box in the boxes' order (merging,
+        # working, next, blocked, suggested), each most first; a tie goes by repo name. A row's state does not order it.
+        def asg(n, repo):
+            return {**self.RUNNER["live"][0], "id": n, "item": n, "repo": repo}
+        runner = {"live": self.RUNNER["live"] + [asg(n, "/repos/many") for n in (81, 82, 83, 84)]
+                  + [asg(n, "/repos/aaa") for n in (91, 92)]}
+        out = self.run_view("R.repos = repos();", answers={"/api/queue/runner": [200, runner]})
+        # system merges one and works three; many works four, aaa two; alpha (a stalled build) and sd work one each.
+        self.assertEqual(out["R"]["repos"], ["system:false", "many:false", "aaa:false", "alpha:false", "sd:false"])
+
     def test_opening_a_repo_closes_the_one_that_was_open(self):
         out = self.run_view("open('system'); open('alpha'); R.repos = repos(); R.kids = kids(); R.html = ELS.queue.html;")
         self.assertEqual(out["R"]["repos"], ["system:false", "alpha:true", "sd:false"])
@@ -1294,6 +1316,18 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertIn('aria-label="1 merging, 3 working, 2 next, 2 blocked, 3 suggested"', out["R"]["html"])
         self.assertEqual(out["R"]["build"], "a build takes a ready task; this one is planning")
 
+    def test_suggested_leaves_out_an_item_with_no_repo_so_no_unassociated_group_shows(self):
+        # pack sd:7731 (operator ruling on sd:7699): a ready item with no repo is no Suggested row; it stays on Tasks.
+        def row(n, repo):
+            return {"id": n, "repo": repo, "title": f"Next {n}", "status": "ready", "why": "ready", "due": None, "priority": 2}
+        self.doc["queues"]["suggested"] = [row(60, "~/repos/example/system"), row(4501, None), row(4503, None), row(4504, "")]
+        out = self.run_view("R.repos = repos(); open('system'); R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;",
+                            search="")
+        self.assertEqual([r for r in out["R"]["repos"] if r.startswith(":")], [], "no Unassociated group")
+        self.assertNotIn("Unassociated", out["R"]["html"])
+        self.assertIn('data-type="suggested" data-item="60"', out["R"]["html"])
+        self.assertIn('Suggested <span class="n">1</span>', out["R"]["filters"])
+
     def test_ended_builds_adds_ended_rows_and_a_repo_that_has_only_those(self):
         out = self.run_view("R.before = repos(); press('ended'); R.after = repos(); open('gamma'); R.gamma = ELS.queue.html;"
                             " open('system'); R.kids = kids(); press('suggested');")
@@ -1394,13 +1428,14 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/tasks/build", {"items": [item], "revisions": {str(item): "c" * 64}}]])
 
     def test_build_on_an_unread_suggested_row_reads_the_queue_rows_repository(self):
-        """Pack sd:7275. Before Details load, Build reads the queue row: its repo path allows, a null one refuses."""
+        """Pack sd:7275. Before Details load, Build reads the queue row: its repo path allows. A null one is no
+        Suggested row since pack sd:7731, so Build finds no row and refuses."""
         item, answers = self.suggested()
         on = self.run_view(f"R.on = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
         self.assertIs(on["R"]["on"], True)
         self.doc["queues"]["suggested"][0]["repo"] = None
         off = self.run_view(f"R.off = cmd('item.build').when({{ id: '{item}' }});", search="?show=suggested", answers=answers)
-        self.assertEqual(off["R"]["off"], "a build needs a repository")
+        self.assertEqual(off["R"]["off"], "the task is no longer listed")
 
     # pack sd:7334: a planned or an unscheduled suggested row offers its next status before its Details are read, as a
     # Tasks list row does: its task is the /api/tasks row, read while Suggested shows, not only once Details open.
@@ -1469,6 +1504,22 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertIn("open", out["R"]["kids"])
         kept = self.run_view("open('system'); R.kids = kids();", search="?show=open", answers=answers)
         self.assertIn("open", kept["R"]["kids"])
+
+    def test_all_items_leaves_ideas_out_they_live_on_writing(self):
+        """pack sd:7699: an idea of any idea kind is no Queue row, with a repo or without; a task still is."""
+        from sd_dashboard import tasks_screen
+        made = {kind: self.item(f"A {kind}", kind=kind, priority=2, repo=str(self.checkout))
+                for kind in ("task", "idea", "work-idea", "personal-idea")}
+        loose = {kind: self.item(f"Loose {kind}", kind=kind, priority=2) for kind in ("idea", "work-idea")}
+        answers = {"/api/tasks": [200, tasks_screen.document(self.connection, now=NOW)]}
+        out = self.run_view("R.repos = repos(); open('system'); R.html = ELS.queue.html; open(''); R.none = ELS.queue.html;",
+                            search="?show=open", answers=answers)
+        self.assertIn(f'data-type="open" data-item="{made["task"]}"', out["R"]["html"], "a task is a Queue row")
+        for kind in ("idea", "work-idea", "personal-idea"):
+            self.assertNotIn(f'data-type="open" data-item="{made[kind]}"', out["R"]["html"], f"a {kind} lives on Writing")
+        for n in loose.values():
+            self.assertNotIn(f'data-type="open" data-item="{n}"', out["R"]["none"], "an idea with no repo is no row")
+        self.assertEqual([r for r in out["R"]["repos"] if r.startswith(":")], [], "no Unassociated group")
 
     def test_an_open_row_selects_into_task_details_and_offers_its_next_status_move(self):
         made, answers = self.open_items()

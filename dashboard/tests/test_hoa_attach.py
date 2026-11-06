@@ -347,6 +347,19 @@ class ThePicture(Case):
             self.assertEqual(hoa_attach.picture(self.connection, {"id": ["../etc"]})[0], 400)
             self.assertEqual(fetch.call_count, 1)
 
+    def test_a_picture_needs_the_account_alone_not_a_folder_setting(self):
+        # sd:7680: a light's thumbnail, with only the light folder and the account set, read the water folder setting
+        # and answered 503. A picture is named by its file id: the account is all it reads.
+        writes.set_setting(self.connection, hoa_attach.FOLDER_KEY, None)
+        writes.set_setting(self.connection, hoa_attach.LIGHT_KEY, "LIGHTS")
+        with mock.patch.object(hoa_attach, "_fetch", return_value=b"\xff\xd8jpeg"):
+            self.assertEqual(hoa_attach.picture(self.connection, {"id": ["PIC1234567"]}), (200, b"\xff\xd8jpeg", "image/jpeg"))
+        writes.set_setting(self.connection, hoa_attach.ACCOUNT_KEY, None)
+        status, body = hoa_attach.picture(self.connection, {"id": ["PIC1234567"]})
+        self.assertEqual(status, 503)
+        self.assertIn(f"{hoa_attach.ACCOUNT_KEY} is not set", body["error"])
+        self.assertNotIn(hoa_attach.FOLDER_KEY, body["error"])
+
 
 class TheRoutes(BrowserSession):
     """The server half: staging bytes at /api/hoa/attach/file, and a picture's bytes with an image type only."""

@@ -1117,6 +1117,18 @@ class TheBooks(ScreenCase):
         self.assertEqual({r["id"]: r["category"] for r in doc["rows"]}, {ids["video"]: "Coding", ids["named"]: ""})
         self.assertTrue(all(2 < len(set(c)) <= 6 for c in learning_screen.CATEGORIES.values()))
 
+    def test_a_row_files_under_the_first_value_its_view_names_whatever_the_case(self):
+        """pack sd:7695: a list-valued category went to Other, as its joined text names no category. A row files under
+        the first of its values the view's set names, in the set's spelling, compared case-insensitively; else Other ("")."""
+        seed_learning(self.connection)
+        made = {title: learning(self.connection, title, "queued", **{"content-type": "book", "category": value})
+                for title, value in (("Listed", ["Computers", "communication", "Learning"]), ("Lower", "teams & facilitation"),
+                                     ("Off", ["Computers", "Math"]), ("Odd", [None, 3, " Learning "]))}
+        rows = {r["id"]: r for r in learning_screen.books(self.connection, now=NOW)["rows"]}
+        self.assertEqual({title: rows[made[title]]["filed"] for title in made},
+                         {"Listed": "Communication", "Lower": "Teams & Facilitation", "Off": "", "Odd": "Learning"})
+        self.assertEqual(rows[made["Listed"]]["category"], "Computers, communication, Learning", "Details keeps every value")
+
     def test_the_route_reads_the_books(self):
         seed_learning(self.connection)
         doc = v2.pages.documents._books(types.SimpleNamespace(connection=self.connection, now=NOW))
@@ -1254,6 +1266,20 @@ press('Teams & Facilitation'); press('other'); R.other = ELS['books-rows'].html;
         self.assertIn("On Queues", r["other"])
         self.assertIn("A Bare Book", r["other"])
         self.assertNotIn("Agile Retrospectives", r["other"])
+
+    def test_a_listed_category_counts_under_its_tile_not_other(self):
+        """pack sd:7695: a row whose category is a list, one value in the set, counts under that value's tile; the page
+        files by the read's `filed`, not by the joined text."""
+        learning(self.connection, "Listed Book", "queued", **{"content-type": "book", "category": ["Computers", "communication"]})
+        out = self.run_view("""window.shell.view.show('books'); await flush();
+R.filters = ELS['books-filters'].html;
+ELS['books-filters'].listeners.click[0]({ target: { closest: s => s === '[data-f="category"]' ? { dataset: { f: 'category', v: 'Communication' } } : null } });
+R.rows = ELS['books-rows'].html;""", self.books())
+        r = out["R"]
+        self.assertIn('title="Communication: 1"', r["filters"])
+        self.assertIn('title="Other: 2"', r["filters"])
+        self.assertIn("Listed Book", r["rows"])
+        self.assertNotIn("On Queues", r["rows"])
 
     def test_clear_filters_in_the_empty_view_clears_the_search_too(self):
         """sd:6285: the empty state's Clear filters cleared the read state only, so a search that matched nothing stayed."""

@@ -182,6 +182,19 @@ class Realms(Fixture):
         self.assertEqual(places.realm_of("/repos/hoa", "task", self.RULES), "personal")
         self.assertEqual(places.realm_of("/repos/system-two", "task", self.RULES), "personal")
 
+    def test_the_hoa_checkout_is_hoa_before_any_glob_and_without_a_realm_list(self):
+        """pack sd:7687: the hoa checkout (`hoa`, `area_of`'s) is HOA, not Personal, so its rows leave Personal for
+        the HOA tab; before a glob that claims it, without a realm list, and with ~ in either path."""
+        claims = [{"id": "work", "label": "Work", "globs": ["/repos/*"]}]
+        for rules in (self.RULES, claims, [], None):
+            with self.subTest(rules=rules):
+                self.assertEqual(places.realm_of("/repos/hoa", "task", rules, "/repos/hoa"), "hoa")
+        self.assertEqual(places.realm_of("~/repos/hoa", "task", None, str(Path.home() / "repos/hoa")), "hoa")
+        self.assertEqual(places.realm_of(str(Path.home() / "repos/hoa"), "lane", None, "~/repos/hoa"), "hoa")
+        self.assertEqual(places.realm_of("/repos/system", "task", claims, "/repos/hoa"), "work")
+        self.assertEqual(places.realm_of(None, "task", claims, "/repos/hoa"), "personal")
+        self.assertIsNone(places.realm_of("/repos/hoa", "report", claims, "/repos/hoa"))
+
     def test_a_repo_stored_with_a_tilde_matches_a_tilde_glob(self):
         # The database keeps a repo as ~/repos/...; realms() expands a glob's ~, so the repo's ~ must expand too.
         rules = places.realms(self.connection, self.conf("realm|work|Work|~/repos/example-work/*\n"))["list"]
@@ -225,14 +238,14 @@ class Realms(Fixture):
             doc = tasks_screen.document(self.connection, now=NOW)
         realm = {r["id"]: r["realm"] for r in doc["rows"]}
         self.assertEqual((realm[self.hoa_item], realm[self.home_item], realm[self.other_item]),
-                         ("personal", "personal", "work"))
+                         ("hoa", "personal", "work"))
         self.assertTrue(all(r["realm"] is None for r in doc["rows"] if r["kind"] == "report"))
         self.assertEqual(doc["realms"], {"state": "read", "source": "<config>/project-dashboard/realms.conf",
                                          "problems": []})
         with mock.patch.object(places, "REALMS_CONFIG", self.dir / "absent.conf"):
             doc = tasks_screen.document(self.connection, now=NOW)
         realm = {r["id"]: r["realm"] for r in doc["rows"]}
-        self.assertEqual((realm[self.hoa_item], realm[self.home_item], realm[self.other_item]), (None, "personal", None))
+        self.assertEqual((realm[self.hoa_item], realm[self.home_item], realm[self.other_item]), ("hoa", "personal", None))
         self.assertEqual(doc["realms"]["state"], "missing")
 
 
@@ -395,6 +408,13 @@ class RealmPlaces(RealmFixture):
             raise sqlite3.OperationalError("database is locked")
 
         return mock.patch.object(writes, "read_settings", refuse)
+
+    def test_a_realm_whose_glob_matches_the_hoa_checkout_leaves_its_items_to_hoa(self):
+        """pack sd:7687: a realm place's Tasks are its Tasks tab's rows, and the hoa checkout's rows are HOA's there."""
+        self.realms.write_text("realm|acme|Acme|/repos/*\n", encoding="utf-8")
+        doc = places.tasks(self.connection, "acme", now=NOW)
+        self.assertEqual((doc["state"], self.ids(doc)), ("read", sorted([self.acme_item, self.other_item])))
+        self.assertEqual(self.ids(places.tasks(self.connection, "hoa", now=NOW)), [self.hoa_item])
 
     def test_tasks_are_the_realms_open_items_the_rows_of_tasks_realm_view(self):
         doc = places.tasks(self.connection, "acme", now=NOW)
@@ -971,6 +991,9 @@ class TheOverviewScript(Fixture):
         # A tile whose folder is not here says why, and its button is off with the reason.
         self.assertIn("<p class=\"why\">/x is not on this machine, so its actions run elsewhere.</p>", rows)
         self.assertIn('data-tile-act="Start" aria-disabled="true"', rows)
+        # pack sd:7675: an action that runs turns its button's icon; one that ended does not.
+        self.assertRegex(rows, r'data-tile-act="Refresh" aria-busy="true"[^>]*><svg[^>]*>.*?</svg>Refresh</button>')
+        self.assertNotRegex(rows, r'data-tile-act="Deploy" aria-busy')
 
     def test_a_buttons_hover_says_what_it_does_then_the_command(self):
         # Pack sd:7536: the act line's help leads; with none, the hover names the action plainly. The command is the
@@ -1115,15 +1138,17 @@ for (const v of ['work', 'hoa', 'home', 'personal']) { await realm(v); R[v] = EL
         # Realm is no filter now: the bar holds Kind, Repo and the rest, in every tab.
         self.assertNotIn('data-pick="realm"', r["filters"])
         self.assertIn('data-pick="kind"', r["filters"])
-        # sd:5064: Personal, the first tab, is every row no realm claims: the hoa checkout's and the one with no repo.
-        self.assertEqual([t in r["first"] for t in self.TITLES], [True, True, False])
+        # sd:5064: Personal, the first tab, is every row no realm claims: the one with no repo. pack sd:7687: the hoa
+        # checkout's row is realm hoa, so it sits in HOA alone, not in Personal too.
+        self.assertEqual([t in r["first"] for t in self.TITLES], [False, True, False])
         self.assertEqual([t in r["work"] for t in self.TITLES], [False, False, True])
         self.assertEqual([t in r["hoa"] for t in self.TITLES], [True, False, False])
         self.assertEqual([t in r["home"] for t in self.TITLES], [False, True, False])
-        self.assertEqual([t in r["personal"] for t in self.TITLES], [True, True, False])
+        self.assertEqual([t in r["personal"] for t in self.TITLES], [False, True, False])
         # Each tab carries its tasks (sd:5524); the shell keeps the tab in #view=, so the query names no realm.
         # The report row is in no realm (places.realm_of), so it sits in Personal too.
-        self.assertEqual(out["counts"], {"personal": 4, "work": 1, "hoa": 2, "home": 1})
+        # pack sd:7687: the hoa checkout's open and done rows left Personal for HOA (Personal held 4).
+        self.assertEqual(out["counts"], {"personal": 2, "work": 1, "hoa": 2, "home": 1})
         self.assertEqual(r["urls"], ["view=board"] * 5)
 
     def test_an_address_or_an_older_link_lands_on_its_realm(self):
@@ -1131,11 +1156,11 @@ for (const v of ['work', 'hoa', 'home', 'personal']) { await realm(v); R[v] = EL
         All tab is gone: ?realm=all still lists every realm, and #view=all opens Personal, the address saying #view=personal."""
         self.doc, self.details = self.realm_doc(), {}
         prelude = self.REALMS + "var history = { state: null, replaceState: (s, t, u) => { OUT.replaced = u; location.hash = u; } };\n"
-        for search, hash_, shown in (("?realm=hoa", "", [True, False, False]), ("", "#view=all", [True, True, False]),
+        for search, hash_, shown in (("?realm=hoa", "", [True, False, False]), ("", "#view=all", [False, True, False]),
                                      ("?realm=all", "", [True, True, True]), ("?realm=all", "#view=work", [True, True, True]),
                                      ("", "#view=hoa", [True, False, False]), ("", "#view=home", [False, True, False]),
                                      ("", "#view=work", [False, False, True]), ("?realm=home", "#view=all", [False, True, False]),
-                                     ("", "#view=nope", [True, True, False]), ("?realm=nope", "", [True, True, False])):
+                                     ("", "#view=nope", [False, True, False]), ("?realm=nope", "", [False, True, False])):
             with self.subTest(search=search, hash=hash_):
                 out = self.run_tasks("R.board = ELS['view-board'].html;", search=search, hash=hash_, prelude=prelude)
                 self.assertEqual([t in out["R"]["board"] for t in self.TITLES], shown)
@@ -1156,7 +1181,7 @@ R.left = OUT.urls[OUT.urls.length - 1];""", search="?view=list&realm=all")
         self.assertIsNone(r["cur"])
         self.assertIn("All realms", r["sub"])
         self.assertIn("realm=all", r["kept"])
-        self.assertEqual([t in r["list2"] for t in self.TITLES], [True, True, False])
+        self.assertEqual([t in r["list2"] for t in self.TITLES], [False, True, False])
         self.assertEqual(r["cur2"], "personal")
         self.assertNotIn("All realms", r["sub2"])
         self.assertNotIn("realm=all", r["left"])
@@ -1169,12 +1194,13 @@ R.left = OUT.urls[OUT.urls.length - 1];""", search="?view=list&realm=all")
         views = self.run_tasks("R.views = window.PAGE_VIEWS.map(v => v.id);", prelude=prelude)["R"]["views"]
         self.assertEqual(views, ["personal", "work", "hoa", "home"])
 
-    def test_without_realms_conf_personal_holds_every_row_and_says_why(self):
+    def test_without_realms_conf_personal_holds_every_row_but_hoas_and_says_why(self):
         # pack sd:7216: a row in no realm tab (no realm list read, or a realm with no tab) sits in Personal, not only All.
+        # pack sd:7687: the hoa checkout's row is HOA's without a realm list too.
         with mock.patch.object(places, "REALMS_CONFIG", self.dir / "realms.conf"):
             self.doc, self.details = tasks_screen.document(self.connection, now=NOW), {}
         r = self.run_tasks("R.board = ELS['view-board'].html; R.sub = ELS.subhead.html; await realm('work'); R.work = ELS['view-board'].html;")["R"]
-        self.assertEqual([t in r["board"] for t in self.TITLES], [True, True, True])
+        self.assertEqual([t in r["board"] for t in self.TITLES], [False, True, True])
         self.assertEqual([t in r["work"] for t in self.TITLES], [False, False, False])
         self.assertIn("repos in no realm: no realm list; set dashboard.realms on Settings", r["sub"])
 
@@ -1337,6 +1363,13 @@ class TheRule(unittest.TestCase):
         self.assertIsNone(places.area_of(None, "report", "/repos/hoa"))
         self.assertIsNone(places.area_of("/repos/system", "task", "/repos/hoa"))
         self.assertIsNone(places.area_of("/repos/hoa", "task", None))
+
+    def test_area_of_expands_a_tilde_on_either_side_as_realm_of_does(self):
+        # sd:7707: a row stored as ~/repos/hoa against an absolute registered path (or the reverse) is still HOA's.
+        home = str(Path.home() / "repos/hoa")
+        self.assertEqual(places.area_of("~/repos/hoa", "task", home), "hoa")
+        self.assertEqual(places.area_of(home, "task", "~/repos/hoa"), "hoa")
+        self.assertIsNone(places.area_of("~/repos/hoa-two", "task", home))
 
     def test_a_series_names_a_job_lower_cased_with_hyphens(self):
         self.assertEqual(places.series_job("HOA Morning Digest"), "hoa-morning-digest")

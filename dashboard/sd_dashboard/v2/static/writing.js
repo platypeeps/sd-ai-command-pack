@@ -16,9 +16,11 @@ window.PAGE_ATTENTION = { state: 'unknown', n: 0, what: 'pieces not read' };
 // the layout menu's view-btn and view-menu (sd:5641), which the shell would hide as panels.
 // sd:7213: no All view. Every piece sits in one view: its realm's, else Personal, which takes a piece of no realm, of one
 // not read (realm_of None) and of one that has no view here. An old #view=all link opens Personal; a stays unused, so
-// the other views keep their keys.
+// the other views keep their keys. pack sd:7687: HOA comes last, the hoa checkout's pieces (places.realm_of), so they
+// leave Personal as on Tasks; like a realm, it hides with no piece in it.
 window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
-  ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'all', 'board', 'editor', 'btn', 'menu'].includes(r.id)).map(r => ({ id: r.id, label: r.label }))];
+  ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'hoa', 'all', 'board', 'editor', 'btn', 'menu'].includes(r.id)).map(r => ({ id: r.id, label: r.label })),
+  { id: 'hoa', label: 'HOA' }];
 {
   const used = new Set(['b', 'e', 'a']);
   window.PAGE_VIEWS.forEach(v => { if (!v.key) { v.key = [...v.id].find(c => /[a-z]/.test(c) && !used.has(c)); used.add(v.key); } });
@@ -139,6 +141,9 @@ addEventListener('DOMContentLoaded', () => {
     // and with no tile pressed the column shows the first `top` of them, the highest overall.
     const nArea = a => (I.areas || {})[a === 'none' ? '' : a] || 0;
     const areaTiles = [...IDEA_AREAS.map(a => [a, a]), ...(nArea('none') ? [['none', 'No area']] : [])];
+    // pack sd:7695: a pressed tile a read again no longer draws (No area once every idea has one) clears, else the column
+    // stays narrowed to nothing with no tile to press off.
+    if (ideaArea && !(I.state === 'read' && I.count && areaTiles.some(([a]) => a === ideaArea))) ideaArea = '';
     const ideasShown = ideaArea ? I.rows.filter(i => (ideaArea === 'none' ? !i.area : i.area === ideaArea)) : I.rows.slice(0, I.top || I.rows.length);
     const ofWhat = !ideaArea ? `${I.count} inbox ideas` : ideaArea === 'none' ? `${nArea('none')} ideas with no area` : `${nArea(ideaArea)} ${ideaArea} ideas`;
     const idea = i => html`<article class="card idea" aria-label="Idea: ${i.title}"><div class="top"><span class="id">${i.created || ''}</span>${i.area ? html`<span class="area">${i.area}</span>` : ''}<span class="tag">${i.score == null ? 'no score' : `${i.score}/10`}</span></div>

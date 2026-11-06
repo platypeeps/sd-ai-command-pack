@@ -56,7 +56,7 @@ class URLContractTests(ReviewFixture):
         with mock.patch.object(sd_review, "run_provider", wraps=sd_review.run_provider) as transport:
             result = self.run_review(root, args, client)
         subject, prompt = transport.call_args_list[0].args[2:4]
-        material = sd_review.review_material(root, subject)
+        material = sd_review.review_material(root, subject, prompt)
         prefix = f"{prompt}\nSchema: {json.dumps(sd_review.CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{material}"
         self.assertGreater(len(prefix.encode()), 150000)
         self.assertIn(json.dumps(prior["findings"], sort_keys=True), prompt)

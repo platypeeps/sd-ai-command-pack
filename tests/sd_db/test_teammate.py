@@ -234,6 +234,47 @@ class Start(Case):
         self.assertEqual(workflow.item_state(self.db, item)["item"]["status"], "in_progress")
 
 
+class SecondBranch(Case):
+    """pack sd:7737: one open bundle branch per repository; a second needs `into` or a reason."""
+
+    def second(self, items, **extra):
+        return teammate.start(self.db, items, worktree="/w/pack-2", branch="feat/y", budget_minutes=90,
+                              owner="lead", **extra)
+
+    def notes(self, item):
+        return [row[0] for row in self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'comment' "
+                                                  "ORDER BY id", (item,))]
+
+    def test_a_second_branch_of_the_repo_is_refused_naming_the_open_branch_and_worktree(self):
+        self.start([self.item()])
+        later = self.item()
+        before = self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0]
+        with self.assertRaisesRegex(teammate.TeammateRefused, r"open branch feat/x in /w/pack-1 .*--reason state-move"):
+            self.second([later])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment").fetchone()[0], before)
+        with self.assertRaisesRegex(teammate.TeammateRefused, "state-move or in-lane"):
+            self.second([later], reason="because")
+
+    def test_the_same_branch_another_repo_and_an_ended_run_are_not_a_second_branch(self):
+        runs = [self.start([self.item()]), self.start([self.item()])]
+        self.second([self.item(repo=B)])
+        for run in runs:
+            teammate.end(self.db, run["members"][0]["item"])
+        self.second([self.item()])
+
+    def test_into_the_open_branch_or_a_reason_allows_it_and_the_reason_is_a_note(self):
+        self.start([self.item()])
+        side, moving = self.item(), self.item()
+        self.second([side], into="feat/x")
+        self.assertIn("merges into feat/x", self.notes(side)[-1])
+        teammate.start(self.db, [moving], worktree="/w/pack-3", branch="feat/z", budget_minutes=90, owner="lead",
+                       reason="state-move")
+        self.assertIn("Second open branch feat/z of /fixture/a beside feat/x, feat/y: state-move", self.notes(moving)[-2])
+        with self.assertRaisesRegex(teammate.TeammateRefused, "open branch"):
+            teammate.start(self.db, [self.item()], worktree="/w/pack-4", branch="feat/w", budget_minutes=90,
+                           owner="lead", into="feat/q")
+
+
 class Ownership(Case):
     """An open teammate run owns its items against every pickup; the session's own writes still pass.
 

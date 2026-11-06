@@ -2,9 +2,10 @@
 // reference is marked "build:". The events are /api/activity (activity_screen.py), never sample data. A command that executes
 // posts to the route v1 already answers, and its toast comes after the write lands, not before.
 const { html, put, plural, cells } = window.markup;
-// The shell's view switch (shell.js, view block): the Timeline first, the 24-hour lane chart second. Both read /api/activity.
-window.PAGE_VIEWS = [{ id: 'timeline', label: 'Timeline' }, { id: 'cadence', label: 'Cadence' }];
-// The shell's Shapeshift bar (sd:5539) filters the timeline through shell:filter, and the cadence fallback table itself.
+// The shell's view switch (shell.js, view block): the Timeline alone. pack sd:7681: the lane chart that was the Cadence
+// view is Today's Timeline now, one lane per kind under Today's own lanes.
+window.PAGE_VIEWS = [{ id: 'timeline', label: 'Timeline' }];
+// The shell's Shapeshift bar (sd:5539) filters the timeline through shell:filter.
 window.PAGE_FILTER = { timeline: 'the timeline' };
 addEventListener('DOMContentLoaded', () => {
   const { ICON, toast, suggest, openPane } = window.shell;
@@ -24,7 +25,8 @@ addEventListener('DOMContentLoaded', () => {
   const kindOf = id => KINDS.find(k => k.id === id);
   const hhmm = iso => iso.slice(11, 16);
   const ago = iso => { const m = Math.round((OBSERVED - Date.parse(iso)) / 60000); return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`; };
-  // The document holds the 24 hours and, for the journal, older records too; the chart and the 24h range are the window.
+  // The document holds the 24 hours, or the 7 days a ?range=7d link asks for (Today's Timeline, pack sd:7681), and, for the
+  // journal, older records too; the document's range is the window.
   const inWindow = e => Date.parse(e.at) >= RANGE.from;
 
   // ---------- Data (build) ----------
@@ -39,7 +41,7 @@ addEventListener('DOMContentLoaded', () => {
   // an event the read no longer lists loses its pick and runs no command; a failed load leaves no row, object or observed
   // time from the last one; and a failed reread after a write keeps the rows and says the write landed.
   const activity = window.shell.read({
-    source: '/api/activity', what: 'the events',
+    source: () => F.week ? '/api/activity?range=7d' : '/api/activity', what: 'the events',
     adopt: doc => {
       DOC = doc; EVENTS = doc.events; OBSERVED = Date.parse(doc.read); RANGE = { from: Date.parse(doc.from), to: Date.parse(doc.to) };
       document.body.dataset.observed = doc.read;
@@ -49,7 +51,7 @@ addEventListener('DOMContentLoaded', () => {
       const failed = Object.entries(doc.sources).filter(([, why]) => why);
       return { objects: EVENTS.map(objectOf),
         state: failed.length ? { kind: 'partial', text: failed.map(([s, why]) => `${s}: ${why}`).join(' · '), source: '/api/activity' }
-          : !EVENTS.some(inWindow) ? { kind: 'empty', text: 'No merge, run, review or command in the last 24 hours.' } : null };
+          : !EVENTS.some(inWindow) ? { kind: 'empty', text: `No merge, run, review or command in the last ${F.week ? '7 days' : '24 hours'}.` } : null };
     },
     clear: () => { DOC = null; EVENTS = []; REPOS = []; Object.keys(OUTPUT).forEach(id => delete OUTPUT[id]); delete document.body.dataset.observed; },
     draw: () => update(),
@@ -65,14 +67,15 @@ addEventListener('DOMContentLoaded', () => {
   window.PAGE_AGAIN = { title: 'Read the events again', run: load };
 
   // ---------- State (mirrored in the URL) ----------
-  const F = { kind: new Set(), repo: new Set(), state: '', q: '', hour: false, all: false }; // all: every event read, the journal's older records too; only a link sets it (palette.py)
+  const F = { kind: new Set(), repo: new Set(), state: '', q: '', hour: false, all: false, week: false }; // all: every event read, the journal's older records too; only a link sets it (palette.py)
+  // week: the 7-day read; only a link sets it (Today's Timeline at 7d), and a range press or Clear all reads 24 hours again
   let page = 1, size = 50, selected = null;
   function readURL() {
     const p = new URLSearchParams(location.search);
     // A kind the page does not draw (an old link's deploy or mail) is dropped, or it would hide every row.
     (p.get('kind') || '').split(',').filter(v => kindOf(v)).forEach(v => F.kind.add(v));
     (p.get('repo') || '').split(',').filter(Boolean).forEach(v => F.repo.add(v));
-    F.state = p.get('state') || ''; F.q = p.get('q') || ''; F.hour = p.get('range') === '1h'; F.all = p.get('range') === 'all';
+    F.state = p.get('state') || ''; F.q = p.get('q') || ''; F.hour = p.get('range') === '1h'; F.all = p.get('range') === 'all'; F.week = p.get('range') === '7d';
     const asked = Number(p.get('page'));
     page = Number.isInteger(asked) && asked > 0 ? asked : 1; // a page is a positive integer; anything else is the first page
     size = [25, 50, 100, 200].includes(+p.get('size')) ? +p.get('size') : 50;
@@ -86,12 +89,13 @@ addEventListener('DOMContentLoaded', () => {
     if (F.q) p.set('q', F.q);
     if (F.hour) p.set('range', '1h');
     if (F.all) p.set('range', 'all');
+    if (F.week) p.set('range', '7d');
     if (page > 1) p.set('page', page);
     if (size !== 50) p.set('size', size);
     window.shell.url(p); // build: the shell keeps ?row=
   }
   const since = () => F.hour ? OBSERVED - 36e5 : 0;
-  const active = () => F.kind.size + F.repo.size + (F.state ? 1 : 0) + (F.q ? 1 : 0) + (F.hour || F.all ? 1 : 0);
+  const active = () => F.kind.size + F.repo.size + (F.state ? 1 : 0) + (F.q ? 1 : 0) + (F.hour || F.all || F.week ? 1 : 0);
   const match = e => (!F.kind.size || F.kind.has(e.k)) && (!F.repo.size || F.repo.has(e.repo)) && (!F.state || e.s === F.state) && (F.all || Date.parse(e.at) >= (since() || RANGE.from)) &&
     (!F.q || `${e.what} ${e.repo || ''} ${e.ref} ${e.detail || ''}`.toLowerCase().includes(F.q.toLowerCase())); // ?q= keeps its case
 
@@ -107,7 +111,7 @@ addEventListener('DOMContentLoaded', () => {
     const shown = EVENTS.filter(inRange);
     const n = (k, s) => shown.filter(e => e.k === k && (!s || e.s === s)).length;
     const worst = k => unknownWhy(k) ? 'unknown' : n(k, 'warning') ? 'warning' : n(k, 'caution') ? 'caution' : 'ok';
-    // A lamp, its Kind chip and its lane button are one control (design.md § Interaction rules): pressed is F.kind.
+    // A lamp and its Kind chip are one control (design.md § Interaction rules): pressed is F.kind.
     // build: a kind whose read failed is a lamp that cannot be pressed: it has no answer to filter.
     const cell = (k, val) => unknownWhy(k.id)
       ? { state: 'unknown', attrs: html` data-kind="${k.id}"`, label: k.name, mark: ICON(k.icon), val: html`<span class="ph"><b>unknown</b></span> · <span class="ph">not read</span>` }
@@ -118,7 +122,7 @@ addEventListener('DOMContentLoaded', () => {
     const VAL = {
       merge: html`<span class="ph"><b>${n('merge')}</b> merged</span> · <span class="ph">${plural(new Set(shown.filter(e => e.k === 'merge').map(e => e.repo)).size, 'repo')}</span>`,
       run: html`<span class="ph"><b>${jobsFailed}</b> jobs failed</span> · <span class="ph">${asg.filter(e => e.status === 'blocked').length} of ${asg.length} runs blocked</span>`,
-      command: html`<span class="ph"><b>${n('command', 'warning')}</b> failed</span> · <span class="ph">${n('command')} ${F.all ? 'in the journal' : F.hour ? 'in 1 h' : 'in 24 h'}</span>`,
+      command: html`<span class="ph"><b>${n('command', 'warning')}</b> failed</span> · <span class="ph">${n('command')} ${F.all ? 'in the journal' : F.hour ? 'in 1 h' : F.week ? 'in 7 d' : 'in 24 h'}</span>`,
       // build: the design's "want changes · approve" has no source; a delivery records clean or adjudicated (sd:2211).
       review: html`<span class="ph"><b>${n('review', 'caution')}</b> adjudicated</span> · <span class="ph">${n('review', 'ok')} clean</span>${DOC?.review_unrecorded ? html` · <span class="ph">${plural(DOC.review_unrecorded, 'merge')} unrecorded</span>` : ''}`,
     };
@@ -128,43 +132,11 @@ addEventListener('DOMContentLoaded', () => {
   $('annunciator').addEventListener('click', e => {
     const c = e.target.closest('button.cell'); if (!c) return;
     const k = c.dataset.kind;
-    F.kind.has(k) ? F.kind.delete(k) : F.kind.add(k); page = 1; update(); window.shell.view.show('timeline'); // adds to the kind filter, as the lane does
-  });
-
-  // ---------- Lane chart (hand-rolled SVG, patterns.md § Charts) ----------
-  const W = 720, H = 24;
-  const x = t => ((Date.parse(t) - RANGE.from) / (RANGE.to - RANGE.from)) * W;
-  const hours = () => Array.from({ length: 25 }, (_, i) => RANGE.from + i * 36e5);
-  function renderLanes() {
-    const H24 = hours();
-    const grid = H24.filter((_, i) => i % 3 === 0).map(t => { const gx = ((t - RANGE.from) / (RANGE.to - RANGE.from) * W).toFixed(1); return html`<line x1="${gx}" x2="${gx}" y1="0" y2="${String(H)}"/>`; });
-    const order = { ok: 0, queued: 0, unknown: 0, caution: 1, warning: 2 };
-    const lanes = KINDS.map(k => {
-      const evs = EVENTS.filter(e => e.k === k.id && inWindow(e) && (!F.repo.size || F.repo.has(e.repo))); // the chart is the 24 h window
-      const why = unknownWhy(k.id);
-      const btn = html`<button class="lane-btn" type="button" data-kind="${k.id}" aria-pressed="${String(F.kind.has(k.id))}">${ICON(k.icon)}<span>${k.name}</span><span class="n">${why ? '▨' : String(evs.length)}</span></button>`;
-      if (why) return html`<div class="lane">${btn}<div class="track unknown"><svg viewBox="0 0 ${String(W)} ${String(H)}" preserveAspectRatio="none" aria-hidden="true"><g class="grid">${grid}</g></svg><p class="why-unknown"><span>▨ unknown · ${k.name.toLowerCase()} not read</span></p></div></div>`;
-      // Draw ok first, then caution, then warning, so the loudest ticks sit on top.
-      const ticks = evs.slice().sort((a, b) => order[a.s] - order[b.s]).map(e => html`<rect class="tick ${e.s}${e.id === selected ? ' sel' : ''}" data-id="${e.id}" x="${(x(e.at) - 1.5).toFixed(1)}" y="4" width="3" height="${String(H - 8)}"><title>${e.what} · ${hhmm(e.at)}Z</title></rect>`);
-      return html`<div class="lane">${btn}<div class="track"><svg viewBox="0 0 ${String(W)} ${String(H)}" preserveAspectRatio="none" role="img" aria-label="${k.name}: ${String(evs.length)} in 24 hours"><g class="grid">${grid}</g>${ticks}</svg></div></div>`;
-    });
-    const axis = html`<div class="lane"><span class="axis-label"></span><div class="axis"><svg viewBox="0 0 ${String(W)} 16" preserveAspectRatio="none" aria-hidden="true">${H24.filter((_, i) => i % 6 === 0 && i < 24).map(t => html`<text x="${((t - RANGE.from) / (RANGE.to - RANGE.from) * W + 3).toFixed(1)}" y="12">${new Date(t).toISOString().slice(11, 16)}</text>`)}</svg></div></div>`;
-    put($('lanes'), html`${lanes}${axis}`);
-    const bins = H24.slice(0, 24);
-    put($('chart-table'), html`<table><caption class="sr">Events per hour by kind</caption><thead><tr><th scope="col">Hour (UTC)</th>${KINDS.map(k => html`<th scope="col">${k.name}</th>`)}</tr></thead><tbody>${bins.map(t => html`<tr><td>${new Date(t).toISOString().slice(5, 16).replace('T', ' ')}</td>${KINDS.map(k => unknownWhy(k.id) ? html`<td class="u">▨</td>` : html`<td>${String(EVENTS.filter(e => e.k === k.id && (!F.repo.size || F.repo.has(e.repo)) && Date.parse(e.at) >= t && Date.parse(e.at) < t + 36e5).length)}</td>`)}</tr>`)}</tbody></table>`);
-  }
-  $('lanes').addEventListener('click', e => {
-    // The chart is the Cadence view (sd:5064). A tick stays on it and opens Details with the event's commands (sd:6681);
-    // a lane shows the Timeline with that kind.
-    const t = e.target.closest('rect.tick'); if (t) return select(t.dataset.id, true);
-    const b = e.target.closest('.lane-btn'); if (!b) return;
-    const k = b.dataset.kind;
-    if (unknownWhy(k)) return showKind(k);
-    F.kind.has(k) ? F.kind.delete(k) : F.kind.add(k); page = 1; update(); window.shell.view.show('timeline');
+    F.kind.has(k) ? F.kind.delete(k) : F.kind.add(k); page = 1; update(); window.shell.view.show('timeline'); // adds to the kind filter
   });
 
   // ---------- Filters: one bar (state, range, repo, the picked tokens, Clear all) ----------
-  // A lamp and a lane already toggle each kind, so the bar draws no kind chips; a picked kind shows as a removable token.
+  // A lamp already toggles each kind, so the bar draws no kind chips; a picked kind shows as a removable token.
   // sd:5463: the shell draws the bar (shell.list.fbar), as on every table page; the count sits on the Timeline title line.
   const STATES = [['warning', '■', 'failed'], ['caution', '▲', 'caution'], ['ok', '●', 'ok']];
   const pop = $('repo-pop'), repoQ = $('repo-q'), repoList = $('repo-list');
@@ -176,9 +148,9 @@ addEventListener('DOMContentLoaded', () => {
     const { fseg, tok, fbar } = window.shell.list;
     put($('filters'), fbar(html`${fseg('state', 'State', STATES.map(([s, g, w]) => ({ v: s, pressed: F.state === s, title: `${w}: ${count(s)}`,
       label: html`<span class="g-${s}" aria-hidden="true">${g}</span><span class="n">${count(s)}</span><span class="sr"> ${w}</span>` })))}
-      ${fseg('range', 'Range', [{ v: '1h', label: '1h', pressed: F.hour }, { v: '24h', label: '24h', pressed: !F.hour && !F.all }])}
+      ${fseg('range', 'Range', [{ v: '1h', label: '1h', pressed: F.hour }, { v: '24h', label: '24h', pressed: !F.hour && !F.all && !F.week }])}
       ${REPOS.length || F.repo.size ? html`<button type="button" class="pick" id="repo-btn" aria-haspopup="listbox" aria-expanded="${String(!pop.hidden)}" aria-controls="repo-pop">Repo${F.repo.size ? html` <span class="n">· ${String(F.repo.size)}</span>` : ''}</button>` : ''}
-      ${[...F.kind].map(k => tok('kind', k, kindOf(k).name))}${[...F.repo].map(r => tok('repo', r, r))}${F.q ? tok('q', '', `“${F.q}”`) : ''}${F.all ? tok('range', 'all', 'Older journal records') : ''}`, { clear: active() }));
+      ${[...F.kind].map(k => tok('kind', k, kindOf(k).name))}${[...F.repo].map(r => tok('repo', r, r))}${F.q ? tok('q', '', `“${F.q}”`) : ''}${F.all ? tok('range', 'all', 'Older journal records') : ''}${F.week ? tok('range', '7d', 'Last 7 days') : ''}`, { clear: active() }));
     window.shell.view.count('timeline', shown);
   }
   $('filters').addEventListener('click', e => {
@@ -187,8 +159,8 @@ addEventListener('DOMContentLoaded', () => {
     const r = e.target.closest('[data-f="range"]');
     if (r) {
       const v = r.dataset.v;
-      // The All token removes itself to 24h.
-      F.hour = v === '1h'; F.all = false; page = 1; return update();
+      // The All and 7d tokens remove themselves to 24h; leaving 7 days reads the 24 hours again.
+      const was = F.week; F.hour = v === '1h'; F.all = false; F.week = false; page = 1; return was ? load() : update();
     }
     const c = e.target.closest('[data-f]'); if (!c) return;
     const { f, v } = c.dataset;
@@ -197,7 +169,7 @@ addEventListener('DOMContentLoaded', () => {
     if (f === 'q') { F.q = ''; window.shell.filter(''); }
     page = 1; update();
   });
-  function clearAll() { F.kind.clear(); F.repo.clear(); F.state = ''; F.q = ''; F.hour = false; F.all = false; window.shell.filter(''); page = 1; update(); }
+  function clearAll() { const was = F.week; F.kind.clear(); F.repo.clear(); F.state = ''; F.q = ''; F.hour = false; F.all = false; F.week = false; window.shell.filter(''); page = 1; was ? load() : update(); }
 
   // The repo picker: a listbox under the Repo button, every repo with its count, most events first. Typing filters it;
   // the arrows move, Enter or a tap picks, Esc closes and gives focus back to the button. A picked repo with no events
@@ -274,7 +246,7 @@ addEventListener('DOMContentLoaded', () => {
     put($('pager'), html`<span>${a}–${z} of ${all.length}</span>
       <div class="chips" role="group" aria-label="Page">${page > 1 ? html`<button class="chip" type="button" data-p="${String(page - 1)}">${ICON('chevron-left')}Previous</button>` : ''}${page < pages ? html`<button class="chip" type="button" data-p="${String(page + 1)}">Next${ICON('chevron-right')}</button>` : ''}</div>
       <div class="chips" role="group" aria-label="Rows per page">${[25, 50, 100, 200].map(n => html`<button class="chip" type="button" data-size="${String(n)}" aria-pressed="${String(n === size)}">${n}</button>`)}</div>`);
-    put($('sub'), html`${plural(EVENTS.filter(inWindow).length, 'event')} across the fleet · last 24 hours to ${new Date(OBSERVED).toISOString().slice(11, 16)} UTC, ${new Date(OBSERVED).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' })}`);
+    put($('sub'), html`${plural(EVENTS.filter(inWindow).length, 'event')} across the fleet · last ${F.week ? '7 days' : '24 hours'} to ${new Date(OBSERVED).toISOString().slice(11, 16)} UTC, ${new Date(OBSERVED).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' })}`);
     // The journal note shows only what the timeline misses: skipped exec notes and ones past the read cap (sd:2183).
     const skipped = Object.values(DOC?.journal_skipped || {}).reduce((a, n) => a + n, 0);
     $('journal-note').hidden = !skipped && !DOC?.journal_unread;
@@ -293,7 +265,7 @@ addEventListener('DOMContentLoaded', () => {
   tbody.addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) select(tr.dataset.id, true); });
 
   function update() {
-    renderAnnunciator(); renderLanes(); renderFilters(); renderRows(); writeURL();
+    renderAnnunciator(); renderFilters(); renderRows(); writeURL();
     // Selection follows the filter (design.md, Page contract): a hidden row gives way to the first visible one.
     const kept = window.shell.reconcile({ rows: tbody.querySelectorAll('tr[data-id]'), current: selected, select: id => select(id, false), clear: unselect });
     if (kept !== undefined) selected = kept;
@@ -328,7 +300,6 @@ addEventListener('DOMContentLoaded', () => {
   function show(id) {
     const e = EVENTS.find(v => v.id === id); if (!e) return;
     tbody.querySelectorAll('tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', String(tr.dataset.id === id)));
-    document.querySelectorAll('#lanes rect.tick').forEach(r => r.classList.toggle('sel', r.dataset.id === id));
     const k = kindOf(e.k), out = OUTPUT[id];
     put(details, html`<p class="kind"><span class="g-${e.s}" aria-hidden="true">${GLYPH[e.s] || GLYPH.unknown}</span> ${k.name.replace(/s$/, '')} · ${e.s}</p>
       <h2>${e.what}</h2>
@@ -339,13 +310,6 @@ addEventListener('DOMContentLoaded', () => {
     C.select(id);
     suggest([`Why did this ${e.k} happen?`, 'What else changed in this hour?', e.repo ? `Show all activity in ${e.repo}` : 'Rank what I should look at first']);
     swap();
-  }
-  function showKind(id) {
-    const k = kindOf(id);
-    put(details, html`<p class="kind"><span class="g-unknown" aria-hidden="true">▨</span> ${k.name} · unknown</p>
-      <h2>${k.name} not read</h2>
-      <p class="why">The read failed: ${unknownWhy(id)}. Unknown is not zero: ${k.name.toLowerCase()} may have happened. Reload reads again.</p>`);
-    window.shell.setContext?.(`${k.name}: not read`); openPane('tab-details'); swap();
   }
   function select(id, open) { selected = id; show(id); if (open) openPane('tab-details'); }
 

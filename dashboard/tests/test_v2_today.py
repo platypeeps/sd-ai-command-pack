@@ -195,7 +195,18 @@ class TheAssets(BrowserSession):
             self.assertIn(".track-plot", sel, f"{sel} also matches svg.i in the track table")
         self.assertTrue(any("width: 100%" in body for _, body in svg_rules), "the chart no longer fills its plot")
         self.assertIn('class="track-plot"', (V2 / "today.html").read_text(encoding="utf-8"))
-        self.assertIn("put($('track-plot'), marks.length ? html`<svg ", TODAY_JS)
+        self.assertIn("put($('track-plot'), marks.length || events.length || unknown ? html`<svg ", TODAY_JS)
+
+    def test_a_members_detail_in_details_sits_on_its_own_line(self):
+        """pack sd:7678: Details lists a group's members as title then `.via` detail. `.via` was styled
+        only under `.active`, the Queue table, so in Details the detail ran into the title
+        ('…b8aathe gate failed'). A rule that sets `.via` on its own line must reach #details."""
+        self.assertIn('<span class="via">${m.detail}</span>', TODAY_JS)
+        css = re.sub(r"/\*.*?\*/", "", (V2 / "static" / "today.css").read_text(encoding="utf-8"), flags=re.S)
+        block = [sel.strip() for sels, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css) if "display: block" in body
+                 for sel in sels.split(",")]
+        self.assertTrue([s for s in block if s.endswith(".via") and not s.startswith(".active")],
+                        "no rule puts .via on its own line outside .active")
 
 
     def test_the_queue_table_carries_its_caption(self):

@@ -58,6 +58,7 @@ from ..repos import (
     set_declaration,
     set_dependabot,
     set_github_issues,
+    set_issues_scope,
     set_jira_project,
     set_lane_host,
     set_managed,
@@ -685,7 +686,8 @@ def command_repo(argv: list[str]) -> int:
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
     `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
-    `repo github-issues <path> <off|read|ask>`, `repo jira-project <path> <KEY|off>`,
+    `repo github-issues <path> <off|read|ask>`, `repo issues-scope <path> <all|mine>`,
+    `repo jira-project <path> <KEY|off>`,
     `repo declare <path> [KIND [JSON|off]]`, `repo freeze <path> [UNTIL REASON | off]`,
     `repo remove <path> ...`.
 
@@ -712,6 +714,9 @@ def command_repo(argv: list[str]) -> int:
     `github-issues` sets the `policy` declaration's `issues` key (sd:4827,
     pack sd:6849): whether agents read the repository's third-party GitHub
     issues (`read`), and draft writes the operator approves (`ask`).
+    `issues-scope` sets its `issues_scope` key (pack sd:7672): whether intake
+    lists every third-party issue (`all`) or only those that reach the
+    operator (`mine`). `list` does not show it.
     `jira-project` sets `repo.jira_project` (sd:5103): the Jira project the
     dashboard files a sanitized issue in, or `off`. `list` does not show it,
     so no reader that counts fields moves. `declare` prints or sets
@@ -728,7 +733,7 @@ def command_repo(argv: list[str]) -> int:
     `lane_host` so the first four fields and the last two stay put.
     """
     verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
-             "dependabot", "github-issues", "jira-project", "declare", "freeze", "remove")
+             "dependabot", "github-issues", "issues-scope", "jira-project", "declare", "freeze", "remove")
     if not argv or argv[0] not in verbs:
         print(f"sd-db repo: expected {', '.join(verbs[:-1])} or {verbs[-1]}",
               file=sys.stderr)
@@ -822,6 +827,13 @@ def command_repo(argv: list[str]) -> int:
             path, before = set_github_issues(connection, rest[0], rest[1])
             print(f"sd-db: {path} policy.issues {before} -> {rest[1]}")
             return 0
+        if verb == "issues-scope":
+            if len(rest) != 2:
+                print("sd-db repo issues-scope: needs a path and all or mine", file=sys.stderr)
+                return 1
+            path, before = set_issues_scope(connection, rest[0], rest[1])
+            print(f"sd-db: {path} policy.issues_scope {before} -> {rest[1]}")
+            return 0
         if verb == "jira-project":
             if len(rest) != 2:
                 print("sd-db repo jira-project: needs a path and a Jira project key or off", file=sys.stderr)
@@ -848,7 +860,7 @@ def command_repo(argv: list[str]) -> int:
                 # An empty answer is an answer: a caller asking which
                 # repositories are managed gets none, not a failure.
                 print("sd-db: no repository is marked managed; run "
-                      "`bin/sd-db repo managed PATH yes`", file=sys.stderr)
+                      "`sd fleet standard` in a checkout", file=sys.stderr)
                 return 0
         for row in rows:
             # pack sd:7366: `ci` and the last field read the policy, in the words the columns used.

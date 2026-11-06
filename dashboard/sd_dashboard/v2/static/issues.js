@@ -16,10 +16,36 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
 // each with Undo. A hidden row leaves its list, the tally and the tab count; Open | Hidden (sd:6701), at the left of
 // each list's filter bar and kept as ?hidden=1, lists the hidden rows alone, with Unhide. A view store the read could not read hides nothing and turns
 // both commands off with its reason.
+// pack sd:7708: local categories for Jira issues, in the same view store; nothing is written to Jira. The Jira rows of Your
+// issues group by category, one group open at a time, as GitHub's Pull requests group by repo (today-github.js, sd:7664):
+// a press on a group opens it and closes the open one, a press on the open one closes it, and the selected row's group, or
+// the first with a row, opens on the first draw. Uncategorized is the last group. GitHub rows keep no group, as before,
+// and come first. Each row gets an Actions cell (the ⋯ menu); Set category (jira issue.category) and the Category select in
+// Details post /api/github/issues/view with the category, each with Undo. New category, in the section head, and a group's
+// Rename and Remove post /api/github/issues/categories with the list the page read; Remove asks nothing, offers Undo,
+// and leaves the group's issues uncategorized. A view store not read groups nothing: a line says why, and the commands are off.
 (() => {
-  const { html, put } = window.markup;
+  const { html, put, plural } = window.markup;
   const $ = id => document.getElementById(id);
-  let ISSUES = [], STORE = '';
+  let ISSUES = [], STORE = '', CATS = [];
+  // The open category group: undefined until the first draw picks one, null once every group is closed.
+  let OPEN;
+  const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+  const jira = r => r.tracker === 'Jira';
+  const actions = id => window.shell?.commands?.rowActions ? window.shell.commands.rowActions(id) : '';
+  const groupOf = r => r.category && CATS.includes(r.category) ? `cat:${r.category}` : 'none';
+  // The Jira rows in view by category, in the list's order, then Uncategorized; under Hidden an empty category is left out.
+  function groups(rows) {
+    const G = CATS.map(name => ({ key: `cat:${name}`, name, rows: rows.filter(r => groupOf(r) === `cat:${name}`) }));
+    const none = rows.filter(r => groupOf(r) === 'none');
+    return [...G.filter(g => g.rows.length || !showHidden()), ...(none.length ? [{ key: 'none', name: 'Uncategorized', rows: none }] : [])];
+  }
+  const groupRow = g => { const on = OPEN === g.key, at = g.rows.map(r => r.updated_at).filter(Boolean).sort().pop();
+    return html`<tr class="repo" data-cat="${g.key}" aria-expanded="${String(on)}">
+      <td class="what" colspan="2"><button type="button" class="disc" data-cat-open="${g.key}" aria-expanded="${String(on)}" aria-label="${on ? 'Close' : 'Open'} ${g.name}">${I('chevron-right')}</button><button type="button" class="pick" data-cat-open="${g.key}">${g.name}</button></td>
+      <td class="repo"></td><td class="why">${plural(g.rows.length, 'issue')}</td>
+      <td class="when">${at ? html`<time class="rel" datetime="${at}"></time>` : ''}</td>
+      <td class="act">${g.key === 'none' ? '' : actions(`isscat:${g.name}`)}</td></tr>`; };
   const hid = () => window.shell.aside.mode('hidden'), showHidden = () => hid() === 'aside';
   const inView = r => window.shell.aside.shows(hid(), r.hidden);
   // The read's view state: why Hide is off, or '' when it read.
@@ -31,29 +57,40 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   let READ = {};
   const isOpen = r => (r.state || 'open') === 'open';
   const closedToo = () => new URLSearchParams(location.search).get('iss') === 'closed';
-  function draw({ issues = [], error = '', github = '', store } = READ) {
-    READ = { issues, error, github, store };
-    ISSUES = error ? [] : issues; STORE = storeOff(store);
-    // Every count below is of the rows in view: the unhidden ones, or the hidden ones under Hidden.
-    const pool = ISSUES.filter(inView), open = pool.filter(isOpen), rows = closedToo() ? pool : open, L = window.shell?.list;
-    const hiddenN = ISSUES.filter(r => r.hidden && (closedToo() || isOpen(r))).length, openN = ISSUES.filter(r => !r.hidden && (closedToo() || isOpen(r))).length;
-    put($('issues'), error ? html`<tr class="empty"><td colspan="5">Issues could not be read: ${error}. Read again tries again.</td></tr>`
-      : html`${rows.length ? rows.map(r => html`<tr${selected(r)}>
+  const issueRow = r => html`<tr${selected(r)}>
         <td class="ref">${r.url ? html`<a href="${r.url}">${r.tracker} ${r.ref}</a>` : html`${r.tracker} ${r.ref}`}</td>
         <td class="what">${title(r)}</td>
         <td class="repo">${r.repo}</td>
         <td class="why">${isOpen(r) ? r.reason : `${r.state} · ${r.reason}`}</td>
-        <td class="when">${r.updated_at ? html`<time class="rel" datetime="${r.updated_at}"></time>` : ph(r)}</td></tr>`)
-      : html`<tr class="empty"><td colspan="5">${showHidden() ? `No ${closedToo() ? '' : 'open '}issue is hidden.`
+        <td class="when">${r.updated_at ? html`<time class="rel" datetime="${r.updated_at}"></time>` : ph(r)}</td>
+        <td class="act">${actions(oid(r))}</td></tr>`;
+  // GitHub rows as before, then the Jira groups; a view store not read groups nothing and says so above the Jira rows.
+  function body(rows) {
+    const J = rows.filter(jira);
+    if (STORE) return html`${rows.filter(r => !jira(r)).map(issueRow)}${J.length ? html`<tr class="empty"><td colspan="6">Categories were not read: ${STORE}. The Jira issues below are not grouped. Read again tries again.</td></tr>` : ''}${J.map(issueRow)}`;
+    const G = groups(J), has = k => G.some(g => g.key === k), sel = rowOf(window.shell?.row?.() || '');
+    if (OPEN === undefined || (OPEN && !has(OPEN))) OPEN = sel && jira(sel) && has(groupOf(sel)) ? groupOf(sel) : (G.find(g => g.rows.length) || G[0] || {}).key;
+    return html`${rows.filter(r => !jira(r)).map(issueRow)}${G.map(g => html`${groupRow(g)}${OPEN === g.key ? g.rows.map(issueRow) : ''}`)}`;
+  }
+  function draw({ issues = [], error = '', github = '', store, categories = [] } = READ) {
+    READ = { issues, error, github, store, categories };
+    ISSUES = error ? [] : issues; STORE = storeOff(store); CATS = STORE ? [] : categories;
+    objects();
+    // Every count below is of the rows in view: the unhidden ones, or the hidden ones under Hidden.
+    const pool = ISSUES.filter(inView), open = pool.filter(isOpen), rows = closedToo() ? pool : open, L = window.shell?.list;
+    const hiddenN = ISSUES.filter(r => r.hidden && (closedToo() || isOpen(r))).length, openN = ISSUES.filter(r => !r.hidden && (closedToo() || isOpen(r))).length;
+    put($('issues'), error ? html`<tr class="empty"><td colspan="6">Issues could not be read: ${error}. Read again tries again.</td></tr>`
+      : html`${rows.length || (CATS.length && !showHidden()) ? body(rows)
+      : html`<tr class="empty"><td colspan="6">${showHidden() ? `No ${closedToo() ? '' : 'open '}issue is hidden.`
         : `No ${closedToo() ? '' : 'open '}issue is assigned to you or filed by you.`}</td></tr>`}${
-        github ? html`<tr class="empty"><td colspan="5">Your GitHub issues outside the repos' issue sources were not read: ${github}. Read again tries again.</td></tr>` : ''}`);
+        github ? html`<tr class="empty"><td colspan="6">Your GitHub issues outside the repos' issue sources were not read: ${github}. Read again tries again.</td></tr>` : ''}`);
+    put($('issues-cats'), error ? html`` : html`<button class="btn quiet sm" type="button" data-cmd="issue categories.add" data-obj="isscats"${STORE ? html` disabled title="${`Categories are off: ${STORE}`}"` : ''}>${I('plus')}<span>New category</span></button>`);
     put($('issues-tally'), pool.length && !error ? html`<span>${open.length} ${showHidden() ? 'hidden' : 'open'}</span>${closedToo() ? html`<span>${pool.length - open.length} closed in 7 d</span>` : ''}` : html``);
     if (L) put($('issues-filters'), error ? html`` : L.fbar(html`${hiddenSeg(openN, hiddenN)}${L.fseg('iss', 'State',
       // pack sd:7084: Open | Hidden already says open; one chip adds the issues closed in 7 days, a second press drops them.
       [{ v: closedToo() ? 'open' : 'closed', pressed: closedToo(), label: html`with closed <span class="n">${String(pool.length - open.length)}</span>` }])}`));
     // The Your issues tab (sd:5080): the open rows not hidden, whichever list shows.
     window.shell?.view?.count('issues', error ? null : ISSUES.filter(r => isOpen(r) && !r.hidden).length);
-    objects();
   }
   document.addEventListener('issues:read', e => draw(e.detail));
   // State: open, or with closed; the param is written around the page's others (shell.url keeps ?row=).
@@ -78,6 +115,15 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   const NO_VIEW_CLI = 'no CLI: view state; the dashboard writes it (POST /api/github/issues/view)';
   const view = (o, hidden) => window.shell.post('/api/github/issues/view', { key: o.key, hidden })
     .then(v => { landed(o.key, hidden); window.githubIssues?.again(); return v; }, e => { window.githubIssues?.again(); throw e; });
+  // pack sd:7708: a category set or cleared moves its row at once and opens the group it went to; the page then reads again.
+  const NO_CAT_CLI = 'no CLI: issue categories are view state; the dashboard writes them';
+  const categorize = (key, category) => window.shell.post('/api/github/issues/view', { key, category })
+    .then(v => { ISSUES.filter(r => r.key === key).forEach(r => { r.category = category; }); OPEN = category ? `cat:${category}` : 'none';
+      draw(); redetail(key); window.githubIssues?.again(); return v; }, e => { window.githubIssues?.again(); throw e; });
+  const categories = body => window.shell.post('/api/github/issues/categories', body)
+    .then(v => { READ = { ...READ, categories: v.categories }; draw(); window.githubIssues?.again(); return v; }, e => { window.githubIssues?.again(); throw e; });
+  // Details showing the row redraw with its new category.
+  const redetail = key => { const id = `iss:${key}`; if (window.shell?.commands?.selected?.()?.id === id) details(id, false); };
 
   // Issue intake (sd:4840), on GitHub: each policy.issues read or ask repo's open third-party issues no item carries (issues.intake over
   // sd_db.repos.intake_issues). File as item posts /api/items with the issue's title, repo and ref, the item `sd task add
@@ -127,9 +173,21 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     if (b) return file(b.dataset.key);
     const opened = e.target?.closest?.('[data-iss-open]');
     if (opened) return details(opened.dataset.issOpen);
+    // A category group (pack sd:7708): its chevron, name or the rest of its row opens it and closes the open one.
+    const g = e.target?.closest?.('[data-cat-open]') || (!e.target?.closest?.('a, button') && e.target?.closest?.('#issues tr.repo'));
+    if (g) return toggle(g.dataset.catOpen ?? g.dataset.cat);
     const tr = e.target?.closest && !e.target.closest('a, button') && e.target.closest('#issues tr[data-id], #intake tr[data-id]');
     if (tr) details(tr.dataset.id);
   });
+
+  function toggle(key) { OPEN = OPEN === key ? null : key; draw(); }
+  // Details' Category select runs Set category with the picked value, so it toasts and offers Undo as the command does.
+  document.addEventListener('change', e => {
+    const s = e.target?.closest?.('[data-iss-cat]'), C = window.shell?.commands, o = s && C?.get(s.dataset.issCat);
+    const c = o && REG_CAT; if (!c) return;
+    C.run({ ...c, fields: null, run: x => c.run(x, { category: s.value }) }, o);
+  });
+  let REG_CAT = null;
 
   // ---------- Details (sd:5877) ----------
   // Both lists' rows by object id; an intake row filed here names its item until the next read.
@@ -143,30 +201,39 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     const C = window.shell?.commands; if (!C) return;
     const keep = new Set();
     rows().forEach(r => { keep.add(oid(r)); C.put({ id: oid(r), type: typeOf(r), label: `${r.tracker || 'GitHub'} ${r.ref} ${r.title}`.trim(),
-      url: r.url, item: r.item, ref: r.ref, slug: r.slug, key: r.key, hidden: !!r.hidden }); });
+      url: r.url, item: r.item, ref: r.ref, slug: r.slug, key: r.key, hidden: !!r.hidden, category: r.category || null }); });
+    // pack sd:7708: each category is an object for its group row's Rename and Remove; isscats holds New category.
+    if (!FAILED_ISSUES()) {
+      CATS.forEach(name => { keep.add(`isscat:${name}`); C.put({ id: `isscat:${name}`, type: 'issue category', label: name, name }); });
+      keep.add('isscats'); C.put({ id: 'isscats', type: 'issue categories', label: 'Issue categories' });
+    }
     PUT.forEach(id => { if (!keep.has(id)) C.put({ id, type: 'not listed', label: `${C.get(id)?.label || id} (no longer listed)` }); });
     PUT = keep;
   }
   // A fact the store did not record says so; one it could not read says that.
   const ph = r => html`<span class="ph">${r.unread ? 'not read' : 'not stored'}</span>`;
   const fact = (r, v) => v || ph(r);
+  const FAILED_ISSUES = () => !!READ.error;
+  // Details' Category (pack sd:7708): a Jira row's select, or why there is none to pick.
+  const category = r => !jira(r) ? '' : html`<dt>Category</dt><dd>${STORE ? html`<span class="ph">not read: ${STORE}</span>`
+    : !CATS.length ? html`<span class="ph">none yet: New category, in the list's head, adds one</span>`
+    : html`<select class="cap-in" data-iss-cat="${oid(r)}" aria-label="Category">${[...CATS.map(n => [n, n]), ['', 'None (Uncategorized)']].map(([v, l]) => html`<option value="${v}"${(r.category || '') === v ? html` selected` : ''}>${l}</option>`)}</select>`}</dd>`;
   const stamp = (r, v) => v ? html`<time class="rel" data-long datetime="${v}"></time>` : ph(r);
   function details(id, open = true) {
     const r = rowOf(id); if (!r) return;
-    const tracker = r.tracker || 'GitHub', where = tracker === 'Jira' ? 'in Jira' : 'on GitHub';
+    const tracker = r.tracker || 'GitHub';
     document.querySelectorAll('#issues tr[data-id], #intake tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', String(tr.dataset.id === id)));
     put($('details'), html`<p class="kind">${tracker} issue · ${r.state || 'state not stored'}</p>
       <h2>${r.title || r.ref}</h2>
       <dl><dt>Issue</dt><dd>${tracker} ${r.ref}</dd><dt>Repo</dt><dd>${r.repo}${r.slug ? ` · ${r.slug}` : ''}</dd>
         <dt>State</dt><dd>${fact(r, r.state)}${r.status ? ` · ${r.status}` : ''}</dd>
-        ${r.reason ? html`<dt>Why</dt><dd>${r.reason}</dd>` : ''}
+        ${r.reason ? html`<dt>Why</dt><dd>${r.reason}</dd>` : ''}${category(r)}
         <dt>Assignee</dt><dd>${fact(r, r.assignee)}</dd><dt>Reporter</dt><dd>${fact(r, r.reporter || r.author)}</dd>
         <dt>Opened</dt><dd>${stamp(r, r.created_at)}</dd><dt>Updated</dt><dd>${stamp(r, r.updated_at)}</dd>
         <dt>Labels</dt><dd><span class="ph">not stored</span></dd><dt>Priority</dt><dd><span class="ph">not stored</span></dd>
         <dt>Description</dt><dd><span class="ph">not stored: sd shadow sync keeps no labels, priority or description</span></dd>
         <dt>Item</dt><dd>${r.item ? html`<a href="${window.shell.itemHref(r.item)}">sd:${r.item}</a>` : html`<span class="ph">${r.unread ? 'not read' : 'none filed under this issue'}</span>`}</dd></dl>
       ${r.unread ? html`<p class="why">The stored issue was not read: ${r.unread}. Read again tries again.</p>` : ''}
-      ${r.url ? html`<p><a href="${r.url}" target="_blank" rel="noopener noreferrer">Open ${r.ref} ${where}</a></p>` : ''}
       <h3>Act</h3>${window.shell.commands.bar(id)}`);
     window.shell.commands.select(id);
     if (open) window.shell.openPane('tab-details');
@@ -185,10 +252,41 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
         cli: () => NO_VIEW_CLI,
         run: o => view(o, hidden).then(() => `${done} · ${o.label}${after}`),
         undo: o => view(o, !hidden) }));
+    // pack sd:7708: Set category and the category list's commands; every one is a local view-state write with Undo.
+    const off = () => STORE ? `Categories are off: ${STORE}` : true;
+    REG_CAT = { id: 'jira issue.category', on: 'jira issue', label: 'Set category', key: 'g', risk: 'undo', bar: false,
+      does: 'Puts this Jira issue in a category, or in none. Jira is not changed.',
+      when: o => off() !== true ? off() : CATS.length ? true : 'no category yet: New category adds one',
+      fields: o => [{ name: 'category', label: 'Category', value: o.category || CATS[0],
+        options: [...CATS.map(n => ({ value: n, label: n })), { value: '', label: 'None (Uncategorized)' }] }],
+      cli: () => NO_CAT_CLI,
+      run: (o, v) => { const was = o.category || null, to = v?.category || null;
+        return categorize(o.key, to).then(() => ({ text: to ? `Category ${to} · ${o.label}` : `Category cleared · ${o.label}`, was })); },
+      undo: (o, v) => categorize(o.key, v ? v.was : o.category || null) };
+    const listOf = w => w.categories;
     C.register(
       opens('jira issue', 'Open in Jira', o => `open ${window.shell.shq(o.url || '')}`), item('jira issue'), ...hides('jira issue'),
       opens('github issue', 'Open on GitHub', o => o.slug ? `gh issue view ${o.ref.replace('#', '')} --repo ${o.slug} --web` : `open ${window.shell.shq(o.url || '')}`),
-      item('github issue'), ...hides('github issue'));
+      item('github issue'), ...hides('github issue'),
+      REG_CAT,
+      { id: 'issue categories.add', on: 'issue categories', label: 'New category', key: 'a', risk: 'undo',
+        does: 'Adds a category to group your Jira issues by. Nothing is written to Jira.',
+        when: () => off() !== true ? off() : CATS.length < 16 || 'at most 16 categories: remove one first',
+        fields: () => [{ name: 'name', label: 'Name', required: true, placeholder: 'Ingestion' }], cli: () => NO_CAT_CLI,
+        run: (o, v) => { const before = [...CATS];
+          return categories({ categories: [...before, v.name], before }).then(w => ({ text: `Category ${v.name.trim()} added`, before, after: listOf(w) })); },
+        undo: (o, v) => categories({ categories: v.before, before: v.after }) },
+      { id: 'issue category.rename', on: 'issue category', label: 'Rename', key: 'r', risk: 'undo',
+        does: 'Renames this category; its issues stay in it.', when: off,
+        fields: o => [{ name: 'to', label: 'New name', required: true, value: o.name }], cli: () => NO_CAT_CLI,
+        run: (o, v) => { const at = CATS.indexOf(o.name);
+          return categories({ rename: o.name, to: v.to, before: [...CATS] }).then(w => ({ text: `Category ${o.name} renamed ${listOf(w)[at]}`, from: o.name, to: listOf(w)[at], after: listOf(w) })); },
+        undo: (o, v) => categories({ rename: v.to, to: v.from, before: v.after }) },
+      { id: 'issue category.remove', on: 'issue category', label: 'Remove', key: 'd', risk: 'undo',
+        does: 'Removes this category; its issues go to Uncategorized. Undo puts them back.', when: off, cli: () => NO_CAT_CLI,
+        run: o => { const before = [...CATS];
+          return categories({ categories: before.filter(n => n !== o.name), before }).then(w => ({ text: `Category ${o.name} removed · its issues are uncategorized`, before, after: listOf(w) })); },
+        undo: (o, v) => categories({ categories: v.before, before: v.after }) });
   }
   document.addEventListener('DOMContentLoaded', () => {
     register();

@@ -339,7 +339,7 @@ class TheManagedWriter(RepoCase):
     def test_it_sets_the_column_and_names_what_it_replaced(self):
         path = self._registered()
         self.assertEqual(self._value(path), 0)
-        self.assertEqual(set_managed(self.connection, path, "yes"), (path, "no"))
+        self.assertEqual(set_managed(self.connection, path, "yes", bypass_standard=True), (path, "no"))
         self.assertEqual(self._value(path), 1)
         self.assertEqual(set_managed(self.connection, path, "no"), (path, "yes"))
         self.assertEqual(self._value(path), 0)
@@ -348,7 +348,7 @@ class TheManagedWriter(RepoCase):
         path = self._registered()
         before = dict(self.connection.execute(
             "SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
-        set_managed(self.connection, path, "yes")
+        set_managed(self.connection, path, "yes", bypass_standard=True)
         after = dict(self.connection.execute(
             "SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
         moved = {key for key in before if before[key] != after[key]}
@@ -360,6 +360,21 @@ class TheManagedWriter(RepoCase):
             with self.subTest(value=value), self.assertRaises(RepoRefusal) as caught:
                 set_managed(self.connection, path, value)
             self.assertIn("yes or no", str(caught.exception))
+        self.assertEqual(self._value(path), 0)
+
+    def test_turning_managed_on_requires_the_standard_or_a_named_bypass(self):
+        """sd:7710: managed no -> yes skipped the standard setup (sd:5610), so
+        a repository came up managed with GitHub defaults. The flip refuses,
+        names `sd fleet standard`, and writes nothing unless the caller is
+        the standard or chose managed alone; yes -> yes and off stay free."""
+        path = self._registered()
+        with self.assertRaises(RepoRefusal) as caught:
+            set_managed(self.connection, path, "yes")
+        self.assertIn("sd fleet standard", str(caught.exception))
+        self.assertEqual(self._value(path), 0)
+        self.assertEqual(set_managed(self.connection, path, "yes", bypass_standard=True), (path, "no"))
+        self.assertEqual(set_managed(self.connection, path, "yes"), (path, "yes"))
+        self.assertEqual(set_managed(self.connection, path, "no"), (path, "yes"))
         self.assertEqual(self._value(path), 0)
 
     def test_an_unregistered_path_is_refused_rather_than_registered(self):
@@ -788,14 +803,14 @@ class TheChannelsWriter(RepoCase):
         `repo managed PATH yes` reads as none, and still rides along when the
         dashboard sets the outbound channels, so that form keeps working."""
         path = self._registered()
-        set_managed(self.connection, path, "yes")
+        set_managed(self.connection, path, "yes", bypass_standard=True)
         with self.assertRaises(RepoRefusal) as caught:
             set_channels(self.connection, path, {"github": {"repo": "example/project"}, "drive": {}})
         self.assertIn("managed", str(caught.exception))
         self.assertIsNone(self._stored(path))
         set_managed(self.connection, path, "no")
         set_channels(self.connection, path, {"github": {"repo": "example/project"}, "jira": {"project": "EXAMPLE"}})
-        set_managed(self.connection, path, "yes")
+        set_managed(self.connection, path, "yes", bypass_standard=True)
         self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE"})
         set_channels(self.connection, path, {"drive": {}})
         self.assertIn('"github":{"repo":"example/project"}', self._stored(path))
@@ -1500,6 +1515,73 @@ class TheIntake(RepoCase):
         self.assertEqual(list(intake_issues(self.connection)), [path])
         set_github_issues(self.connection, path, "off")
         self.assertEqual(intake_issues(self.connection), {})
+
+    def test_a_mine_scope_lists_only_the_issues_that_reach_the_operator(self):
+        """pack sd:7672: `mine` keeps an assigned or watched row (a mention or a
+        review request) and drops one only the open sweep saw, such as an issue
+        someone else opened with no assignee or mention. `all`, the default,
+        keeps them all, and another repository keeps its own scope. An issue
+        the operator opened stays out under both (the test above)."""
+        from sd_db import repos
+
+        path = self._on("one", "https://github.com/example/project")
+        other = self._on("two", "https://github.com/example/other")
+        base = "https://github.com/example/project"
+        self._shadow([("github", "example/project", f"{base}/issues/1", "issue", "open", "assigned"),
+                      ("github", "example/project", f"{base}/issues/2", "issue", "open", "watched"),
+                      ("github", "example/project", f"{base}/issues/3", "issue", "open", None),
+                      ("github", "example/other", "https://github.com/example/other/issues/4", "issue", "open",
+                       None)])
+        everything = {path: [3, 2, 1], other: [4]}
+        numbers = lambda: {key: [row["number"] for row in rows]  # noqa: E731
+                           for key, rows in intake_issues(self.connection).items()}
+        self.assertEqual(numbers(), everything)
+        self.assertEqual(repos.set_issues_scope(self.connection, path, "mine"), (path, "all"))
+        self.assertEqual(numbers(), {path: [2, 1], other: [4]})
+        repos.set_issues_scope(self.connection, other, "mine")
+        self.assertEqual(numbers(), {path: [2, 1]})
+        self.assertEqual(repos.set_issues_scope(self.connection, path, "all"), (path, "mine"))
+        self.assertEqual(numbers(), {path: [3, 2, 1]})
+
+
+class TheIssuesScopeSetting(RepoCase):
+    """pack sd:7672. `policy.issues_scope`: which intake issues a repository lists, all or mine.
+
+    The writer mirrors `set_github_issues`: `all` is no key, the policy's
+    other keys stay, a word outside the two and an unregistered path are
+    refused. It governs what intake shows, never what agents may write.
+    """
+
+    def test_it_sets_the_key_keeps_the_others_and_the_reader_follows(self):
+        from sd_db import repos
+
+        path = add(self.connection, support.repository(self.checkouts / "one"), home=self.home)
+        self.assertEqual(repos.issues_scope(self.connection, path), "all")
+        set_github_issues(self.connection, path, "ask")
+        self.assertEqual(repos.set_issues_scope(self.connection, path, "mine"), (path, "all"))
+        self.assertEqual(declarations(self.connection, path), {"policy": {"issues": "ask", "issues_scope": "mine"}})
+        self.assertEqual(repos.issues_scope(self.connection, paths.expand(path)), "mine")
+        self.assertEqual(issues_policy(self.connection, path), "ask")
+        set_github_issues(self.connection, path, "off")
+        self.assertEqual(repos.issues_scope(self.connection, path), "mine")
+        self.assertEqual(repos.set_issues_scope(self.connection, path, "all"), (path, "mine"))
+        self.assertEqual(declarations(self.connection, path), {})
+
+    def test_every_word_but_all_and_mine_is_refused_and_writes_nothing(self):
+        from sd_db import repos
+
+        path = add(self.connection, support.repository(self.checkouts / "one"), home=self.home)
+        repos.set_issues_scope(self.connection, path, "mine")
+        for word in ("", "Mine", "MINE", " mine", "mine\n", "ALL", "none", "off", "ask", "read", "\x00", "míne"):
+            with self.subTest(word=word), self.assertRaises(RepoRefusal) as caught:
+                repos.set_issues_scope(self.connection, path, word)
+            self.assertIn("all, mine", str(caught.exception))
+        self.assertEqual(repos.issues_scope(self.connection, path), "mine")
+        stranger = support.repository(self.checkouts / "two")
+        with self.assertRaises(RepoRefusal) as caught:
+            repos.set_issues_scope(self.connection, stranger, "mine")
+        self.assertIn("not a registered repository", str(caught.exception))
+        self.assertEqual(repos.issues_scope(self.connection, stranger), "all")
 
 
 class TheCloneLines(RepoCase):

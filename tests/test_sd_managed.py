@@ -70,7 +70,7 @@ class ADirectCall(Fixture):
         said = sd_lib.unmanaged(root)
         self.assertIsNotNone(said, "an unmanaged checkout was let through")
         self.assertIn("repo.managed = no", said)
-        self.assertIn("bin/sd-db repo managed ~/theirs yes", said)
+        self.assertIn("`sd fleet standard` in ~/theirs", said)
 
     def test_a_managed_checkout_proceeds(self) -> None:
         root = self.checkout("mine")
@@ -91,7 +91,7 @@ class ADirectCall(Fixture):
             self.assertIsNone(sd_lib.unmanaged(root))
         self.assertEqual(said.getvalue().count("\n"), 1, said.getvalue())
         self.assertIn("(repo.managed); proceeding", said.getvalue())
-        self.assertIn("bin/sd-db repo managed ", said.getvalue())
+        self.assertIn("then `sd fleet standard` in ", said.getvalue())
 
 
 class TheDirectCommands(Fixture):
@@ -121,9 +121,11 @@ class TheDirectCommands(Fixture):
                                  done.stdout + done.stderr)
                 said = done.stdout + done.stderr
                 self.assertIn("repo.managed = no", said)
-                self.assertIn("bin/sd-db repo managed ~/theirs yes", said)
+                self.assertIn("`sd fleet standard` in ~/theirs", said)
         refused = json.loads(self.run_command("sd-ship", root).stdout)
         self.assertEqual(refused["workflow"]["blocker"]["code"], "unmanaged_repository")
+        # pack sd:7732: `repo managed PATH yes` refuses once sd:7710 lands; the standard sets the flag.
+        self.assertIn("sd fleet standard", refused["workflow"]["next_action"])
 
     def test_sd_review_reviews_an_unmanaged_checkout_and_sd_ship_still_refuses(self) -> None:
         """pack sd:5953: sd-review reads a diff and writes no repository file."""

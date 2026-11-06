@@ -57,6 +57,12 @@ def _view(payload, principal):
     return issues.view(payload)
 
 
+def _categories(payload, principal):
+    from ... import issues
+
+    return issues.categories(payload)
+
+
 def _copilot(payload, principal):
     from ... import today_github
 
@@ -96,6 +102,8 @@ PAGE = Page(
          Api("/api/github/dependabot", _dependabot), Api("/api/github/tracked", _tracked),
          # Hide (sd:6175): the per-page view route Designs, Documents and Contributions have, on the same view store.
          Api("/api/github/issues/view", write=_view),
+         # Local Jira categories (pack sd:7708): the category names, in the same view store; a row's category goes to /view.
+         Api("/api/github/issues/categories", write=_categories),
          Api("/api/today/github/copilot-review", write=_copilot),
          # Merge (sd:5668): the GET previews, the POST copies; `pr_merge` checks the preview's revision before anything moves.
          Api("/api/today/github/merge/preview", read=_merge_preview, query=True),

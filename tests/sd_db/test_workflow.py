@@ -427,7 +427,7 @@ class DoneResolvesOpenNotes(WorkflowCase):
 
 
 class BranchClearing(WorkflowCase):
-    """sd:2818: `edit_item` clears a stale branch and sets none."""
+    """sd:2818, sd:7659: `edit_item` clears a stale branch, or sets one."""
 
     def work_on(self, branch, status="done"):
         upsert_repo(self.db, "/repos/work")
@@ -468,9 +468,36 @@ class BranchClearing(WorkflowCase):
             edit_item(self.db, state["item"]["id"], {"branch": None}, who="operator")
         self.assertEqual(item_state(self.db, state["item"]["id"]), state)
 
-    def test_a_branch_value_is_refused_and_leaves_the_row(self):
+    def test_an_in_progress_row_keeps_a_branch(self):
+        """sd:7659. Lint rule 2 wants a branch on an in_progress row: a clear is refused."""
+        state = self.work_on("feat/live", status="in_progress")
+        with self.assertRaisesRegex(WorkflowError, "in_progress item records its branch"):
+            edit_item(self.db, state["item"]["id"], {"branch": None}, who="operator")
+        self.assertEqual(item_state(self.db, state["item"]["id"]), state)
+
+    def test_a_branch_is_set_noted_and_replaces_the_old_one(self):
+        """sd:7659. A row that lost its branch, or names a stale one, takes a new name."""
+        for status, held in (("planning", None), ("in_progress", "feat/stale")):
+            with self.subTest(status=status):
+                state = self.work_on(held, status=status)
+                set_to = edit_item(self.db, state["item"]["id"], {"branch": " feat/new "},
+                                   who="operator", expected_revision=state["revision"])
+                self.assertEqual(set_to["item"]["branch"], "feat/new")
+                self.assertEqual(set_to["notes"][-1]["body"], "Updated branch by operator")
+
+    def test_a_blank_or_spaced_branch_is_refused_and_leaves_the_row(self):
         state = self.work_on("feat/gone", status="planning")
-        with self.assertRaisesRegex(WorkflowError, "branch can only be cleared here"):
+        for value in ("", "  ", "feat/a b", 7):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(WorkflowError, "branch"):
+                    edit_item(self.db, state["item"]["id"], {"branch": value}, who="operator")
+                self.assertEqual(item_state(self.db, state["item"]["id"]), state)
+
+    def test_a_runner_owned_row_keeps_its_branch_against_a_new_name(self):
+        state = self.work_on("feat/held", status="planning")
+        create_assignment(self.db, item=state["item"]["id"], role="author", status="running")
+        state = item_state(self.db, state["item"]["id"])
+        with self.assertRaisesRegex(WorkflowError, "has running assignment"):
             edit_item(self.db, state["item"]["id"], {"branch": "feat/new"}, who="operator")
         self.assertEqual(item_state(self.db, state["item"]["id"]), state)
 

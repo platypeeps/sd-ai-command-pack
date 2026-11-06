@@ -2117,6 +2117,9 @@ def _work_rows(
             rows.append(_row(
                 "branch-unresolvable", item, slug,
                 f"{where} names branch {branch}, which no local or remote head has",
+                # An in_progress row cannot lose its branch (sd:7659): it takes the live name.
+                "fetch the branch, or name the live one with `sd task edit <id> --branch NAME`"
+                if status == "in_progress" else
                 "fetch the branch, or clear it with `sd task edit <id> --clear-branch`",
             ))
         if status not in ("done", "unknown"):

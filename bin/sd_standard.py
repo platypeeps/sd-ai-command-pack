@@ -404,7 +404,7 @@ def row_steps(connection: Any, row: Any) -> list[Step]:
                           None if ci == "local" else lambda: repos.set_ci(connection, path, "local")))
     managed = bool(row["managed"])
     steps.append(Step("D1", "row", "managed", "ok" if managed else "change", "yes", "yes" if managed else "no", "yes",
-                      None if managed else lambda: repos.set_managed(connection, path, "yes")))
+                      None if managed else lambda: repos.set_managed(connection, path, "yes", bypass_standard=True)))
     merge = repos.policy_merge(row["declarations"])
     steps.append(Step("D2", "row", "runner_merge", "ok" if merge == "auto" else "change", "auto", merge, "auto",
                       None if merge == "auto" else lambda: repos.set_runner_merge(connection, path, "auto")))

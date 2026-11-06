@@ -4,7 +4,9 @@
   One page, no tabs (sd:5921, docs/work/2026-10-23-today-queue/design.md): what is going on, then what needs you.
   Data: /api/now, the document now_screen.document builds, read when the page opens and on Refresh.
   Since yesterday (sd:6002, now_screen.digest): merged per repo with the PRs folded, failed with why and fix, questions.
-  The day track: the last 24 hours as marks (landed, failed jobs, briefs, sessions), a table of them and a key to Tasks.
+  The Timeline (pack sd:7681): one chart on one time axis, Today's lanes (landed, failed jobs, briefs, sessions) and then
+  one lane per Activity kind (merges, runs, reviews, commands, from /api/activity?range=7d, read when the view first
+  shows), over the last 24 hours or 7 days as its range tiles pick; a table of the marks and a key to Tasks.
   Under it the spend line (sd:6031): spent in the last 24 hours and each of the last 7, from the cost table; Metrics has the rest.
   The annunciator: Jobs, Lane, Reports, Pulls, Mail and Repos filter Needs you to their rows; Sessions and Gate open the
   Queue view. Each number counts the rows its filter shows.
@@ -66,7 +68,9 @@
     </section>
 
     <section class="daytrack" id="view-timeline" aria-labelledby="track-h" hidden>
-      <h2 id="track-h">The last 24 hours</h2>
+      <!-- pack sd:7681: the 24h / 7d tiles pick the window the whole chart draws: Today's lanes and Activity's kinds. -->
+      <div class="track-head"><h2 id="track-h">The last 24 hours</h2>
+        <div class="vseg" id="track-range" role="group" aria-label="Range"><button type="button" data-range="24h" aria-pressed="true">24h</button><button type="button" data-range="7d" aria-pressed="false">7d</button></div></div>
       <div class="track-plot" id="track-plot"><p class="why">Reading the day…</p></div>
       <ul class="flowkey" id="flowkey" aria-label="Where the work is"></ul>
       <p class="spend" id="spend">Reading spend…</p>

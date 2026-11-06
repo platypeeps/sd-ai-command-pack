@@ -7,7 +7,9 @@ nothing the list does not show. A lane read that failed is a dark row, never an 
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import datetime, timedelta
 from unittest import mock
 
 from sd_dashboard import now_screen, queue_screen
@@ -194,8 +196,9 @@ class TheGroups(ReportsCase):
 
 
 class TheTrack(ReportsCase):
-    """The day track (sd:5921): the last 24 hours as marks, one per landed item, failed run, new brief and session, and the
-    key's four counts. A mark outside the 24 hours is left out; a read that failed is its reason, never an empty day."""
+    """The day track (sd:5921): the last 7 days as marks (pack sd:7681: the Timeline's 24h / 7d tiles), one per landed
+    item, failed run, new brief and session, and the key's four counts, Landed over the last 24 hours. A mark outside
+    the 7 days is left out; a read that failed is its reason, never an empty day."""
 
     DELIVERED = [{"id": 7, "title": "Seven", "at": "2026-09-06 10:00:00"}, {"id": 8, "title": "Eight", "at": "2026-09-05T11:00:00Z"}]
     PLANNED = [{"due": "2026-09-08"}, {"due": "2026-09-20"}]
@@ -209,26 +212,29 @@ class TheTrack(ReportsCase):
             return now_screen.document(self.connection, now=NOW, jobs=jobs, fleet=fleet_document,
                                        lanes=queue(lane(rows=[{**blocked(1), "state": "merging"}])))["track"]
 
-    def test_each_lane_marks_its_source_in_the_last_24_hours_and_the_key_counts(self):
+    def test_each_lane_marks_its_source_in_the_last_7_days_and_the_key_counts_24_hours(self):
         from datetime import datetime, timezone
 
-        jobs = JobsBackend(self.tmp.name, jobs=[("nightly-sync", "failed", 7, None), ("old-one", "failed", 1, None)])
+        jobs = JobsBackend(self.tmp.name, jobs=[("nightly-sync", "failed", 7, None), ("old-one", "failed", 1, None),
+                                                ("older", "failed", 2, None)])
         jobs.log("nightly-sync", datetime(2026, 9, 6, 9, 0, tzinfo=timezone.utc).timestamp())
         jobs.log("old-one", datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc).timestamp())
+        jobs.log("older", datetime(2026, 8, 29, 9, 0, tzinfo=timezone.utc).timestamp())
         self.brief("2026-09-06 - Daily Intel Brief", at="2026-09-06T06:00:00Z")
         found = self.track(jobs)
-        self.assertEqual((found["since"], found["until"]), ("2026-09-05T12:00:00Z", NOW))
-        self.assertEqual([(m["at"], m["item"]) for m in found["landed"]], [("2026-09-06T10:00:00Z", 7)])
-        self.assertEqual([(m["at"], m["id"]) for m in found["jobs"]], [("2026-09-06T09:00:00Z", "job:nightly-sync:7")])
+        self.assertEqual((found["since"], found["day"], found["until"]), ("2026-08-30T12:00:00Z", "2026-09-05T12:00:00Z", NOW))
+        self.assertEqual([(m["at"], m["item"]) for m in found["landed"]], [("2026-09-05T11:00:00Z", 8), ("2026-09-06T10:00:00Z", 7)])
+        self.assertEqual([(m["at"], m["id"]) for m in found["jobs"]], [("2026-09-04T09:00:00Z", "job:old-one:1"),
+                                                                     ("2026-09-06T09:00:00Z", "job:nightly-sync:7")])
         self.assertEqual([m["at"] for m in found["briefs"]], ["2026-09-06T06:00:00Z"])
         self.assertEqual(found["live"], [])
         self.assertEqual(found["key"], {"landed": 1, "landing": 1, "due_week": 1, "blocked": 3})
 
     def test_a_session_started_before_the_window_is_live_from_the_windows_start(self):
-        """sd:6710: Live shows every session running now; one started days ago spans the whole window."""
+        """sd:6710: Live shows every session running now; one started before the 7 days spans the whole window."""
         from sd_db import today
 
-        active = {"rows": [{"item": 5585, "session": "Worktree old", "started": "2026-09-02T08:00:00Z"},
+        active = {"rows": [{"item": 5585, "session": "Worktree old", "started": "2026-08-20T08:00:00Z"},
                            {"item": 9, "session": "Worktree new", "started": "2026-09-06T11:30:00Z"}]}
         with mock.patch.object(today, "delivered", return_value=[]), \
                 mock.patch.object(today, "planned", return_value=[]), \
@@ -236,7 +242,7 @@ class TheTrack(ReportsCase):
             found = now_screen.track(self.connection, NOW, rows=[], briefs=[], active=active,
                                      lane={"merging": 0, "next": 0})
         self.assertEqual([(m["at"], m["item"]) for m in found["live"]],
-                         [("2026-09-05T12:00:00Z", 5585), ("2026-09-06T11:30:00Z", 9)])
+                         [("2026-08-30T12:00:00Z", 5585), ("2026-09-06T11:30:00Z", 9)])
 
     def test_a_read_that_failed_is_its_reason(self):
         import sqlite3
@@ -407,3 +413,30 @@ class TheFlakyHeads(ReportsCase):
         self.assertEqual((row["band"], row["lamp"], row["partial"], row["what"]),
                          ("broken", "lane", True, "lane not read for flaky heads"))
         self.assertIn("database is locked", row["detail"])
+
+    def test_a_lane_entry_that_cannot_be_read_is_a_partial_lane_row_not_a_quiet_week(self):
+        """pack sd:7706: `_entries` counts a body that is not a lane entry; the flaky read dropped that count, so a bad
+        entry vanished and the Lane lamp read 0. It is the partial `dark:flaky` row, which names the count."""
+        self.flaky("1" * 40, 9)
+        for n in (1, 2):
+            self.connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                                    (f"lane:v1:example/alpha:bad{n}", NOW, json.dumps({"status": "merged"})))
+        self.connection.commit()
+        doc = self.today()
+        [row] = [row for row in doc["needs"] if row["id"] == "dark:flaky"]
+        self.assertEqual((row["band"], row["lamp"], row["partial"], row["what"]),
+                         ("broken", "lane", True, "lane not read for flaky heads"))
+        self.assertIn("2 lane entries could not be read", row["detail"])
+        # The heads it could read still show.
+        self.assertIn("flaky:example/alpha:" + "1" * 40, [r["id"] for r in doc["needs"]])
+
+    def test_an_unreadable_lane_entry_older_than_the_window_is_not_counted(self):
+        """pack sd:7734: the count covered every body in history, so one old bad entry kept `dark:flaky` up for good."""
+        from sd_dashboard import metrics_screen
+
+        old = (datetime.fromisoformat(NOW.replace("Z", "+00:00"))
+               - timedelta(days=metrics_screen.CI_DAYS + 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                                ("lane:v1:example/alpha:old", old, json.dumps({"status": "merged"})))
+        self.connection.commit()
+        self.assertEqual([row["id"] for row in self.today()["needs"] if row["id"] == "dark:flaky"], [])

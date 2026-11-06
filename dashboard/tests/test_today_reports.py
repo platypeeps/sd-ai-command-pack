@@ -7,6 +7,7 @@ person. Seen is a Today snooze; Acknowledge is the Reports page's route. A read 
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -88,6 +89,54 @@ class TheProblems(ReportsCase):
         today = self.today()
         self.assertEqual(len(today["problems"]), 1)
         self.assertEqual(today["attention"], {"state": "caution", "n": 1, "what": "rows to look at"})
+
+
+class TheClaims(ReportsCase):
+    """pack sd:7683: a report another session already took names who has it, so Today offers no second Fix on it.
+
+    Taken is `in_progress`, by the status change's `who`, or a note the dashboard's Fix wrote (`fix_session.NOTE`), by
+    its session. A report nobody took has no claim.
+    """
+
+    def test_an_untaken_report_has_no_claim(self):
+        self.report("nas-full-copy", "r1")
+        [row] = self.read()["problems"]
+        self.assertIsNone(row["claim"])
+
+    def test_an_in_progress_report_names_who_moved_it(self):
+        item = self.report("nas-full-copy", "r1")
+        writes.transition(self.connection, item, "in_progress", who="hub-triage", reason="triage")
+        [row] = self.read()["problems"]
+        self.assertEqual(row["claim"], "hub-triage has it (in_progress)")
+        today = self.today()
+        [needs] = [r for r in today["needs"] if r["id"] == f"report:{item}"]
+        self.assertIn("hub-triage has it (in_progress)", needs["detail"])
+
+    def test_a_fix_note_names_its_session_and_pane(self):
+        from sd_dashboard import fix_session
+        from sd_db import workflow
+
+        item = self.report("nas-full-copy", "r1")
+        body = fix_session.NOTE.format(session="debug", item=item, pane="w9:p1", where="~/repos/system")
+        workflow.add_item_note(self.connection, item, kind="comment", who="dashboard", body=body)
+        [row] = self.read()["problems"]
+        self.assertEqual(row["claim"], "dashboard has it (Fix: debug session, herdr pane w9:p1)")
+
+    def test_a_fix_note_older_than_the_claim_window_no_longer_holds_the_report(self):
+        """pack sd:7733: one Fix attempt kept Fix off on Today forever; a launch note claims for `CLAIM_HOURS`."""
+        from sd_dashboard import fix_session
+        from sd_db import workflow
+
+        item = self.report("nas-full-copy", "r1")
+        body = fix_session.NOTE.format(session="debug", item=item, pane="w9:p1", where="~/repos/system")
+        workflow.add_item_note(self.connection, item, kind="comment", who="dashboard", body=body)
+        [note] = self.connection.execute("SELECT max(id) FROM note WHERE item = ?", (item,)).fetchone()
+        hours = today_reports.CLAIM_HOURS
+        for age, held in ((hours - 1, True), (hours + 1, False)):
+            stamp = (datetime.fromisoformat(NOW.replace("Z", "+00:00")) - timedelta(hours=age)).isoformat()
+            self.connection.execute("UPDATE note SET timestamp = ? WHERE id = ?", (stamp, note))
+            [row] = self.read()["problems"]
+            self.assertEqual(row["claim"] is not None, held, f"a Fix note {age} h old")
 
 
 class TheBriefs(ReportsCase):

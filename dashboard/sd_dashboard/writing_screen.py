@@ -133,9 +133,12 @@ def _ideas(connection) -> dict:
 
 def document(connection, *, now):
     """What the v2 Writing page reads: every piece, parked ones too, with its gates, moves and files."""
+    from .hoa_screen import checkout
+
     pieces = []
     found = realms(connection)
     rules = found["list"] if found["state"] in ("read", "partial") else None
+    hoa = checkout(connection)[0]
     try:
         kit = publishing.kit()
         mirrored = (kit.QUEUE, kit.receipts(), kit.PIECE_FOLDERS), ""
@@ -154,7 +157,7 @@ def document(connection, *, now):
         live = next((claim for claim in reversed(claims) if _text(claim["url"])), None)
         pieces.append({
             "id": row["id"], "title": row["title"], "stage": row["stage"], "parked": state["parked"], "piece": row["piece"],
-            "repo": Path(row["repo"]).name, "realm": realm_of(row["repo"], row["kind"], rules), "folder": "content-parked" if (row["path"] or "").startswith("content-parked/") else "content",
+            "repo": Path(row["repo"]).name, "realm": realm_of(row["repo"], row["kind"], rules, hoa), "folder": "content-parked" if (row["path"] or "").startswith("content-parked/") else "content",
             "updated": row["updated_at"], "revision": full["revision"],
             "gates_ok": gates["ok"], "problems": gates["problems"], "owner": state["owner"],
             "ready_recorded": bool(row["ready_digest"]) and row["ready_digest"] == gates["digest"],

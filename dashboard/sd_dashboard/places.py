@@ -23,8 +23,8 @@ Tasks' realm tab; its Briefs are those whose repo is in it or whose series is a 
 family's. `realm_places` says which realms are places, for the rail: a realm or family line that did not read makes none.
 
 **Which realm a row is in (sd:5064).** Tasks' realm tabs, Personal, Work and the others: the `dashboard.realms` setting row
-(sd:5109; Settings edits it) names each realm and the checkout path globs that are its (`realms`); `realm_of` gives a row the first realm whose glob matches its repo path. A
-row with no repo, or a repo no line claims, is Personal; a report is in no realm. Without a readable row a repo row's
+(sd:5109; Settings edits it) names each realm and the checkout path globs that are its (`realms`); `realm_of` gives a row the first realm whose glob matches its repo path. The
+hoa checkout's rows are HOA's before any glob (pack sd:7687). A row with no repo, or a repo no line claims, is Personal; a report is in no realm. Without a readable row a repo row's
 realm is unknown (None), so Personal holds only the rows with no repo and the page says why.
 
 **What is not read.** A missing hoa checkout, family or list makes the view `unknown` with the reason and the line to
@@ -99,32 +99,37 @@ def parse_realms(text: str) -> tuple[list[dict], list[str]]:
     return list(found.values()), problems
 
 
-def realm_of(repo: str | None, kind: str, rules: list | None) -> str | None:
-    """The realm of an item: the first `rules` realm a glob of which matches its repo path, else `personal`.
+def realm_of(repo: str | None, kind: str, rules: list | None, hoa: str | None = None) -> str | None:
+    """The realm of an item: `hoa` for the hoa checkout's (`hoa`, as `area_of`), else the first `rules` realm a glob of
+    which matches its repo path, else `personal`.
 
-    No repo is Personal. A report is in no realm: its family's Reports view lists it. `rules` None (no realm list, or one
-    not read) leaves a repo row's realm unknown, None.
+    No repo is Personal. A report is in no realm: its family's Reports view lists it. pack sd:7687: the hoa checkout is
+    HOA before any glob and without a realm list, so its rows leave Personal for the HOA tab. `rules` None (no realm
+    list, or one not read) leaves any other repo row's realm unknown, None.
     """
     if kind == "report":
         return None
     if not repo:
         return "personal"
+    path = os.path.expanduser(repo)  # the database keeps ~/repos/...; the globs are expanded too
+    if hoa is not None and path == os.path.expanduser(hoa):
+        return "hoa"
     if rules is None:
         return None
-    path = os.path.expanduser(repo)  # the database keeps ~/repos/...; the globs are expanded too
     return next((r["id"] for r in rules if any(fnmatch.fnmatchcase(path, glob) for glob in r["globs"])), "personal")
 
 
 def area_of(repo: str | None, kind: str, hoa: str | None) -> str | None:
     """The area an item belongs to: `hoa` for the hoa checkout's, `home` for one with no repo, else None.
 
-    A report is in no area's Tasks: the area's Reports view lists it by its job.
+    A report is in no area's Tasks: the area's Reports view lists it by its job. Both paths have `~` expanded, as
+    `realm_of` expands it, so a row stored as `~/...` against an absolute registered path is still HOA's (sd:7707).
     """
     if kind == "report":
         return None
     if not repo:
         return "home"
-    return "hoa" if hoa is not None and repo == hoa else None
+    return "hoa" if hoa is not None and os.path.expanduser(repo) == os.path.expanduser(hoa) else None
 
 
 def series_job(series: str) -> str:
@@ -158,7 +163,8 @@ def _place(connection, area: str):
         line = f"add realm|{area}|<label>|<glob> to {REALMS_KEY} on Settings"
         named = "no realms are set" if found["state"] == "missing" else f"{found['source']} names no realm {area}"
         return None, f"not configured: {named}; {line}", False
-    return lambda repo, kind: realm_of(repo, kind, found["list"]) == area, "", False
+    hoa = _hoa(connection)[0]
+    return lambda repo, kind: realm_of(repo, kind, found["list"], hoa) == area, "", False
 
 
 def _family(connection, area: str, config: Path | None) -> tuple[list[str] | None, str, bool]:

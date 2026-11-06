@@ -110,6 +110,18 @@ def queue_builds(args: argparse.Namespace) -> int:
     return 0
 
 
+def _beat_flags(args: argparse.Namespace) -> None:
+    """Refuse a `beat` flag set that does not go together, before anything is read."""
+    if not args.start and (args.worktree or args.branch or args.budget is not None or args.into):
+        raise WorkRefusal("--worktree, --branch, --budget and --into go with --start")
+    if args.start and (not args.worktree or not args.branch or args.budget is None):
+        raise WorkRefusal("--start needs --worktree, --branch and --budget")
+    if args.reason is not None and not (args.start or args.end):
+        raise WorkRefusal("--reason goes with --start or --end")
+    if not args.start and len(args.items) != 1:
+        raise WorkRefusal("a beat or an end names one item of the run")
+
+
 def beat_teammate(args: argparse.Namespace) -> int:
     """`sd assignments beat ITEM`: a teammate run's beat; `--start` registers one, `--end` ends it (pack sd:7221)."""
     sd_db = sd_handoff_rows.library()
@@ -117,19 +129,13 @@ def beat_teammate(args: argparse.Namespace) -> int:
         import sd_db.teammate as teammate
     except ImportError:
         raise WorkRefusal("update this pack checkout, whose lib/ is the sd_db bin/ runs for teammate runs") from None
-    if not args.start and (args.worktree or args.branch or args.budget is not None):
-        raise WorkRefusal("--worktree, --branch and --budget go with --start")
-    if args.start and (not args.worktree or not args.branch or args.budget is None):
-        raise WorkRefusal("--start needs --worktree, --branch and --budget")
-    if args.reason is not None and not args.end:
-        raise WorkRefusal("--reason goes with --end")
-    if not args.start and len(args.items) != 1:
-        raise WorkRefusal("a beat or an end names one item of the run")
+    _beat_flags(args)
     connection = sd_handoff_rows.connect(sd_db, write=True)
     try:
         if args.start:
             found = teammate.start(connection, args.items, worktree=str(Path(args.worktree).expanduser().resolve()),
-                                   branch=args.branch, budget_minutes=args.budget, owner=getpass.getuser())
+                                   branch=args.branch, budget_minutes=args.budget, owner=getpass.getuser(),
+                                   into=args.into, reason=args.reason)
             result = {"run": found["id"], "due": found["due"], "items": [m["item"] for m in found["members"]]}
             line = f"teammate run {found['id']} started; due {found['due']}"
         elif args.end:
@@ -503,5 +509,8 @@ def register(groups: Any) -> None:
             parser.add_argument("--worktree", help="with --start: the builder's worktree")
             parser.add_argument("--branch", help="with --start: the builder's branch")
             parser.add_argument("--budget", type=int, metavar="MINUTES", help="with --start: the builder's budget")
-            parser.add_argument("--reason", help="with --end: why it ended (default: ended by its lead)")
+            parser.add_argument("--into", metavar="BRANCH",
+                                help="with --start: the open bundle branch this side branch merges into (pack sd:7737)")
+            parser.add_argument("--reason", help="with --end: why it ended (default: ended by its lead); with --start: "
+                                "state-move or in-lane, why the repository gets a second open branch (pack sd:7737)")
             parser.add_argument("--json", action="store_true")

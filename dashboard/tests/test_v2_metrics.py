@@ -398,9 +398,9 @@ class TheGateRuns(Fixture):
         lane_run(c, "g5", "failed", "2026-09-02T12:00:00Z", expected="4" * 40, reason=GATE, item=11)
         lane_run(c, "g6", "failed", "2026-09-01T10:00:00Z", expected="5" * 40, reason=REVIEW, item=12)
         lane_run(c, "g7", "merged", "2026-09-01T12:00:00Z", head="5" * 40, item=12)
-        self.assertEqual(metrics_screen.flaky(c, NOW), [{"repository": "example/alpha", "item": 9, "title": "Item 9", "head": h,
-                                                         "failed": ["2026-09-04T10:00:00Z", "2026-09-04T12:00:00Z"],
-                                                         "passed": "2026-09-04T14:00:00Z", "status": "merged"}])
+        self.assertEqual(metrics_screen.flaky(c, NOW)[0], [{"repository": "example/alpha", "item": 9, "title": "Item 9", "head": h,
+                                                            "failed": ["2026-09-04T10:00:00Z", "2026-09-04T12:00:00Z"],
+                                                            "passed": "2026-09-04T14:00:00Z", "status": "merged"}])
 
     def test_metrics_carries_no_flaky_head_and_its_badge_counts_none(self):
         """pack sd:7663: the flaky heads moved to Today's Needs you; Metrics keeps CI health alone."""
@@ -433,7 +433,7 @@ class TheGateRuns(Fixture):
         lane_run(self.connection, "old", "merged", "2026-08-01T10:00:00Z", head="a" * 40)
         ci = self.doc()["ci"]
         self.assertEqual((ci["error"], ci["repos"], ci["unreadable"]), ("", [], 0))
-        self.assertEqual(metrics_screen.flaky(self.connection, NOW), [])
+        self.assertEqual(metrics_screen.flaky(self.connection, NOW), ([], 0))
 
     def test_the_gate_phrases_and_codes_are_the_pinned_packs_refusals(self):
         # A pack that rewords a gate refusal would file every gate failure as "other": the pinned source must say each.

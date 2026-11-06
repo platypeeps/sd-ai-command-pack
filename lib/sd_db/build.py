@@ -113,8 +113,8 @@ AUTO_PICKUP = "build.auto_pickup_until"
 PICKUP = "auto-pickup"
 #: The title prefix of the item a failed health check after an auto-pickup merge files; the push reads it.
 HEALTH = "Auto-pickup off: health failed after the merge of "
-#: On ends at the next morning here (design, "Auto-pickup").
-MORNING, ZONE = 7, ZoneInfo("America/Denver")
+#: On ends at the next 09:00 here (design, "Auto-pickup"; pack sd:7698).
+MORNING, ZONE = 9, ZoneInfo("America/Denver")
 
 
 class BuildRefused(SdDbError):
@@ -215,7 +215,7 @@ def eligible(connection, *, now: str | None = None) -> list[dict]:
 
 
 def morning(now: str | None = None) -> str:
-    """The next 07:00 America/Denver after `now`, in UTC: where On ends."""
+    """The next 09:00 America/Denver after `now`, in UTC: where On ends."""
     here = datetime.fromisoformat(now or clock()).astimezone(ZONE)
     end = here.replace(hour=MORNING, minute=0, second=0, microsecond=0)
     if end <= here:

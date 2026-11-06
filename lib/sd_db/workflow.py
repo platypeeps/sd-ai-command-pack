@@ -48,10 +48,10 @@ USER_FIELDS = frozenset({"title", "body", "priority", "due", "repo", "kind"})
 #: control yet.
 RECURRENCE_FIELDS = frozenset({"recurrence", "recurrence_anchor", "recurrence_lead"})
 
-#: `branch`, which `edit_item` only clears (sd:2818): a stale name has no
-#: other way out. Setting one stays with the build that works the row
-#: (`build.py`). Outside `USER_FIELDS` for the same reason as
-#: `RECURRENCE_FIELDS`.
+#: `branch`, which `edit_item` clears (sd:2818) or sets (sd:7659): a stale
+#: name needs a way out, and an in_progress row that lost its branch needs a
+#: way back, because the build (`build.py`) is the only other writer. Outside
+#: `USER_FIELDS` for the same reason as `RECURRENCE_FIELDS`.
 BRANCH_FIELDS = frozenset({"branch"})
 
 #: `parked_at`: the nightly prune parks an untouched P4 item and `edit_item`
@@ -247,7 +247,9 @@ def _fields(connection: sqlite3.Connection, changes: dict) -> dict:
         raise WorkflowError(f"fields cannot be edited here: {', '.join(sorted(unknown))}")
     result = dict(changes)
     if result.get("branch") is not None:
-        raise WorkflowError("branch can only be cleared here; registering the work folder sets one")
+        result["branch"] = _text(result["branch"], "branch")
+        if re.search(r"\s", result["branch"]):
+            raise WorkflowError("branch must be one name without spaces")
     if result.get("parked_at") is not None:
         try:
             result["parked_at"] = stamp(result["parked_at"])
@@ -362,13 +364,20 @@ def _refuse_active_assignment(connection: sqlite3.Connection, item: int) -> None
         raise WorkflowError(f"item {item} has {active['status']} assignment {active['id']}")
 
 
-def _branch_clear(connection: sqlite3.Connection, item: int) -> None:
-    """Refuse a branch clear while the runner owns the row (sd:2818).
+def _branch_change(connection: sqlite3.Connection, row: Any, new: str | None) -> None:
+    """Refuse a branch change while the runner owns the row (sd:2818), and a clear on in_progress (sd:7659).
 
     The runner reads the branch to claim a queued assignment and to restore a
     run, so the guards are: no active assignment and no unreleased runner
-    run.
+    run. `sd-docs-lint` rule 2 wants an in_progress item to record its branch,
+    so a clear would leave a row the gate fails and no verb could repair; a new
+    name replaces the old one in a single step instead.
     """
+    item = row["id"]
+    if new is None and row["status"] == "in_progress":
+        raise WorkflowError(
+            f"an in_progress item records its branch; item {item} would fail docs-lint: "
+            f"set the new name with --branch NAME, or move the item out of in_progress first")
     _refuse_active_assignment(connection, item)
     leased = connection.execute(
         "SELECT 1 FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
@@ -502,7 +511,7 @@ def edit_item(
         if "kind" in changed:
             _kind_change(connection, row, changed["kind"], values.get("repo", row["repo"]))
         if "branch" in changed:
-            _branch_clear(connection, item)
+            _branch_change(connection, row, changed["branch"])
         changed = _recurring(changed.get("kind", row["kind"]), row, changed)
         if changed:
             set_item_fields(connection, item, **changed)

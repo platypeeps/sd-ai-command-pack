@@ -59,6 +59,7 @@ in words. A repo whose lane was not read says
 "lane not read" in place of the boxes, not 0.
 Suggested is on by default (pack sd:7314); All items and Ended builds are off. On, a repo that has only those rows
 shows too. `?show=` keeps the choice: no key is the default, and an empty `show=` keeps every filter off.
+All items lists no idea kind (pack sd:7699): ideas live on Writing.
 The view reads its three documents when it first shows, on each Today read after, and every 30 s while it shows.
 A source that was not read is named under the table.
 
@@ -71,3 +72,12 @@ reads the lane again. The line above the table says the outcome in the words Nee
 A build run's Cancel asks first and posts `/api/assignments/<id>/cancel`; an ended blocked or cancelled bundle's Retry
 and Send to builder post `/api/queue/builds/retry` (pack sd:6020).
 Queue's Last 7 days moved to Metrics' Lane times view (pack sd:7233).
+
+The Timeline view is one chart on one time axis (pack sd:7681): Today's
+Landed, Jobs, Briefs and Live lanes from `/api/now`'s `track`, which carries 7
+days of marks, then one lane per Activity kind (Merges, Runs, Reviews,
+Commands) from `GET /api/activity?range=7d`, read when the view first shows
+and on each Read again after. The 24h and 7d tiles pick the window the axis,
+the marks and the table draw; `?range=7d` keeps the longer one. A kind whose
+read failed draws a hatched lane with the reason, even in a window with no
+mark. A tick links to its event on Activity, at 7 days when the tile says 7d. The key's Landed counts the last 24 hours.

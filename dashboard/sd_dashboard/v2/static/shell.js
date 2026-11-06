@@ -829,10 +829,11 @@
   // design source's shell has them (sd:2200). The line under them follows what is typed (cli(values)). OK stays off while a
   // required field is empty or spaces only, and the close asks again, so no path runs the command without its text. Enter in a
   // field is OK, not the form's first button, which is Keep and would drop what was typed (the design's sd:2369).
-  // A field with options ([{ value, label }]) is a choice, not text: a select whose first option is the default (sd:3450).
+  // A field with options ([{ value, label }]) is a choice, not text: a select whose first option is the default (sd:3450),
+  // or the option whose value is the field's value (pack sd:7708).
   // A text field's value, when given, is typed in already and can be changed (sd:3523).
   const fieldOf = f => html`<label class="label" for="cf-${f.name}">${f.label}</label>${f.options
-    ? html`<select class="cap-in" id="cf-${f.name}" name="${f.name}"${f.help ? html` aria-describedby="${`cf-${f.name}-help`}"` : ''}>${f.options.map(x => html`<option value="${x.value}">${x.label}</option>`)}</select>`
+    ? html`<select class="cap-in" id="cf-${f.name}" name="${f.name}"${f.help ? html` aria-describedby="${`cf-${f.name}-help`}"` : ''}>${f.options.map(x => html`<option value="${x.value}"${x.value === f.value ? html` selected` : ''}>${x.label}</option>`)}</select>`
     : html`<input class="cap-in" id="cf-${f.name}" name="${f.name}" autocomplete="off" spellcheck="false"${f.required ? html` required aria-required="true"` : ''} value="${f.value || ''}" placeholder="${f.placeholder || ''}"${f.help ? html` aria-describedby="${`cf-${f.name}-help`}"` : ''}>`}${f.help ? html`<p id="cf-${f.name}-help">${f.help}</p>` : ''}`;
   function confirmAction({ title, body: text = '', cli = '', ok = 'Confirm', keep = 'Keep it', danger = true, fields = [] }) {
     let from = null;
@@ -906,7 +907,8 @@
   // Row: the primary command as a button, then ⋯ for the menu. sd:5457: a command that declares an icon shows as that
   // icon, its label the button's name and the head of its tip; one without an icon keeps its text.
   // `{ icons: true }` shows every live command that declares an icon instead of the primary alone, so a row can offer
-  // what its Details offer (sd:5747).
+  // what its Details offer (sd:5747). A list of command ids shows only those live ones; `[]` leaves the row its ⋯ alone
+  // (sd:7700).
   function rowActions(id, { icons = false } = {}) {
     const o = OBJ.get(id); if (!o) return html``;
     const L = live(o), p = L.find(c => c.primary?.(o));
@@ -914,17 +916,22 @@
     const one = c => (c.icon
       ? html`<button class="icon-btn" type="button" data-cmd="${c.id}" data-obj="${id}" aria-label="${c.label}" aria-keyshortcuts="${c.key ? '. ' + c.key : ''}" data-tip="${`${c.label}${c.key ? ` (. ${c.key})` : ''}: ${tipOf(c, o)}`}">${ICON(c.icon)}</button>`
       : html`<button class="btn quiet sm" type="button" data-cmd="${c.id}" data-obj="${id}" data-tip="${tipOf(c, o)}">${c.label}</button>`);
-    const act = icons ? html`${L.filter(c => c.icon).map(one)}` : p ? one(p) : '';
+    const act = icons ? html`${L.filter(c => c.icon && (icons === true || icons.includes(c.id))).map(one)}` : p ? one(p) : '';
     return html`<span class="rowact">${act}<button class="icon-btn" type="button" data-menu-for="${id}" aria-haspopup="menu" aria-expanded="false" aria-label="Actions for ${o.label}">${ICON('ellipsis')}</button></span>`;
   }
   // Details: every command as a button; what it does and its line are the button's tip (sd:5287), its CLI line and the
   // reason an off one is off fold under "Same thing from the CLI", closed until opened (sd:3464).
   function bar(id) {
     // sd:5295: `bar: false` is a command an on-page field or dropdown already does; its key, the ⋯ menu and bulk keep it.
+    // pack sd:7675: a command whose job runs now (`busy(o)`) is off, but shows as its button, disabled and turning, so the
+    // bar says the job runs instead of folding the command away.
     const o = OBJ.get(id); const list = cmdsFor(o).filter(c => c.bar !== false); if (!list.length) return html``;
-    const on = list.filter(c => !offWhy(c, o)), off = list.filter(c => offWhy(c, o));
-    const first = on.find(c => c.primary?.(o)) || on[0];
-    const button = c => html`<button class="btn${c === first ? '' : ' quiet'}${c.risk === 'confirm' ? ' risky' : ''}" type="button" data-cmd="${c.id}" data-obj="${id}" data-tip="${tipOf(c, o)}" aria-keyshortcuts="${c.key ? '. ' + c.key : ''}">${c.label}${c.key ? html`<kbd>${c.key}</kbd>` : ''}</button>`;
+    const busy = c => !!c.busy?.(o);
+    const on = list.filter(c => !offWhy(c, o) || busy(c)), off = list.filter(c => offWhy(c, o) && !busy(c));
+    const first = on.find(c => !busy(c) && c.primary?.(o)) || on.find(c => !busy(c));
+    const button = c => busy(c)
+      ? html`<button class="btn quiet" type="button" data-cmd="${c.id}" data-obj="${id}" data-tip="${offWhy(c, o)}" disabled aria-busy="true">${ICON('rotate-ccw')}Running</button>`
+      : html`<button class="btn${c === first ? '' : ' quiet'}${c.risk === 'confirm' ? ' risky' : ''}" type="button" data-cmd="${c.id}" data-obj="${id}" data-tip="${tipOf(c, o)}" aria-keyshortcuts="${c.key ? '. ' + c.key : ''}">${c.label}${c.key ? html`<kbd>${c.key}</kbd>` : ''}</button>`;
     return html`<div class="actions">${on.map(button)}</div>
       <details class="cli-all"><summary>Same thing from the CLI</summary>${off.map(c => html`<p class="why off"><b>${c.label}</b> is off: ${offWhy(c, o)}</p>`)}${on.filter(c => noCli(cliOf(c, o))).map(c => html`<p class="why"><b>${c.label}</b> has no CLI${c.cli ? `: ${cliOf(c, o).replace(/^no (CLI|sd verb):?\s*/, '')}` : '; it is dashboard only'}.</p>`)}${on.filter(c => !noCli(cliOf(c, o))).map(c => html`<div class="cli fold"><button class="cli-line" type="button" aria-expanded="false" title="Show the full command"><code>${cliOf(c, o)}</code></button><button class="icon-btn" type="button" data-copy="${cliOf(c, o)}" aria-label="Copy: ${cliOf(c, o)}">${ICON('copy')}</button></div>${executes(c, o) ? (c.sends ? html`<p class="why"><b>${c.label}</b> runs here and sends <code>${c.sends(o)}</code>.</p>` : '') : html`<p class="why"><b>${c.label}</b> is copy only: the dashboard does not run this line.</p>`}`)}</details>`;
   }

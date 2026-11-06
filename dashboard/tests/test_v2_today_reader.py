@@ -402,6 +402,103 @@ class TheTrack(ReaderCase):
         self.assertEqual((out["R"]["key"], out["R"]["table"]), ("", True))
 
 
+class TheTimeline(ReaderCase):
+    """pack sd:7681: the Timeline is one chart on one time axis: Today's Landed, Jobs, Briefs and Live lanes, then one
+    lane per Activity kind, read from /api/activity?range=7d when the view first shows. The 24h / 7d tiles drive the
+    whole view: its axis, its marks and its table."""
+
+    TRACK = {"since": "2026-08-30T12:00:00Z", "day": "2026-09-05T12:00:00Z", "until": NOW,
+             "key": {"landed": 1, "landing": 0, "due_week": 0, "blocked": 0},
+             "landed": [{"at": "2026-09-03T10:00:00Z", "id": "item:6", "item": 6, "what": "sd:6 Three days ago"},
+                        {"at": "2026-09-06T10:00:00Z", "id": "item:7", "item": 7, "what": "sd:7 Seven"}],
+             "jobs": [], "briefs": [], "live": []}
+    ACTIVITY = {"read": NOW, "from": "2026-08-30T12:00:00Z", "to": NOW, "kinds": ["merge", "run", "review", "command"],
+                "sources": {"merge": "", "review": "database locked", "run": "", "job": "", "command": ""},
+                "events": [{"id": "merge:41", "k": "merge", "at": "2026-09-06T09:30:00Z", "s": "ok", "what": "Port the page"},
+                           {"id": "run:5", "k": "run", "at": "2026-09-06T08:00:00Z", "s": "warning", "what": "nightly-sync failed"},
+                           {"id": "cmd:9", "k": "command", "at": "2026-09-03T09:00:00Z", "s": "ok", "what": "sd status · exit 0"}]}
+    ANSWER = ("const ACT = %s;\nANSWER = path => path === '/api/activity?range=7d' ? [200, ACT] : [200, DOC0];\n"
+              "const showTimeline = () => (DOC_LISTENERS['shell:view'] || []).forEach(f => f({ detail: { id: 'timeline' } }));\n"
+              "const range = v => ELS['track-range'].listeners.click[0]({ target: { closest: s => s === '[data-range]' ? { dataset: { range: v } } : null } });\n")
+    DRAWN = "R.plot = ELS['track-plot'].html; R.rows = ELS['track-rows'].html; R.tiles = ELS['track-range'].html; R.h = ELS['track-h'].textContent;"
+
+    def run_timeline(self, body):
+        self.doc["track"] = self.TRACK
+        return self.run_page(body, after=self.ANSWER % json.dumps(self.ACTIVITY))
+
+    def test_the_timeline_carries_the_activity_lanes_under_todays(self):
+        out = self.run_timeline("R.before = ELS['track-plot'].html; showTimeline(); await flush();" + self.DRAWN)
+        self.assertEqual(out["gets"], ["/api/now", "/api/activity?range=7d"], "Activity is read once the Timeline shows")
+        self.assertNotIn("tick", out["R"]["before"])
+        plot = out["R"]["plot"]
+        labels = re.findall(r'<text class="lane-l" x="0" y="\d+">(\w+)</text>', plot)
+        self.assertEqual(labels, ["Landed", "Jobs", "Briefs", "Live", "Merges", "Runs", "Reviews", "Commands"])
+        self.assertEqual(plot.count("<svg "), 1, "one chart, one time axis")
+        # The 24 hours: the merge and the failed run; the command 3 days old is not drawn.
+        self.assertEqual(re.findall(r'<rect class="tick (\w+)"', plot), ["ok", "warning"])
+        self.assertIn('<a href="/activity?kind=merge&amp;row=merge%3A41">', plot)
+        self.assertIn("▨ unknown · reviews not read: database locked", plot)
+        self.assertIn('aria-label="Last 24 hours: 1 landed, 0 jobs failed, 0 briefs filed, 0 sessions live; 1 merges, 1 runs,'
+                      ' reviews not read, 0 commands"', plot)
+        self.assertIn("Port the page", out["R"]["rows"])
+        self.assertNotIn("sd status", out["R"]["rows"])
+
+    def test_the_range_tiles_change_the_axis_and_the_window(self):
+        out = self.run_timeline("showTimeline(); await flush(); R.day = ELS['track-plot'].html; range('7d');" + self.DRAWN
+                                + " R.search = location.search;")
+        day, week = out["R"]["day"], out["R"]["plot"]
+
+        def axis(plot):
+            return re.findall(r'<text class="axis"[^>]*>([^<]+)</text>', plot)
+
+        self.assertTrue(axis(day) and all(re.fullmatch(r"\d\d:00", a) for a in axis(day)), axis(day))
+        self.assertEqual(len(axis(week)), 7, axis(week))
+        self.assertFalse(any(a.endswith(":00") for a in axis(week)), "the 7d axis names days, not hours")
+        self.assertIn('aria-label="Last 7 days: 2 landed,', week)
+        # Lane by lane: the merge, the failed run, and the command 3 days old.
+        self.assertEqual(re.findall(r'<rect class="tick (\w+)"', week), ["ok", "warning", "ok"])
+        self.assertIn("sd status · exit 0", out["R"]["rows"])
+        self.assertIn("sd:6 Three days ago", out["R"]["rows"])
+        self.assertIn('data-range="7d" aria-pressed="true"', out["R"]["tiles"])
+        self.assertIn('data-range="24h" aria-pressed="false"', out["R"]["tiles"])
+        self.assertEqual(out["R"]["h"], "The last 7 days")
+        self.assertTrue(out["R"]["search"].endswith("&range=7d"), "the address keeps the row and the range")
+
+    def test_the_address_keeps_the_7_day_range(self):
+        out = self.run_timeline("showTimeline(); await flush();" + self.DRAWN)
+        self.assertIn("Last 24 hours", out["R"]["plot"])
+        self.doc["track"] = self.TRACK
+        out = self.run_page("showTimeline(); await flush();" + self.DRAWN, search="?range=7d",
+                            after=self.ANSWER % json.dumps(self.ACTIVITY))
+        self.assertIn('aria-label="Last 7 days:', out["R"]["plot"])
+
+    def test_an_activity_read_that_fails_hatches_every_kind_with_the_reason(self):
+        out = self.run_timeline("ACT.status = 1; ANSWER = path => path.startsWith('/api/activity') ? [500, { error: 'database is locked' }] : [200, DOC0];"
+                                " showTimeline(); await flush();" + self.DRAWN)
+        plot = out["R"]["plot"]
+        for kind in ("merges", "runs", "reviews", "commands"):
+            self.assertIn(f"▨ unknown · {kind} not read:", plot)
+        self.assertNotIn('<rect class="tick', plot)
+
+    def test_an_activity_read_that_fails_shows_even_when_no_mark_is_in_the_window(self):
+        """A window with no Today mark and no event still says Activity was not read: unknown is not zero."""
+        self.TRACK = {**self.TRACK, "landed": []}
+        out = self.run_timeline("ANSWER = path => path.startsWith('/api/activity') ? [500, { error: 'database locked' }] : [200, DOC0];"
+                                " showTimeline(); await flush();" + self.DRAWN)
+        plot = out["R"]["plot"]
+        self.assertNotIn("Nothing landed", plot)
+        for kind in ("merges", "runs", "reviews", "commands"):
+            self.assertIn(f"▨ unknown · {kind} not read: database locked", plot)
+        self.assertIn("merges not read, runs not read", plot)
+
+    def test_a_7_day_tick_and_row_open_activity_at_7_days(self):
+        """Activity reads 24 hours unless asked: an older event's link carries the range, or it opens with no row."""
+        out = self.run_timeline("showTimeline(); await flush(); R.day = ELS['track-plot'].html; range('7d');" + self.DRAWN)
+        self.assertIn('<a href="/activity?kind=merge&amp;row=merge%3A41">', out["R"]["day"])
+        self.assertIn('<a href="/activity?kind=command&amp;row=cmd%3A9&amp;range=7d">', out["R"]["plot"])
+        self.assertIn('<a href="/activity?kind=command&amp;row=cmd%3A9&amp;range=7d">', out["R"]["rows"])
+
+
 HELP = {
     "jobs": "Failed scheduled jobs. Press to list them in Needs you.",
     "lane": "Lane entries blocked until someone acts; merging, next and flaky heads (a gate that failed, then passed at one"
@@ -511,7 +608,7 @@ shellRun(cmd('work item.fix'), C.get('item:{self.task}')); await flush();""")
 
     def test_fix_on_a_report_with_an_expired_login_opens_its_credentials_row(self):
         """sd:6964: a job alert whose log shows claude signed out gets Fix, first, to Health > Credentials' claude row;
-        a report with no login cause keeps Acknowledge first, and Fix is off there."""
+        a report with no login cause keeps Acknowledge first, and Fix there is the Reports page's (pack sd:7683)."""
         from sd_db import reporting
 
         def report(job, text):
@@ -534,7 +631,40 @@ shellRun(fix, o); await flush();""")
         self.assertEqual(out["toasts"][-1]["msg"], "Health opens on claude")
         self.assertEqual((out["posts"], out["confirms"]), ([], []))
         self.assertEqual(out["R"]["primary"], [True, False, False, True])
-        self.assertEqual(out["R"]["off"], "no expired login in its log: Fix it from Reports")
+        self.assertIs(out["R"]["off"], True)
+
+    def test_fix_on_a_report_is_the_reports_debug_session_unless_another_session_has_it(self):
+        """pack sd:7683: a report row offers Fix as Reports does, a debug session posted with the read's revision, beside
+        Acknowledge; a report another session took names who has it, in the row and Details, and offers no Fix."""
+        from sd_db import reporting, workflow, writes
+
+        def report(job):
+            return reporting.ingest(self.connection, job=job, run_id="r1", started="2026-09-06T09:00:00Z",
+                                    ended="2026-09-06T09:01:00Z", exit_code=1, text="mirror failed\n", source_path="/tmp/x.log",
+                                    attention=True, attention_basis="job exited 1")["item"]["id"]
+        plain, taken = report("nas-full-copy"), report("hoa-core-bills")
+        writes.transition(self.connection, taken, "in_progress", who="hub-triage", reason="triage")
+        revision = workflow.item_state(self.connection, plain)["revision"]
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.doc = now_screen.document(self.connection, now=NOW, jobs=JobsBackend(root.name, jobs=[]),
+                                       fleet=lambda area: fleet_document(area, repos=[]))
+        out = self.run_page(ICONS + f"""ANSWER = (path, body) => path.endsWith('/fix') ? [200, {{ revision: 'e'.repeat(64), fix: {{ session: 'debug', pane: 'w9:p1' }} }}] : [200, DOC0];
+refresh(); await flush();
+const fix = cmd('report.fix'), o = C.get('report:{plain}'), t = C.get('report:{taken}');
+R.drawn = OUT.drawn['report:{plain}']; R.plain = icons('report:{plain}'); R.taken = icons('report:{taken}');
+R.off = fix.when(t); R.says = fix.consequence(o);
+window.PAGE_LIST.select('report:{taken}'); R.details = ELS.details.html;
+shellRun(fix, o); await flush();""")
+        self.assertTrue(out["R"]["drawn"], "a report row draws its icon actions, Fix beside Acknowledge")
+        self.assertEqual([c for c, _, _ in out["R"]["plain"]], ["report.fix", "today.report.ack"])
+        self.assertEqual([c for c, _, _ in out["R"]["taken"]], ["today.report.ack"])
+        self.assertEqual(out["R"]["off"], "hub-triage has it (in_progress): open its session in herdr, or Fix it from Reports")
+        self.assertIn(f"Opens a Claude session on report #{plain} in herdr", out["R"]["says"])
+        self.assertIn("hub-triage has it (in_progress)", out["R"]["details"])
+        self.assertEqual(out["confirms"], ["report.fix"])
+        self.assertEqual(out["posts"], [[f"/api/items/{plain}/fix", {"revision": revision}, 64]])
+        self.assertEqual(out["toasts"][-1]["msg"], f"Fix started · #{plain} · debug session in herdr pane w9:p1")
 
     def test_a_stale_fix_reads_now_again_and_says_why(self):
         out = self.run_page("""ANSWER = (path, body) => path.endsWith('/fix') ? [409, { error: 'item changed; reload it before applying this change', reload: true }] : [200, DOC0];

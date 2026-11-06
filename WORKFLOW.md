@@ -57,7 +57,7 @@ These run without being asked.
 - No pack command runs in a checkout whose `repo.managed` is no (sd:1620, sd:2566).
   `sd-ship`, `sd-check`, `sd-status` and `sd-ship lane enqueue` refuse there, dry runs included.
   `sd-review` runs there, review only: it reads a diff, and its gate check does not run (sd:5953).
-  The refusal names the remedy: `bin/sd-db repo managed <path> yes`.
+  The refusal names the remedy: `sd fleet standard` in that checkout, which sets managed last (sd:7710).
   A checkout with no row proceeds; only a row marked unmanaged refuses.
 - `sd-status` reports. It never writes.
 - An item reference a person reads names its repository: `system sd:5103`, or `fleet sd:5103` for an item in none (sd:5124).
@@ -382,10 +382,10 @@ Workers:
 - **Register each in-session builder so Today lists it** (pack sd:7221): on spawn run
   `sd assignments beat <items> --start --worktree <path> --branch <branch> --budget <minutes>`; on its final report, `--end` before the lane enqueue, which refuses a held item. Only `--end` ends a run: silence and a done item do not.
 - **Fan out only when the targets are independent, share no mutable state, and are cheap to verify.**
-- **Batch a repository's ready items into one pull request per wave**, one commit per row; rows that change the same files always group.
-  A wave is the round of builders the lead starts together (grill Q26, pack sd:6005).
-  Keep a group near 300 changed lines. Name every grouped row in the pull request. Where goldens exist, bless them once per bundle.
-  A change that moves state in steps still gets its own pull request.
+- **Keep one open bundle branch per repository**, one commit per row; rows that change the same files always group.
+  Open a second pull request only for a change that moves state in steps or when the bundle is already in the lane (pack sd:7737).
+  `--start` refuses a second open branch of the repository, naming the open one; `--into <branch>` starts a side branch that merges into it, and `--reason state-move|in-lane` opens a second one and notes why.
+  Name every grouped row in the pull request. Where goldens exist, bless them once per bundle.
   Add a bundle's shadow columns in one schema migration, not one per feature (pack sd:6358).
   Bundling comes before parallel lanes: revisit them only when Metrics' Lane times median wait (pack sd:6006) passes 30 min (pack sd:7412).
 - **Repository work uses the existing `ready` status (pack sd:6000).** A second status would split one queue in two.

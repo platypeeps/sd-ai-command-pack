@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_dashboard import places, server, v2, writing_screen
+from sd_dashboard import hoa_screen, places, server, v2, writing_screen
 from sd_dashboard.v2.pages import writing as writing_page
 from sd_db import upsert_repo, writing
 from test_v2_read import READ_SHELL
@@ -80,6 +80,15 @@ class TheDocument(Pieces):
         with mock.patch.object(places, "REALMS_CONFIG", Path(self.tmp.name) / "absent.conf"):
             doc = writing_screen.document(self.connection, now=NOW)
         self.assertEqual(({p["realm"] for p in doc["pieces"]}, doc["realms"]["state"]), ({None}, "missing"))
+
+    def test_a_piece_of_the_hoa_checkout_is_realm_hoa_before_a_glob_that_claims_it(self):
+        """pack sd:7687: the hoa checkout's pieces are HOA's, as its items are on Tasks, with or without a realm list."""
+        conf = Path(self.tmp.name) / "realms.conf"
+        conf.write_text(f"realm|brand|Brand|{self.root}\n", encoding="utf-8")
+        hoa = mock.patch.object(hoa_screen, "checkout", return_value=(str(self.root), Path(self.root), []))
+        for path in (conf, Path(self.tmp.name) / "absent.conf"):
+            with self.subTest(path=path.name), hoa, mock.patch.object(places, "REALMS_CONFIG", path):
+                self.assertEqual({p["realm"] for p in writing_screen.document(self.connection, now=NOW)["pieces"]}, {"hoa"})
 
     def test_each_piece_carries_its_stage_gates_moves_files_and_draft(self):
         doc = writing_screen.document(self.connection, now=NOW)
@@ -489,8 +498,8 @@ DOC.pieces.forEach(p => { p.realm = p.id === 12 ? 'brand' : 'personal'; });
 VIEW = 'brand'; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: 'brand' } })); await flush(); R.brand = ELS['view-board'].html;""",
                             prelude=self.REALMS)
         r = out["R"]
-        self.assertEqual(r["views"], [["personal", "p"], ["brand", "r"], ["work", "w"]])
-        self.assertEqual(out["hidden"], {"brand": False, "work": True})  # Personal never hides (sd:5642)
+        self.assertEqual(r["views"], [["personal", "p"], ["brand", "r"], ["work", "w"], ["hoa", "h"]])
+        self.assertEqual(out["hidden"], {"brand": False, "work": True, "hoa": True})  # Personal never hides (sd:5642)
         def has(board):
             return ["Three Budgets" in board, "Gated Review" in board, "File Owned" in board]
         self.assertEqual((has(r["personal"]), has(r["brand"])), ([True, False, True], [False, True, False]))
@@ -512,15 +521,31 @@ for (const v of R.views) { VIEW = v; document.dispatchEvent(new CustomEvent('she
                  for title in ("Three Budgets", "Gated Review", "Parked Idea", "File Owned")}
         self.assertEqual(where, {"Three Budgets": ["personal"], "Gated Review": ["brand"], "Parked Idea": ["personal"],
                                  "File Owned": ["personal"]})
-        self.assertEqual(out["hidden"], {"brand": False, "work": True})
+        self.assertEqual(out["hidden"], {"brand": False, "work": True, "hoa": True})
         self.assertEqual(out["replaced"], "#view=personal", "an old #view=all link did not land on Personal")
+
+    def test_an_hoa_piece_sits_in_the_hoa_view_not_personal(self):
+        """pack sd:7687: a piece of the hoa checkout (realm hoa, places.realm_of) shows under HOA, which then shows, and
+        leaves Personal, as on Tasks. A realm line named hoa takes no second view."""
+        realms = self.REALMS + "DOC.pieces.forEach(p => { p.realm = p.id === 12 ? 'hoa' : null; p.parked = false; });\n"
+        out = self.run_page("""R.views = window.PAGE_VIEWS.map(v => v.id); R.board = {};
+for (const v of R.views) { VIEW = v; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id: v } })); await flush(); R.board[v] = ELS['view-board'].html; }""",
+                            prelude=realms)
+        r = out["R"]
+        self.assertEqual(r["views"], ["personal", "brand", "work", "hoa"])
+        self.assertEqual([v for v, board in r["board"].items() if "Gated Review" in board], ["hoa"])
+        self.assertIn("Three Budgets", r["board"]["personal"])
+        self.assertEqual(out["hidden"], {"brand": True, "work": True, "hoa": False})
+        taken = self.run_page("R.views = window.PAGE_VIEWS.map(v => [v.id, v.label]);",
+                              prelude=realms + "SHELL_REALMS.push({ id: 'hoa', label: 'Hoa2' });\n")["R"]["views"]
+        self.assertEqual(taken, [["personal", "Personal"], ["brand", "Brand"], ["work", "Work"], ["hoa", "HOA"]])
 
     def test_personal_shows_with_no_piece_in_it_and_says_where_the_pieces_are(self):
         # sd:5642: Personal is a tab for personal writing, as on Tasks: it stays when every piece's repo is in a realm line,
         # and its empty board says why, not that no piece is registered.
         brand = self.REALMS + "DOC.pieces.forEach(p => { p.realm = 'brand'; }); DOC.realms = { state: %s };\n"
         out = self.run_page("", prelude=brand % "'read'")
-        self.assertEqual(out["hidden"], {"brand": False, "work": True}, "Personal was hidden, or a realm was not told")
+        self.assertEqual(out["hidden"], {"brand": False, "work": True, "hoa": True}, "Personal was hidden, or a realm was not told")
         self.assertEqual(out["states"][-1]["title"], "No personal pieces")
         self.assertEqual(out["states"][-1]["text"], "Pieces from a repo a realm claims show in that realm: writing-pack under Brand."
                          " dashboard.realms on Settings decides which repos each realm claims.")
@@ -753,6 +778,22 @@ R.all = ELS['view-board'].html; press('Work'); R.work = ELS['view-board'].html; 
         self.assertNotIn("An idea with no source", col(r["work"]))
         self.assertIn("Highest 1 of 50 Work ideas.", col(r["work"]))
         self.assertIn("An idea with no source", col(r["off"]))
+
+    def test_a_pressed_no_area_tile_that_vanishes_on_a_read_again_clears(self):
+        """pack sd:7695: No area pressed, then a read again in which every idea has an area: the tile is gone, so the
+        filter clears and the column shows the highest ideas again, not an empty column no tile can clear."""
+        out = self.run_page("""const press = v => ELS['view-board'].listeners.click.forEach(f => f({ target: { closest: s =>
+  s === '[data-f="area"]' ? { dataset: { f: 'area', v } } : null } }));
+press('none'); R.none = ELS['view-board'].html;
+DOC.ideas.areas = { Personal: 157, Work: 50 }; window.PAGE_AGAIN.run(); await flush(); R.again = ELS['view-board'].html;""")
+        def col(board):
+            return re.search(r'<div class="col vault".*?</div></div></div>', board, re.S).group(0)
+        r = out["R"]
+        self.assertIn('data-v="none" aria-pressed="true"', col(r["none"]))
+        self.assertEqual(re.findall(r'data-f="area" data-v="([^"]*)" aria-pressed="(\w+)"', col(r["again"])),
+                         [("Personal", "false"), ("Work", "false"), ("RWBP", "false")])
+        self.assertIn("Gates are cheaper than rework", col(r["again"]))
+        self.assertIn("Highest 2 of 207 inbox ideas.", col(r["again"]))
 
     def test_parked_shows_the_parked_pieces_alone_and_an_older_all_link_shows_open(self):
         def board(search):

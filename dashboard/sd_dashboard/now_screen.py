@@ -509,10 +509,12 @@ def lane_rows(lanes: list[dict]) -> list[dict]:
 
 
 def report_rows(problems: list[dict]) -> list[dict]:
-    """The open problem reports as Needs you rows (sd:5921), in the look band; Acknowledge is each one's act."""
+    """The open problem reports as Needs you rows (sd:5921), in the look band; Fix and Acknowledge are each one's acts, and
+    a report another session took names who has it (pack sd:7683)."""
     return [{**problem, "rank": ATTENTION, "kind": "report", "what": f"Report: {problem['title']}",
              "detail": " · ".join(part for part in (problem.get("why"), f"on {problem['host']}" if problem.get("host") else "",
-                                                     f"repeats {problem['repeats']}×" if problem.get("repeats") else "") if part)
+                                                     f"repeats {problem['repeats']}×" if problem.get("repeats") else "",
+                                                     problem.get("claim")) if part)
                        or "asks for a person",
              "source": "reports", "problem": [problem["title"], problem.get("why")]}
             for problem in problems]
@@ -599,14 +601,16 @@ def brief_needs(briefs: list[dict]) -> list[dict]:
                    QUIET, rows, source="briefs")]
 
 
-def flaky_rows(connection: sqlite3.Connection, now: str) -> list[dict]:
-    """Each flaky head of the last week as a look row on the Lane lamp (pack sd:7663; Metrics' Flaky tests until then).
+def flaky_rows(connection: sqlite3.Connection, now: str) -> tuple[list[dict], int]:
+    """Each flaky head of the last week as a look row on the Lane lamp (pack sd:7663; Metrics' Flaky tests until then),
+    and the count of lane entries that could not be read (pack sd:7706).
 
     `metrics_screen.flaky` finds them: a head the gate failed at, then passed at that same head. Its problem is the
     repository, the head and the failures, so a snooze holds until the gate fails that head again.
     """
     from .metrics_screen import flaky
 
+    heads, unreadable = flaky(connection, now)
     return [{"rank": ATTENTION, "kind": "flaky", "id": f"flaky:{found['repository']}:{found['head']}",
              "what": " ".join(part for part in ("Flaky:", found["repository"],
                                                  f"sd:{found['item']}" if found.get("item") else "",
@@ -615,7 +619,7 @@ def flaky_rows(connection: sqlite3.Connection, now: str) -> list[dict]:
              "source": "lane", "at": found["passed"], "item": found.get("item"), "title": found["title"],
              "repo": found["repository"], "head": found["head"], "failed": found["failed"], "passed": found["passed"],
              "status": found["status"], "problem": [found["repository"], found["head"], found["failed"]]}
-            for found in flaky(connection, now)]
+            for found in heads], unreadable
 
 
 def flaky_needs(rows: list[dict]) -> list[dict]:
@@ -714,28 +718,33 @@ def motion(connection: sqlite3.Connection, active: dict, lanes: list[dict]) -> d
 
 
 TRACK_HOURS = 24
+#: The Timeline's longer range (pack sd:7681): the track carries this many days of marks, and its 24h / 7d tiles
+#: pick which part the page draws.
+TRACK_DAYS = 7
 
 
 def track(connection: sqlite3.Connection, now: str, *, rows: list[dict], briefs: list[dict], active: dict,
           lane: dict) -> dict:
-    """The day track (sd:5921): the last 24 hours, rolling, as marks in four lanes, and its key's four counts.
+    """The day track (sd:5921): the last `TRACK_DAYS` days, rolling, as marks in four lanes, and its key's four counts.
 
     Landed is each item a merge delivered (`sd_db.today.delivered`); Jobs each failed run at its log time; Briefs each new
     brief at its filing; Live each session running now, from its start or
-    the window's, whichever is later. Every mark names its row. A read that failed is `error`, so the page
+    the window's, whichever is later. Every mark names its row. `since` starts the 7 days and `day` the last 24 hours,
+    which the key's Landed counts. A read that failed is `error`, so the page
     says the track was not read, never an empty day.
     """
     from sd_db import today
 
     end = datetime.fromisoformat(now.replace("Z", "+00:00"))
-    since, until = _utc((end - timedelta(hours=TRACK_HOURS)).timestamp()), _utc(end.timestamp())
+    since, until = _utc((end - timedelta(days=TRACK_DAYS)).timestamp()), _utc(end.timestamp())
+    day = _utc((end - timedelta(hours=TRACK_HOURS)).timestamp())
     week = (end + timedelta(days=7)).strftime("%Y-%m-%d")
 
     def within(marks):
         return sorted((mark for mark in marks if mark["at"] and since <= mark["at"] <= until), key=lambda mark: mark["at"])
 
     try:
-        delivered = today.delivered(connection, now=now, hours=TRACK_HOURS)
+        delivered = today.delivered(connection, now=now, hours=TRACK_DAYS * 24)
         due = sum(1 for row in today.planned(connection, now=now) if row["due"] <= week)
         blocked = len(today.blocked(connection))
     except (SdDbError, sqlite3.Error, KeyError, TypeError) as failure:
@@ -753,8 +762,8 @@ def track(connection: sqlite3.Connection, now: str, *, rows: list[dict], briefs:
                         "item": row["item"], "what": f"sd:{row['item']} {row['session']}"}
                        for n, row in enumerate(active.get("rows") or [])),
     }
-    return {"since": since, "until": until, **marks,
-            "key": {"landed": len(marks["landed"]), "landing": lane["merging"] + lane["next"], "due_week": due,
+    return {"since": since, "day": day, "until": until, **marks,
+            "key": {"landed": sum(1 for mark in marks["landed"] if mark["at"] >= day), "landing": lane["merging"] + lane["next"], "due_week": due,
                     "blocked": blocked}}
 
 
@@ -964,8 +973,8 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     `queues` is the Queues panel (pack sd:6946, `queues`): ready items, build queue and merge lane in one list.
     `builders` is the builder runs Details read (sd:6003, `builders`): each open build run's items, stage, start and ETA.
     `digest` is Since yesterday (sd:6002, `digest`): merged per repo, failed with why and fix, questions waiting.
-    The flaky heads (pack sd:7663, `flaky_rows`) are look rows in `needs`, a group of two or more; a lane read that failed
-    is the partial `dark:flaky` row.
+    The flaky heads (pack sd:7663, `flaky_rows`) are look rows in `needs`, a group of two or more; a lane read that failed,
+    or lane entries it could not read (pack sd:7706), is the partial `dark:flaky` row.
     """
     collect_area, kept = fleet or fleet_module.collect, {}
 
@@ -1011,12 +1020,16 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     reports, reports_snoozed = snooze.split("today", report_rows(reported["problems"]), snoozes)
     threads, mail_snoozed = snooze.split("today", mail_rows(mail["mail"]), snoozes)
     live = {row["item"] for row in active.get("rows") or []}
-    # The flaky heads (pack sd:7663): a read that failed is a partial lane row, so the Lane lamp reads unknown, never 0.
+    # The flaky heads (pack sd:7663): a read that failed, or entries it could not read (pack sd:7706), is a partial lane
+    # row, so the Lane lamp reads unknown, never 0.
     try:
-        flakes, flaky_dark = flaky_rows(connection, now), []
+        flakes, unreadable = flaky_rows(connection, now)
+        flaky_unread = (f"{unreadable} lane {'entry' if unreadable == 1 else 'entries'} could not be read, so a flaky "
+                        "head among them is not listed") if unreadable else ""
     except (OSError, ValueError, TypeError, KeyError, SdDbError, sqlite3.Error) as failure:
-        flakes, flaky_dark = [], [{**dark_row("lane", str(failure) or "the lane entries could not be read"),
-                                   "id": "dark:flaky", "what": "lane not read for flaky heads", "partial": True}]
+        flakes, flaky_unread = [], str(failure) or "the lane entries could not be read"
+    flaky_dark = [{**dark_row("lane", flaky_unread), "id": "dark:flaky", "what": "lane not read for flaky heads",
+                   "partial": True}] if flaky_unread else []
     # The dark rows a part read raises snooze as a dark collector does (sd:5954): each carries its `seen`, and a snoozed
     # one names its lamp, so the lamp still reads unknown (sd:5939).
     dark, dark_snoozed = snooze.split("today", [*([dark_row("lane", sources["lane"])] if sources["lane"] else []),

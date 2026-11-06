@@ -23,9 +23,9 @@ document for it.
 
 ## When to use
 
-Use when requested for work spanning more than one session or more than about
-300 changed lines, as `WORKFLOW.md` describes. A smaller change follows the
-normal branch, check, review and ship path without a planning artifact. Do not
+Use when requested for a change that moves state in steps, as `WORKFLOW.md`
+describes. Any other change follows the normal branch, check, review and ship
+path without a planning artifact. Do not
 write a design just to record routine progress or work already merged.
 
 ## The sequence

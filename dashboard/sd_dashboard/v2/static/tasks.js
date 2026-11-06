@@ -96,7 +96,8 @@ addEventListener('DOMContentLoaded', () => {
     : !w.last || w.last.state === 'never' ? 'sweep not run yet' : w.last.state === 'done' ? `sweep done${w.last.finished ? ` ${w.last.finished.slice(0, 16).replace('T', ' ')} UTC` : ''}${w.last.gaps?.length ? ` · not read: ${w.last.gaps.join(', ')}` : ''}`
     : `sweep ${w.last.state}${w.last.exit != null ? `, exit ${w.last.exit}` : ''}${w.last.reason ? `: ${w.last.reason}` : ''}`;
   // A row's realm tab: its realm when that has a tab, else Personal (no realm list read, or a realm with no tab: pack sd:7216).
-  const tabOf = t => t.realm !== 'hoa' && t.realm !== 'home' && window.PAGE_VIEWS.some(v => v.id === t.realm) ? t.realm : 'personal';
+  // pack sd:7687: the hoa checkout's rows are realm hoa (places.realm_of), so they sit in HOA, not Personal too.
+  const tabOf = t => t.realm !== 'home' && window.PAGE_VIEWS.some(v => v.id === t.realm) ? t.realm : 'personal';
   const inPlace = (t, p = place()) => p === 'all' || (p === 'hoa' || p === 'home' ? t.area === p : tabOf(t) === p);
   const placed = () => listed().filter(t => inPlace(t));
 

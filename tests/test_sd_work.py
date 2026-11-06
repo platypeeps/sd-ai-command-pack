@@ -739,6 +739,19 @@ class TaskCLI(unittest.TestCase):
         self.assertIsNone(cleared["item"]["branch"])
         self.assertEqual(cleared["notes"][-1]["body"], f"Updated branch by {getpass.getuser()}")
 
+    def test_edit_branch_sets_a_branch_and_clear_branch_refuses_in_progress(self):
+        """sd:7659. `--branch` re-sets one; a clear never strands an in_progress row."""
+        state = json.loads(self.call("task", "add", "--priority", "3", "Branch to set", "--json").stdout)
+        item = state["item"]["id"]
+        with database(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, branch="feat/old")
+            sd_db.writes.transition(connection, item, "in_progress", who="test", reason="work")
+        refused = self.call("task", "edit", item, "--clear-branch", code=1)
+        self.assertIn("in_progress item records its branch", refused.stderr)
+        set_to = json.loads(self.call("task", "edit", item, "--branch", "feat/new", "--json").stdout)
+        self.assertEqual(set_to["item"]["branch"], "feat/new")
+        self.call("task", "edit", item, "--branch", "x", "--clear-branch", code=2)
+
     # Stands in for the library's `edit_item` and records what it was handed:
     # the pin may predate the unpark (sd:3007), and the library's own tests
     # cover what it does with `parked_at`.

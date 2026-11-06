@@ -54,6 +54,8 @@ CHAIN_KEY = "cron-chain:"
 #: The status-change note is how a superseded report is told from an
 #: acknowledged one (sd:4641): it never counts as acknowledged.
 SUPERSEDED = "superseded by sd:"
+#: pack sd:7729: the reason a clean run of the job on the report's host closed it, then `<job>:<run id>`.
+RECOVERED = "recovered: clean run "
 
 #: How far past the clock a recorded `ended` may be and still count as the
 #: newest tick. `cron-jobs.sh` stamps `ended` on this machine moments before it
@@ -390,8 +392,10 @@ def _kept_cut(item):
     return (fields.get("repeats") or {}).get("body_truncated", fields["report"].get("truncated")) is True
 
 
-def _host_reports(connection, job, host, *, but=None):
+def _host_reports(connection, job, host, *, but=None, failed=False):
     """The open clean-exit findings reports of `job` that `host` filed, newest first, other than `but`.
+
+    `failed` takes the host's failure reports too, any exit code (pack sd:7729).
 
     Only rows that store this `host` (sd:4641, no backfill), with `attention`
     and no `record`, and none another host's newest run folded into before
@@ -404,16 +408,16 @@ def _host_reports(connection, job, host, *, but=None):
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') = ?"
         "      AND json_extract(fields, '$.report.host') = ?"
         "      AND json_type(fields, '$.attention') = 'true'"
-        "      AND json_type(fields, '$.report.exit_code') = 'integer' AND json_extract(fields, '$.report.exit_code') = 0"
+        "      AND (? OR json_type(fields, '$.report.exit_code') = 'integer' AND json_extract(fields, '$.report.exit_code') = 0)"
         "      AND json_type(fields, '$.record') IS NULL END"
         " AND NOT EXISTS (SELECT 1 FROM state WHERE kind='heartbeat' AND substr(key, 1, ?) = ? AND key != ?"
         "      AND CASE WHEN json_valid(body) THEN json_extract(body, '$.item') END = item.id)"
         " ORDER BY id DESC",
-        (job + ":", job + ";", but, job, host, len(f"{CHAIN_KEY}{job}@"), f"{CHAIN_KEY}{job}@",
+        (job + ":", job + ";", but, job, host, failed, len(f"{CHAIN_KEY}{job}@"), f"{CHAIN_KEY}{job}@",
          f"{CHAIN_KEY}{job}@{host}")).fetchall()
 
 
-def _supersede(connection, *, job, host, by):
+def _supersede(connection, *, job, host, by, recovered=None):
     """Close the other open findings reports of `job` on `host` as superseded by report `by` (sd:4641).
 
     A clean-exit findings run with a whole body, filed or folded into `by`,
@@ -423,9 +427,10 @@ def _supersede(connection, *, job, host, by):
     with a followup the ingest did not write: somebody owes work on it. The
     ingest's own followup is resolved, as `acknowledge` resolves it, and the status note names `by`; `_fold_target` reads that note, so a
     superseded report never counts as acknowledged. `ingest_log` calls this
-    only for the host's newest run, so a late run closes nothing.
+    only for the host's newest run, so a late run closes nothing. pack sd:7729: `recovered`, a clean run's
+    `<job>:<run id>`, closes the host's failure reports too, under the same rules, with `RECOVERED` as the reason.
     """
-    for row in _host_reports(connection, job, host, but=by):
+    for row in _host_reports(connection, job, host, but=by, failed=recovered is not None):
         ingests = _ingest_followup_for(row["fields"])
         followups = connection.execute(
             "SELECT id, session, body FROM note WHERE item=? AND kind='followup' AND resolved_at IS NULL",
@@ -434,7 +439,8 @@ def _supersede(connection, *, job, host, by):
             continue
         for note in followups:
             resolve_note(connection, note["id"])
-        transition(connection, row["id"], "done", who=INGEST_SESSION, reason=f"{SUPERSEDED}{by}" + (
+        transition(connection, row["id"], "done", who=INGEST_SESSION, reason=(
+            f"{RECOVERED}{recovered}" if recovered else f"{SUPERSEDED}{by}") + (
             "; resolved the ingest's followup " + ", ".join(str(note["id"]) for note in followups) if followups else ""))
 
 
@@ -726,6 +732,8 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         if not (attention or filed):
             if moves:
                 _set_chain(connection, chain_key, newest_row, {"run_id": run_id, "ended": ended, "item": None})
+                if host:
+                    _supersede(connection, job=job, host=host, by=None, recovered=f"{job}:{run_id}")
             return {"recorded": "heartbeat" if wrote else "nothing", "job": job, "run_id": run_id,
                     "healthy": True, "exit_code": exit_code, "ended": ended,
                     "why": "the job recovered" if recovered else _quiet(beat, previous)}

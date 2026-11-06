@@ -239,7 +239,7 @@ class ProviderEnvironmentTests(ReviewFixture):
         external = self.tmp / "outside.txt"
         external.write_text("private fixture content must not be sent")
         (root / "linked.txt").symlink_to(external)
-        material = sd_review.review_material(root, sd_review.resolve_subject(root, "worktree"))
+        material = sd_review.review_material(root, sd_review.resolve_subject(root, "worktree"), "")
         self.assertIn(f"symlink -> {external}", material)
         self.assertNotIn(external.read_text(), material)
 

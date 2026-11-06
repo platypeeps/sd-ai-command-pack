@@ -34,7 +34,7 @@ function absorb(doc) {
     const m = (r.remote || '').match(/github\.com[:/]([^/]+)\/(.+?)(\.git)?$/);
     return { path: r.path, remote: r.remote, managed: r.managed, merge: r.runner_merge, lane: r.lane_host || 'hub', mode: r.mode, ci: r.ci,
       channels: r.channels || 'none', chProblem: r.channels_problem || null,
-      dependabot: r.dependabot ?? null, depGate: r.dependabot_gate || null, github_issues: r.github_issues ?? null, jira_project: r.jira_project ?? null,
+      dependabot: r.dependabot ?? null, depGate: r.dependabot_gate || null, github_issues: r.github_issues ?? null, issues_scope: r.issues_scope ?? null, jira_project: r.jira_project ?? null,
       pieces: r.pieces_source, created: r.created_at, updated: r.updated_at, review: r.review, protection: r.protection, runtimes: r.runtimes,
       owner: m ? m[1] : '?', slug: m ? `${m[1]}/${m[2]}` : '', name: nameOf(r.path), registered: true, git: gitBy[r.path] || null };
   });
@@ -434,6 +434,8 @@ function renderRepoPage(el) {
         html`<input class="fld" type="text" data-set="lane_host" list="lane-hosts" value="${r.lane}" aria-label="Move lane to" autocomplete="off" spellcheck="false"><datalist id="lane-hosts">${laneHosts().map(h => html`<option value="${h}"></option>`)}</datalist>`, html` data-key="lane_host"`)}
       ${setRow(html`GitHub issues <button class="help" type="button" aria-label="Help: GitHub issues" data-help="<b>Whether this repo takes GitHub issues from other people.</b> <b>off</b>, where every repo starts: work stays in tasks. <b>read</b>: lists outside issues to turn into tasks. <b>ask</b>: agents may also close and update issues after you approve each one, and tasks offer File GitHub issue.">${I('circle-help')}</button>`, r.github_issues ?? html`<span class="no">not read</span>`,
         r.github_issues == null ? lock(why('repos') || 'the policy declaration did not read') : seg('github_issues', ['off', 'read', 'ask'], r.github_issues), html` data-key="github_issues"`)}
+      ${setRow(html`Issue intake <button class="help" type="button" aria-label="Help: Issue intake" data-help="<b>Which outside issues the intake list shows for this repo.</b> <b>all</b>, where every repo starts: every open issue no task carries. <b>mine</b>: only issues assigned to you, mentioning you or asking your review. It changes what you see, not what agents may write.">${I('circle-help')}</button>`, r.issues_scope ?? html`<span class="no">not read</span>`,
+        r.issues_scope == null ? lock(why('repos') || 'the policy declaration did not read') : seg('issues_scope', ['all', 'mine'], r.issues_scope), html` data-key="issues_scope"`)}
       ${setRow(html`Jira project <button class="help" type="button" aria-label="Help: Jira project" data-help="<b>The Jira project that File Jira issue files in,</b> by its key, such as EXAMPLE. <b>off</b>, where every repo starts, hides that action. The Jira sign-in lives in the dashboard's settings file.">${I('circle-help')}</button>`, r.jira_project ?? html`<span class="no">not read</span>`,
         r.jira_project == null ? lock(why('repos') || 'the row has no jira_project column') : html`<input class="fld" type="text" data-set="jira_project" value="${r.jira_project}" placeholder="KEY or off" aria-label="Jira project" autocomplete="off" spellcheck="false">`, html` data-key="jira_project"`)}
       ${setRow(html`Publishing <button class="help" type="button" aria-label="Help: Publishing" data-help="<b>Where this repo's briefs and documents publish:</b> a folder in Obsidian, a page in Notion, a path in Drive. A checked place is on; an empty folder uses the default, shown greyed. A document still opts in to Notion or Drive under Publish to on Documents. <b>none</b>: each document's own settings and the default folders. A change takes effect at the next render.">${I('circle-help')}</button>`, chShown(r), chForm(r), html` data-key="channels"`)}
@@ -484,20 +486,21 @@ function withdraw(key, quiet) {
   if (!quiet) shell.toast(`Proposal withdrawn · ${p.title}`);
 }
 // Pack sd:7536: the plain names the settings page and its proposals show; the column each sets stays in the line.
-const LABEL = { runner_merge: 'Merge automatically', managed: 'Managed', dependabot: 'Auto-merge dependency updates', github_issues: 'GitHub issues',
+const LABEL = { runner_merge: 'Merge automatically', managed: 'Managed', dependabot: 'Auto-merge dependency updates', github_issues: 'GitHub issues', issues_scope: 'Issue intake',
   severity_floor: 'Blocking severity', automatic_deep: 'Automatic deep Copilot review' };
 function propose(key, value) {
   const r = REPOS.find(x => x.path === repoParam), rv = r.review || {};
   let p;
   if (key === 'channels') return proposeChannels(r, value === null ? null : chRead());
   if (key === 'mail_aliases') return proposeAliases(r, value);
-  if (key === 'runner_merge' || key === 'managed' || key === 'dependabot' || key === 'github_issues') {
+  if (key === 'runner_merge' || key === 'managed' || key === 'dependabot' || key === 'github_issues' || key === 'issues_scope') {
     const before = key === 'runner_merge' ? r.merge : r[key];
     if (value === before) return withdraw(key);
     const verb = key.replace('_', '-');
     p = { key, value, before, verb, route: 'sd-db', icon: 'terminal', title: `${LABEL[key]}: ${before} → ${value}`, cmd: `${SDDB} repo ${verb} ${shq(r.path)} ${value}`,
       note: key === 'runner_merge' && value === 'manual' ? 'Changes to this repo will wait for you before they merge.' : key === 'runner_merge' ? 'A finished, reviewed change to this repo goes into the merge queue on its own.'
         : key === 'dependabot' ? `The daily Dependabot sweep ${value === 'yes' ? 'may merge' : 'skips'} this repo's bumps from its next run.`
+        : key === 'issues_scope' ? (value === 'mine' ? 'Issue intake lists only issues assigned to you, mentioning you or asking your review.' : 'Issue intake lists every open outside issue no task carries.')
         : key === 'github_issues' ? (value === 'ask' ? "Agents may close and update issues on this repo's own remote, each write approved by you; its tasks offer File GitHub issue." : value === 'read' ? "Agents read this repo's issues and map each to an sd item; they write none." : 'Agents write no GitHub issues here; work stays in sd items.') : 'Writes one column; no new row.' };
   } else if (key === 'lane_host') {
     if (!value || value === r.lane) return withdraw(key);
@@ -681,7 +684,7 @@ function registerCommands() {
       cli: o => `${SDDB} repo runner-merge ${shq(o.path)} ${o.row.merge === 'auto' ? 'manual' : 'auto'}`, executes: true,
       run: o => flipRepo('runner-merge', o), undo: undoOf },
     { id: 'repo.managed', on: 'repo', label: 'Switch managed', does: 'Switches whether the workflow manages this repo; Undo switches it back.', key: 'g', risk: 'undo', bulk: true, primary: o => o.row.managed !== 'yes', when: o => o.row.registered || 'register this repo first (sd-db repo add)',
-      cli: o => `${SDDB} repo managed ${shq(o.path)} ${o.row.managed === 'yes' ? 'no' : 'yes'}`, executes: true,
+      cli: o => o.row.managed === 'yes' ? `${SDDB} repo managed ${shq(o.path)} no` : `cd ${shq(o.path)} && sd fleet standard`, executes: true,
       run: o => o.row.managed === 'yes' ? flipRepo('managed', o) : sheet(() => standardRepo(o, true)), undo: undoOf },
     // sd:5610: the managed-repo standard, previewed by `sd fleet standard` and applied with the digest the sheet showed.
     { id: 'repo.standard', on: 'repo', label: 'Standard setup', does: 'Previews the standard setup for this repo; applies it when you confirm.', icon: 'shield-check', risk: 'confirm', executes: true,
@@ -770,7 +773,7 @@ function registerCommands() {
       run: () => landing(regenerateUpload(), v => `Upload link signed · expires ${v.expiry.slice(0, 16).replace('T', ' ')} UTC`) },
     // launchd calendar jobs. Retry (commands.js) posts /api/jobs/<name>/retry; operations.inventory's capability is the off
     // reason. Exit 127 is "command not found": Print is the row's act (sd:3392).
-    window.commands.retry({ job: o => ({ name: o.job, service: o.service, failed: o.failed, exit: o.exit, capability: o.caps.retry }),
+    window.commands.retry({ job: o => ({ name: o.job, service: o.service, failed: o.failed, exit: o.exit, running: o.running, capability: o.caps.retry }),
       run: o => landing(job(o, 'retry'), out => window.commands.answered(out, o.job, 'retried', `Run started · ${o.job}`)) }),
     // build (sd:3388): Cancel is `sd jobs cancel`, which sends SIGTERM to the running job through launchd. It posts
     // /api/jobs/<name>/cancel with the row's revision; the confirm names the job, since the run stops part way.
@@ -1078,7 +1081,7 @@ function defaultDetails() {
     const r = repoParam && REPOS.find(x => x.path === repoParam);
     put(details, html`<p class="kind">${I('settings')} ${r ? 'Repo settings' : 'Repos'}</p><h2>${r ? r.name : 'How an edit lands'}</h2>
       <ul class="legend">
-        <li><span class="route">${I('terminal')}Applied here</span>Merge automatically, Managed, Auto-merge dependency updates and GitHub issues. Run applies the change here, with Undo.</li>
+        <li><span class="route">${I('terminal')}Applied here</span>Merge automatically, Managed, Auto-merge dependency updates, GitHub issues and Issue intake. Run applies the change here, with Undo.</li>
         <li><span class="route">${I('terminal')}You copy</span>Review rules. The proposal shows the change and the line to copy.</li>
         <li><span class="route">${I('shield-check')}GitHub</span>Branch protection, as of last night's check. The dashboard does not change it.</li>
       </ul>

@@ -92,7 +92,7 @@
   // tested (sd:3392). run(o) is the page's write; it words the answer with answered().
   function retry({ job, run }) {
     return { id: 'jobs.retry', on: 'job', label: 'Run now', does: 'Starts the job now; after a failure, this reruns it.', key: 't', icon: 'play', risk: 'safe', bulk: true,
-      primary: o => !!job(o).failed && job(o).exit !== 127,
+      primary: o => !!job(o).failed && job(o).exit !== 127, busy: o => !!job(o).running, // pack sd:7675
       when: o => { const j = job(o), c = j.capability; return !c ? (j.failed || 'no failed run to retry') : c.allowed || c.reason || 'launchd refuses a retry now'; },
       askFirst: o => job(o).exit === 127,
       consequence: o => job(o).exit === 127 ? `${job(o).name}'s last run ended with exit 127: command not found. A retry tests the path, and fails the same way unless the path was fixed.` : '',
