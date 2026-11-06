@@ -1283,7 +1283,7 @@ class OldSlugTests(SetupFixture):
     def test_rendered_replaces_an_old_slug_guard_rather_than_adding_a_second(self) -> None:
         old = old_slug(guard.minimal_file())
         self.assertIn(f'"{OLD_SLUG}/actions/review-route"', old)
-        self.assertEqual(guard.guard_state(old), "differs")
+        self.assertEqual(guard.guard_state(old), "same")
         self.assertEqual(guard.rendered(old), guard.minimal_file())
 
     def test_check_reads_the_pin_of_an_old_slug_workflow(self) -> None:
@@ -1306,10 +1306,71 @@ class OldSlugTests(SetupFixture):
     def test_remove_keeps_the_guard_while_another_workflow_pins_the_old_slug(self) -> None:
         root = self.make_repo()
         install(root)
+        self.seed_dependabot(root, old_slug(guard.minimal_file()))
         (self.workflow(root).parent / "other.yml").write_text(
             f"jobs:\n  x:\n    steps:\n      - uses: {OLD_SLUG}/actions/review-route@{PIN}\n", encoding="utf-8")
         stream = io.StringIO()
         setup.remove(root, setup_args(remove=True, dry_run=True), stream)
+        self.assertIn(f"kept {guard.DEPENDABOT_RELATIVE_PATH}", stream.getvalue())
+
+
+class OldSlugGuardTests(SetupFixture):
+    """sd:7633 class pass: a guard stays while any workflow names its slug."""
+
+    NEW = f"{setup.ACTION_REPOSITORY}/actions/review-route"
+    OLD = f"{OLD_SLUG}/actions/review-route"
+
+    def sibling(self, root: pathlib.Path, slug: str) -> pathlib.Path:
+        path = self.workflow(root).parent / "other.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"jobs:\n  x:\n    steps:\n      - uses: {slug}/actions/review-route@{PIN}\n",
+                        encoding="utf-8")
+        return path
+
+    def names(self, text: str) -> list[str]:
+        return [line.split('"')[1] for line in text.splitlines() if "dependency-name:" in line]
+
+    def test_a_guard_the_old_pack_wrote_reads_same(self) -> None:
+        self.assertEqual(guard.guard_state(old_slug(guard.minimal_file())), "same")
+
+    def test_install_keeps_the_old_guard_while_a_sibling_pins_the_old_slug(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, old_slug(guard.minimal_file()))
+        self.sibling(root, OLD_SLUG)
+        install(root)
+        self.assertEqual(self.names(self.dependabot(root).read_text()), [self.OLD, self.NEW])
+
+    def test_install_replaces_the_old_guard_when_no_workflow_pins_the_old_slug(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, old_slug(guard.minimal_file()))
+        install(root)
+        self.assertEqual(self.dependabot(root).read_text(), guard.minimal_file())
+
+    def test_check_expects_both_guards_while_a_sibling_pins_the_old_slug(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, old_slug(guard.minimal_file()))
+        self.sibling(root, OLD_SLUG)
+        install(root)
+        stream = io.StringIO()
+        code = setup.check_files(root, setup_args(check=True, pin=None), stream)
+        self.assertEqual((code, stream.getvalue().splitlines()[1]), (0, f"same {guard.DEPENDABOT_RELATIVE_PATH}"))
+
+    def test_remove_takes_the_new_guard_and_keeps_the_old_one_a_sibling_pins(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, old_slug(guard.minimal_file()))
+        self.sibling(root, OLD_SLUG)
+        install(root)
+        code = setup.remove(root, setup_args(remove=True), io.StringIO())
+        self.assertEqual(code, 0)
+        self.assertEqual(self.dependabot(root).read_text(), old_slug(guard.minimal_file()))
+
+    def test_remove_keeps_the_new_guard_a_sibling_pins(self) -> None:
+        root = self.make_repo()
+        install(root)
+        self.sibling(root, setup.ACTION_REPOSITORY)
+        stream = io.StringIO()
+        setup.remove(root, setup_args(remove=True), stream)
+        self.assertEqual(self.dependabot(root).read_text(), guard.minimal_file())
         self.assertIn(f"kept {guard.DEPENDABOT_RELATIVE_PATH}", stream.getvalue())
 
 

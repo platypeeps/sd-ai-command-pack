@@ -830,6 +830,34 @@ class OldSlug(unittest.TestCase):
                                                    self_install=False))
 
 
+class OldSlugGuard(Fleet):
+    """sd:7633 class pass: the stamp keeps a guard any workflow still pins."""
+
+    OLD = "platypeeps/sd-ai-command-pack"
+
+    def old(self, text: str) -> str:
+        return text.replace("platypeeps/sd-workflow/", f"{self.OLD}/").replace(
+            "# The sd-workflow pin", "# The sd-ai-command-pack pin")
+
+    def route(self) -> str:
+        return self.old(sd_setup_github.workflow_text(sd_setup_github.action_reference(PIN)))
+
+    def test_a_refused_route_rewrite_keeps_the_old_guard(self) -> None:
+        root, remote = self.repo("kept", {sd_fleet.ROUTE_PATH: self.route() + "# a local edit\n",
+                                          sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())})
+        [plan] = self.plan([(root, remote)])
+        self.assertTrue(any(line.startswith(sd_fleet.ROUTE_PATH) for line in plan["refused"]))
+        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+
+    def test_a_moved_route_takes_the_new_guard_in_place_of_the_old(self) -> None:
+        root, remote = self.repo("moved", {sd_fleet.ROUTE_PATH: self.route(),
+                                           sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())})
+        [plan] = self.plan([(root, remote)])
+        [change] = [c for c in plan["changes"] if c["path"] == sd_fleet.DEPENDABOT_PATH]
+        self.assertIn(f'-      - dependency-name: "{self.OLD}/actions/review-route"', change["diff"])
+        self.assertIn('+      - dependency-name: "platypeeps/sd-workflow/actions/review-route"', change["diff"])
+
+
 class Wiring(unittest.TestCase):
     def test_sd_exposes_the_verb(self) -> None:
         done = subprocess.run([sys.executable, str(REPO_ROOT / "bin" / "sd"), "fleet", "stamp", "--help"],

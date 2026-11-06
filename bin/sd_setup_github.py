@@ -261,7 +261,8 @@ def setup_github(
             f"{WORKFLOW_RELATIVE_PATH} exists and differs from what this build writes; "
             "rerun with --force to replace it"
         )
-    guard_text = guard_after(current, found, self_install=self_install, force=args.force)
+    guard_text = guard_after(current, found, self_install=self_install, force=args.force,
+                             slugs=sd_setup_guard.workflow_slugs(root, WORKFLOW_RELATIVE_PATH, text))
     if existing == text and guard_text == current:
         result["status"] = "unchanged"
 
@@ -306,7 +307,7 @@ def _read(path: pathlib.Path) -> str | None:
     return path.read_text(encoding="utf-8") if path.is_file() else None
 
 
-def guard_after(current: str | None, found: str, *, self_install: bool, force: bool) -> str | None:
+def guard_after(current: str | None, found: str, *, self_install: bool, force: bool, slugs: tuple = ()) -> str | None:
     """What `dependabot.yml` holds after the run; None when there is no file and none is written.
 
     The guard holds a pin, and the pack's own workflow names none (see
@@ -323,9 +324,8 @@ def guard_after(current: str | None, found: str, *, self_install: bool, force: b
         raise Refusal(
             f"{sd_setup_guard.DEPENDABOT_RELATIVE_PATH} carries a guard for "
             f"{sd_setup_guard.DEPENDENCY} that differs from what this build writes; rerun "
-            "with --force to replace it"
-        )
-    return sd_setup_guard.rendered(current)
+            "with --force to replace it")
+    return sd_setup_guard.rendered(current, slugs=slugs)
 
 
 def check_files(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) -> int:
@@ -347,8 +347,8 @@ def check_files(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) ->
     if not self_install:
         # The pack's own workflow names no pin, so it has no guard to compare.
         expected[sd_setup_guard.DEPENDABOT_RELATIVE_PATH] = sd_setup_guard.rendered(
-            _read(root / sd_setup_guard.DEPENDABOT_RELATIVE_PATH)
-        )
+            _read(root / sd_setup_guard.DEPENDABOT_RELATIVE_PATH),
+            slugs=sd_setup_guard.workflow_slugs(root, WORKFLOW_RELATIVE_PATH, expected[WORKFLOW_RELATIVE_PATH]))
     return sd_setup_guard.report_drift(root, expected, stream)
 
 

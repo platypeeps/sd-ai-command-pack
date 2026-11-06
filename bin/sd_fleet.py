@@ -654,10 +654,10 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
         plan.refused.append(f"{ROUTE_PATH}: the sd-github-review footprint is still here ({', '.join(legacy)}); "
                             "run `sd-review setup-github --remove-legacy` in this repository first")
     else:
-        current = tree.text_at(ROUTE_PATH)
+        current = route = tree.text_at(ROUTE_PATH)
         if current is None or is_route_template(current, self_install=self_install):
-            propose(ROUTE_PATH, sd_setup_github.workflow_text(
-                sd_setup_github.action_reference(None if self_install else pin)))
+            route = sd_setup_github.workflow_text(sd_setup_github.action_reference(None if self_install else pin))
+            propose(ROUTE_PATH, route)
         else:
             # The stamp moves a pin; it does not take over a file the
             # repository changed. setup-github refuses the same without
@@ -667,7 +667,11 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
                                 "run `sd-review setup-github --force` there to replace it")
         if not self_install:
             try:
-                propose(DEPENDABOT_PATH, sd_setup_guard.rendered(tree.text_at(DEPENDABOT_PATH)))
+                # A guard stays while any workflow names its slug: a refused
+                # rewrite leaves the old pin, and with it the old guard (sd:7633).
+                others = [tree.text_at(rel) or "" for rel in tree.workflows() if rel != ROUTE_PATH]
+                slugs = sd_setup_guard.pinned_slugs([route or "", *others])
+                propose(DEPENDABOT_PATH, sd_setup_guard.rendered(tree.text_at(DEPENDABOT_PATH), slugs=slugs))
             except sd_setup_guard.GuardError as error:
                 plan.refused.append(f"{DEPENDABOT_PATH}: {error}")
 

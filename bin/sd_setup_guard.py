@@ -31,7 +31,7 @@ from __future__ import annotations
 import difflib
 import pathlib
 import re
-from typing import Any, Mapping, TextIO
+from typing import Any, Iterable, Mapping, TextIO
 
 DEPENDABOT_RELATIVE_PATH = pathlib.Path(".github") / "dependabot.yml"
 
@@ -51,7 +51,8 @@ class GuardError(Exception):
 
 #: Every slug the pack's actions have lived under, the one written first.
 #: Readers accept each: a consumer pinned before sd:7633 still names the old
-#: one, and reading it as unpinned added a second guard beside its own.
+#: one. A guard is per slug, because Dependabot matches the dependency name:
+#: a workflow that still names the old slug needs the old guard (sd:7633).
 ACTION_SLUGS = ("platypeeps/sd-workflow", "platypeeps/sd-ai-command-pack")
 ACTIONS_PREFIX = f"{ACTION_SLUGS[0]}/actions"
 _PREFIXES = "|".join(re.escape(f"{slug}/actions") for slug in ACTION_SLUGS)
@@ -69,10 +70,42 @@ ACTIONS = ("review-route", "docs-gate")
 DEFAULT_ACTION = "review-route"
 
 
-def dependency_name(action: str = DEFAULT_ACTION) -> str:
-    """The Dependabot dependency name for one of the pack's actions."""
+def dependency_name(action: str = DEFAULT_ACTION, slug: str = ACTION_SLUGS[0]) -> str:
+    """The Dependabot dependency name for one of the pack's actions, under one slug."""
 
-    return f"{ACTIONS_PREFIX}/{action}"
+    return f"{slug}/actions/{action}"
+
+
+def _named(key: str) -> tuple[str, str]:
+    """`(action, slug)` for a guard key: an action, under the written slug, or a whole dependency name."""
+
+    slug, _, action = key.rpartition("/actions/")
+    return (action, slug) if slug else (key, ACTION_SLUGS[0])
+
+
+def pinned_slugs(workflows: Iterable[str], action: str = DEFAULT_ACTION) -> tuple[str, ...]:
+    """The slugs, in `ACTION_SLUGS` order, under which any of `workflows` names `action`.
+
+    Any mention counts, quoted or not: keeping a guard costs nothing, and
+    lifting a needed one lets Dependabot bump a pin (sd:7633).
+    """
+
+    texts = tuple(workflows)
+    return tuple(slug for slug in ACTION_SLUGS if any(dependency_name(action, slug) in text for text in texts))
+
+
+def workflow_slugs(root: pathlib.Path, workflow: pathlib.Path, text: str) -> tuple[str, ...]:
+    """`pinned_slugs` once `workflow` holds `text`, read with every workflow beside it."""
+
+    return pinned_slugs([text, *sibling_workflows(root, workflow).values()])
+
+
+def sibling_workflows(root: pathlib.Path, workflow: pathlib.Path) -> dict[str, str]:
+    """Every other workflow beside `workflow`, by path relative to `root`."""
+
+    target = root / workflow
+    return {str(path.relative_to(root)): path.read_text(encoding="utf-8")
+            for path in sorted((root / workflow.parent).glob("*.y*ml")) if path != target}
 
 
 DEPENDENCY = dependency_name(DEFAULT_ACTION)
@@ -91,7 +124,7 @@ DEPENDENCIES = tuple(dependency_name(action) for action in ACTIONS)
 # its own README and no other action's.
 _PROSE: dict[str, tuple[str, ...]] = {
     "review-route": (
-        "# The sd-workflow pin is set by hand, not by Dependabot. The action",
+        "# The {repo} pin is set by hand, not by Dependabot. The action",
         "# runs the pack's own code out of the pinned checkout, so a bump is a",
         "# behaviour change across the whole pack, not a version number. Bump it",
         "# deliberately, in its own commit, with",
@@ -101,7 +134,7 @@ _PROSE: dict[str, tuple[str, ...]] = {
         "# go stale the next time the pin moves.",
     ),
     "docs-gate": (
-        "# The sd-workflow pin is set by hand, not by Dependabot. The action",
+        "# The {repo} pin is set by hand, not by Dependabot. The action",
         "# runs the pack's own code out of the pinned checkout, so a bump is a",
         "# behaviour change across the whole pack, not a version number. Bump it",
         "# deliberately, in its own commit; `sd-review setup-github` installs the",
@@ -114,11 +147,13 @@ _PROSE: dict[str, tuple[str, ...]] = {
 
 
 def guard_lines(action: str = DEFAULT_ACTION) -> tuple[str, ...]:
-    """The guard's comment and its one `ignore:` item, for one action."""
+    """The guard's comment and its one `ignore:` item, for an action or a whole dependency name."""
 
-    if action not in _PROSE:
+    action, slug = _named(action)
+    if action not in _PROSE or slug not in ACTION_SLUGS:
         raise GuardError(f"{action} is not one of the pack's actions: {', '.join(ACTIONS)}")
-    return _PROSE[action] + (f'- dependency-name: "{dependency_name(action)}"',)
+    first, *rest = _PROSE[action]
+    return (first.format(repo=slug.rpartition("/")[2]), *rest, f'- dependency-name: "{dependency_name(action, slug)}"')
 
 
 #: The review-route guard, kept as a module constant because `sd-review`'s
@@ -130,7 +165,7 @@ GUARD_LINES = guard_lines(DEFAULT_ACTION)
 _ENTRY = re.compile(r"""^\s*- package-ecosystem:\s*["']?github-actions["']?(?:\s+#.*)?\s*$""")
 _ANY_ENTRY = re.compile(r"^\s*- package-ecosystem:")
 _GUARD_ITEM = re.compile(
-    rf"""dependency-name:\s*["']?(?:{_PREFIXES})/"""
+    rf"""dependency-name:\s*["']?(?P<slug>{"|".join(re.escape(slug) for slug in ACTION_SLUGS)})/actions/"""
     rf"""(?P<action>{"|".join(re.escape(name) for name in ACTIONS)})["']?\s*$"""
 )
 
@@ -245,18 +280,19 @@ def _blocks(lines: list[str], first: int, stop: int, indent: int) -> list[tuple[
 
 
 def _guarded(line: str, wanted: str | None) -> str | None:
-    """The pack action this `ignore:` item names, or None.
+    """The dependency name this `ignore:` item guards, or None.
 
-    With `wanted` the search is narrowed to one action; without it any of the
-    pack's actions counts, which is what lets a reader say `same` about a
-    docs-gate consumer it was never told about.
+    With `wanted` the search is narrowed to one action under any slug, or to
+    one whole dependency name; without it any of the pack's actions counts,
+    which is what lets a reader say `same` about a docs-gate consumer it was
+    never told about.
     """
 
     found = _GUARD_ITEM.search(line)
     if found is None:
         return None
-    action = found.group("action")
-    return action if wanted is None or action == wanted else None
+    name = dependency_name(found.group("action"), found.group("slug"))
+    return name if wanted is None or wanted in (name, found.group("action")) else None
 
 
 def _place(lines: list[str], start: int, wanted: str | None) -> tuple[str, int, int, int, str | None]:
@@ -360,7 +396,7 @@ def guard_state(text: str | None, action: str | None = None) -> str:
     return next(verdict for verdict in _WORST_FIRST if verdict in states)
 
 
-def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
+def rendered(text: str | None, action: str = DEFAULT_ACTION, *, slugs: Iterable[str] = ACTION_SLUGS[:1]) -> str:
     """`text` with the guard in place: the one the installer writes and `--check` expects.
 
     Idempotent: rendering a rendered file changes nothing, which is what lets
@@ -381,10 +417,27 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
     them is also what makes the transform converge -- a read that folds every
     entry (see `guard_states`) and a write that touches one have no fixed
     point, and `--check` compares this output with the tracked bytes.
+
+    `slugs` are the ones some workflow in the repository names
+    (`pinned_slugs`): each gets its own guard, since Dependabot matches the
+    dependency name. A guard for an older slug no workflow names goes, so
+    moving the last pin moves the guard; one a workflow names stays (sd:7633).
     """
 
+    keep = [slug for slug in ACTION_SLUGS if slug in tuple(slugs)] or [ACTION_SLUGS[0]]
     if text is None:
-        return minimal_file(action)
+        text = minimal_file(dependency_name(action, keep[0]))
+    for slug in keep:
+        text = _rendered(text, dependency_name(action, slug))
+    for slug in ACTION_SLUGS[1:]:
+        if slug not in keep and set(guard_states(text, dependency_name(action, slug))) != {"absent"}:
+            text = _dropped(text, dependency_name(action, slug))
+    return text
+
+
+def _rendered(text: str, action: str) -> str:
+    """`text` with one guard in place; `action` is an action or a whole dependency name."""
+
     if set(guard_states(text, action)) == {"same"}:
         return text
     lines = text.splitlines()
@@ -415,18 +468,29 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
     return "\n".join(lines) + "\n"
 
 
-def unguarded(text: str, action: str = DEFAULT_ACTION) -> str | None:
+def unguarded(text: str, action: str = DEFAULT_ACTION, *, keep: Iterable[str] = ()) -> str | None:
     """`text` with `action`'s guard taken out: what `setup-github --remove` writes.
 
     The inverse of `rendered` for the lines it owns. Each guard item goes with
     its comment run, an `ignore:` list the removal empties goes too, and every
     other line stays: the rest of the file is the consumer's. A file that is
     exactly `minimal_file(action)` was created by the installer, so it answers
-    None, which the caller reads as delete.
+    None, which the caller reads as delete. A guard for a slug in `keep`, one
+    another workflow still names, stays (sd:7633).
     """
 
-    if text == minimal_file(action):
+    keep = tuple(keep)
+    if not keep and text in {minimal_file(dependency_name(action, slug)) for slug in ACTION_SLUGS}:
         return None
+    for slug in ACTION_SLUGS:
+        if slug not in keep:
+            text = _dropped(text, dependency_name(action, slug))
+    return text
+
+
+def _dropped(text: str, action: str) -> str:
+    """`text` with one guard taken out; `action` is an action or a whole dependency name."""
+
     lines = text.splitlines()
     try:
         places = _places(lines, action)
@@ -497,16 +561,16 @@ def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_
     plan: list[tuple[pathlib.Path, str | None, str]] = [(target, None, f"{verdict} {workflow}")]
     dependabot = root / DEPENDABOT_RELATIVE_PATH
     before = dependabot.read_text(encoding="utf-8") if dependabot.is_file() else None
-    pinned = sorted(str(path.relative_to(root)) for path in (root / workflow.parent).glob("*.y*ml")
-                    if path != target and any(f"{slug}/actions/{DEFAULT_ACTION}" in path.read_text(encoding="utf-8")
-                                              for slug in ACTION_SLUGS))
+    others = sibling_workflows(root, workflow)
+    kept = pinned_slugs(others.values())
+    pinned = [rel for rel, text in others.items() if pinned_slugs([text])]
+    after = None if before is None else unguarded(before, keep=kept)
     if before is None:
         plan.append((dependabot, None, f"absent {DEPENDABOT_RELATIVE_PATH}"))
-    elif pinned:
-        plan.append((dependabot, before, f"kept {DEPENDABOT_RELATIVE_PATH} ({', '.join(pinned)} still pins "
-                                         f"{DEPENDENCY})"))
+    elif pinned and after == before:
+        names = ", ".join(dependency_name(DEFAULT_ACTION, slug) for slug in kept)
+        plan.append((dependabot, before, f"kept {DEPENDABOT_RELATIVE_PATH} ({', '.join(pinned)} still pins {names})"))
     else:
-        after = unguarded(before)
         verb = "remove" if after is None else "unguard" if after != before else "same"
         plan.append((dependabot, after, f"{verb} {DEPENDABOT_RELATIVE_PATH}"))
     return plan
