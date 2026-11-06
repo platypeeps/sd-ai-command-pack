@@ -262,6 +262,8 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     ['queue', 'track-rows'].forEach(t => $(t).querySelectorAll('tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', tr.dataset.id === id)));
   }
   const BAND_NAME = { broken: 'Broken', look: 'Look', queued: 'Queued' };
+  // pack sd:7776: a pr-attention row's pull (now_screen's pr_url) opens in a new tab from an icon beside its actions.
+  const prOpen = r => r.pr_url ? html`<a class="icon-btn" href="${r.pr_url}" target="_blank" rel="noopener noreferrer" aria-label="Open the pull request on GitHub" data-tip="Open the pull request on GitHub in a new tab">${I('arrow-up-right')}</a>` : '';
   function line(r, member) {
     const s = STATE[r.band], src = SRC[r.source];
     return html`<tr data-id="${r.id}" data-src="${r.lamp || ''}"${member ? html` class="member" data-in="${member}"` : r.group ? html` class="grp"` : ''}>
@@ -270,7 +272,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       <td class="detail">${r.detail}</td>
       <td class="src">${src ? I(src[1]) : ''}${r.source}</td>
       <td class="num age">${age(r.at)}</td>
-      <td class="act">${shell.commands.rowActions(r.id, { icons: r.band === 'broken' || r.kind === 'report' })}</td></tr>`;
+      <td class="act">${prOpen(r)}${shell.commands.rowActions(r.id, { icons: r.band === 'broken' || r.kind === 'report' })}</td></tr>`;
   }
   // Needs you: the rows the lamp, the intent and the text keep, a band head where the band changes, and each open group's
   // members under it. Nothing hides a row after the draw: a filter draws the list again.
