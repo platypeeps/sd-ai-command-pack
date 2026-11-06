@@ -501,6 +501,25 @@ class ContributionSync(SyncCase):
         ordered = adapter._order(planned["pending"], fresh)
         self.assertEqual([row["url"] for row in ordered], [old[2], old[3], old[0], old[1], URL, old[4]])
 
+    def test_a_never_read_backlog_takes_a_few_slots_and_observed_work_keeps_its_turn(self):
+        # Review of sd:7840: every never-read key went ahead of the rotation,
+        # the ~4,900 backlog included, so explicit work past the first three
+        # and every observed open pull waited weeks behind it.
+        explicit = [{"key": f"item:{n}", "explicit": True} for n in range(4)]
+        head = [{"key": f"github:head{n}", "explicit": False} for n in range(2)]
+        observed = {"key": "github:observed", "explicit": False}
+        backlog = [{"key": f"github:old{n}", "explicit": False} for n in range(30)]
+        new = {"key": "github:new", "explicit": False}
+        pending = [*explicit, *head, observed, *backlog, new]
+        fresh = {row["key"] for row in [*backlog, new]}
+        keys = [row["key"] for row in adapter._order(pending, fresh)]
+        # The new pull is read first after the head slots, then the newest
+        # few of the backlog; the rest follow the rotation.
+        self.assertEqual(keys[5:10], ["github:new", "github:old29", "github:old28", "github:old27", "github:old26"])
+        self.assertEqual(keys[10:12], ["item:3", "github:observed"])
+        self.assertEqual(sorted(keys), sorted(row["key"] for row in pending))
+        self.assertEqual(adapter.FRESH_SLOTS, 5)
+
     def test_registered_work_refreshes_without_search_match(self):
         item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
         self.add_comment()

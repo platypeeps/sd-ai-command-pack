@@ -73,20 +73,26 @@ def _merge(pending, additions):
     return list(indexed.values())
 
 
+#: The never-read keys a run reads ahead of the rotation, newest first (sd:7840).
+FRESH_SLOTS = 5
+
+
 def _order(pending, fresh=frozenset()):
     # Explicit local work gets priority, while ordinary authored work has two
     # guaranteed slots before the rest follow in queue order. The budget, not a
     # count, decides how far down the list a run gets; rotation in `refresh`
     # prevents a failing first item from starving the ones behind it.
-    # `fresh` names the keys never read: they follow those slots, newest
-    # first, so a pull found tonight is not read behind a backlog of
-    # thousands (sd:7840). A failed read leaves a heartbeat, so the key is
-    # no longer fresh and rotates like any other.
+    # `fresh` names the keys never read: the newest FRESH_SLOTS follow those
+    # slots, so a pull found tonight is not read behind a backlog of
+    # thousands (sd:7840). Only that many: the backlog itself is thousands
+    # of never-read keys, and all of them ahead would starve the rotation of
+    # explicit work and observed open pulls for weeks. A failed read leaves a
+    # heartbeat, so the key is no longer fresh and rotates like any other.
     explicit = [row for row in pending if row.get("explicit")]
     ordinary = [row for row in pending if not row.get("explicit")]
     ordered = explicit[:3] + ordinary[:2]
     taken = {row["key"] for row in ordered}
-    ordered += [row for row in reversed(pending) if row["key"] in fresh and row["key"] not in taken]
+    ordered += [row for row in reversed(pending) if row["key"] in fresh and row["key"] not in taken][:FRESH_SLOTS]
     taken = {row["key"] for row in ordered}
     return ordered + [row for row in pending if row["key"] not in taken]
 
