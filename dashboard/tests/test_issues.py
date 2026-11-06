@@ -868,22 +868,25 @@ class TheIntakeBulk(ScreenCase):
         self.assertEqual([p[1] for p in out["posts"]], [{"key": "github:example/project#21", "hidden": True},
                                                         {"key": "github:example/project#23", "hidden": True}])
 
-    def test_a_bulk_hide_keeps_two_writes_in_flight_and_sends_the_rest_in_turn(self):
-        """pack sd:7843: a bulk Hide sent all its writes at once, and each held a server thread and a store connection;
-        thirty of them stalled the dashboard. At most two are in flight now; each reply sends the next."""
+    def test_a_bulk_hide_keeps_three_writes_in_flight_and_reads_again_once(self):
+        """pack sd:7843, sd:7852: a bulk Hide sent all its writes at once, and each held a server thread and a store
+        connection; thirty of them stalled the dashboard. The shell's bulk runner keeps three in flight, each reply
+        sends the next, and the page reads again once, after the last."""
         rows = [{**INTAKE_ROWS[0], "ref": f"#{n}", "key": f"github:example/project#{n}", "title": f"Issue {n}"}
-                for n in range(31, 37)]
+                for n in range(31, 41)]
         out = self.run_page(self.PICK + "show('intake'); await flush(); all(true); await flush();"
                             " const was = ANSWER, held = []; let now = 0; R.most = 0;"
                             " ANSWER = (p, b) => p !== '/api/github/issues/view' ? was(p, b) : new Promise(ok => {"
                             " now++; R.most = Math.max(R.most, now); held.push(() => { now--; ok(was(p, b)); }); });"
-                            " bulk('github issue.hide'); await flush(); R.first = held.length;"
+                            " bulk('github issue.hide'); await flush(); R.first = held.length; R.gets = OUT.gets.length;"
                             " while (held.length) { held.shift()(); await flush(); }"
-                            " await flush(); R.toast = lastToast().msg; R.rows = ELS.intake.html;", intake_rows=rows)
+                            " await flush(); R.gets = OUT.gets.length - R.gets; R.toast = lastToast().msg; R.rows = ELS.intake.html;",
+                            intake_rows=rows)
         r = out["R"]
-        self.assertEqual((r["first"], r["most"]), (2, 2))
+        self.assertEqual((r["first"], r["most"]), (3, 3))
+        self.assertEqual(r["gets"], 1)
         self.assertEqual([p[1]["key"] for p in out["posts"]], [row["key"] for row in rows])
-        self.assertIn("Hide · 6 github issues", r["toast"])
+        self.assertIn("Hide · 10 github issues", r["toast"])
         self.assertNotIn("Issue 3", r["rows"])
 
     def test_unhide_on_the_picked_rows_under_hidden_shows_each_again(self):

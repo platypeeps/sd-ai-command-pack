@@ -720,9 +720,33 @@
   // askFirst is a flag or a test of the object (commands.md): Retry asks only after exit 127 (sd:3392). A safe command that
   // asks confirms first; a function is never itself a yes.
   const asksFirst = (c, o) => typeof c.askFirst === 'function' ? !!c.askFirst(o) : !!c.askFirst;
+  // pack sd:7852: a group runs BULK_RUNS rows at a time, each next row as one settles: thirty picks sent at once were
+  // thirty requests, each a server thread and a store connection. inTurn(items, fn) answers one promise per item, in
+  // order; fn throwing is that item's rejection. A page's reread asked for while a group runs, afterBulk(key, fn), waits
+  // until every group has settled and then runs once per key; with no group running it runs at once.
+  const BULK_RUNS = 3, LATER = new Map();
+  let BULKS = 0;
+  const afterBulk = (key, fn) => { if (!BULKS) return fn(); LATER.set(key, fn); return Promise.resolve(); };
+  function inTurn(items, fn) {
+    BULKS++;
+    const out = items.map(() => { const s = {}; s.p = new Promise((ok, no) => { s.ok = ok; s.no = no; }); return s; });
+    let next = 0;
+    const start = () => {
+      if (next >= items.length) return;
+      const s = out[next], item = items[next++];
+      let r; try { r = Promise.resolve(fn(item)); } catch (e) { r = Promise.reject(e); }
+      r.then(s.ok, s.no).then(start);
+    };
+    for (let i = 0; i < BULK_RUNS; i++) start();
+    Promise.allSettled(out.map(s => s.p)).then(() => {
+      if (--BULKS) return;
+      const later = [...LATER.values()]; LATER.clear(); later.forEach(f => f());
+    });
+    return out.map(s => s.p);
+  }
   // One run per picked object, each its own promise: a run that throws is that row's rejection, so the rows after it
   // still run and the group's toast names it (review, PR #46). `v` is what the group's confirm took, the same for every row.
-  const runEach = (c, objs, v) => objs.map(o => { try { return c.run?.(o, v); } catch (e) { return Promise.reject(e); } });
+  const runEach = (c, objs, v) => inTurn(objs, o => c.run?.(o, v));
   function settleOne(c, o, p, { toast }) {
     return p.then(v => {
       const undo = c.risk === 'undo' && c.undo ? () => undoOne(c, o, v).then(
@@ -743,7 +767,7 @@
       const of = n => `${n} of ${objs.length}`;
       const text = `${c.label} · ${plural(landed.length, c.on)}${stale.length ? ` · ${of(stale.length)} refused stale, read again: ${stale.map(x => x.o.label).join(', ')}` : ''}`
         + (failed.length ? ` · ${of(failed.length)} not changed: ${failed.map(x => `${x.o.label} (${x.why})`).join(', ')}` : '');
-      const undo = c.risk === 'undo' && c.undo && landed.length ? () => Promise.allSettled(landed.map(x => undoOne(c, x.o, x.v))).then(us => {
+      const undo = c.risk === 'undo' && c.undo && landed.length ? () => Promise.allSettled(inTurn(landed, x => c.undo(x.o, x.v))).then(us => {
         const not = stale.concat(failed).map(x => `${x.o.label} (its change did not land)`).concat(us.map((u, i) => u.status === 'rejected' ? `${landed[i].o.label} (${whyOf(u.reason)})`
           : u.value === false ? `${landed[i].o.label} (nothing to reverse)` : '').filter(Boolean));
         toast(`${c.label} undone · ${objs.length - not.length} of ${objs.length} reversed${not.length ? ` · not reversed: ${not.join(', ')}` : ''}`);
@@ -1941,10 +1965,10 @@
   // read:start
   // build: (sd:2418) shell.read(spec) is the page reader read.js defines (window.SHELL_READ): generation, retirement, selection
   // clearing, the failure states and the write barrier, in one place. A page without read.js before shell.js has no shell.read.
-  const read = window.SHELL_READ && window.SHELL_READ({ fetch: (...a) => fetch(...a), commands, state, row: rowParam, listen: (t, f) => document.addEventListener(t, f) });
+  const read = window.SHELL_READ && window.SHELL_READ({ fetch: (...a) => fetch(...a), commands, state, row: rowParam, listen: (t, f) => document.addEventListener(t, f), afterBulk });
   // read:end
   // build: (sd:2418) `read` joins the shell's API; (view switch) so does `view`.
-  window.shell = { ready, ICON, aside, closeX: CLOSE_X, plural, state, read, post, getJSON, shown: stillShown, list, viewPick, tables, chording: () => !!chord && Date.now() - chord < 1500, openPane, closePane, showTab, openChat, setContext, suggest, send, toast, confirm: a => confirmAction(a).then(r => r.yes), ask: a => confirmAction(a).then(({ yes, values }) => ({ yes, values })), commands, capture: openCapture, fileCapture, filter, repos: readRepos, shq, itemHref, itemPage, openItem, time, attention, view, reconcile, url, row: (...a) => a.length ? writeRow(a[0]) : rowParam(), pages: PAGES, groups: GROUPS,
+  window.shell = { afterBulk, ready, ICON, aside, closeX: CLOSE_X, plural, state, read, post, getJSON, shown: stillShown, list, viewPick, tables, chording: () => !!chord && Date.now() - chord < 1500, openPane, closePane, showTab, openChat, setContext, suggest, send, toast, confirm: a => confirmAction(a).then(r => r.yes), ask: a => confirmAction(a).then(({ yes, values }) => ({ yes, values })), commands, capture: openCapture, fileCapture, filter, repos: readRepos, shq, itemHref, itemPage, openItem, time, attention, view, reconcile, url, row: (...a) => a.length ? writeRow(a[0]) : rowParam(), pages: PAGES, groups: GROUPS,
     // sd:3445: the rail's width in px, or null at the default; railWidth(px) sets and keeps it, railWidth(null) resets it.
     railWidth: (...a) => a.length ? setWidth(a[0]) : railWidth(store('sd.rail.width')) };
   if (location.hash === '#chat') openChat(); // screenshot hook

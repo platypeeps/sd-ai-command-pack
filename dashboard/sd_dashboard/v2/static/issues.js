@@ -133,17 +133,11 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     draw(); drawIntake();
   }
   const NO_VIEW_CLI = 'no CLI: view state; the dashboard writes it (POST /api/github/issues/view)';
-  // pack sd:7787: a bulk Hide sends one write per row; the page reads again once, when the last of them settles.
-  // pack sd:7843: at most WRITES of them are in flight and the rest wait their turn, so thirty rows do not hold
-  // thirty server threads and store connections at once.
-  const WRITES = 2, WAITING = [];
-  let WRITING = 0, SENDING = 0;
-  const turn = () => new Promise(go => { if (SENDING < WRITES) { SENDING++; go(); } else WAITING.push(go); });
-  const sent = () => { const next = WAITING.shift(); if (next) next(); else SENDING--; };
-  const settled = () => { if (--WRITING === 0) window.githubIssues?.again(); };
-  const view = (o, hidden) => { WRITING++;
-    return turn().then(() => window.shell.post('/api/github/issues/view', { key: o.key, hidden }))
-      .then(v => { sent(); landed(o.key, hidden); settled(); return v; }, e => { sent(); settled(); throw e; }); };
+  // pack sd:7787: a bulk Hide sends one write per row, BULK_RUNS at a time (shell.js, pack sd:7852); the page reads
+  // again once, after the group (shell.afterBulk), and after a refusal too.
+  const settled = () => window.shell.afterBulk('issues', () => window.githubIssues?.again());
+  const view = (o, hidden) => window.shell.post('/api/github/issues/view', { key: o.key, hidden })
+    .then(v => { landed(o.key, hidden); settled(); return v; }, e => { settled(); throw e; });
   // pack sd:7708: a category set or cleared moves its row at once and opens the group it went to; the page then reads again.
   const NO_CAT_CLI = 'no CLI: issue categories are view state; the dashboard writes them';
   const categorize = (key, category) => window.shell.post('/api/github/issues/view', { key, category })

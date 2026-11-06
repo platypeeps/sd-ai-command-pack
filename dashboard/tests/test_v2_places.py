@@ -974,6 +974,16 @@ lastUndo().undo(); await flush(); R.undone = OUT.gets.length - reads;""", docs)
                           ["/api/snooze", {"page": "today", "row": f"brief:{stem}", "until": None, "seen": row["seen"]}]])
         self.assertEqual((r["reads"], r["undone"]), (1, 2))
 
+    def test_a_bulk_seen_reads_the_view_again_once_after_the_group(self):
+        # pack sd:7852: each row's Seen read the view again as it landed, so a bulk Seen of N briefs started N reads.
+        docs, stem = self.docs("hoa"), "2026-09-05 - HOA Morning Digest"
+        row = next(r for r in docs["/api/hoa/briefs"][1]["rows"] if r["id"] == stem)
+        docs["/api/snooze"] = [200, {"key": f"today:{row['mark']}"}]
+        out = self.run_page(self.ACTS + f"""await go('#view=briefs'); const o = C.get({json.dumps(stem)}), reads = OUT.gets.length;
+C.runBulk(cmd('brief.seen'), [o, o, o, o, o, o]); await flush(); R.reads = OUT.gets.length - reads;""", docs)
+        self.assertEqual(len(out["posts"]), 6)
+        self.assertEqual(out["R"]["reads"], 1)
+
     def test_the_overview_reads_no_view_and_each_view_reads_its_own_document_when_shown(self):
         out = self.run_page("""R.first = shown(); R.gets0 = OUT.gets.slice();
 await go('#view=tasks'); R.second = shown(); R.gets1 = OUT.gets.slice();

@@ -2221,6 +2221,17 @@ shellRun(cmd('snoozed row.unsnooze'), o); await flush(); OUT.toasts[OUT.toasts.l
                           {"page": "health", "row": "gone:group/alpha", "until": "2026-09-07T08:00:00+00:00", "seen": seen}])
         self.assertEqual(out["toasts"][-2][0], "Shows again · group/alpha: 2 worktrees registered, directory gone")
 
+    def test_a_bulk_ignore_reads_health_again_once_after_the_group(self):
+        """pack sd:7852: each row's Ignore read the whole page again as it landed, so a bulk Ignore of N rows started N
+        full reads. The group's rows now read Health again once, after the last of them settles, as one Ignore does."""
+        out = self.run_page("""ANSWER = (path, body) => HEALTH_READ(path) ? HEALTH(path) : [200, { key: 'k', until: body.until }];
+const reads = () => OUT.gets.filter(HEALTH_READ).length, c = cmd('worktree registrations.ignore'), o = C.get('gone:group/alpha');
+let at = reads(); shellRun(c, o); await flush(); R.one = reads() - at;
+at = reads(); C.runBulk(c, [o, o, o, o, o, o]); await flush(); R.six = reads() - at; R.posts = OUT.posts.length;""")
+        self.assertEqual(out["R"]["posts"], 7)
+        self.assertGreater(out["R"]["one"], 0)
+        self.assertEqual(out["R"]["six"], out["R"]["one"])
+
     def test_ignore_posts_a_snooze_with_no_end_and_undo_clears_it(self):
         """sd:5470: Ignore is the snooze write with `forever`, beside Snooze; the row's fingerprint goes with it."""
         out = self.run_page("""ANSWER = (path, body) => HEALTH_READ(path) ? HEALTH(path) : [200, { key: 'k', until: body.until }];
