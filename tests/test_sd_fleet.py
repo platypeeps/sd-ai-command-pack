@@ -891,6 +891,21 @@ class OldSlugGuard(Fleet):
                         plan["refused"])
         self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
 
+    def test_an_unread_dependabot_file_is_refused_not_replaced(self) -> None:
+        """pack sd:7812: text_at gives None for a failed read as for a missing
+        file; read as missing, the stamp proposed the minimal file over a real
+        guard and skipped the --force refusal."""
+        dependabot = sd_setup_guard.minimal_file().replace("# The sd-workflow pin", "# Our pin")
+        root, remote = self.repo("unread-dependabot", {sd_fleet.ROUTE_PATH: self.route(),
+                                                       sd_fleet.DEPENDABOT_PATH: dependabot})
+        text_at = sd_fleet.Tree.text_at
+        with mock.patch.object(sd_fleet.Tree, "text_at",
+                               lambda tree, rel: None if rel == sd_fleet.DEPENDABOT_PATH else text_at(tree, rel)):
+            [plan] = self.plan([(root, remote)])
+        self.assertTrue(any(line.startswith(f"{sd_fleet.DEPENDABOT_PATH}: could not read") for line in plan["refused"]),
+                        plan["refused"])
+        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+
     def test_an_unlisted_workflow_folder_refuses_the_guard_rather_than_dropping_it(self) -> None:
         root, remote = self.repo("unlisted", {sd_fleet.ROUTE_PATH: self.route(),
                                               sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())})

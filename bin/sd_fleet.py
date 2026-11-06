@@ -368,6 +368,17 @@ class Tree:
             return None
         return _git_show(self.root, f"{self.commit}:{rel}")
 
+    def present(self, rel: str) -> bool | None:
+        """Whether `rel` is a file in this tree; None when git could not say.
+
+        `text_at` gives None for a missing file and a failed read alike; this
+        tells them apart (pack sd:7812).
+        """
+        if self.commit is None:
+            return (self.root / rel).is_file()
+        listed = sd_lib.git_output(["ls-tree", self.commit, "--", rel], self.root)
+        return None if listed is None else bool(listed)
+
     def workflows(self) -> list[str]:
         return self._workflows() or []
 
@@ -678,6 +689,9 @@ def guard_change(plan: Plan, tree: Tree, propose: Callable[[str, str], None], ro
         plan.refused.append(f"{DEPENDABOT_PATH}: could not read {others}, so the stamp keeps the guard as it is")
         return
     current = tree.text_at(DEPENDABOT_PATH)
+    if current is None and tree.present(DEPENDABOT_PATH) is not False:
+        plan.refused.append(f"{DEPENDABOT_PATH}: could not read it, so the stamp keeps the guard as it is")
+        return
     differing = sd_setup_guard.differing(current, sd_setup_guard.DEFAULT_ACTION)
     if differing:
         plan.refused.append(f"{DEPENDABOT_PATH}: the guard for {', '.join(differing)} differs from the template, so "
