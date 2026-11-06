@@ -205,10 +205,25 @@ FAKE = textwrap.dedent('''
                 print(url)
             sys.exit(0)
         sys.exit(f"gh fake: no such call {argv}")
-    if role == "gate":  # `sd gate run --label L -- <command>`: runs the command, its exit code its own
+    if role == "gate":  # `sd gate run --label L -- <command>`: its exit code the command's own
+        # As `run_gated` does: the command in a process group of its own, INT, TERM and HUP sent on to that
+        # group, and a wait for the command to end.
         argv = sys.argv[1:]
         assert argv[0] == "--label" and argv[2] == "--", argv
-        sys.exit(subprocess.run(argv[3:]).returncode)
+        import signal
+        child = subprocess.Popen(argv[3:], process_group=0)
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(signum, lambda number, _frame: os.killpg(child.pid, number))
+        code = child.wait()
+        sys.exit(128 - code if code < 0 else code)
+    if role == "guard":  # `leak-guard.sh scan`: the text on stdin; `match` names each line holding PRIVATE
+        text = sys.stdin.read()
+        (plans / "guard.txt").write_text(text)
+        if mode == "none":  # no pattern file: unknown, exit 3
+            sys.exit(3)
+        hits = [str(number) for number, line in enumerate(text.splitlines(), 1) if "PRIVATE" in line]
+        print(" ".join(hits))
+        sys.exit(1 if hits else 0)
     if role == "sd-docs-lint":
         _, args = real("sd-docs-lint")
         assert args.pr_body is not None and args.pr_body.is_file(), args
@@ -1043,10 +1058,11 @@ class Unmanaged(Case):
         super().setUp()
         self.db.execute("UPDATE repo SET managed = 0")
         tools = self.root / "tools"
-        for role in ("gh", "gate"):
+        for role in ("gh", "gate", "guard"):
             (tools / f"{role}.py").write_text(FAKE, encoding="utf-8")
         self.tools = dataclasses.replace(self.tools, gh=[sys.executable, str(tools / "gh.py")],
-                                         gate=[sys.executable, str(tools / "gate.py")])
+                                         gate=[sys.executable, str(tools / "gate.py")],
+                                         guard=[sys.executable, str(tools / "guard.py")])
 
     def pulls(self):
         path = self.plans / "pulls.json"
@@ -1089,6 +1105,26 @@ class Unmanaged(Case):
         self.assertIn("exit 1", fix[fix.index("-p") + 1])
         self.assertEqual(build.run(self.db, self.bundle["id"])["review_round"], 1)
         self.assertEqual(len(self.pulls()), 1)
+
+    def test_a_check_that_ignores_sigterm_ends_with_the_run(self):
+        """Review of 8fa8c7cca: `sd gate run` puts the check in a group of its own; a timeout ends that group too."""
+        pid_file = self.root / "check.pid"
+        hang = [sys.executable, "-c", "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(120)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [hang], timeout=4).run()
+        pid = int(pid_file.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True, check=False))
+        self.assertEqual(ended["outcome"], "timed_out")
+        try:
+            os.kill(pid, 0)
+            alive = True
+        except ProcessLookupError:
+            alive = False
+        self.assertFalse(alive, f"the check {pid} outlived the run it was ended with")
+        self.assertEqual(self.pulls(), [])
 
     def test_no_check_entrypoint_runs_none_and_says_so(self):
         self.press()
@@ -1136,14 +1172,69 @@ class Unmanaged(Case):
         self.assertEqual(len(self.pulls()), 1, "one draft, never two")
         self.assertEqual(self.contribution(self.items[0]).get("pull_url"), self.pulls()[0]["url"])
 
+    def test_a_private_value_in_a_commit_blocks_before_the_push(self):
+        """Review of 8fa8c7cca: an unmanaged repository has no leak-guard hook; the scan runs before the push."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["PRIVATE"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("nothing was pushed: a privacy pattern matches the commits", ended["blocked"])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+        self.assertEqual((self.pulls(), [c for c in self.calls("gh") if c["argv"][:2] == ["pr", "create"]]), ([], []))
+        scanned = (self.plans / "guard.txt").read_text()
+        self.assertIn("feat(fixture): build the fixture", scanned.splitlines()[0], "the title is line 1")
+        self.assertIn("work.txt", scanned, "the paths each commit touches")
+
+    def scan_refused(self, title, guard, said):
+        self.press()
+        self.write_pr(title=title)
+        self.plan(claude=["pass"], sd_review=["clean"], guard=guard)
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn(said, ended["blocked"])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+        self.assertEqual(self.pulls(), [])
+
+    def test_a_private_title_blocks_before_the_push(self):
+        self.scan_refused("feat(fixture): PRIVATE", [], "nothing was pushed: a privacy pattern matches the title")
+
+    def test_a_scan_with_no_pattern_file_blocks_before_the_push(self):
+        """Unknown is not clean: a scan that cannot check (no pattern file, exit 3) is a refusal, not a pass."""
+        self.scan_refused("feat(fixture): build the fixture", ["none"], "could not check the text (exit 3")
+
+    def test_a_retry_at_enqueuing_reviews_and_tests_before_it_publishes(self):
+        """Review of 8fa8c7cca: no lane gate re-checks an unmanaged head, so a retry never publishes it untested."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"], gh=["list", "mute"])
+        self.supervisor(checks=lambda work: [PASS]).run()
+        row = self.latest()
+        build.end(self.db, row["id"], "interrupted", "lost after the create")
+        retry = self.latest()
+        self.assertEqual(retry["step"], "enqueuing")
+        self.assertEqual(self.supervisor(retry["id"], checks=lambda work: [PASS]).run()["step"], "enqueued")
+        self.assertEqual((len(self.calls("sd-review")), len(self.calls("gate"))), (2, 2),
+                         "the retry reviewed and tested the head it published")
+
+    def test_the_body_lint_skips_a_foreign_docs_tree(self):
+        """Review of 8fa8c7cca: `--body-only` in an unmanaged repository; a managed one keeps the tree rules."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.assertEqual(self.supervisor(checks=lambda work: [PASS]).run()["step"], "enqueued")
+        (lint,) = self.calls("sd-docs-lint")
+        self.assertIn("--body-only", lint["argv"])
+
     def test_a_managed_run_never_calls_gh_or_its_checks(self):
         self.db.execute("UPDATE repo SET managed = 1")
         self.press()
         self.write_pr()
         self.plan(claude=["pass"], sd_review=["clean"])
         self.assertEqual(self.supervisor(checks=lambda work: [CHECK]).run()["step"], "enqueued")
-        self.assertEqual((self.calls("gh"), self.calls("gate")), ([], []))
+        self.assertEqual((self.calls("gh"), self.calls("gate"), self.calls("guard")), ([], [], []))
         self.assertIsNone(build.run(self.db, self.bundle["id"])["detail"])
+        self.assertTrue(all("--body-only" not in call["argv"] for call in self.calls("sd-docs-lint")))
 
     def observed(self, url, state):
         from sd_db import contributions

@@ -43,6 +43,21 @@ when the run's repository reads unmanaged.
   released, as for the lane.
 - Title and body: the builder writes both, as for the lane; the same
   line check and leak guard (`enqueue_refusals`) run before the review.
+  That guard runs only where a pre-push hook names it, which an
+  unmanaged repository lacks, so `publish` runs `leak-guard.sh scan`
+  (`Tools.guard`) itself before the push: over the title, the body, and
+  each commit's message, paths and added lines in base..head. A match,
+  or a scan that cannot check (no pattern file is exit 3), blocks the
+  run with nothing pushed. `sd-docs-lint` gets `--body-only` there, so a
+  foreign docs tree cannot block the run.
+- Reviewed head: no lane gate re-checks an unmanaged head, so
+  `enqueuing` publishes only the head this supervisor's review and
+  checks passed. A run resumed or retried at `enqueuing` goes back to
+  `reviewing` first.
+- Checks' processes: `sd gate run` starts its command in a process group
+  of its own. The supervisor reads the groups the gate's descendants run
+  in while it lives, and a timeout, cancel or lost run ends them with
+  the gate's group: TERM, the grace, then KILL.
 - `enqueued`: the tick's `watch` reads a run whose `detail` names a draft
   pull request from the contribution observation (`contribution_sync`
   observes every task `pull_url`), never the lane. Merged: the delivered
@@ -117,6 +132,14 @@ merge    | tasks done, run at     | observation unread   | nothing moves; next t
          | cleaning               | or stale             | again                           | unread
 merge    | run lane_failed        | closed unmerged      | operator reopens or cancels;    | watch: closed ends lane_failed
          |                        |                      | worktree kept                   |
+tests    | a check's own group    | check ignores TERM;  | its group is ended with the     | test_build_run: a check that
+         | (sd gate run's child)  | timeout or cancel    | gate's, TERM then KILL          | ignores SIGTERM ends with run
+review   | none                   | retry at enqueuing   | back to reviewing: review and   | test_build_run: a retry at
+         |                        | with no reviewed head| checks before the publish       | enqueuing reviews and tests
+push     | none                   | a private value in   | blocked before the push; the    | test_build_run: private
+         |                        | title, body, commits | scan reads all three            | commit, title; no patterns
+push     | none                   | foreign docs tree    | --body-only: the body alone     | test_build_run: body lint
+         |                        | breaks the tree lint | is linted                       | skips a foreign docs tree
 flag     | none (a read)          | draft not marked     | lane awaiting_you with DRAFTED  | test_contributions: draft
          |                        | ready by operator    | until observed ready            | reads awaiting_you; Details
          |                        |                      |                                 | flags it (DOM test)
@@ -147,6 +170,11 @@ link UI  | none (a read)          | operator cannot      | Details links pull_ur
 - The merge closes the items only once `contribution_sync` observes it,
   which runs on its own schedule.
 - The draft's "needs you" reason waits for the first observation.
+- The privacy patterns apply to the owners' repository too: a value
+  they hold private (an organization name) blocks a build there.
+- A supervisor killed outright leaves a check's own group to finish:
+  the reap ends only the recorded group. Filed with the gate's exit
+  125 reading as pack sd:7899.
 - Evidence: the watch ties a merge to the run by the pull request URL
   the run recorded and the observation keyed by that URL; the tests'
   pass is tied to the head the review read.

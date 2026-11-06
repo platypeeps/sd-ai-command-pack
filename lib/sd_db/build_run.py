@@ -195,6 +195,10 @@ class Tools:
     #: and its draft pull request opens through `<gh>`.
     gate: list[str] = field(default_factory=lambda: [sys.executable, str(PACK / "bin" / "sd_gate_slots.py"), "run"])
     gh: list[str] = field(default_factory=lambda: ["gh"])
+    #: Before that push, `<guard>` reads the title, body and commits on stdin: `leak-guard.sh scan`, run whatever
+    #: pre-push hook the repository has, since an unmanaged one normally has none (review of pack sd:7868).
+    guard: list[str] = field(default_factory=lambda: ["sh", str(system_checkout() / "local-leak-guard" / "leak-guard.sh"),
+                                                      "scan"])
 
 
 def judge(lines: list[str], *, session: str | None = None) -> dict:
@@ -484,6 +488,11 @@ def _environ(environ: dict | None) -> dict:
 class Supervisor:
     """One run's supervisor: `run()` walks its steps and returns how it ended."""
 
+    #: While a child that asked for it runs, the process groups its descendants run in, apart from its own
+    #: (`sd gate run` starts its command in a new group): ended with it, so a check that ignores SIGTERM
+    #: cannot outlive the run. None for every other child.
+    groups: set[int] | None = None
+
     def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path,
                  cited: Callable[[Path, str, str, str], Collection[int] | None], environ: dict | None = None,
                  beat_seconds: float = BEAT_SECONDS, timeout: float = TIMEOUT_SECONDS, grace: float = GRACE_SECONDS,
@@ -643,7 +652,7 @@ class Supervisor:
             for name in ("checks", "checks.err"):
                 self.out(name).write_bytes(b"")
             code = self.child([*self.tools.gate, "--label", f"build {self.row['branch']} checks", "--", *argv],
-                              cwd=self.work, name="checks")
+                              cwd=self.work, name="checks", descendants=True)
             if code == 125:  # `sd gate run` did not start the command: unknown, never a failure of the code
                 raise Unread(f"sd gate run did not start `{said}`; see {self.out('checks.err')}")
             if code != 0:
@@ -684,7 +693,10 @@ class Supervisor:
             raise Lost
         self.last_beat = time.monotonic()
         head = self.head()
-        if self.reviewed is not None and head != self.reviewed:
+        unmanaged = build.unmanaged(self.db, self.row["repo"])
+        # No lane gate re-checks an unmanaged head: it publishes only the head this supervisor's review and
+        # checks passed, so a resumed or retried run reviews and tests again first (review of pack sd:7868).
+        if head != self.reviewed and (unmanaged or self.reviewed is not None):
             if not build.write(self.db, self.ident, step="reviewing"):
                 raise Lost
             return "reviewing"
@@ -713,7 +725,6 @@ class Supervisor:
         if not delivered:
             return self.finish("blocked", "the branch delivers no item: no commit has a `Closes: sd:N` trailer "
                                           "for one of the run's items")
-        unmanaged = build.unmanaged(self.db, self.row["repo"])
         if not unmanaged:
             entry = lane_entry(self.tools.ship, self.work, delivered, env=self.env)
             if entry and entry.get("status") != "cancelled" and entry.get("expected_head") == head:
@@ -726,7 +737,9 @@ class Supervisor:
             return self.finish("blocked", f"the title at {self.title} is missing or over {TITLE_MAX} characters")
         errors = self.out("lint.err")
         errors.write_bytes(b"")
-        if self.child([*self.tools.lint, "--pr-body", str(self.body)], cwd=self.work, name="lint") != 0:
+        # A foreign repository's docs tree follows none of this pack's rules: only the body is linted there.
+        only = ["--body-only"] if unmanaged else []
+        if self.child([*self.tools.lint, "--pr-body", str(self.body), *only], cwd=self.work, name="lint") != 0:
             # The lint prints its failures on stderr; its stdout holds only notes (pack sd:6402).
             try:
                 failures = [line[5:] for line in errors.read_text(encoding="utf-8").splitlines()
@@ -776,6 +789,9 @@ class Supervisor:
         if not repository:
             return self.finish("blocked", "the repository's remote is not on GitHub, so no draft pull request opens")
         branch = self.row["branch"]
+        leaked = self.leaks(head, title)
+        if leaked:
+            return self.finish("blocked", f"nothing was pushed: {leaked}")
         if self.child([*self.tools.git, "-C", str(self.work), "push", "-q", "origin", f"{head}:refs/heads/{branch}"],
                       cwd=self.work, name="push") != 0:
             return self.finish("blocked", f"git push of {branch} to origin failed; see {self.out('push.err')}")
@@ -796,6 +812,51 @@ class Supervisor:
         if self.fresh()["cancel_requested"]:
             return self.finish("blocked", f"a cancel was asked after {url} opened; close it on GitHub")
         raise Lost
+
+    def leaks(self, head: str, title: str) -> str:
+        """What the privacy-pattern scan refuses in the text a publish sends; "" when it passed.
+
+        It reads the title, the body, and each commit in base..head as `leak-guard.sh check` does: its message,
+        the paths it touches and its added lines. A scan that matches, fails or has no pattern is a refusal:
+        unknown is not clean before a push to someone else's repository.
+        """
+        try:
+            body = self.body.read_text(encoding="utf-8")
+        except OSError:
+            body = ""
+        log = _read([*self.tools.git, "-C", str(self.work), "log", "--no-color", "--unified=0", "--format=%x00%B",
+                     "-p", f"{self.base()}..{head}"], env=self.env)
+        commits, message = [], False
+        for line in log.splitlines():
+            if line.startswith("\0"):
+                message, line = True, line[1:]
+            elif line.startswith("diff --git "):
+                message = False
+                commits.append(line[len("diff --git "):])
+                continue
+            if message:
+                commits.append(line)
+            elif line.startswith("+") and not line.startswith("+++"):
+                commits.append(line[1:])
+        parts = [("the title", [title]), ("the body", body.splitlines()), ("the commits", commits)]
+        text = "".join(line + "\n" for _part, lines in parts for line in lines)
+        try:
+            done = subprocess.run(self.tools.guard, input=text, capture_output=True, text=True, timeout=READ_SECONDS,
+                                  check=False, env=self.env)
+        except (OSError, subprocess.SubprocessError) as error:
+            return f"the privacy-pattern scan did not run: {type(error).__name__}"
+        if done.returncode == 0:
+            return ""
+        if done.returncode != 1:
+            return (f"the privacy-pattern scan could not check the text (exit {done.returncode}; 3 is no pattern "
+                    f"file): {done.stderr.strip()[-300:]}")
+        hits, first = set(), 1
+        numbers = {int(word) for word in done.stdout.split() if word.isdigit()}
+        for part, lines in parts:
+            if any(first <= number < first + len(lines) for number in numbers):
+                hits.add(part)
+            first += len(lines)
+        return f"a privacy pattern matches {', '.join(sorted(hits)) or 'the text'}; replace the value with a synthetic one"
 
     def open_pull(self, repository: str, branch: str, title: str) -> str | dict:
         """The open pull request for `branch`, or a new draft one; its url, or the run's blocked end."""
@@ -1035,7 +1096,8 @@ class Supervisor:
 
     # -------------------------------------------------------------- children
 
-    def child(self, argv: list[str], *, cwd: Path, name: str, out: Path | None = None, session: bool = False) -> int:
+    def child(self, argv: list[str], *, cwd: Path, name: str, out: Path | None = None, session: bool = False,
+              descendants: bool = False) -> int:
         """Run one child in its own process group, recorded before it runs; its exit code.
 
         The child waits on a pipe until `builder_pgid` and `builder_start`
@@ -1043,6 +1105,8 @@ class Supervisor:
         the child exits unrun. While it runs, the supervisor beats, stops at
         a requested cancel or a lost run, and ends it past `timeout`. Its
         group must read gone after it exits, or the run is a `Survivor`.
+        With `descendants`, the groups its descendants start (`sd gate run`
+        puts its command in one) are ended with it and must read gone too.
         """
         target = out or self.out(name)
         read, gate = os.pipe()
@@ -1067,12 +1131,15 @@ class Supervisor:
             process.wait()
             raise Lost
         deadline = time.monotonic() + self.timeout
+        self.groups = set() if descendants else None
         while True:
             try:
                 code = process.wait(timeout=min(1.0, self.beat_seconds))
                 break
             except subprocess.TimeoutExpired:
                 pass
+            if self.groups is not None:
+                self.groups |= descendant_groups(process.pid) or set()
             try:
                 if session:
                     self.watch_session()
@@ -1132,26 +1199,61 @@ class Supervisor:
         The leader is reaped as it dies (`process.poll`): a zombie leader is
         still a member of its group, and would read as a survivor.
         """
+        # The child's descendants' own groups go too, read while the child still lives: once it is killed, they
+        # are orphans no listing ties to the run (review of pack sd:7868).
+        if self.groups is not None and process is not None and process.poll() is None:
+            self.groups |= descendant_groups(process.pid) or set()
+        groups = [pgid, *sorted((self.groups or set()) - {pgid})] if process is not None else [pgid]
+
         def gone() -> bool:
             if process is not None:
                 process.poll()
-            return self.probe.group(pgid) is False
+            return all(self.probe.group(group) is False for group in groups)
 
         if gone():
             return True
         for sent, wait in ((signal.SIGTERM, self.grace), (signal.SIGKILL, 5.0)):
-            try:
-                os.killpg(pgid, sent)
-            except ProcessLookupError:
-                return True
-            except OSError:
-                pass  # EPERM may be a group of zombies only (sd:6406): `gone` decides
+            for group in groups:
+                try:
+                    os.killpg(group, sent)
+                except OSError:
+                    pass  # ESRCH: gone; EPERM may be a group of zombies only (sd:6406): `gone` decides
             stop = time.monotonic() + wait
             while time.monotonic() < stop:
                 if gone():
                     return True
                 time.sleep(0.05)
         return gone()
+
+
+def descendant_groups(pid: int) -> set[int] | None:
+    """The process groups `pid`'s descendants run in, apart from `pid`'s own; None when `ps` did not answer.
+
+    `sd gate run` starts its command in a group of its own, so ending the child's group alone left a check that
+    ignores SIGTERM running beside a released run (review of pack sd:7868).
+    """
+    try:
+        listing = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid="], capture_output=True, text=True,
+                                 timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if listing.returncode != 0:
+        return None
+    children: dict[int, list[tuple[int, int]]] = {}
+    for line in listing.stdout.splitlines():
+        fields = line.split()
+        if len(fields) == 3 and all(field.isdigit() for field in fields):
+            child, parent, group = map(int, fields)
+            children.setdefault(parent, []).append((child, group))
+    found, todo, seen = set(), [pid], {pid}
+    while todo:
+        for child, group in children.get(todo.pop(), []):
+            if child not in seen:
+                seen.add(child)
+                todo.append(child)
+                if group != pid:
+                    found.add(group)
+    return found
 
 
 class DraftSupervisor(Supervisor):
