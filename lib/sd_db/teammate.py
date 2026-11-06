@@ -155,6 +155,22 @@ def _dispatched(connection, entry: dict) -> dict | Literal[False] | None:
     return receipt if receipt.get("phase") in ("merge_dispatch", "merged") else None
 
 
+#: The tail `start` gives a side branch's start note: the run keeps its `--into` there, so runs started
+#: before pack sd:7748 read the same way and the run row needs no column.
+INTO = "; merges into "
+
+
+def _into(connection, run: dict) -> str | None:
+    """The branch an open run's side branch merges into, from its lead item's start note; None for a bundle."""
+    prefix = f"Teammate run {run['id']} started by "
+    row = connection.execute(
+        "SELECT note.body FROM note JOIN assignment ON assignment.item = note.item WHERE assignment.id = ? "
+        "AND note.kind = 'comment' AND substr(note.body, 1, ?) = ? ORDER BY note.id LIMIT 1",
+        (run["assignment"], len(prefix), prefix)).fetchone()
+    _, found, target = (row["body"] if row else "").rpartition(INTO)
+    return target if found and target and not any(c.isspace() for c in target) else None
+
+
 def start(connection, items: list[int], *, worktree: str, branch: str, budget_minutes: int, owner: str,
           into: str | None = None, reason: str | None = None) -> dict:
     """Register one teammate run for `items`, the first its lead; the run, as `build.run` reads it.
@@ -164,6 +180,8 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
     worktree, unless `into` names that branch (a side branch that merges into
     the bundle) or `reason` is one of `SECOND_BRANCH`, which each item records.
     An open run is never in the lane: enqueue refuses an item one holds.
+    pack sd:7748: runs share a bundle when their branch or `into` meet, so
+    sibling side branches into one bundle are not beside each other.
     """
     if not items or len(set(items)) != len(items) or any(type(item) is not int for item in items):
         raise TeammateRefused("name one or more distinct items")
@@ -172,6 +190,8 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
     for name, value in (("worktree", worktree), ("branch", branch), ("owner", owner)):
         if not isinstance(value, str) or not value.strip():
             raise TeammateRefused(f"a teammate run names its {name}")
+    if into is not None and (not isinstance(into, str) or not into or any(c.isspace() for c in into)):
+        raise TeammateRefused(f"--into names a branch, not {into!r}")
     if reason is not None and reason not in SECOND_BRANCH:
         raise TeammateRefused(f"a second open branch's reason is state-move or in-lane, not {reason!r}")
     with transaction(connection):
@@ -204,14 +224,22 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
         if len(repos) != 1:
             raise TeammateRefused("a teammate run's items share one repository")
         repo = repos.pop()
-        beside = [run for run in open_runs(connection)
-                  if run["repo"] == repo and run["outcome"] is None and run["branch"] not in (branch, into)]
+        mine = {branch, into} - {None}
+        beside = []
+        for open_run in open_runs(connection):
+            if open_run["repo"] != repo or open_run["outcome"] is not None:
+                continue
+            target = _into(connection, open_run)
+            if not mine & ({open_run["branch"], target} - {None}):
+                beside.append(open_run | {"into": target})
         if beside and reason is None:
             other = beside[0]
+            bundle = other["into"] or other["branch"]
+            side = f", a side branch of {other['into']}" if other["into"] else ""
             raise TeammateRefused(
-                f"{repo} has open branch {other['branch']} in {other['work_path']} (teammate run {other['id']}): "
-                "one open bundle branch per repository; build these items there, pass --into "
-                f"{other['branch']} for a side branch that merges into it, or --reason state-move or "
+                f"{repo} has open branch {other['branch']} in {other['work_path']} (teammate run {other['id']}"
+                f"{side}): one open bundle branch per repository; build these items there, pass --into "
+                f"{bundle} for a side branch that merges into it, or --reason state-move or "
                 "--reason in-lane for a second pull request")
         stamp = clock()
         lead = None
@@ -234,7 +262,7 @@ def start(connection, items: list[int], *, worktree: str, branch: str, budget_mi
                          f"{', '.join(sorted({run['branch'] for run in beside}))}: {reason}")
             add_note(connection, item, "comment",
                      f"Teammate run {run} started by {owner}: worktree {worktree}, branch {branch}, "
-                     f"budget {budget_minutes} min" + (f"; merges into {into}" if into else ""))
+                     f"budget {budget_minutes} min" + (f"{INTO}{into}" if into else ""))
         return run_state(connection, run)
 
 

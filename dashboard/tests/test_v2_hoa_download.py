@@ -32,6 +32,7 @@ from test_workflow_actions import BrowserSession
 CLAUDE = r'''import json, os, pathlib, sys, time
 here = pathlib.Path(os.environ["STUB_DIR"])
 (here / "claude-argv.json").write_text(json.dumps(sys.argv[1:]))
+(here / "claude-token").write_text(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "none"))
 mode = (here / "mode").read_text().strip() if (here / "mode").exists() else "signed-in"
 def say(text):
     print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}), flush=True)
@@ -169,6 +170,14 @@ class TheRun(Stubs, unittest.TestCase):
         self.assertIn("navigate your tab to https://scada.example.test", argv[argv.index("-p") + 1])
         self.assertIn("Never type into the page", argv[argv.index("-p") + 1])
         self.assertEqual(self.downloads(), ["mission export"])
+
+    def test_the_session_gets_no_setup_token(self):
+        # pack sd:7750: the setup token's user:inference scope disables Claude in Chrome.
+        shell = Path(os.environ["HOME"], ".config", "shell")
+        shell.mkdir(parents=True)
+        (shell / "env.sh").write_text("export CUSTOM_CLAUDE_CODE_OAUTH_TOKEN=setup\n")
+        self.run_now()
+        self.assertEqual((self.stub / "claude-token").read_text(), "none")
 
     def test_a_session_that_does_not_sign_in_runs_no_download(self):
         (self.stub / "mode").write_text("unavailable")

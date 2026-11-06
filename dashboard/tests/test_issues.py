@@ -225,7 +225,8 @@ window.shell = { aside: (() => { const { html } = window.markup;
         self.assertIn("Fix the &lt;b&gt;widget&lt;/b&gt;", drawn["issues"])
         self.assertIn(">assigned<", drawn["issues"])
         self.assertNotIn("javascript:", drawn["issues"])
-        self.assertIn("GitHub #3", drawn["issues"])
+        # pack sd:7753: GitHub #3 sits in its repo's group, closed while anvil's is open.
+        self.assertIn('data-cat-open="repo:kiln"', drawn["issues"])
         self.assertIn("3 open", drawn["issues-tally"])
 
     def test_each_row_says_when_it_was_last_updated(self):
@@ -565,10 +566,12 @@ class TheGitHubPage(ScreenCase):
         return out
 
     def test_hide_removes_the_row_and_its_count_and_undo_restores_it(self):
-        out = self.run_page("show('issues'); await flush(); R.before = ELS.issues.html; R.n0 = OUT.counts.issues;"
+        # pack sd:7753: the Jira row's group opens by a press; with it gone, the repo group opens.
+        out = self.run_page(TheCategoryGroups.PRESS + "show('issues'); await flush(); press('none'); await flush();"
+                            " R.before = ELS.issues.html; R.n0 = OUT.counts.issues;"
                             " act('jira issue.hide', 'iss:jira:EXAMPLE-8'); await flush(); R.after = ELS.issues.html; R.n1 = OUT.counts.issues;"
                             " R.tally = ELS['issues-tally'].html; R.bar = ELS['issues-filters'].html; R.toast = lastToast().msg;"
-                            " lastUndo().undo(); await flush(); R.back = ELS.issues.html; R.n2 = OUT.counts.issues;")
+                            " lastUndo().undo(); await flush(); press('none'); await flush(); R.back = ELS.issues.html; R.n2 = OUT.counts.issues;")
         r = out["R"]
         self.assertIn("Fix the widget", r["before"])
         self.assertNotIn("Fix the widget", r["after"])
@@ -720,16 +723,21 @@ class TheCategoryGroups(ScreenCase):
         out = self.page(self.PRESS + "show('issues'); await flush(); R.first = ELS.issues.html;"
                         " press('none'); await flush(); R.none = ELS.issues.html; press('none'); await flush(); R.shut = ELS.issues.html;")
         r = out["R"]
-        self.assertEqual(re.findall(self.GROUPS, r["first"]), [("cat:Alerts", "true"), ("cat:Ingest", "false"), ("none", "false")])
+        # pack sd:7753: the GitHub row's repo group comes first and opens first.
+        self.assertEqual(re.findall(self.GROUPS, r["first"]),
+                         [("repo:anvil", "true"), ("cat:Alerts", "false"), ("cat:Ingest", "false"), ("none", "false")])
         self.assertLess(r["first"].index("Crash on start"), r["first"].index('data-cat="cat:Alerts"'))
-        self.assertIn("Fix the widget", r["first"])
+        self.assertNotIn("Fix the widget", r["first"])
         self.assertNotIn("Tune the alarm", r["first"])
-        self.assertEqual(re.findall(self.GROUPS, r["none"]), [("cat:Alerts", "false"), ("cat:Ingest", "false"), ("none", "true")])
+        self.assertEqual(re.findall(self.GROUPS, r["none"]),
+                         [("repo:anvil", "false"), ("cat:Alerts", "false"), ("cat:Ingest", "false"), ("none", "true")])
         self.assertIn("Tune the alarm", r["none"])
         self.assertNotIn("Fix the widget", r["none"])
-        self.assertEqual(re.findall(self.GROUPS, r["shut"]), [("cat:Alerts", "false"), ("cat:Ingest", "false"), ("none", "false")])
+        self.assertNotIn("Crash on start", r["none"])
+        self.assertEqual(re.findall(self.GROUPS, r["shut"]),
+                         [("repo:anvil", "false"), ("cat:Alerts", "false"), ("cat:Ingest", "false"), ("none", "false")])
         self.assertNotIn("Tune the alarm", r["shut"])
-        self.assertIn("Crash on start", r["shut"])
+        self.assertNotIn("Crash on start", r["shut"])
         self.assertIn(">1 issue<", r["first"])
         self.assertIn(">0 issues<", r["first"])
 
@@ -764,21 +772,55 @@ class TheCategoryGroups(ScreenCase):
         self.assertIn(("none", "true"), re.findall(self.GROUPS, r["after"]))
         self.assertIn(("cat:Alerts", "true"), re.findall(self.GROUPS, r["back"]))
 
+    def test_the_category_pickers_list_by_name_ignoring_case_and_none_last(self):
+        """pack sd:7752: the Details select and Set category's options sort by name; the groups keep the stored order."""
+        out = self.page("show('issues'); await flush(); window.issues.details('iss:jira:EXAMPLE-9'); R.details = ELS.details.html;"
+                        " R.rows = ELS.issues.html;"
+                        " R.fields = cmd('jira issue.category').fields(C.get('iss:jira:EXAMPLE-9'))[0];",
+                        categories=("beta", "Alpha", "gamma"))
+        r = out["R"]
+        self.assertEqual(re.findall(r'<option value="[^"]*"(?: selected)?>([^<]+)</option>', r["details"]),
+                         ["Alpha", "beta", "gamma", "None (Uncategorized)"])
+        self.assertEqual([o["label"] for o in r["fields"]["options"]], ["Alpha", "beta", "gamma", "None (Uncategorized)"])
+        self.assertEqual(r["fields"]["value"], "Alpha")
+        self.assertEqual([g for g, _ in re.findall(self.GROUPS, r["rows"])], ["repo:anvil", "cat:beta", "cat:Alpha", "cat:gamma", "none"])
+
+    def test_github_rows_group_by_repo_first_and_share_the_one_open_group(self):
+        """pack sd:7753: one group per repo, by name ignoring case, before the categories; one group open at a time."""
+        github = [{"repo": repo, "tracker": "GitHub", "ref": ref, "key": f"github:example/{repo}{ref}", "title": title,
+                   "reason": "assigned", "url": None, "state": "open", "hidden": False}
+                  for repo, ref, title in (("zinc", "#3", "Zinc breaks"), ("Brass", "#4", "Brass bends"))]
+        out = self.run_page(self.PRESS + "show('issues'); await flush(); R.first = ELS.issues.html;"
+                            " press('repo:zinc'); await flush(); R.second = ELS.issues.html;",
+                            issues_rows=CATEGORY_ROWS[:2] + github, categories=("Alerts",))
+        r = out["R"]
+        self.assertEqual(re.findall(self.GROUPS, r["first"]),
+                         [("repo:Brass", "true"), ("repo:zinc", "false"), ("cat:Alerts", "false"), ("none", "false")])
+        self.assertIn("Brass bends", r["first"])
+        self.assertNotIn("Zinc breaks", r["first"])
+        self.assertNotIn("Fix the widget", r["first"])
+        self.assertEqual(re.findall(self.GROUPS, r["second"]),
+                         [("repo:Brass", "false"), ("repo:zinc", "true"), ("cat:Alerts", "false"), ("none", "false")])
+        self.assertIn("Zinc breaks", r["second"])
+        self.assertNotIn("Brass bends", r["second"])
+        # A repo group carries no Rename or Remove: its Actions cell is empty.
+        self.assertRegex(r["first"], r'data-cat="repo:Brass"[^\n]*(?:\n[^\n]*){0,4}<td class="act"></td></tr>')
+
     def test_remove_asks_nothing_leaves_its_issues_uncategorized_and_undo_restores_the_list(self):
-        # The open group left, so the first group with a row, Uncategorized, opens.
-        out = self.page("show('issues'); await flush(); act('issue category.remove', 'isscat:Alerts'); await flush();"
-                        " R.after = ELS.issues.html; R.toast = lastToast().msg; R.none = ELS.issues.html;"
+        # The repo group stays open; a press opens Uncategorized, which now holds both Jira issues.
+        out = self.page(self.PRESS + "show('issues'); await flush(); act('issue category.remove', 'isscat:Alerts'); await flush();"
+                        " R.after = ELS.issues.html; R.toast = lastToast().msg; press('none'); await flush(); R.none = ELS.issues.html;"
                         " lastUndo().undo(); await flush(); R.back = ELS.issues.html;")
         r = out["R"]
         self.assertEqual(out["confirms"], [])
         self.assertEqual([p[:2] for p in out["posts"]], [
             ["/api/github/issues/categories", {"categories": ["Ingest"], "before": ["Alerts", "Ingest"]}],
             ["/api/github/issues/categories", {"categories": ["Alerts", "Ingest"], "before": ["Ingest"]}]])
-        self.assertEqual(re.findall(self.GROUPS, r["after"]), [("cat:Ingest", "false"), ("none", "true")])
+        self.assertEqual(re.findall(self.GROUPS, r["after"]), [("repo:anvil", "true"), ("cat:Ingest", "false"), ("none", "false")])
         self.assertIn("Fix the widget", r["none"])
         self.assertIn("Tune the alarm", r["none"])
         self.assertIn("Category Alerts removed · its issues are uncategorized", r["toast"])
-        self.assertEqual([g for g, _ in re.findall(self.GROUPS, r["back"])], ["cat:Alerts", "cat:Ingest", "none"])
+        self.assertEqual([g for g, _ in re.findall(self.GROUPS, r["back"])], ["repo:anvil", "cat:Alerts", "cat:Ingest", "none"])
 
     def test_new_category_and_rename_post_the_list_the_page_read(self):
         out = self.page("show('issues'); await flush(); R.button = ELS['issues-cats'].html; FIELD_VALUES.name = 'Pages';"
@@ -801,7 +843,8 @@ class TheCategoryGroups(ScreenCase):
                         store={"available": False, "reason": "the view store was not read: locked"})
         r = out["R"]
         self.assertIn("Categories were not read: the view store was not read: locked. The Jira issues below are not grouped.", r["rows"])
-        self.assertNotIn('data-cat="', r["rows"])
+        self.assertNotIn('data-cat="cat:', r["rows"])
+        self.assertNotIn('data-cat="none"', r["rows"])
         self.assertIn("Fix the widget", r["rows"])
         self.assertIn("Tune the alarm", r["rows"])
         self.assertIn("disabled", r["button"])
