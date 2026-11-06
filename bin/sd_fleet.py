@@ -334,6 +334,18 @@ class Change:
             tofile=f"b/{self.path}"))
 
 
+class Undecodable(UnicodeDecodeError):
+    """A file the stamp read that is not UTF-8, naming its path (pack sd:7812).
+
+    A UnicodeDecodeError, so a caller that already refuses one, as
+    `settings_change` does, still does; `plan_repo` refuses the rest.
+    """
+
+    def __init__(self, path: str, error: UnicodeDecodeError) -> None:
+        super().__init__(error.encoding, error.object, error.start, error.end, error.reason)
+        self.path = path
+
+
 @dataclasses.dataclass
 class Plan:
     root: str
@@ -360,13 +372,17 @@ class Tree:
         self.root, self.commit = root, commit
 
     def text_at(self, rel: str) -> str | None:
-        if self.commit is None:
-            path = self.root / rel
-            return path.read_text(encoding="utf-8") if path.is_file() else None
-        kind = sd_lib.git_output(["cat-file", "-t", f"{self.commit}:{rel}"], self.root)
-        if kind != "blob":
-            return None
-        return _git_show(self.root, f"{self.commit}:{rel}")
+        """`rel`'s text, or None when it is missing or did not read; Undecodable when not UTF-8."""
+        try:
+            if self.commit is None:
+                path = self.root / rel
+                return path.read_text(encoding="utf-8") if path.is_file() else None
+            kind = sd_lib.git_output(["cat-file", "-t", f"{self.commit}:{rel}"], self.root)
+            if kind != "blob":
+                return None
+            return _git_show(self.root, f"{self.commit}:{rel}")
+        except UnicodeDecodeError as error:
+            raise Undecodable(rel, error) from error
 
     def present(self, rel: str) -> bool | None:
         """Whether `rel` is a file in this tree; None when git could not say.
@@ -378,13 +394,6 @@ class Tree:
             return (self.root / rel).is_file()
         listed = sd_lib.git_output(["ls-tree", self.commit, "--", rel], self.root)
         return None if listed is None else bool(listed)
-
-    def _text_or_none(self, rel: str) -> str | None:
-        """`text_at`, with bytes that do not decode read as unreadable (pack sd:7812)."""
-        try:
-            return self.text_at(rel)
-        except UnicodeDecodeError:
-            return None
 
     def workflows(self) -> list[str]:
         return self._workflows() or []
@@ -411,7 +420,7 @@ class Tree:
         paths = self._workflows()
         if paths is None:
             return ".github/workflows/"
-        texts = {rel: self._text_or_none(rel) for rel in paths if rel != besides}
+        texts = {rel: self.text_at(rel) for rel in paths if rel != besides}
         unread = next((rel for rel, text in texts.items() if text is None), None)
         return unread if unread is not None else {rel: text for rel, text in texts.items() if text is not None}
 
@@ -695,7 +704,7 @@ def guard_change(plan: Plan, tree: Tree, propose: Callable[[str, str], None], ro
     if isinstance(others, str):
         plan.refused.append(f"{DEPENDABOT_PATH}: could not read {others}, so the stamp keeps the guard as it is")
         return
-    current = tree._text_or_none(DEPENDABOT_PATH)
+    current = tree.text_at(DEPENDABOT_PATH)
     if current is None and tree.present(DEPENDABOT_PATH) is not False:
         plan.refused.append(f"{DEPENDABOT_PATH}: could not read it, so the stamp keeps the guard as it is")
         return
@@ -750,10 +759,26 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
         propose(CHECK_PATH, check_workflow_text())
 
 
-def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
-              local_block: Callable[[str], str], tracked: Callable[[pathlib.Path, str], bool],
-              ask: sd_lib.Asker = sd_lib.gh_api, ci: str = "github",
-              owners: tuple[str, ...] = DEFAULT_OWNERS) -> Plan:
+def plan_repo(root: pathlib.Path, remote: str | None, **kwargs: Any) -> Plan:
+    """`_plan_repo`, with a file that is not UTF-8 refusing this repository whole.
+
+    A traceback would stop the run for every repository after it, and a
+    plan cut short at the bad read is not a plan to write (pack sd:7812).
+    """
+    try:
+        return _plan_repo(root, remote, **kwargs)
+    except Undecodable as error:
+        slug = owner_slug(remote)
+        tree = kwargs["tree"]
+        plan = Plan(root=str(root), slug=slug or (remote or ""), base=tree.commit or f"worktree {tree.root}")
+        plan.refused.append(f"{error.path}: not UTF-8 ({error.reason}); the stamp leaves this repository as it is")
+        return plan
+
+
+def _plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
+               local_block: Callable[[str], str], tracked: Callable[[pathlib.Path, str], bool],
+               ask: sd_lib.Asker = sd_lib.gh_api, ci: str = "github",
+               owners: tuple[str, ...] = DEFAULT_OWNERS) -> Plan:
     """What stamping `root` would change, rendered and diffed; writes nothing.
 
     `local_block` renders the `CLAUDE.local.md` text from the current text,
@@ -810,8 +835,7 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
         plan.refused.append(f"{LOCAL_BLOCK_PATH}: tracked in this repository; the block goes only into an "
                             "untracked file")
     else:
-        target = root / LOCAL_BLOCK_PATH
-        current = target.read_text(encoding="utf-8") if target.is_file() else None
+        current = _local_text(root)
         try:
             after, kept = additive_block(current, local_block(current or ""))
             if kept:
@@ -823,6 +847,15 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
         plan.changes.append(Change(DASHBOARD_DIR, "local", None, "", directory=True))
     apply_exemptions(plan, tree)
     return plan
+
+
+def _local_text(root: pathlib.Path) -> str | None:
+    """The untracked local block's text, or None; Undecodable when not UTF-8 (pack sd:7812)."""
+    target = root / LOCAL_BLOCK_PATH
+    try:
+        return target.read_text(encoding="utf-8") if target.is_file() else None
+    except UnicodeDecodeError as error:
+        raise Undecodable(LOCAL_BLOCK_PATH, error) from error
 
 
 def guest_settings(plan: Plan, root: pathlib.Path, tracked: Callable[[pathlib.Path, str], bool],

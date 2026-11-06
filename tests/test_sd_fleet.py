@@ -909,17 +909,24 @@ class OldSlugGuard(Fleet):
                         plan["refused"])
         self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
 
-    def test_a_non_utf8_dependabot_file_is_refused_not_a_traceback(self) -> None:
-        """pack sd:7812 review: non-UTF-8 bytes are the likeliest unreadable
-        file; text_at raised UnicodeDecodeError past the refusal."""
-        for rel in (sd_fleet.DEPENDABOT_PATH,):
-            files = {sd_fleet.ROUTE_PATH: self.route(), sd_fleet.DEPENDABOT_PATH: sd_setup_guard.minimal_file()}
-            files[rel] = b"jobs: \xff\xfe\n"
-            root, remote = self.repo("bytes-" + rel.rsplit("/", 1)[-1], files)
-            [plan] = self.plan([(root, remote)])
-            self.assertTrue(any(line.startswith(sd_fleet.DEPENDABOT_PATH) and "could not read" in line
-                                for line in plan["refused"]), (rel, plan["refused"]))
-            self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+    def test_a_non_utf8_file_refuses_its_repository_by_name_not_a_traceback(self) -> None:
+        """pack sd:7812 review: every file the stamp reads, tracked or the
+        untracked local block; a traceback stopped the run for every repo
+        after it. The repository is refused whole and nothing is proposed."""
+        bad = b"jobs: \xff\xfe\n"
+        for rel in (sd_fleet.DEPENDABOT_PATH, ".github/workflows/other.yml", sd_fleet.ROUTE_PATH,
+                    sd_fleet.CHECK_PATH, "CLAUDE.md", sd_fleet.GITIGNORE_PATH, sd_fleet.LOCAL_BLOCK_PATH):
+            with self.subTest(rel=rel):
+                files = {sd_fleet.ROUTE_PATH: self.route(), sd_fleet.DEPENDABOT_PATH: sd_setup_guard.minimal_file()}
+                if rel != sd_fleet.LOCAL_BLOCK_PATH:
+                    files[rel] = bad
+                root, remote = self.repo("bytes-" + rel.replace("/", "-"), files)
+                if rel == sd_fleet.LOCAL_BLOCK_PATH:
+                    (root / rel).write_bytes(bad)
+                [plan] = self.plan([(root, remote)])
+                self.assertTrue(any(line.startswith(f"{rel}: not UTF-8") for line in plan["refused"]),
+                                plan["refused"])
+                self.assertEqual([], plan["changes"])
 
     def test_an_unlisted_workflow_folder_refuses_the_guard_rather_than_dropping_it(self) -> None:
         root, remote = self.repo("unlisted", {sd_fleet.ROUTE_PATH: self.route(),
