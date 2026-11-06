@@ -379,6 +379,13 @@ class Tree:
         listed = sd_lib.git_output(["ls-tree", self.commit, "--", rel], self.root)
         return None if listed is None else bool(listed)
 
+    def _text_or_none(self, rel: str) -> str | None:
+        """`text_at`, with bytes that do not decode read as unreadable (pack sd:7812)."""
+        try:
+            return self.text_at(rel)
+        except UnicodeDecodeError:
+            return None
+
     def workflows(self) -> list[str]:
         return self._workflows() or []
 
@@ -404,7 +411,7 @@ class Tree:
         paths = self._workflows()
         if paths is None:
             return ".github/workflows/"
-        texts = {rel: self.text_at(rel) for rel in paths if rel != besides}
+        texts = {rel: self._text_or_none(rel) for rel in paths if rel != besides}
         unread = next((rel for rel, text in texts.items() if text is None), None)
         return unread if unread is not None else {rel: text for rel, text in texts.items() if text is not None}
 
@@ -688,7 +695,7 @@ def guard_change(plan: Plan, tree: Tree, propose: Callable[[str, str], None], ro
     if isinstance(others, str):
         plan.refused.append(f"{DEPENDABOT_PATH}: could not read {others}, so the stamp keeps the guard as it is")
         return
-    current = tree.text_at(DEPENDABOT_PATH)
+    current = tree._text_or_none(DEPENDABOT_PATH)
     if current is None and tree.present(DEPENDABOT_PATH) is not False:
         plan.refused.append(f"{DEPENDABOT_PATH}: could not read it, so the stamp keeps the guard as it is")
         return

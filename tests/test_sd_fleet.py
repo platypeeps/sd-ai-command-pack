@@ -104,7 +104,10 @@ class Fleet(unittest.TestCase):
         git(root, "remote", "add", "origin", remote)
         for rel, text in {"README.md": "x\n", **(files or {})}.items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_text(text, encoding="utf-8")
+            if isinstance(text, bytes):
+                (root / rel).write_bytes(text)
+            else:
+                (root / rel).write_text(text, encoding="utf-8")
         git(root, "add", "-A")
         git(root, "commit", "-q", "-m", "init")
         git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -905,6 +908,18 @@ class OldSlugGuard(Fleet):
         self.assertTrue(any(line.startswith(f"{sd_fleet.DEPENDABOT_PATH}: could not read") for line in plan["refused"]),
                         plan["refused"])
         self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+
+    def test_a_non_utf8_dependabot_file_is_refused_not_a_traceback(self) -> None:
+        """pack sd:7812 review: non-UTF-8 bytes are the likeliest unreadable
+        file; text_at raised UnicodeDecodeError past the refusal."""
+        for rel in (sd_fleet.DEPENDABOT_PATH,):
+            files = {sd_fleet.ROUTE_PATH: self.route(), sd_fleet.DEPENDABOT_PATH: sd_setup_guard.minimal_file()}
+            files[rel] = b"jobs: \xff\xfe\n"
+            root, remote = self.repo("bytes-" + rel.rsplit("/", 1)[-1], files)
+            [plan] = self.plan([(root, remote)])
+            self.assertTrue(any(line.startswith(sd_fleet.DEPENDABOT_PATH) and "could not read" in line
+                                for line in plan["refused"]), (rel, plan["refused"]))
+            self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
 
     def test_an_unlisted_workflow_folder_refuses_the_guard_rather_than_dropping_it(self) -> None:
         root, remote = self.repo("unlisted", {sd_fleet.ROUTE_PATH: self.route(),
