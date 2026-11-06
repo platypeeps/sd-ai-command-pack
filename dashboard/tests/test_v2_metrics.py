@@ -252,6 +252,38 @@ TWO_SHARDS = ("sd-check fail (precheck pass, check fail: shard tests.sd_db.test_
 TARGET = "the repository gate failed after the review cleared: sd-check fail (check fail: make target test-workspace)"
 
 
+class ThePrWaits(Fixture):
+    """pack sd:7859: the PR waits part, from each item's PR lane notes."""
+
+    def pr(self, n, *lanes):
+        from sd_db import contributions
+        from sd_db.writes import add_note
+
+        url = f"https://github.com/example/system/pull/{n}"
+        item = contributions.capture(self.connection, title=f"PR {n}", changes={"pull_url": url}, who="test")["item"]["id"]
+        for at, lane, state in lanes:
+            add_note(self.connection, item, "comment", f"PR lane: {lane} · {state} · {url}",
+                     session="contribution-observer", timestamp=at)
+        return item
+
+    def test_totals_split_on_you_and_on_reviewers_with_the_median_first_pr_to_merge_and_the_slowest(self):
+        merged = self.pr(1, ("2026-09-06T08:00:00Z", "awaiting_them", "open"), ("2026-09-06T09:00:00Z", "awaiting_you", "open"),
+                         ("2026-09-06T09:30:00Z", "merged", "merged"))
+        waiting = self.pr(2, ("2026-09-06T10:00:00Z", "awaiting_you", "open"))
+        prs = self.doc()["prs"]
+        self.assertEqual({k: prs[k] for k in ("error", "items", "open", "on_you", "on_reviewers", "merged", "to_merge")},
+                         {"error": "", "items": 2, "open": 1, "on_you": 1800 + 7200, "on_reviewers": 3600, "merged": 1,
+                          "to_merge": 5400})
+        self.assertEqual([(w["item"], w["on_you"], w["on_reviewers"], w["to_merge"], w["open"], w["on"]) for w in prs["slowest"]],
+                         [(waiting, 7200, 0, None, True, "you"), (merged, 1800, 3600, 5400, False, None)])
+
+    def test_a_failed_read_is_the_parts_error(self):
+        from sd_db import contributions
+
+        with mock.patch.object(contributions, "pr_waits", side_effect=sqlite3.OperationalError("database is locked")):
+            self.assertEqual(self.doc()["prs"], {"error": "OperationalError: database is locked"})
+
+
 class TheHealth(Fixture):
     """The weekly KISS audit's numbers (pack sd:6744). NOW is 2026-09-06T12:00Z; the window is 14 days, and last
     week's is the 14 days that ended 2026-08-30T12:00Z."""
@@ -707,7 +739,7 @@ class TheScript(Controlled):
         panels = {m.group(1): re.findall(r'<section class="panel" id="([a-z-]+)"', m.group(2))
                   for m in re.finditer(r'<div id="view-([a-z]+)"(.*?)(?=<div id="view-|</main>)', page, re.S)}
         self.assertEqual(panels, {"spend": ["spend", "week", "usage"], "providers": ["scorecard"], "ci": ["ci"],
-                                  "times": ["times"], "age": ["age"]})
+                                  "times": ["times", "prs"], "age": ["age"]})  # pack sd:7859: PR waits beside lane times
 
     def test_a_lamp_shows_the_view_that_holds_its_reading(self):
         out = self.run_page("""const lamp = (cell, ev, view) => ({ dataset: { cell, ev, view } });
@@ -820,6 +852,37 @@ C.run(cmd('bill.cap'), OBJ.get('bill:capped')); await flush();""")
         out = self.run_page("R.body = ELS['times-body'].html;", doc)
         self.assertIn("<b>▨ Not read.</b> OperationalError: database is locked", out["R"]["body"])
         self.assertIn("lanes: OperationalError: database is locked", out["states"][-1]["text"])
+
+    PRS = {"error": "", "items": 2, "open": 1, "on_you": 9000, "on_reviewers": 3600, "merged": 1, "to_merge": 5400,
+           "slowest": [{"item": 2, "title": "Waiting", "url": "https://github.com/example/system/pull/2", "open": True,
+                        "on": "you", "on_you": 7200, "on_reviewers": 0, "to_merge": None},
+                       {"item": 1, "title": "Landed", "url": "https://github.com/example/system/pull/1", "open": False,
+                        "on": None, "on_you": 1800, "on_reviewers": 3600, "to_merge": 5400}]}
+
+    def test_pr_waits_shows_the_totals_then_the_slowest_items(self):
+        """pack sd:7859: the totals row, then each slow item: open on you is caution; one not merged says so, never 0."""
+        doc = self.doc()
+        doc["prs"] = self.PRS
+        out = self.run_page("R.body = ELS['prs-body'].html; R.note = ELS['prs-note'].textContent;", doc)
+        body = out["R"]["body"]
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.S)
+        self.assertEqual(len(rows), 3)
+        self.assertIn("All 2 items", rows[0])
+        self.assertEqual(re.findall(r'<td class="num[^"]*">(.*?)</td>', rows[0]), ["2h 30m", "1h 0m", "median 1h 30m"])
+        self.assertIn('<td class="g g-caution">▲<span class="sr">open, on you</span></td>', rows[1])
+        self.assertIn('href="https://github.com/example/system/pull/2"', rows[1])
+        self.assertEqual(re.findall(r'<td class="num[^"]*">(.*?)</td>', rows[1]), ["2h 0m", "0m 0s", "not merged"])
+        self.assertIn('<span class="sr">ended</span>', rows[2])
+        self.assertEqual(out["R"]["note"], "1 pull request open now; waiting in all: 3h 30m.")
+
+    def test_pr_waits_with_none_says_so_and_a_failed_read_is_unknown(self):
+        doc = self.doc()
+        doc["prs"] = {**self.PRS, "items": 0, "open": 0, "slowest": []}
+        self.assertIn("No item has a pull-request lane note yet.", self.run_page("R.b = ELS['prs-body'].html;", doc)["R"]["b"])
+        doc["prs"] = {"error": "OperationalError: database is locked"}
+        out = self.run_page("R.b = ELS['prs-body'].html;", doc)
+        self.assertIn("<b>▨ Not read.</b> OperationalError: database is locked", out["R"]["b"])
+        self.assertIn("prs: OperationalError: database is locked", out["states"][-1]["text"])
 
     def test_a_part_that_failed_is_a_partial_read_and_its_panel_is_unknown(self):
         doc = self.doc()
