@@ -51,6 +51,7 @@ with mock.patch("sys.path", [str(BIN), *sys.path]):
     ADAPTER = importlib.import_module("sd_operations")
     LANE = importlib.import_module("sd_lane")  # loaded now: `cited` imports it, and the lane's body reader, by name
     importlib.import_module("sd_ship_body")
+    SD_LIB = importlib.import_module("sd_lib")  # the adapter's entrypoint detection, for its git fault
 
 #: One fake for every tool: its role is its file name, its answers come from `<plans>/<role>.json`.
 FAKE = textwrap.dedent('''
@@ -222,8 +223,14 @@ FAKE = textwrap.dedent('''
         def opt(name):
             return argv[argv.index(name) + 1]
         if argv[:2] == ["pr", "list"]:
-            print(json.dumps([{"url": row["url"]} for row in pulls
-                              if row["head"] == opt("--head") and row["state"] == "open"]))
+            # As GitHub answers: `--head` matches the name in forks too; the head is the branch's tip now.
+            def tip(name):
+                done = subprocess.run(["git", "-C", str(plans.parent / "origin.git"), "rev-parse", "--verify",
+                                       "--quiet", f"refs/heads/{name}"], capture_output=True, text=True)
+                return done.stdout.strip() or None
+            print(json.dumps([{"url": row["url"], "isCrossRepository": row.get("fork", False),
+                               "baseRefName": row["base"], "headRefOid": row.get("sha") or tip(row["head"])}
+                              for row in pulls if row["head"] == opt("--head") and row["state"] == "open"]))
             sys.exit(0)
         if argv[:2] == ["pr", "create"]:
             assert "--draft" in argv and Path(opt("--body-file")).is_file(), argv
@@ -539,6 +546,16 @@ class Supervise(Case):
             time.sleep(0.05)
         self.assertIs(build.Probe.group(leader.pid), False)
         self.assertTrue(self.supervisor().end_group(leader.pid))
+
+    def test_an_unread_ps_does_not_fail_an_end_once_the_group_is_gone(self):
+        """Review of b34af431e: an unread `ps` set a flag no later read cleared, so a run whose group read
+        ESRCH ended a survivor, managed builds too. Its known groups' ESRCH is True, as `kill_group` reads it."""
+        self.press()
+        leader = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(end, leader)
+        with mock.patch.object(build, "descendant_groups", return_value=None):
+            self.assertTrue(self.supervisor().end_group(leader.pid, leader))
+        self.assertIsNotNone(leader.poll(), "the group was signalled and is gone")
 
     def questions(self):
         return [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'question'",
@@ -1382,6 +1399,80 @@ class Unmanaged(Case):
         self.assertEqual(self.supervisor(retry["id"], checks=lambda work: [PASS]).run()["step"], "enqueued")
         self.assertEqual(len(self.pulls()), 1, "one draft, never two")
         self.assertEqual(self.contribution(self.items[0]).get("pull_url"), self.pulls()[0]["url"])
+
+    def seed_pull(self, **row):
+        """An open pull request already on GitHub for the run's branch: the fake gh's `pulls.json` row."""
+        url = f"https://github.com/fixture/repo/pull/{len(self.pulls()) + 1}"
+        (self.plans / "pulls.json").write_text(json.dumps(self.pulls() + [
+            {"url": url, "head": self.bundle["branch"], "state": "open", "base": "main", "title": "x", **row}]))
+        return url
+
+    def test_a_forks_pull_request_on_the_branch_name_is_never_linked(self):
+        """Review of b34af431e: `gh pr list --head` matches a fork's branch of the same name; its merge
+        must not close the tasks. The run opens its own draft and links that."""
+        self.press()
+        fork = self.seed_pull(fork=True, sha="0" * 40)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["step"], "enqueued", ended)
+        own = self.pulls()[-1]["url"]
+        self.assertNotEqual(own, fork)
+        self.assertEqual(self.contribution(self.items[0]).get("pull_url"), own)
+        self.observed(fork, "merged")
+        self.assertEqual(self.watched(), [])
+        self.assertEqual(self.statuses(), ["in_progress"])
+
+    def test_a_pull_request_into_another_base_is_not_linked(self):
+        """Review of b34af431e: the sole pull request on the branch targets another base: blocked, unlinked."""
+        self.press()
+        other = self.seed_pull(base="release")
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked", ended)
+        self.assertIn("targets 'release', not 'main'; it was not linked", ended["blocked"])
+        self.assertEqual((self.contribution(self.items[0]), len(self.pulls())), ({}, 1))
+        self.observed(other, "merged")
+        self.assertEqual(self.watched(), [])
+        self.assertEqual(self.statuses(), ["blocked"], "the blocked run's task, never done")
+
+    def test_a_pull_request_on_another_head_is_unread_and_not_linked(self):
+        """Review of b34af431e: the pull request reads a head that is not the pushed one: unknown, unlinked."""
+        self.press()
+        self.seed_pull(sha="f" * 40)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], None, ended)
+        self.assertIn("not the pushed", ended["why"])
+        self.assertEqual(self.contribution(self.items[0]), {})
+
+    def test_check_entrypoints_that_do_not_read_end_the_run_not_a_fix_round(self):
+        """Review of b34af431e: a declaration fault (CLAUDE.local.md) is the operator's, not the builder's."""
+        def broken(work):
+            raise ValueError("CLAUDE.local.md: the sd-check block does not parse")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass", "fix"], sd_review=["clean", "clean"])
+        ended = self.supervisor(checks=broken).run()
+        self.assertEqual(ended["outcome"], "blocked", ended)
+        self.assertIn("configuration fault", ended["blocked"])
+        self.assertIn("CLAUDE.local.md", ended["blocked"])
+        self.assertEqual((len(self.calls("claude")), self.pulls()), (1, []), "no paid fix round, nothing published")
+
+    def test_a_git_that_gave_no_answer_to_the_entrypoints_is_unread(self):
+        """Review of b34af431e: `GitUnavailable` is transient: Unread, for the reap's retry, not a fix round."""
+        with mock.patch.object(SD_LIB, "detect_entrypoints", side_effect=SD_LIB.GitUnavailable("git timed out")):
+            with self.assertRaises(build_run.Unread):
+                ADAPTER.own_checks(self.root)
+            self.press()
+            self.write_pr()
+            self.plan(claude=["pass", "fix"], sd_review=["clean", "clean"])
+            ended = self.supervisor(checks=ADAPTER.own_checks).run()
+        self.assertEqual(ended["outcome"], None, ended)
+        self.assertIn("git timed out", ended["why"])
+        self.assertEqual((len(self.calls("claude")), self.pulls()), (1, []))
 
     def test_a_private_value_in_a_commit_blocks_before_the_push(self):
         """Review of 8fa8c7cca: an unmanaged repository has no leak-guard hook; the scan runs before the push."""

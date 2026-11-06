@@ -321,11 +321,15 @@ def own_checks(worktree: Path) -> list[list[str]]:
 
     The aggregate `check` when the repository has one, else each of `test` and
     `lint` it has; none is an empty list. A declaration that does not read is
-    ValueError, for the builder to see.
+    ValueError, a configuration fault that ends the run blocked; a `git` that
+    gave no answer is `Unread`, which the reap retries. Neither is a fix
+    round: the builder cannot fix either (review of b34af431e).
     """
     import sd_lib
     try:
         found = sd_lib.detect_entrypoints(worktree)
+    except sd_lib.GitUnavailable as error:
+        raise build_modules()[2].Unread(f"git gave no answer reading the check entrypoints: {error}") from error
     except sd_lib.ConfigError as error:
         raise ValueError(str(error)) from error
     return [list(found.commands[name]) for name in sd_lib._runs(found.commands)]

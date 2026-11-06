@@ -638,23 +638,28 @@ class Supervisor:
         if answer["status"] in ("clean", "advisory"):
             # `sd-review` runs no gate in an unmanaged checkout (sd:5953): the repository's own checks run here.
             failed = self.own_checks(head) if build.unmanaged(self.db, self.row["repo"]) else []
+            if isinstance(failed, dict):
+                return failed
             if failed:
                 return self.blocked_round(failed)
             self.reviewed = head
             return "enqueuing"
         return self.blocked_round(answer["blockers"])
 
-    def own_checks(self, head: str) -> list[dict]:
+    def own_checks(self, head: str) -> list[dict] | dict:
         """Run an unmanaged repository's own checks at `head`, each in a gate slot; a blocker per failure.
 
         No check found is noted on the lead item and passes: a repository with none did not fail one.
+        Entrypoints that do not read are a configuration fault, no code blocker: the run's blocked end (a
+        dict), not a paid fix round; a `git` that gave no answer raises `Unread` in `checks`.
         """
         if self.checks is None:
             return []
         try:
             commands = self.checks(self.work)
         except ValueError as error:
-            return [{"path": "checks", "line": "-", "summary": f"the repository's check entrypoints did not read: {error}"}]
+            return self.finish("blocked", f"the repository's check entrypoints did not read, a configuration "
+                                          f"fault no fix round can mend: {error}")
         if not commands:
             add_note(self.db, self.lead, "comment",
                      f"Build run {self.ident}: no check entrypoint found in the repository; no tests ran at {head[:12]}")
@@ -827,7 +832,7 @@ class Supervisor:
         if self.child([*self.tools.git, "-C", str(self.work), "push", "-q", "origin", f"{head}:refs/heads/{branch}"],
                       cwd=self.work, name="push") != 0:
             return self.finish("blocked", f"git push of {branch} to origin failed; see {self.out('push.err')}")
-        url = self.open_pull(repository, branch, title)
+        url = self.open_pull(repository, branch, title, head)
         if isinstance(url, dict):
             return url
         try:
@@ -912,23 +917,37 @@ class Supervisor:
             first += len(lines)
         return f"a privacy pattern matches {', '.join(sorted(hits)) or 'the text'}; replace the value with a synthetic one"
 
-    def open_pull(self, repository: str, branch: str, title: str) -> str | dict:
-        """The open pull request for `branch`, or a new draft one; its url, or the run's blocked end."""
+    def open_pull(self, repository: str, branch: str, title: str, head: str) -> str | dict:
+        """The open pull request for `branch`, or a new draft one; its url, or the run's blocked end.
+
+        `gh pr list --head` matches the branch name alone, so a fork's pull request with the same name is
+        listed too, and is never this run's: only one from `repository` itself counts. That one must target
+        the run's base and hold the pushed `head`, or it is not linked (review of b34af431e). GitHub moves
+        `headRefOid` a moment after a push, so another head is unread, for the reap's retry to read again.
+        """
         listed = _read([*self.tools.gh, "pr", "list", "--repo", repository, "--head", branch, "--state", "open",
-                        "--json", "url", "--limit", "5"], env=self.env)
+                        "--json", "url,isCrossRepository,baseRefName,headRefOid", "--limit", "5"], env=self.env)
         try:
             rows = json.loads(listed)
         except ValueError:
             raise Unread("gh pr list answered no JSON") from None
         if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
             raise Unread("gh pr list gave no list of pull requests")
-        urls: list[str] = [row.get("url") for row in rows if isinstance(row.get("url"), str)]
-        if len(urls) != len(rows) or not all(contributions.PULL.fullmatch(url) for url in urls):
-            raise Unread("gh pr list gave no pull-request urls")
-        if len(urls) > 1:
-            return self.finish("blocked", f"{len(urls)} open pull requests use {branch}: {', '.join(urls)}")
-        if urls:
-            return urls[0]
+        if not all(isinstance(row.get("url"), str) and contributions.PULL.fullmatch(row["url"])
+                   and isinstance(row.get("isCrossRepository"), bool) for row in rows):
+            raise Unread("gh pr list gave no pull-request urls with their head repository")
+        own = [row for row in rows if row["isCrossRepository"] is False]
+        if len(own) > 1:
+            return self.finish("blocked", f"{len(own)} open pull requests use {branch}: "
+                                          f"{', '.join(row['url'] for row in own)}")
+        if own:
+            url, base = own[0]["url"], self.base().removeprefix("origin/")
+            if own[0].get("baseRefName") != base:
+                return self.finish("blocked", f"{url} uses {branch} but targets {own[0].get('baseRefName')!r}, "
+                                              f"not {base!r}; it was not linked: close it or retarget it")
+            if own[0].get("headRefOid") != head:
+                raise Unread(f"{url} reads head {own[0].get('headRefOid')!r}, not the pushed {head[:12]}")
+            return url
         out = self.out("pull")
         out.write_bytes(b"")
         if self.child([*self.tools.gh, "pr", "create", "--repo", repository, "--draft", "--head", branch,
@@ -1255,17 +1274,16 @@ class Supervisor:
 
         The groups below are read live before each signal (`build.descendant_groups`), so each is one this
         run's processes started; `ours` adds a group the child started that outlived its parent. A `ps` that
-        did not answer while the group lives is no proof that none runs: False, a survivor.
+        did not answer adds none: the groups known are signalled, and their ESRCH is True, as
+        `build.kill_group` reads it. An unread `ps` once set a flag no later read cleared, so a clean
+        managed run ended as a survivor (review of b34af431e).
         The leader is reaped as it dies (`process.poll`): a zombie leader is
         still a member of its group, and would read as a survivor.
         """
-        groups, unread = {pgid}, False
+        groups = {pgid}
 
         def widen() -> None:
-            nonlocal unread
-            below = build.descendant_groups(pgid)
-            unread |= below is None and self.probe.group(pgid) is not False
-            groups.update(below or ())
+            groups.update(build.descendant_groups(pgid) or ())
             groups.update(group for group, start in (self.groups or {}).items() if self.ours(group, start))
 
         def gone() -> bool:
@@ -1276,7 +1294,7 @@ class Supervisor:
         for sent, wait in ((signal.SIGTERM, self.grace), (signal.SIGKILL, 5.0)):
             widen()
             if gone():
-                return not unread
+                return True
             for group in sorted(groups):
                 try:
                     os.killpg(group, sent)
@@ -1285,9 +1303,9 @@ class Supervisor:
             stop = time.monotonic() + wait
             while time.monotonic() < stop:
                 if gone():
-                    return not unread
+                    return True
                 time.sleep(0.05)
-        return gone() and not unread
+        return gone()
 
     def ours(self, group: int, start: str) -> bool:
         """Whether a group the child started, read with its leader's `start`, is still that group.

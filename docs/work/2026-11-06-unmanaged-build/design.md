@@ -130,6 +130,12 @@ tests    | review_round on fail   | a check exits non-0  | blocker to the builde
          |                        |                      | review and tests on the fix     | tests fail, fix, pass
 tests    | none                   | supervisor lost      | reap retries at `reviewing`,    | resume at reviewing reruns
          |                        | mid-test             | which runs review and tests     | the tests
+tests    | none                   | a check exits 0 but  | blocker naming the paths, no    | a check that edits a tracked
+         |                        | edits tracked files  | pass noted                      | file is a failure
+tests    | none                   | entrypoints do not   | run ends blocked naming the     | entrypoints that do not read
+         |                        | read (config fault)  | fault; no fix round             | end the run
+tests    | none                   | git gave no answer   | Unread: the reap retries once   | a git that gave no answer is
+         |                        | to the detection     |                                 | unread
 push     | remote branch at head  | push fails           | run ends blocked, nothing       | test_build_run: push refused
          |                        |                      | opened; Retry pushes again      | blocks, no PR call
 push     | remote branch at head  | lost after push      | retry at `enqueuing` pushes the | lost after the push: the
@@ -138,6 +144,12 @@ draft PR | an open draft PR       | gh refuses           | run ends blocked with
 draft PR | an open draft PR       | lost after create    | retry finds the open PR for the | lost after the create:
          |                        |                      | branch with gh pr list, opens   | retry lists and creates none
          |                        |                      | no second one                   |
+draft PR | none                   | a fork's PR uses the | not this run's: ignored; the    | a fork's pull request is
+         |                        | branch name          | run opens and links its own     | never linked
+draft PR | none                   | the branch's PR      | run ends blocked naming the     | another base is not linked
+         |                        | targets another base | base; nothing linked            |
+draft PR | none                   | the PR reads another | Unread (GitHub moves the head   | another head is unread and
+         |                        | head than the push   | after a push); reap retries     | not linked
 link     | lead task's pull_url   | configure refuses    | run ends blocked naming the URL | link refused blocks
 end      | detail, members done,  | lost before enqueued | retry redoes push, list, link:  | covered by the two above
          | lease released         |                      | each finds its state done       |
@@ -227,6 +239,28 @@ reused pid          | a group is signalled only if read | a group the check star
                     | live below, or its recorded       | that ended is not signalled;
                     | leader (or none) still leads it   | one led by another process is
                     |                                   | left alone
+```
+
+Each `ps` or group read the supervisor makes (review of b34af431e).
+One rule: an unread read signals nothing it did not prove the run's,
+and never fails a run alone; a known group reading ESRCH is gone.
+
+```text
+Read                     | Unread means                     | Test
+------------------------ | -------------------------------- | ------------------------------
+register start (run)     | start None recorded; the reap    | unchanged (build reap tests)
+                         | reads a live pid unsure, not ours|
+builder_start (child)    | start None recorded, as above    | unchanged
+beat descendant_groups   | no group recorded this beat; the | a supervisor killed during a
+                         | next beat reads again            | check leaves no check
+end_group widen          | no group added; known groups are | an unread ps does not fail an
+                         | signalled, their ESRCH is True   | end once the group is gone
+                         | (was a sticky flag: Survivor)    |
+end_group gone (group)   | not gone: KILL, then Survivor    | a group of zombies reads gone
+ours (group, alive,      | not ours: never signalled        | a group led by another process
+started)                 |                                  | is left alone
+kill_group (build.py)    | recorded group only; ESRCH True  | test_build: a kill whose
+                         |                                  | descendants did not read
 ```
 
 Not covered: a check that leaves a daemon in a new group and exits
