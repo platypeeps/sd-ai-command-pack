@@ -19,8 +19,9 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
 // pack sd:7708: local categories for Jira issues, in the same view store; nothing is written to Jira. The Jira rows of Your
 // issues group by category, one group open at a time, as GitHub's Pull requests group by repo (today-github.js, sd:7664):
 // a press on a group opens it and closes the open one, a press on the open one closes it, and the selected row's group, or
-// the first with a row, opens on the first draw. Uncategorized is the last group. GitHub rows keep no group, as before,
-// and come first. Each row gets an Actions cell (the ⋯ menu); Set category (jira issue.category) and the Category select in
+// the first with a row, opens on the first draw. Uncategorized is the last group. pack sd:7753: GitHub rows group by repo,
+// one group per repo, before the categories, by repo name with case ignored; the same one open group covers both kinds,
+// and a repo group has no Actions. Each row gets an Actions cell (the ⋯ menu); Set category (jira issue.category) and the Category select in
 // Details post /api/github/issues/view with the category, each with Undo. New category, in the section head, and a group's
 // Rename and Remove post /api/github/issues/categories with the list the page read; Remove asks nothing, offers Undo,
 // and leaves the group's issues uncategorized. A view store not read groups nothing: a line says why, and the commands are off.
@@ -28,14 +29,18 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   const { html, put, plural } = window.markup;
   const $ = id => document.getElementById(id);
   let ISSUES = [], STORE = '', CATS = [];
-  // The open category group: undefined until the first draw picks one, null once every group is closed.
+  // The open group, a repo's or a category's: undefined until the first draw picks one, null once every group is closed.
   let OPEN;
   const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   const jira = r => r.tracker === 'Jira';
   const actions = id => window.shell?.commands?.rowActions ? window.shell.commands.rowActions(id) : '';
   // pack sd:7752: the category pickers list by name, case ignored; the groups keep the stored order.
   const byName = () => [...CATS].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-  const groupOf = r => r.category && CATS.includes(r.category) ? `cat:${r.category}` : 'none';
+  const repoOf = r => r.repo || r.slug || 'GitHub';
+  const groupOf = r => !jira(r) ? `repo:${repoOf(r)}` : r.category && CATS.includes(r.category) ? `cat:${r.category}` : 'none';
+  // pack sd:7753: the GitHub rows in view, one group per repo, by repo name with case ignored.
+  const repoGroups = rows => [...new Set(rows.map(repoOf))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .map(name => ({ key: `repo:${name}`, name, rows: rows.filter(r => repoOf(r) === name) }));
   // The Jira rows in view by category, in the list's order, then Uncategorized; under Hidden an empty category is left out.
   function groups(rows) {
     const G = CATS.map(name => ({ key: `cat:${name}`, name, rows: rows.filter(r => groupOf(r) === `cat:${name}`) }));
@@ -47,7 +52,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
       <td class="what" colspan="2"><button type="button" class="disc" data-cat-open="${g.key}" aria-expanded="${String(on)}" aria-label="${on ? 'Close' : 'Open'} ${g.name}">${I('chevron-right')}</button><button type="button" class="pick" data-cat-open="${g.key}">${g.name}</button></td>
       <td class="repo"></td><td class="why">${plural(g.rows.length, 'issue')}</td>
       <td class="when">${at ? html`<time class="rel" datetime="${at}"></time>` : ''}</td>
-      <td class="act">${g.key === 'none' ? '' : actions(`isscat:${g.name}`)}</td></tr>`; };
+      <td class="act">${g.key.startsWith('cat:') ? actions(`isscat:${g.name}`) : ''}</td></tr>`; };
   const hid = () => window.shell.aside.mode('hidden'), showHidden = () => hid() === 'aside';
   const inView = r => window.shell.aside.shows(hid(), r.hidden);
   // The read's view state: why Hide is off, or '' when it read.
@@ -66,13 +71,14 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
         <td class="why">${isOpen(r) ? r.reason : `${r.state} · ${r.reason}`}</td>
         <td class="when">${r.updated_at ? html`<time class="rel" datetime="${r.updated_at}"></time>` : ph(r)}</td>
         <td class="act">${actions(oid(r))}</td></tr>`;
-  // GitHub rows as before, then the Jira groups; a view store not read groups nothing and says so above the Jira rows.
+  // The GitHub repo groups, then the Jira category groups; a view store not read groups no Jira row and says so above them.
   function body(rows) {
-    const J = rows.filter(jira);
-    if (STORE) return html`${rows.filter(r => !jira(r)).map(issueRow)}${J.length ? html`<tr class="empty"><td colspan="6">Categories were not read: ${STORE}. The Jira issues below are not grouped. Read again tries again.</td></tr>` : ''}${J.map(issueRow)}`;
-    const G = groups(J), has = k => G.some(g => g.key === k), sel = rowOf(window.shell?.row?.() || '');
-    if (OPEN === undefined || (OPEN && !has(OPEN))) OPEN = sel && jira(sel) && has(groupOf(sel)) ? groupOf(sel) : (G.find(g => g.rows.length) || G[0] || {}).key;
-    return html`${rows.filter(r => !jira(r)).map(issueRow)}${G.map(g => html`${groupRow(g)}${OPEN === g.key ? g.rows.map(issueRow) : ''}`)}`;
+    const J = rows.filter(jira), G = [...repoGroups(rows.filter(r => !jira(r))), ...(STORE ? [] : groups(J))];
+    const has = k => G.some(g => g.key === k), sel = rowOf(window.shell?.row?.() || '');
+    if (OPEN === undefined || (OPEN && !has(OPEN))) OPEN = sel && has(groupOf(sel)) ? groupOf(sel) : (G.find(g => g.rows.length) || G[0] || {}).key;
+    const shown = html`${G.map(g => html`${groupRow(g)}${OPEN === g.key ? g.rows.map(issueRow) : ''}`)}`;
+    if (STORE) return html`${shown}${J.length ? html`<tr class="empty"><td colspan="6">Categories were not read: ${STORE}. The Jira issues below are not grouped. Read again tries again.</td></tr>` : ''}${J.map(issueRow)}`;
+    return shown;
   }
   function draw({ issues = [], error = '', github = '', store, categories = [] } = READ) {
     READ = { issues, error, github, store, categories };
