@@ -2040,6 +2040,22 @@ R.details = OUT.gets.filter(g => g === '/api/tasks/{plan}').length;""", answer)
             self.assertEqual(out["R"]["reads"], want, answer)
             self.assertEqual(out["R"]["details"], want, answer)
 
+    def test_a_failed_launch_whose_task_left_the_rows_keeps_its_cause(self):
+        """pack sd:7820: a read during the Fix post drops the task, so `again` must not look it up by the row again: a
+        TypeError from T(o).id would replace the 5xx toast that names the cause."""
+        plan = self.ids["plan"]
+        prelude = """var HOST; Object.defineProperty(globalThis, 'taskDetails', { configurable: true,
+  set(v) { const a = v.attach; v.attach = h => { HOST = h; return a(h); }; this._td = v; }, get() { return this._td; } });
+"""
+        answer = f"""(path, body) => path.endsWith('/fix') ? (async () => {{
+  DOC.rows = DOC.rows.filter(r => String(r.id) !== '{plan}'); await HOST.reread();
+  return [503, {{ error: 'Fix failed: herdr.sh launch: session sd is not running. A note on sd:{plan} keeps the cause.' }}]; }})()
+  : [404, {{ error: 'no answer' }}]"""
+        out = self.run_page(f"""shellRun(cmd('item.fix'), C.get('{plan}')); await flush(); await flush(); await flush();""",
+                            answer, prelude=prelude)
+        self.assertEqual(len(out["posts"]), 1)
+        self.assertIn("session sd is not running", out["toasts"][-1][0])
+
     START_PLAN = {"read": NOW, "cap": 6, "running": 2, "load": 4.5, "load_max": 40.0, "room": 2, "refusal": "",
                   "start": [{"id": 11, "title": "First <ready>", "repo": "/r", "revision": "a" * 64},
                             {"id": 12, "title": "Second", "repo": "/r", "revision": "b" * 64}],

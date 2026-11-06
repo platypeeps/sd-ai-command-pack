@@ -4465,6 +4465,18 @@ class AcceptedGapTests(InventoryFixture):
         self.assertIn("2026-07-01", rows[0]["detail"])
         self.assertIn("the app is installed", rows[0]["suggest"])
 
+    def test_an_acceptance_until_never_lists_no_row(self) -> None:
+        """`until: never` has no condition to re-read, so a reminder is noise.
+
+        The entry still prints in Protection as accepted; only the
+        re-read row goes. Case and spaces around the word are ignored.
+        """
+        rows = self.rows_for(
+            {**self.ENTRY, "id": "unprotected", "until": " Never "},
+            self.ENTRY,
+        )
+        self.assertEqual(["required-checks"], [row["key"] for row in rows])
+
     def test_an_accepted_gap_never_reaches_the_banner(self) -> None:
         inventory = status.actionable_inventory(
             self.repo,

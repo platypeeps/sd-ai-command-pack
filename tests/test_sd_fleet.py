@@ -104,7 +104,10 @@ class Fleet(unittest.TestCase):
         git(root, "remote", "add", "origin", remote)
         for rel, text in {"README.md": "x\n", **(files or {})}.items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_text(text, encoding="utf-8")
+            if isinstance(text, bytes):
+                (root / rel).write_bytes(text)
+            else:
+                (root / rel).write_text(text, encoding="utf-8")
         git(root, "add", "-A")
         git(root, "commit", "-q", "-m", "init")
         git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -890,6 +893,40 @@ class OldSlugGuard(Fleet):
         self.assertTrue(any(line.startswith(sd_fleet.DEPENDABOT_PATH) and other in line for line in plan["refused"]),
                         plan["refused"])
         self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+
+    def test_an_unread_dependabot_file_is_refused_not_replaced(self) -> None:
+        """pack sd:7812: text_at gives None for a failed read as for a missing
+        file; read as missing, the stamp proposed the minimal file over a real
+        guard and skipped the --force refusal."""
+        dependabot = sd_setup_guard.minimal_file().replace("# The sd-workflow pin", "# Our pin")
+        root, remote = self.repo("unread-dependabot", {sd_fleet.ROUTE_PATH: self.route(),
+                                                       sd_fleet.DEPENDABOT_PATH: dependabot})
+        text_at = sd_fleet.Tree.text_at
+        with mock.patch.object(sd_fleet.Tree, "text_at",
+                               lambda tree, rel: None if rel == sd_fleet.DEPENDABOT_PATH else text_at(tree, rel)):
+            [plan] = self.plan([(root, remote)])
+        self.assertTrue(any(line.startswith(f"{sd_fleet.DEPENDABOT_PATH}: could not read") for line in plan["refused"]),
+                        plan["refused"])
+        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+
+    def test_a_non_utf8_file_refuses_its_repository_by_name_not_a_traceback(self) -> None:
+        """pack sd:7812 review: every file the stamp reads, tracked or the
+        untracked local block; a traceback stopped the run for every repo
+        after it. The repository is refused whole and nothing is proposed."""
+        bad = b"jobs: \xff\xfe\n"
+        for rel in (sd_fleet.DEPENDABOT_PATH, ".github/workflows/other.yml", sd_fleet.ROUTE_PATH,
+                    sd_fleet.CHECK_PATH, "CLAUDE.md", sd_fleet.GITIGNORE_PATH, sd_fleet.LOCAL_BLOCK_PATH):
+            with self.subTest(rel=rel):
+                files = {sd_fleet.ROUTE_PATH: self.route(), sd_fleet.DEPENDABOT_PATH: sd_setup_guard.minimal_file()}
+                if rel != sd_fleet.LOCAL_BLOCK_PATH:
+                    files[rel] = bad
+                root, remote = self.repo("bytes-" + rel.replace("/", "-"), files)
+                if rel == sd_fleet.LOCAL_BLOCK_PATH:
+                    (root / rel).write_bytes(bad)
+                [plan] = self.plan([(root, remote)])
+                self.assertTrue(any(line.startswith(f"{rel}: not UTF-8") for line in plan["refused"]),
+                                plan["refused"])
+                self.assertEqual([], plan["changes"])
 
     def test_an_unlisted_workflow_folder_refuses_the_guard_rather_than_dropping_it(self) -> None:
         root, remote = self.repo("unlisted", {sd_fleet.ROUTE_PATH: self.route(),
