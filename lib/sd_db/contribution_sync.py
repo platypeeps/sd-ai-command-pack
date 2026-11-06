@@ -202,6 +202,27 @@ def fold(connection, planned, key, url):
     return ""
 
 
+def note_lanes(connection) -> list[str]:
+    """Link the pull requests `sd-ship prepare` opened, then note each registered pull request's lane (sd:7859).
+
+    A side observation of the sync, as the protection collector is: what it could not do is returned, one line per
+    receipt or item, never raised, and never a failed sync or a held watermark (review round 2). Each pass is guarded
+    on its own, so a link pass that fails still lets the lane notes run.
+    """
+    from . import contributions as core
+
+    said: list[str] = []
+    try:
+        said += core.link_shipped(connection)[1]
+    except Exception as error:  # noqa: BLE001 - a side observation never fails the sync
+        said.append(f"pull-request links were not read: {type(error).__name__}: {error}")
+    try:
+        said += core.record_lanes(connection)[1]
+    except Exception as error:  # noqa: BLE001 - same rule
+        said.append(f"pull-request lane notes were not written: {type(error).__name__}: {error}")
+    return said
+
+
 def refresh(connection, planned, issues, *, client, observed_at, search_complete=False, reserve=0,
             reserve_seconds=0):
     """Stage discovered work durably, then collect details until the budget runs out.

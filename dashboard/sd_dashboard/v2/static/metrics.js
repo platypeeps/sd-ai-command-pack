@@ -254,6 +254,18 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     $('times-note').textContent = [over.length ? `▲ Median wait past 1 h: ${over.join(', ')}. The lane run files the parallel-lanes question.` : '',
       quiet && read.length ? `No entry in ${days} days: ${plural(quiet, 'lane')}.` : ''].filter(Boolean).join(' ');
   }
+  // PR waits (pack sd:7859): the totals row, then the slowest items. On you lights caution on an open one; a wait not
+  // merged says so, never 0.
+  const merge = s => s == null ? 'not merged' : dur(Math.round(s));
+  function prWaits() {
+    const P = DOC?.prs;
+    if (!P || P.error) { put($('prs-body'), html`<tr><td colspan="5">${unknownBlock(P ? P.error : 'the Metrics document did not arrive')}</td></tr>`); $('prs-note').textContent = ''; return; }
+    if (!P.items) { put($('prs-body'), html`<tr><td colspan="5" class="why">No item has a pull-request lane note yet.</td></tr>`); $('prs-note').textContent = ''; return; }
+    const total = html`<tr class="total"><td class="g g-ok">${G.ok}<span class="sr">total</span></td><td class="what">All ${plural(P.items, 'item')}</td><td class="num">${dur(P.on_you)}</td><td class="num">${dur(P.on_reviewers)}</td><td class="num hide-sm">${P.merged ? `median ${merge(P.to_merge)}` : 'none merged'}</td></tr>`;
+    put($('prs-body'), html`${total}${P.slowest.map(w => { const st = w.open && w.on === 'you' ? 'caution' : 'ok';
+      return html`<tr><td class="g g-${st}">${G[st]}<span class="sr">${w.open ? `open, on ${w.on}` : 'ended'}</span></td><td class="what"><a href="${w.url}" target="_blank" rel="noopener noreferrer">sd:${String(w.item)} ${w.title}</a></td><td class="num">${dur(w.on_you)}</td><td class="num">${dur(w.on_reviewers)}</td><td class="num hide-sm">${merge(w.to_merge)}</td></tr>`; })}`);
+    $('prs-note').textContent = `${plural(P.open, 'pull request')} open now; waiting in all: ${dur(P.on_you + P.on_reviewers)}.`;
+  }
   // pack sd:7208: each of the six months by bill. A month with no ledger row says so, never $0; a window bill is not a zero.
   function months() {
     const sm = DOC?.ranged?.spend;
@@ -274,6 +286,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     put($('model'), unreadBlock('model'));
     ci();
     laneTimes();
+    prWaits();
     const o = DOC?.observed;
     put($('observed'), !DOC ? html`` : o.error ? unknownBlock(o.error) : html`<p class="foot-note">Observed ${o.since} → ${o.until}: ${plural(o.recorded_requests, 'request')} recorded, ${plural(o.finished_review_attempts, 'finished review attempt')}, ${plural(o.recorded_deliveries, 'recorded delivery', 'recorded deliveries')}. <button class="linkbtn" type="button" data-ev="observed">Details</button></p>`);
   }
@@ -358,7 +371,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     adopt: doc => {
       DOC = doc; evidence(); CELLS = readCells(); attention();
       document.body.dataset.observed = doc.read;
-      const parts = [...['usage', 'trend', 'numbers', 'scorecard', 'age', 'observed', 'controls', 'ci', 'lanes'].map(k => [k, doc[k]]),
+      const parts = [...['usage', 'trend', 'numbers', 'scorecard', 'age', 'observed', 'controls', 'ci', 'lanes', 'prs'].map(k => [k, doc[k]]),
         ...(doc.ranged ? ['spend', 'scorecard', 'ci'].map(k => [`6mo ${k}`, doc.ranged[k]]) : [])];
       const failed = parts.filter(([, p]) => p.error || p.stale);
       FIRST = CELLS.find(c => c.state === 'warning' || c.state === 'caution')?.ev || Object.keys(EV).find(k => k.startsWith('win:')) || null;
