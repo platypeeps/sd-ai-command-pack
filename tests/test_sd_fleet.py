@@ -881,18 +881,33 @@ class OldSlugGuard(Fleet):
         [plan] = self.plan([(root, remote)])
         self.assertTrue(self.guard_refused(plan), plan["refused"])
 
-    def test_an_unread_workflow_refuses_the_guard_rather_than_dropping_it(self) -> None:
+    def test_an_unread_workflow_refuses_the_repository_rather_than_dropping_the_guard(self) -> None:
+        """sd:7633, pack sd:7850: a workflow git could not read raises Unread, which refuses the repository whole;
+        text_at no longer answers None for it, so no guard-only refusal reads a None."""
         other = ".github/workflows/other.yml"
         root, remote = self.repo("unread", {
             sd_fleet.ROUTE_PATH: self.route(), other: f"      - uses: {self.OLD}/actions/review-route@{PIN}\n",
             sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())})
-        text_at = sd_fleet.Tree.text_at
-        with mock.patch.object(sd_fleet.Tree, "text_at",
-                               lambda tree, rel: None if rel == other else text_at(tree, rel)):
+        show = sd_fleet._git_show
+        with mock.patch.object(sd_fleet, "_git_show",
+                               lambda root, spec: None if spec.endswith(":" + other) else show(root, spec)):
             [plan] = self.plan([(root, remote)])
-        self.assertTrue(any(line.startswith(sd_fleet.DEPENDABOT_PATH) and other in line for line in plan["refused"]),
-                        plan["refused"])
-        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+        self.assertTrue(any(line.startswith(f"{other}: could not read") for line in plan["refused"]), plan["refused"])
+        self.assertEqual([], plan["changes"])
+
+    def test_a_submodule_at_a_read_path_is_no_file_not_a_failed_read(self) -> None:
+        """pack sd:7850: a gitlink at a path the stamp reads made `cat-file -t` fail while `ls-tree` listed it, so
+        the repository was refused as unread. A tree entry that is no blob is no file there."""
+        vendored = ".github/workflows/vendored.yml"
+        root, remote = self.repo("gitlink", {sd_fleet.ROUTE_PATH: self.route(),
+                                             sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())})
+        git(root, "update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},{vendored}")
+        git(root, "commit", "-q", "-m", "a submodule at a workflow path")
+        git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.assertIsNone(sd_fleet.Tree(root, git(root, "rev-parse", "HEAD").strip()).text_at(vendored))
+        [plan] = self.plan([(root, remote)])
+        self.assertEqual([], plan["refused"])
+        self.assertIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
 
     def test_a_file_git_could_not_read_refuses_its_repository_not_a_template(self) -> None:
         """pack sd:7812, sd:7837: text_at gave None for a failed git read as
@@ -941,14 +956,23 @@ class OldSlugGuard(Fleet):
                                 plan["refused"])
                 self.assertEqual([], plan["changes"])
 
-    def test_an_unlisted_workflow_folder_refuses_the_guard_rather_than_dropping_it(self) -> None:
-        root, remote = self.repo("unlisted", {sd_fleet.ROUTE_PATH: self.route(),
-                                              sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())})
-        with mock.patch.object(sd_fleet.Tree, "_workflows", lambda tree: None):
-            [plan] = self.plan([(root, remote)])
-        self.assertTrue(any(line.startswith(f"{sd_fleet.DEPENDABOT_PATH}: could not read .github/workflows/")
-                            for line in plan["refused"]), plan["refused"])
-        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+    def test_an_unlisted_workflow_folder_refuses_the_repository_and_lays_no_check(self) -> None:
+        """pack sd:7850: a failed listing refused the guard alone, then read as no workflows, so the plan laid the
+        check workflow where one of the unlisted workflows may already validate a pull request."""
+        git_output = sd_fleet.sd_lib.git_output
+        unlisted = mock.patch.object(sd_fleet.sd_lib, "git_output", lambda args, root: None if args[0] == "ls-tree"
+                                     and args[-1] == ".github/workflows/" else git_output(args, root))
+        # The pack's own repository stamps no guard, so only the check read the failed listing there.
+        for owner, name in (("platypeeps", "unlisted"), *(slug.split("/") for slug in sorted(sd_fleet.PACK_SLUGS))):
+            with self.subTest(slug=f"{owner}/{name}"):
+                root, remote = self.repo(name, {sd_fleet.ROUTE_PATH: self.route(),
+                                                sd_fleet.DEPENDABOT_PATH: self.old(sd_setup_guard.minimal_file())},
+                                         owner=owner)
+                with unlisted:
+                    [plan] = self.plan([(root, remote)])
+                self.assertTrue(any(line.startswith(".github/workflows/: could not read") for line in plan["refused"]),
+                                plan["refused"])
+                self.assertEqual([], plan["changes"])
 
 
 class Wiring(unittest.TestCase):
