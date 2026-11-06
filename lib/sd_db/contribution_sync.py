@@ -32,6 +32,9 @@ MAX_NOTIFICATIONS = 5
 PULL_REQUESTS = 9
 ISSUE_REQUESTS = 4
 DEPENDENCY_REQUESTS = {"item": 0, "merge": 1, "release": 7, "issue": 2}
+#: Open pulls no run has read, taken first each run (pack sd:7844). Capped so
+#: a pull whose read keeps failing cannot take the whole budget every run.
+UNREAD_SLOTS = 10
 
 
 def _queue(connection):
@@ -73,15 +76,32 @@ def _merge(pending, additions):
     return list(indexed.values())
 
 
-def _order(pending):
+def _order(pending, unread=frozenset()):
     # Explicit local work gets priority, while ordinary authored work has two
     # guaranteed slots before the rest follow in queue order. The budget, not a
     # count, decides how far down the list a run gets; rotation in `refresh`
     # prevents a failing first item from starving the ones behind it.
+    # `unread` keys, open pulls no run has read, come before the ordinary
+    # slots (pack sd:7844): Contributions lists a pull only once read, and a
+    # new one joined the queue behind thousands of settled pulls.
     explicit = [row for row in pending if row.get("explicit")]
-    ordinary = [row for row in pending if not row.get("explicit")]
-    ordered = explicit[:3] + ordinary[:2]
+    first = [row for row in pending if not row.get("explicit") and row["key"] in unread][:UNREAD_SLOTS]
+    ordinary = [row for row in pending if not row.get("explicit") and row not in first]
+    ordered = explicit[:3] + first + ordinary[:2]
     return ordered + [row for row in pending if row not in ordered]
+
+
+def _unread_open(connection, pending, issues, snapshots):
+    """The queued keys of pulls GitHub has open, by this run's search or the
+    shadow store, that no run has read yet (pack sd:7844)."""
+    from . import contributions as core
+
+    urls = {row["url"] for row in issues if row.get("kind") == "pull" and row.get("state") == "open"}
+    urls |= {row["url"] for row in connection.execute(
+        "SELECT url FROM shadow WHERE tracker='github' AND kind='pull' AND state='open'")}
+    open_keys = {"github:" + github.canonical_url(url) for url in urls if github.PULL.fullmatch(url)}
+    return {row["key"] for row in pending if row["key"] in open_keys
+            and not (snapshots.get(row["key"]) or core.snapshot(connection, row["key"]))["observation"]}
 
 
 def _cost(entry):
@@ -207,8 +227,8 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
         revision = _save_queue(connection, pending, planned["revision"])
     except ValueError as error:
         return {"errors": [str(error)], "queued": len(pending), "attempted": 0, "completed_keys": [], "incomplete": [], "staged": False}
-    ordered = _order(pending)
     snapshots = dict(planned["snapshots"])
+    ordered = _order(pending, _unread_open(connection, pending, issues, snapshots))
     completed, incomplete, attempted, terminal = [], [], [], set()
     operator, identified = None, False
     # Pagination is not priced, so the client itself stops at the reserve: an
