@@ -27,12 +27,16 @@ class Gh:
     """`gh`: the two attention searches answer `author` and `requested`; every other search answers nothing.
 
     The checks query (no `q=`) answers each pull's head contexts from `contexts`, by number; a pull not named
-    there has one red required check, so a red rollup still lights `checks_failing`. `checks_fail` fails it.
+    there has one red required check, so a red rollup still lights `checks_failing`. A None leaves the pull out of
+    the answer; a dict is the whole `contexts` block. `checks_fail` fails the call with no data; `checks_code`
+    exits with that code beside the data, as gh does for an answer that carries GraphQL errors.
     """
 
-    def __init__(self, author=(), requested=(), fail=None, count=None, contexts=None, checks_fail=None):
+    def __init__(self, author=(), requested=(), fail=None, count=None, contexts=None, checks_fail=None,
+                 checks_code=0):
         self.author, self.requested, self.fail, self.count = list(author), list(requested), fail, count
-        self.contexts, self.checks_fail, self.checks_asked = contexts or {}, checks_fail, 0
+        self.contexts, self.checks_fail, self.checks_code, self.checks_asked = contexts or {}, checks_fail, \
+            checks_code, 0
 
     def __call__(self, argv):
         if argv[:2] == ["gh", "auth"]:
@@ -57,9 +61,10 @@ class Gh:
             nodes = self.contexts.get(int(number), RED_REQUIRED)
             if nodes is None:
                 continue
-            rollup = {"contexts": {"pageInfo": {"hasNextPage": False}, "nodes": nodes}}
+            block = nodes if isinstance(nodes, dict) else {"pageInfo": {"hasNextPage": False}, "nodes": nodes}
+            rollup = {"contexts": block}
             data[alias] = {"pullRequest": {"commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}}}
-        return 0, json.dumps({"data": data}), ""
+        return self.checks_code, json.dumps({"data": data}), "GraphQL: Could not resolve" if self.checks_code else ""
 
 
 class Alerts(unittest.TestCase):
@@ -143,15 +148,21 @@ class Alerts(unittest.TestCase):
 
     def test_a_red_check_that_is_not_required_raises_no_checks_failing(self):
         """Only a red required check blocks the merge (sd:7862): an optional red one, as Snyk, is no alert."""
-        url = "https://github.com/example/widget/pull/7"
         optional = [{"conclusion": "FAILURE", "isRequired": False}, {"state": "SUCCESS", "isRequired": True}]
         done, reason = self.run_(Gh(author=[pull(7, rollup="FAILURE")], contexts={7: optional}))
         self.assertEqual((done["filed"], reason), ([], ""))
-        done, reason = self.run_(Gh(author=[pull(7, decision="APPROVED", rollup="FAILURE")], contexts={7: optional}))
-        self.assertEqual((done["filed"], reason), ([f"ready {url}"], ""), "approved with only an optional red check")
         waiting = [{"conclusion": "FAILURE", "isRequired": False}, {"conclusion": None, "isRequired": True}]
-        done, _ = self.run_(Gh(author=[pull(7, decision="APPROVED", rollup="FAILURE")], contexts={7: waiting}))
-        self.assertEqual(done["filed"], [], "a required check still running is neither failing nor ready")
+        done, _ = self.run_(Gh(author=[pull(7, rollup="FAILURE")], contexts={7: waiting}))
+        self.assertEqual(done["filed"], [], "a required check still running is not failing")
+
+    def test_a_red_rollup_is_never_ready_to_merge(self):
+        """`isRequired` covers only checks that reported: green ones prove no required check is missing (sd:7862)."""
+        optional = {"conclusion": "FAILURE", "isRequired": False}
+        for contexts in ([optional], [optional, {"state": "SUCCESS", "isRequired": True}]):
+            with self.subTest(contexts=contexts):
+                found, complete, reason = pr_attention.read(
+                    Gh(author=[pull(7, decision="APPROVED", rollup="FAILURE")], contexts={7: contexts}))
+                self.assertEqual((found, complete, reason), ({}, True, ""))
 
     def test_a_red_required_check_still_raises_checks_failing(self):
         url = "https://github.com/example/widget/pull/7"
@@ -170,22 +181,49 @@ class Alerts(unittest.TestCase):
         done, _ = self.run_(Gh(author=[pull(7, rollup="FAILURE")], contexts={7: optional}))
         self.assertEqual(done["cleared"], [f"checks_failing {url}"])
 
-    def test_unread_required_checks_are_unknown_not_green(self):
-        """A failed, missing, partial or malformed checks read files no state from checks and clears nothing."""
-        url = "https://github.com/example/widget/pull/7"
-        self.run_(Gh(author=[pull(7, rollup="FAILURE")]))
+    def test_an_unread_verdict_falls_back_to_the_whole_rollup_for_that_pull_alone(self):
+        """A checks answer that cannot say lights `checks_failing` as before sd:7862, and keeps the read complete.
+
+        One large or malformed pull must not cut every run's read: then no alert would ever clear.
+        """
+        seven, eight = (f"https://github.com/example/widget/pull/{n}" for n in (7, 8))
+        optional = [{"conclusion": "FAILURE", "isRequired": False}]
         bad = [{"conclusion": "FAILURE"}, {"conclusion": "FAILURE", "isRequired": "false"}, {"isRequired": True},
-               "x", None]
-        cases = [Gh(author=[pull(7, decision="APPROVED", rollup="FAILURE")], checks_fail="HTTP 502"),
-                 Gh(author=[pull(7, decision="APPROVED", rollup="FAILURE")], contexts={7: None}),
-                 *(Gh(author=[pull(7, decision="APPROVED", rollup="FAILURE")], contexts={7: [node]}) for node in bad)]
-        for gh in cases:
-            with self.subTest(contexts=gh.contexts, fail=gh.checks_fail):
-                done, reason = self.run_(gh)
-                self.assertEqual((done["filed"], done["cleared"]), ([], []))
-                self.assertIn("checks of 1 red pull(s) not read", reason)
-        self.assertEqual(self.reports(), [("pr-attention: example/widget#7: checks failing", "planning",
-                                           f"checks_failing {url}")])
+               {"conclusion": ["FAILURE"], "isRequired": True}, {"state": {"x": 1}, "isRequired": True},
+               {"conclusion": 1, "isRequired": False}, "x", None, {}]
+        unread = [None, {"pageInfo": {"hasNextPage": True}, "nodes": optional}, {"nodes": optional},
+                  {"pageInfo": {"hasNextPage": False}, "nodes": {}}, *([node] for node in bad)]
+        for contexts in unread:
+            for code in (0, 1):
+                with self.subTest(contexts=contexts, code=code):
+                    found, complete, reason = pr_attention.read(Gh(
+                        author=[pull(7, decision="APPROVED", rollup="FAILURE"), pull(8, rollup="FAILURE")],
+                        contexts={7: contexts, 8: optional}, checks_code=code))
+                    self.assertEqual((sorted(found), complete, reason), ([f"checks_failing {seven}"], True, ""),
+                                     "pull 8's verdict still holds")
+        found, complete, reason = pr_attention.read(Gh(author=[pull(7, rollup="FAILURE"), pull(8, rollup="FAILURE")],
+                                                       contexts={8: optional}, checks_fail="HTTP 502"))
+        self.assertEqual((sorted(found), complete, reason),
+                         ([f"checks_failing {seven}", f"checks_failing {eight}"], True, ""))
+
+    def test_an_answer_short_of_its_head_checks_says_nothing(self):
+        """A pull GitHub nulled (an alias error), or a head that moved to one with no checks, has no verdict."""
+        def head(rollup):
+            return {"pullRequest": {"commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}}}
+        shorts = [None, "x", [], {}, {"pullRequest": None}, {"pullRequest": {"commits": {"nodes": []}}},
+                  {"pullRequest": {"commits": {"nodes": [None]}}}, head(None), head({}), head({"contexts": None})]
+        for answer in shorts:
+            with self.subTest(answer=answer):
+                self.assertIsNone(pr_attention._verdict(answer))
+        optional = {"pageInfo": {"hasNextPage": False}, "nodes": [{"conclusion": "FAILURE", "isRequired": False}]}
+        self.assertIs(pr_attention._verdict(head({"contexts": optional})), False)
+
+    def test_an_unread_verdict_clears_other_alerts(self):
+        url = "https://github.com/example/widget/pull/3"
+        self.run_(Gh(requested=[pull(3)]))
+        huge = {"pageInfo": {"hasNextPage": True}, "nodes": []}
+        done, reason = self.run_(Gh(author=[pull(7, rollup="FAILURE")], contexts={7: huge}))
+        self.assertEqual((done["cleared"], reason), ([f"review_requested {url}"], ""))
 
     def test_a_pull_with_no_red_rollup_asks_no_checks_query(self):
         gh = Gh(author=[pull(1), pull(2, rollup="PENDING"), pull(3, rollup=None)], requested=[pull(4, rollup="FAILURE")])

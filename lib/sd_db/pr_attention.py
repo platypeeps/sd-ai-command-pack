@@ -9,9 +9,9 @@ attention states:
 | ----------------- | ---------- | ------------------------------------------ |
 | review requested  | another's  | the `user-review-requested:@me` search     |
 | changes requested | yours      | `reviewDecision` CHANGES_REQUESTED         |
-| checks failing    | yours      | a red required check on the head commit    |
+| checks failing    | yours      | red rollup unless every red is optional    |
 | merge conflict    | yours      | `mergeable` CONFLICTING                    |
-| ready to merge    | yours      | approved, mergeable, required checks green |
+| ready to merge    | yours      | approved, mergeable, checks green or none  |
 
 Only a required check blocks the merge, so a red optional one (a Snyk scan)
 is no alert (sd:7862). The search cannot say which checks are required:
@@ -19,6 +19,13 @@ is no alert (sd:7862). The search cannot say which checks are required:
 for a missing review too. So a pull whose whole rollup is red costs one
 batched `CHECKS` query, all such pulls in one call, which reads its head's
 required checks; a pull with no red rollup costs none.
+
+A red rollup is never ready to merge: `isRequired` covers only the checks
+that reported, so green ones cannot prove a required check is not missing.
+When the answer cannot say for one pull (more than 100 checks, a malformed
+or missing entry, a failed call), that pull keeps the whole rollup's rule,
+as before sd:7862, and the read stays complete: one pull's unread checks
+must not stop every alert from clearing.
 
 A state new since the last read files one `reporting.ingest` report, job
 `JOB`, basis `<state> <url>`: the reports path the operator already triages,
@@ -32,7 +39,7 @@ what it read and clears nothing: absence from it is unknown.
 | budget check    | none                   | the sync spent it  | named; read and clear nothing    |
 | search          | none                   | gh fails or cut    | file what was read, clear none   |
 | search shape    | none                   | malformed answer   | cut read: file valid, clear none |
-| required checks | none                   | gh fails, partial  | no checks state; cut read        |
+| required checks | none                   | gh fails, partial  | that pull: whole rollup; complete|
 | file one alert  | one report row         | ingest refuses     | left out of seen: next run files |
 | clear one alert | one report to done     | acknowledge fails  | named; next run clears again     |
 | record seen     | the `SEEN_KEY` row     | write fails        | next run files again; ingest folds |
@@ -63,9 +70,8 @@ CHECKS = """p{i}: repository(owner: {owner}, name: {name}) {{ pullRequest(number
   commit {{ statusCheckRollup {{ contexts(first: 100) {{ pageInfo {{ hasNextPage }} nodes {{
     ... on CheckRun {{ conclusion isRequired(pullRequestNumber: {n}) }}
     ... on StatusContext {{ state isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }} }}"""
-#: A check run's conclusion or a status's state that fails the check; GREEN passes it; any other is pending.
+#: A check run's conclusion or a status's state that fails the check.
 RED = frozenset({"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"})
-GREEN = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
 SEARCHES = (("author", "is:pr is:open archived:false author:@me"),
             ("requested", "is:pr is:open archived:false user-review-requested:@me"))
 LABELS = {"review_requested": "review requested of you", "changes_requested": "changes requested",
@@ -77,19 +83,19 @@ def _rollup(pull: dict) -> str | None:
     return (((nodes[-1] or {}).get("commit") or {}).get("statusCheckRollup") or {}).get("state")
 
 
-def states(pull: dict, why: str, required: str | None = None) -> list[str]:
+def states(pull: dict, why: str, optional_red: bool = False) -> list[str]:
     """The attention states of one search node, from `LABELS`.
 
-    `required` is the rollup of the required checks alone, from `_required`; without it the whole rollup counts.
+    `optional_red`, from `_optional_red`: every red check on the head is optional, so the red rollup blocks nothing.
     """
     if why == "requested":
         return ["review_requested"]
-    rollup = required if required is not None else _rollup(pull)
+    rollup = _rollup(pull)
     decision, mergeable = pull.get("reviewDecision"), pull.get("mergeable")
     found = []
     if decision == "CHANGES_REQUESTED":
         found.append("changes_requested")
-    if rollup in ("FAILURE", "ERROR"):
+    if rollup in ("FAILURE", "ERROR") and not optional_red:
         found.append("checks_failing")
     if mergeable == "CONFLICTING":
         found.append("conflict")
@@ -122,48 +128,47 @@ def _well_formed(node) -> bool:
     return rollup is None or _has(rollup, "state", str)
 
 
-def _verdict(answer) -> str | None:
-    """FAILURE, PENDING or SUCCESS for one pull's required checks; None when the answer does not say."""
+def _verdict(answer) -> bool | None:
+    """Whether a required check on one pull's head is red; None when the answer does not say."""
     try:
         block = answer["pullRequest"]["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]
         if block["pageInfo"]["hasNextPage"] is not False or not isinstance(block["nodes"], list):
             return None
-        required = []
+        red = False
         for node in block["nodes"]:
-            if type(node["isRequired"]) is not bool:
+            key = "conclusion" if "conclusion" in node else "state"
+            if type(node.get("isRequired")) is not bool or key not in node or not (
+                    node[key] is None or isinstance(node[key], str)):
                 return None
-            if node["isRequired"]:
-                required.append(node["conclusion"] if "conclusion" in node else node["state"])
-    except (KeyError, IndexError, TypeError):
+            red = red or node["isRequired"] and node[key] in RED
+    except (KeyError, IndexError, TypeError, AttributeError):
         return None
-    return "FAILURE" if RED.intersection(required) else "SUCCESS" if GREEN.issuperset(required) else "PENDING"
+    return red
 
 
-def _required(pulls: list[dict], runner, timeout: float) -> tuple[dict[str, str], str]:
-    """`({url: rollup of its required checks}, problem)` for pulls whose whole rollup is red, in one call.
+def _optional_red(pulls: list[dict], runner, timeout: float) -> set[str]:
+    """The URLs of pulls, all with a red rollup, whose head has no red required check: one call for all.
 
-    A pull the answer does not cover maps to UNKNOWN, which lights neither `checks_failing` nor `ready`,
-    and names a problem: a check we could not read is not a green one.
+    A pull the answer does not settle is left out, so it keeps the whole rollup's rule. gh exits non-zero
+    when one alias errors and still prints the others' data, so that data is read whatever the exit code.
     """
     from .shadow_sync import _run
 
     if not pulls:
-        return {}, ""
+        return set()
     parts = []
     for i, pull in enumerate(pulls):
         owner, _, name = pull["repository"]["nameWithOwner"].partition("/")
         parts.append(CHECKS.format(i=i, owner=json.dumps(owner), name=json.dumps(name), n=int(pull["number"])))
-    code, out, err = _run(["gh", "api", "graphql", "-f", "query=query { " + " ".join(parts) + " }"],
-                          runner, timeout=timeout)
+    _code, out, _err = _run(["gh", "api", "graphql", "-f", "query=query { " + " ".join(parts) + " }"],
+                            runner, timeout=timeout)
     try:
-        data = json.loads(out)["data"] if code == 0 else None
+        data = json.loads(out)["data"]
     except (ValueError, KeyError, TypeError):
-        data = None
-    verdicts = {pull["url"]: (_verdict(data.get(f"p{i}")) if isinstance(data, dict) else None) or "UNKNOWN"
-                for i, pull in enumerate(pulls)}
-    unread = sum(verdict == "UNKNOWN" for verdict in verdicts.values())
-    said = (err or out).strip().splitlines()[0] if code != 0 and (err or out).strip() else ""
-    return verdicts, f"checks of {unread} red pull(s) not read{': ' + said if said else ''}" if unread else ""
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    return {pull["url"] for i, pull in enumerate(pulls) if _verdict(data.get(f"p{i}")) is False}
 
 
 def read(runner=None, *, timeout: float = 60) -> tuple[dict[str, dict], bool, str]:
@@ -191,14 +196,10 @@ def read(runner=None, *, timeout: float = 60) -> tuple[dict[str, dict], bool, st
             problems.append(f"{why}: {len(listed) - len(nodes)} malformed pull(s)")
         elif count > len(nodes):
             problems.append(f"{why}: more than {PAGE} open pulls")
-        required: dict[str, str] = {}
-        if why == "author":
-            required, problem = _required([node for node in nodes if _rollup(node) in ("FAILURE", "ERROR")],
-                                          runner, timeout)
-            if problem:
-                problems.append(f"{why}: {problem}")
+        optional = _optional_red([node for node in nodes if _rollup(node) in ("FAILURE", "ERROR")],
+                                 runner, timeout) if why == "author" else set()
         for node in nodes:
-            for state in states(node, why, required.get(node["url"])):
+            for state in states(node, why, node["url"] in optional):
                 found[f"{state} {node['url']}"] = {"state": state, "url": node["url"], "number": node.get("number"),
                                                     "title": node.get("title") or "",
                                                     "repo": (node.get("repository") or {}).get("nameWithOwner") or ""}
