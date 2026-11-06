@@ -62,6 +62,34 @@ def fallback(entry: dict, row: dict) -> str:
     return f"{row['tracker']}:{entry['repo_path']}{entry['ref']}"
 
 
+def _ref(row: dict) -> str:
+    """A stored row's reference as the lists show it: `#<number>`, or the last part of its address (a Jira key)."""
+    return f"#{row['number']}" if row["number"] is not None else (row["url"] or "").rstrip("/").rsplit("/", 1)[-1]
+
+
+def _ref_key(row: dict, ref: str, slug) -> str | None:
+    """A Your issues row's key from its stored row: `jira:<ref>`, or `github:<owner>/<repo>#<number>` when `slug` names
+    the repository; None when it can say neither, and the row takes `fallback`."""
+    return (f"jira:{ref}" if row["tracker"] == "jira" else
+            f"github:{slug}#{row['number']}" if slug and row["number"] is not None else None)
+
+
+def _stored_listed(connection: sqlite3.Connection, key: str) -> bool:
+    """Whether Your issues or Intake lists `key`, from the stored lists' own reads (pack sd:7843): `repos.mine_issues`
+    and `repos.intake_issues`, without the details, the GitHub document or the views each page read joins in.
+
+    A Hide read every list in full first, about a second a write, and a bulk Hide sends one write per row. True only for a key these rows give as `document` and `intake` do; False is not stale, since a row
+    GitHub's search adds, or one whose key fell back, is in neither: `view` then reads the lists in full."""
+    wanted = key.lower()
+    mine = getattr(repos, "mine_issues", None)
+    for rows in (mine(connection) if mine else {}).values():
+        if any((_ref_key(row, _ref(row), row.get("repo")) or "").lower() == wanted for row in rows):
+            return True
+    found = getattr(repos, "intake_issues", None)
+    return any(f"github:{row['repo']}#{row['number']}".lower() == wanted
+               for rows in (found(connection) if found else {}).values() for row in rows)
+
+
 def _details(connection: sqlite3.Connection, pairs: list[tuple[dict, dict]]) -> None:
     """Add to each listed entry its stored facts and the item filed under its ref, read by its pack row's tracker and
     url through `progress.tracker_items`, as both lists hold open rows only; a read that fails leaves every fact None
@@ -72,9 +100,7 @@ def _details(connection: sqlite3.Connection, pairs: list[tuple[dict, dict]]) -> 
         for entry, row in pairs:
             stored = stored_rows.get((row["tracker"], row["url"]), {})
             entry.update({name: stored.get(column) for name, column in FACTS.items()}, unread="")
-            slug = entry["slug"] or row.get("repo")
-            ref = (f"jira:{entry['ref']}" if row["tracker"] == "jira" else
-                   f"github:{slug}#{row['number']}" if slug and row["number"] is not None else None)
+            ref = _ref_key(row, entry["ref"], entry["slug"] or row.get("repo"))
             held = None
             for key in dict.fromkeys((ref, ref.lower())) if ref else ():
                 held = held or writes.item_by_external(connection, REF_SOURCE, key)
@@ -109,7 +135,7 @@ def document(connection: sqlite3.Connection) -> dict:
             url = row["url"] or ""
             issues.append({
                 "repo": label(path), "repo_path": path, "tracker": TRACKER.get(row["tracker"], row["tracker"]),
-                "ref": f"#{row['number']}" if row["number"] is not None else url.rstrip("/").rsplit("/", 1)[-1],
+                "ref": _ref(row),
                 "title": row["title"] or "", "reason": row["reason"], "last_seen": row["last_seen"],
                 # Only a web address is a link; the page draws any other as text.
                 "url": url if url.startswith("https://") else None,
@@ -237,8 +263,9 @@ def sync_job(connection: sqlite3.Connection, backend) -> dict:
 def view(payload: dict):
     """`POST /api/github/issues/view` (sd:6175): `{"key", "hidden"}`, as `designs.request` and
     `contribution_screen.view` take, or `{"key", "category"}` (pack sd:7708), a listed category's name or None to clear
-    it; the write as `action_route` returns one. The write reads both lists again, so a key they no longer list is
-    refused as stale and nothing is written; so is a category the list no longer holds."""
+    it; the write as `action_route` returns one. The write reads the lists again, so a key they no longer list is
+    refused as stale and nothing is written; so is a category the list no longer holds. A Hide or Unhide reads the
+    stored lists first and the full ones only for a key those do not hold (`_stored_listed`, pack sd:7843)."""
     from datetime import datetime, timezone
 
     from sd_db import workflow
@@ -255,14 +282,17 @@ def view(payload: dict):
     if not hasattr(writes, "set_view"):
         raise ValueError("The command pack has no view store yet (sd:3430): pull it and restart the dashboard.")
 
-    def write(connection):
+    def listed_rows(connection):
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        listed_rows = with_github(document(connection), today_github.document(connection, now=now))["issues"]
+        return with_github(document(connection), today_github.document(connection, now=now))["issues"]
+
+    def write(connection):
         if "hidden" in payload:
-            if key.lower() not in {str(row["key"]).lower() for row in (*listed_rows, *intake(connection)["intake"])}:
+            if not _stored_listed(connection, key) and key.lower() not in {
+                    str(row["key"]).lower() for row in (*listed_rows(connection), *intake(connection)["intake"])}:
                 raise workflow.StaleItem(f"No issue {key} is listed. Nothing was hidden or shown. Read GitHub again.")
             return {"key": key, **writes.set_view(connection, view_key(key), hidden=hidden)}
-        row = next((row for row in listed_rows if str(row["key"]).lower() == key.lower()), None)
+        row = next((row for row in listed_rows(connection) if str(row["key"]).lower() == key.lower()), None)
         if row is None:
             raise workflow.StaleItem(f"No issue {key} is listed. No category was set. Read GitHub again.")
         if row["tracker"] != "Jira":

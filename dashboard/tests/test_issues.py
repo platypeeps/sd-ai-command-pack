@@ -868,6 +868,24 @@ class TheIntakeBulk(ScreenCase):
         self.assertEqual([p[1] for p in out["posts"]], [{"key": "github:example/project#21", "hidden": True},
                                                         {"key": "github:example/project#23", "hidden": True}])
 
+    def test_a_bulk_hide_keeps_two_writes_in_flight_and_sends_the_rest_in_turn(self):
+        """pack sd:7843: a bulk Hide sent all its writes at once, and each held a server thread and a store connection;
+        thirty of them stalled the dashboard. At most two are in flight now; each reply sends the next."""
+        rows = [{**INTAKE_ROWS[0], "ref": f"#{n}", "key": f"github:example/project#{n}", "title": f"Issue {n}"}
+                for n in range(31, 37)]
+        out = self.run_page(self.PICK + "show('intake'); await flush(); all(true); await flush();"
+                            " const was = ANSWER, held = []; let now = 0; R.most = 0;"
+                            " ANSWER = (p, b) => p !== '/api/github/issues/view' ? was(p, b) : new Promise(ok => {"
+                            " now++; R.most = Math.max(R.most, now); held.push(() => { now--; ok(was(p, b)); }); });"
+                            " bulk('github issue.hide'); await flush(); R.first = held.length;"
+                            " while (held.length) { held.shift()(); await flush(); }"
+                            " await flush(); R.toast = lastToast().msg; R.rows = ELS.intake.html;", intake_rows=rows)
+        r = out["R"]
+        self.assertEqual((r["first"], r["most"]), (2, 2))
+        self.assertEqual([p[1]["key"] for p in out["posts"]], [row["key"] for row in rows])
+        self.assertIn("Hide · 6 github issues", r["toast"])
+        self.assertNotIn("Issue 3", r["rows"])
+
     def test_unhide_on_the_picked_rows_under_hidden_shows_each_again(self):
         out = self.page("show('intake'); await flush(); click('hidden'); await flush();"
                         " all(true); await flush(); R.bar = shared(); R.picked = [...PICKED];"
@@ -1219,6 +1237,44 @@ class TheCategoryStore(ScreenCase):
     @staticmethod
     def jira_of(found):
         return next(row for row in found["issues"] if row["key"] == "jira:EXAMPLE-8")
+
+
+class TheHideCheck(ScreenCase):
+    """pack sd:7843: a Hide read every list in full before it wrote, about a second a write, and a bulk Hide sends one
+    write per row, so thirty rows held the store for half a minute. A key the stored lists hold now writes after their
+    own reads alone; any other key reads the lists in full, so a row only GitHub's search lists still hides, and a key
+    no list holds is still refused as stale."""
+
+    #: `repos.mine_issues` rows as the pack reads them now, each with its `shadow.repo`.
+    MINE = {path: [{**row, "repo": "EXAMPLE" if row["tracker"] == "jira" else "example/project"} for row in rows]
+            for path, rows in FOUND.items()}
+
+    def test_a_hide_of_a_key_the_stored_lists_hold_reads_no_list_in_full(self):
+        from sd_dashboard import today_github
+
+        keys = ("jira:EXAMPLE-8", "GitHub:Example/Project#12", "github:example/project#21")
+        with stub(return_value=self.MINE), stub_intake(return_value=INTAKE), \
+                mock.patch.object(today_github, "document", wraps=today_github.document) as github, \
+                mock.patch.object(progress, "tracker_items", wraps=progress.tracker_items) as details:
+            for key in keys:
+                issues.view({"key": key, "hidden": True})(self.connection)
+        self.assertEqual((github.call_count, details.call_count), (0, 0))
+        self.assertEqual({key: row["hidden"] for key, row in writes.views(self.connection).items()},
+                         {issues.view_key(key): True for key in keys})
+
+    def test_a_key_only_github_search_lists_still_hides_and_one_no_list_holds_is_refused(self):
+        from sd_dashboard import today_github
+
+        searched = {"error": "", "settled": [], "issues": [{
+            "repo": "example/elsewhere", "ref": "example/elsewhere#5", "number": 5, "title": "Found by search",
+            "why": "assigned", "url": "https://github.com/example/elsewhere/issues/5", "state": "open", "item": None,
+            "mine": True}]}
+        with stub(return_value=self.MINE), stub_intake(return_value=INTAKE), \
+                mock.patch.object(today_github, "document", return_value=searched):
+            issues.view({"key": "github:example/elsewhere#5", "hidden": True})(self.connection)
+            with self.assertRaises(workflow.StaleItem):
+                issues.view({"key": "github:example/gone#9", "hidden": True})(self.connection)
+        self.assertEqual(list(writes.views(self.connection)), ["issue:github:example/elsewhere#5"])
 
 
 class TheViewRoute(BrowserSession):
