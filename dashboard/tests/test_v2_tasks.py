@@ -2022,6 +2022,22 @@ shellRun(cmd('item.fix'), C.get('{plan}')); await flush();""", answer)
         self.assertIn("run herdr.sh start first", out["toasts"][-1][0])
         self.assertFalse(out["toasts"][-1][1])
 
+    def test_a_failed_launch_reads_the_tasks_again_so_details_show_its_note(self):
+        """pack sd:7756: a failed launch writes a note on the item, so the page reads again: Details show the cause after
+        the toast fades, and the next Fix carries the new revision. A refusal that wrote nothing (400) reads nothing."""
+        plan = self.ids["plan"]
+        failed = """(path, body) => [503, { error: 'Fix failed: herdr.sh launch: session sd is not running.'
+  + ' A note on sd:1 keeps the cause.' }]"""
+        refused = """(path, body) => [400, { error: 'item 1 is done' }]"""
+        for answer, want in ((failed, 1), (refused, 0)):
+            out = self.run_page(f"""const before = OUT.gets.filter(g => g === '/api/tasks').length;
+shellRun(cmd('item.fix'), C.get('{plan}')); await flush(); await flush();
+R.reads = OUT.gets.filter(g => g === '/api/tasks').length - before;
+R.details = OUT.gets.filter(g => g === '/api/tasks/{plan}').length;""", answer)
+            self.assertEqual(len(out["posts"]), 1)
+            self.assertEqual(out["R"]["reads"], want, answer)
+            self.assertEqual(out["R"]["details"], want, answer)
+
     START_PLAN = {"read": NOW, "cap": 6, "running": 2, "load": 4.5, "load_max": 40.0, "room": 2, "refusal": "",
                   "start": [{"id": 11, "title": "First <ready>", "repo": "/r", "revision": "a" * 64},
                             {"id": 12, "title": "Second", "repo": "/r", "revision": "b" * 64}],

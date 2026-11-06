@@ -510,8 +510,12 @@ def lane_rows(lanes: list[dict]) -> list[dict]:
 
 def report_rows(problems: list[dict]) -> list[dict]:
     """The open problem reports as Needs you rows (sd:5921), in the look band; Fix and Acknowledge are each one's acts, and
-    a report another session took names who has it (pack sd:7683)."""
+    a report another session took names who has it (pack sd:7683). pack sd:7776: a pr-attention report's `pr_url` is its
+    pull's address (`places.pull_url`), for the row's Open PR link; None on any other."""
+    from .places import pull_url
+
     return [{**problem, "rank": ATTENTION, "kind": "report", "what": f"Report: {problem['title']}",
+             "pr_url": pull_url(problem.get("job"), problem.get("basis")),
              "detail": " · ".join(part for part in (problem.get("why"), f"on {problem['host']}" if problem.get("host") else "",
                                                      f"repeats {problem['repeats']}×" if problem.get("repeats") else "",
                                                      problem.get("claim")) if part)

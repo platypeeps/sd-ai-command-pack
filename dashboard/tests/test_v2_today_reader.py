@@ -673,6 +673,31 @@ shellRun(cmd('work item.fix'), C.get('item:""" + str(self.task) + """')); await 
         self.assertEqual(out["gets"], ["/api/now", "/api/now"])
         self.assertIn("reload it", out["toasts"][-1]["msg"])
 
+    def test_a_pr_attention_row_opens_its_pull_in_a_new_tab_and_another_report_has_no_link(self):
+        """pack sd:7776: a pr-attention row in Needs you carries its pull's address (`places.pull_url`), and the row draws
+        an Open PR icon link beside its actions; a report with no pull draws none."""
+        from sd_db import reporting
+
+        url = "https://github.com/example/bench/pull/617"
+
+        def report(job, basis):
+            return reporting.ingest(self.connection, job=job, run_id="r1", started="2026-09-06T09:00:00Z",
+                                    ended="2026-09-06T09:01:00Z", exit_code=0 if job == "pr-attention" else 1,
+                                    text="ran\n", source_path="sd shadow sync", attention=True,
+                                    attention_basis=basis)["item"]["id"]
+        pull, plain = report("pr-attention", f"review_requested {url}"), report("nas-full-copy", "job exited 1")
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.doc = now_screen.document(self.connection, now=NOW, jobs=JobsBackend(root.name, jobs=[]),
+                                       fleet=lambda area: fleet_document(area, repos=[]))
+        rows = {row["id"]: row for row in self.doc["needs"]}
+        self.assertEqual((rows[f"report:{pull}"]["pr_url"], rows[f"report:{plain}"]["pr_url"]), (url, None))
+        out = self.run_page("refresh(); await flush(); R.rows = ELS.rows.html;")
+        line = {i: re.search(rf'<tr data-id="report:{i}".*?</tr>', out["R"]["rows"], re.S).group(0) for i in (pull, plain)}
+        self.assertIn(f'<a class="icon-btn" href="{url}" target="_blank" rel="noopener noreferrer" '
+                      'aria-label="Open the pull request on GitHub"', line[pull])
+        self.assertNotIn("<a class=\"icon-btn\"", line[plain])
+
 
 class TheSnooze(ReaderCase):
     """sd:1896: Snooze on every Today row, the snoozed rows apart with Unsnooze, and the fixed times."""
