@@ -894,20 +894,33 @@ class OldSlugGuard(Fleet):
                         plan["refused"])
         self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
 
-    def test_an_unread_dependabot_file_is_refused_not_replaced(self) -> None:
-        """pack sd:7812: text_at gives None for a failed read as for a missing
-        file; read as missing, the stamp proposed the minimal file over a real
-        guard and skipped the --force refusal."""
-        dependabot = sd_setup_guard.minimal_file().replace("# The sd-workflow pin", "# Our pin")
-        root, remote = self.repo("unread-dependabot", {sd_fleet.ROUTE_PATH: self.route(),
-                                                       sd_fleet.DEPENDABOT_PATH: dependabot})
-        text_at = sd_fleet.Tree.text_at
-        with mock.patch.object(sd_fleet.Tree, "text_at",
-                               lambda tree, rel: None if rel == sd_fleet.DEPENDABOT_PATH else text_at(tree, rel)):
-            [plan] = self.plan([(root, remote)])
-        self.assertTrue(any(line.startswith(f"{sd_fleet.DEPENDABOT_PATH}: could not read") for line in plan["refused"]),
-                        plan["refused"])
-        self.assertNotIn(sd_fleet.DEPENDABOT_PATH, [change["path"] for change in plan["changes"]])
+    def test_a_file_git_could_not_read_refuses_its_repository_not_a_template(self) -> None:
+        """pack sd:7812, sd:7837: text_at gave None for a failed git read as
+        for a missing file, so the plan proposed the template over the
+        repository's own route, check or guard file. Both ways a read fails:
+        `git show` fails, or `cat-file` and `ls-tree` both fail."""
+        own = "# the repository's own\njobs: {}\n"
+        git_output = sd_fleet.sd_lib.git_output
+        failures = {
+            "show": lambda rel: mock.patch.object(
+                sd_fleet, "_git_show", lambda root, spec, show=sd_fleet._git_show:
+                None if spec.endswith(":" + rel) else show(root, spec)),
+            "listing": lambda rel: mock.patch.object(
+                sd_fleet.sd_lib, "git_output", lambda args, root:
+                None if args[0] in ("cat-file", "ls-tree") and rel in args[-1] else git_output(args, root)),
+        }
+        for rel in (sd_fleet.ROUTE_PATH, sd_fleet.CHECK_PATH, sd_fleet.DEPENDABOT_PATH, "CLAUDE.md",
+                    sd_fleet.GITIGNORE_PATH):
+            for how, failing in failures.items():
+                with self.subTest(rel=rel, how=how):
+                    files = {sd_fleet.ROUTE_PATH: self.route(), sd_fleet.DEPENDABOT_PATH: sd_setup_guard.minimal_file()}
+                    files[rel] = own
+                    root, remote = self.repo(f"unread-{how}-" + rel.replace("/", "-"), files)
+                    with failing(rel):
+                        [plan] = self.plan([(root, remote)])
+                    self.assertTrue(any(line.startswith(f"{rel}: could not read") for line in plan["refused"]),
+                                    plan["refused"])
+                    self.assertEqual([], plan["changes"])
 
     def test_a_non_utf8_file_refuses_its_repository_by_name_not_a_traceback(self) -> None:
         """pack sd:7812 review: every file the stamp reads, tracked or the
