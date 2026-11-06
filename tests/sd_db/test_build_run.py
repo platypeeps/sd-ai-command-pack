@@ -1176,6 +1176,18 @@ class Unmanaged(Case):
         self.assertEqual(self.supervisor().run()["outcome"], "done")
         self.assertFalse(Path(self.bundle["work_path"]).exists())
 
+    def test_another_pull_requests_merge_moves_nothing(self):
+        """Evidence: the watch reads the url the run recorded; a merge observed on any other url is not this run's."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor(checks=lambda work: [PASS]).run()
+        url = self.pulls()[0]["url"]
+        self.observed(url.replace("/pull/1", "/pull/2"), "merged")
+        self.observed("https://github.com/other/repo/pull/1", "merged")
+        self.assertEqual(self.watched(), [])
+        self.assertEqual((build.run(self.db, self.bundle["id"])["step"], self.statuses()), ("enqueued", ["in_progress"]))
+
     def test_a_draft_closed_without_a_merge_ends_lane_failed(self):
         self.press()
         self.write_pr()
