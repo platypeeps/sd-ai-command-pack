@@ -180,21 +180,30 @@ def _rows(connection, rows, found, *, now: str) -> list[dict]:
 
 def _report_sources(connection) -> dict:
     """What `places.report_realm` reads (pack sd:7774): each registered GitHub checkout by lower-case `owner/name`,
-    and the report families; a family list that did not read gives no report a family's realm."""
+    and the report families; a family list that did not read is None, so no report gets a family's realm or Personal
+    by it: its realm is unknown (pack sd:7792)."""
     from sd_db.today import repo_keys
 
     from .reports_screen import families
 
-    return {"checkouts": repo_keys(connection), "families": families(connection)["list"]}
+    read = families(connection)
+    return {"checkouts": repo_keys(connection), "families": None if read["state"] == "error" else read["list"]}
 
 
 def _job_basis(item) -> tuple[str | None, str | None]:
-    """A report item's job and attention basis, or Nones when its fields do not read."""
+    """A report item's job and current attention basis, or Nones when its fields do not read. The basis is
+    `repeats.basis` once a later run stored one, else the first run's, as `sd_db.reporting.CURRENT_BASIS` reads it; any
+    failure to read the fields, such as nesting too deep or a value that is not text, is Nones (pack sd:7792)."""
     try:
-        report = (json.loads(item["fields"] or "{}") or {}).get("report")
-    except (ValueError, AttributeError):
+        fields = json.loads(item["fields"] or "{}")
+    except (ValueError, TypeError, RecursionError):
         return None, None
-    return (report.get("job"), report.get("attention_basis")) if isinstance(report, dict) else (None, None)
+    report = fields.get("report") if isinstance(fields, dict) else None
+    if not isinstance(report, dict):
+        return None, None
+    repeats = fields.get("repeats")
+    basis = repeats.get("basis") if isinstance(repeats, dict) else None
+    return report.get("job"), report.get("attention_basis") if basis is None else basis
 
 
 def _column(row, name: str):

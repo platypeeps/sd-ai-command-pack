@@ -577,6 +577,19 @@ shellRun(cmd('report.fix'), C.get('r{n}')); await flush();""", answer=answer)
         self.assertEqual(out["toasts"][-1], [f"Fix started · #{n} · debug session in herdr pane w9:p1", False])
         self.assertEqual(out["gets"], ["/api/reports", "/api/reports"])
 
+    def test_a_failed_fix_launch_reads_the_reports_again_so_the_next_fix_has_the_new_revision(self):
+        """pack sd:7783: a failed launch (5xx) notes its cause on the report, and a post with no answer may have noted
+        it, so either moves the revision the page holds; Reports read again. A refusal that wrote nothing (400) does not."""
+        n = self.ids["failed"]
+        doc = json.dumps(self.doc)
+        failed = ("(path, body) => path.endsWith('/fix') ? [503, { error: 'Fix failed: herdr.sh launch: session sd is not"
+                  f" running. A note on sd:{n} keeps the cause.' }}] : [200, {doc}]")
+        silent = f"(path, body) => {{ if (path.endsWith('/fix')) throw new TypeError('Load failed'); return [200, {doc}]; }}"
+        refused = f"(path, body) => path.endsWith('/fix') ? [400, {{ error: 'item {n} is done' }}] : [200, {doc}]"
+        for answer, reads in ((failed, 2), (silent, 2), (refused, 1)):
+            out = self.run_page(f"shellRun(cmd('report.fix'), C.get('r{n}')); await flush(); await flush();", answer=answer)
+            self.assertEqual(out["gets"], ["/api/reports"] * reads, answer)
+
     def test_fix_on_an_expired_login_opens_its_credentials_row_and_leads_the_bar(self):
         """sd:6964: the cold-outreach-triage run of sd:6951, its account made an example; no session can sign in, so
         Fix opens Health > Credentials on that Google login's row, asks nothing and posts nothing. The plain failed

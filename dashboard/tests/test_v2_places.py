@@ -282,6 +282,34 @@ class Realms(Fixture):
             unread = {r["id"]: r["realm"] for r in tasks_screen.document(self.connection, now=NOW)["rows"]}
         self.assertIsNone(unread[scan], "without the realm list a report's realm is unknown, as a repo row's")
 
+    def test_a_report_realm_is_unknown_when_its_source_did_not_read_and_hoa_without_a_realm_list(self):
+        """pack sd:7792: a family list that did not read made a report Personal, not unknown; and a missing realm list
+        returned None before the pull's checkout was looked up, so a pr-attention report on the hoa repo lost HOA."""
+        rules, hoa = [{"id": "work", "label": "Work", "globs": ["/repos/example-work/*"]}], "/repos/hoa"
+        basis = "review_requested https://github.com/example/hoa/pull/4"
+        self.assertIsNone(places.report_realm("weekly-scan", "", rules, hoa, checkouts={}, families=None))
+        self.assertEqual(places.report_realm("weekly-scan", "", rules, hoa, checkouts={}, families=[]), "personal")
+        self.assertEqual(places.report_realm("pr-attention", basis, None, hoa, checkouts={"example/hoa": hoa},
+                                             families=[]), "hoa")
+        self.assertIsNone(places.report_realm("pr-attention", basis, None, hoa,
+                                              checkouts={"example/hoa": "/repos/example-work/hoa"}, families=None))
+        # A pull in no registered checkout has no repo: Personal, as realm_of's row with no repo.
+        self.assertEqual(places.report_realm("pr-attention", basis, None, hoa, checkouts={}, families=None), "personal")
+
+    def test_a_tasks_report_reads_its_current_basis_and_fields_that_do_not_read_are_unknown(self):
+        """pack sd:7792: `_job_basis` let RecursionError and TypeError escape, so one report's fields failed the whole
+        Tasks read, and it read the first run's basis, not `repeats.basis`, which a later run's pull replaced."""
+        first, later = ("review_requested https://github.com/example/a/pull/1",
+                        "review_requested https://github.com/example/b/pull/2")
+        report_fields = {"report": {"job": "pr-attention", "attention_basis": first}}
+        cases = [({**report_fields, "repeats": {"count": 2, "basis": later}}, ("pr-attention", later)),
+                 ({**report_fields, "repeats": {"count": 2}}, ("pr-attention", first)),
+                 ({**report_fields, "repeats": None}, ("pr-attention", first))]
+        for fields, want in cases:
+            self.assertEqual(tasks_screen._job_basis({"fields": json.dumps(fields)}), want, fields)
+        for raw in ("[" * 100000 + "]" * 100000, 7, "[1]", '{"report": 3}', "{not json"):
+            self.assertEqual(tasks_screen._job_basis({"fields": raw}), (None, None), str(raw)[:20])
+
     def test_the_pull_url_helper_reads_a_pr_attention_basis_only(self):
         url = "https://github.com/example/bench/pull/617"
         self.assertEqual(places.pull_url("pr-attention", f"changes_requested {url}"), url)
@@ -770,6 +798,17 @@ shellRun(cmd('report.ack'), C.get('r{self.fun}')); await flush(); R.det = ELS.de
         self.assertEqual(out["gets"], ["/api/home/reports", "/api/home/reports"])
         self.assertEqual(out["toasts"][-1]["msg"], f"Acknowledged · #{self.fun}")
         self.assertIn(f"Database report #{self.fun} · ", out["R"]["det"])
+
+    def test_a_failed_fix_launch_in_a_reports_details_reads_the_view_again(self):
+        # pack sd:7783: a failed launch (5xx) notes its cause on the report, so the revision the view holds moved; the
+        # view reads again, or the next Fix is refused stale. A refusal that wrote nothing (400) reads nothing.
+        for status, reads in ((503, 2), (400, 1)):
+            docs = self.docs("home")
+            docs[f"/api/items/{self.fun}/fix"] = [status, {"error": "Fix failed: herdr.sh launch: session sd is not running."}]
+            out = self.run_page(self.BRIEF_CLICK + f"""await go('#view=reports'); clickRow('r{self.fun}'); await flush();
+shellRun(cmd('report.fix'), C.get('r{self.fun}')); await flush(); await flush();""", docs, place="home")
+            self.assertEqual([p[0] for p in out["posts"]], [f"/api/items/{self.fun}/fix"], status)
+            self.assertEqual(out["gets"], ["/api/home/reports"] * reads, status)
 
     def task_docs(self):
         docs = self.docs("home")
