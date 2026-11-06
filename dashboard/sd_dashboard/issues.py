@@ -140,6 +140,8 @@ def document(connection: sqlite3.Connection) -> dict:
                 "repo": label(path), "repo_path": path, "tracker": TRACKER.get(row["tracker"], row["tracker"]),
                 "ref": _ref(row),
                 "title": row["title"] or "", "reason": row["reason"], "last_seen": row["last_seen"],
+                # pack sd:7930: the page marks the rows assigned to the operator apart from those only filed.
+                "assigned": row["reason"] == "assigned",
                 # Only a web address is a link; the page draws any other as text.
                 "url": url if url.startswith("https://") else None,
             })
@@ -161,7 +163,8 @@ def with_github(document: dict, github: dict) -> dict:
             continue
         listed.add(key.lower())
         extra.append({"repo": entry["repo"], "repo_path": None, "tracker": "GitHub", "ref": f"#{entry['number']}", "key": key,
-                      "title": entry["title"], "reason": entry["why"], "last_seen": None, "url": entry["url"],
+                      "title": entry["title"], "reason": entry["why"], "assigned": bool(entry.get("assigned")),
+                      "last_seen": None, "url": entry["url"],
                       "slug": entry["repo"], "state": entry["state"], "status": None, "assignee": entry.get("assignee"),
                       "reporter": entry.get("author"), "created_at": entry.get("created_at"),
                       "updated_at": entry.get("updated_at"), "item": entry["item"], "unread": ""})

@@ -78,7 +78,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   const closedToo = () => new URLSearchParams(location.search).get('iss') === 'closed';
   const issueRow = r => html`<tr${selected(r)}>
         <td class="ref">${r.url ? html`<a href="${r.url}">${r.tracker} ${r.ref}</a>` : html`${r.tracker} ${r.ref}`}</td>
-        <td class="what">${title(r)}</td>
+        <td class="what">${title(r)}${r.assigned ? html` <span class="tag real">assigned to you</span>` : ''}</td>
         <td class="repo">${r.repo}</td>
         <td class="why">${isOpen(r) ? r.reason : `${r.state} · ${r.reason}`}</td>
         <td class="when">${r.updated_at ? html`<time class="rel" datetime="${r.updated_at}"></time>` : ph(r)}</td>
