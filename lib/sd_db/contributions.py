@@ -35,6 +35,9 @@ FIELDS = frozenset({"local_clone", "local_branch", "tested_commit", "pull_url", 
 # `closed` is the terminal lane for an issue and for a pull request closed
 # without merge -- neither awaits anyone; `merged` stays pull-request vocabulary.
 LANES = {"newly_unblocked": 0, "awaiting_you": 1, "awaiting_them": 2, "merged": 3, "closed": 4}
+#: An observation older than this reads stale: the projection says so, and
+#: the refresh reads a stale open pull again first (sd:7864).
+STALE_SECONDS = 86400
 SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 PULL = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)/?\Z")
 # Its own pattern: PULL also validates merge and release dependency proof,
@@ -795,7 +798,7 @@ def _freshness(heartbeats, sources) -> dict:
             body = json.loads(row["body"])
             if body.get("ok") is False:
                 result.update(status="unknown", reason=body.get("reason", "Observation failed"))
-    if times and (datetime.now(timezone.utc) - max(map(_moment, times))).total_seconds() > 86400:
+    if times and (datetime.now(timezone.utc) - max(map(_moment, times))).total_seconds() > STALE_SECONDS:
         result.update(status="unknown", reason=result["reason"] or "Last complete observation is older than one day")
     return result
 

@@ -459,6 +459,34 @@ class ContributionSync(SyncCase):
         self.assertEqual(adapter._queue(self.db)["pending"][0]["url"], URL)
         self.assertEqual(core.projection(self.db), [])
 
+    def test_stale_open_rows_come_before_the_unobserved_backlog(self):
+        # sd:7864: thousands of authored search rows buried the few last
+        # observed open, so a closed PR with no item read open for weeks.
+        now = "2026-10-18T08:00:00+00:00"
+        keys = [f"github:backlog/{n}" for n in range(8)] + ["github:merged", "github:fresh", "github:stale"]
+        pending = [{"key": key, "explicit": False} for key in keys]
+        snapshots: dict[str, dict] = {key: {"observation": None} for key in keys}
+        snapshots["github:merged"] = {"observation": {"state": "merged", "observed_at": "2026-10-15T08:00:00+00:00"}}
+        snapshots["github:fresh"] = {"observation": {"state": "open", "observed_at": "2026-10-18T07:00:00+00:00"}}
+        snapshots["github:stale"] = {"observation": {"state": "open", "observed_at": "2026-10-15T08:00:00+00:00"}}
+        ordered = [row["key"] for row in adapter._order(pending, snapshots, now)]
+        self.assertEqual(ordered[2], "github:stale")
+        self.assertGreater(ordered.index("github:fresh"), ordered.index("github:backlog/7"))
+        self.assertEqual(sorted(ordered), sorted(keys))
+
+    def test_a_stale_open_pull_with_no_item_reads_closed_next_run(self):
+        urls = self.clone_pull(range(7, 15))
+        self.assertTrue(self.run_sync(urls[:1]).ok)
+        self.assertEqual(core.projection(self.db)[0]["external_state"], "open")
+        # Seven more authored pulls queue ahead of it; the budget reads only one.
+        self.assertTrue(self.run_sync(urls[1:], max_requests=4 + 1 + 9).ok)
+        self.now += timedelta(days=2)
+        self.api.detail.update(state="closed")
+        self.assertTrue(self.run_sync(max_requests=4 + 1 + 9 * 3).ok)
+        rows = {row["url"]: row for row in core.projection(self.db)}
+        self.assertEqual(rows[urls[0]]["external_state"], "closed")
+        self.assertEqual(rows[urls[0]]["lane"], "closed")
+
     def test_registered_work_refreshes_without_search_match(self):
         item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
         self.add_comment()

@@ -73,15 +73,34 @@ def _merge(pending, additions):
     return list(indexed.values())
 
 
-def _order(pending):
+def _order(pending, snapshots=None, observed_at=None):
     # Explicit local work gets priority, while ordinary authored work has two
-    # guaranteed slots before the rest follow in queue order. The budget, not a
+    # guaranteed slots. Rows last observed open, and stale as the projection
+    # counts it, come next: search queues every authored pull, thousands,
+    # and a run reads a few dozen, so a closed pull with no item read open
+    # for weeks (sd:7864). The rest follow in queue order. The budget, not a
     # count, decides how far down the list a run gets; rotation in `refresh`
     # prevents a failing first item from starving the ones behind it.
+    from . import contributions as core
+
+    def stale(row):
+        observation = (snapshots.get(row["key"]) or {}).get("observation") or {}
+        if observation.get("state") != "open" or observed_at is None:
+            return False
+        try:
+            age = core._moment(observed_at) - core._moment(observation.get("observed_at"))
+        except (WorkflowError, TypeError, ValueError):
+            return True
+        return age.total_seconds() > core.STALE_SECONDS
+
+    snapshots = snapshots or {}
     explicit = [row for row in pending if row.get("explicit")]
     ordinary = [row for row in pending if not row.get("explicit")]
     ordered = explicit[:3] + ordinary[:2]
-    return ordered + [row for row in pending if row not in ordered]
+    chosen = {row["key"] for row in ordered}
+    live = [row for row in pending if row["key"] not in chosen and stale(row)]
+    chosen.update(row["key"] for row in live)
+    return ordered + live + [row for row in pending if row["key"] not in chosen]
 
 
 def _cost(entry):
@@ -207,8 +226,8 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
         revision = _save_queue(connection, pending, planned["revision"])
     except ValueError as error:
         return {"errors": [str(error)], "queued": len(pending), "attempted": 0, "completed_keys": [], "incomplete": [], "staged": False}
-    ordered = _order(pending)
     snapshots = dict(planned["snapshots"])
+    ordered = _order(pending, snapshots, observed_at)
     completed, incomplete, attempted, terminal = [], [], [], set()
     operator, identified = None, False
     # Pagination is not priced, so the client itself stops at the reserve: an
