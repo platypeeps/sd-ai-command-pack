@@ -591,8 +591,12 @@ def add_note(
     output_path: str | None = None,
     harness_session: str | None = None,
     labelling: bool = False,
+    timestamp: str | None = None,
 ) -> int:
     """Any note but a status change, which only `transition` writes.
+
+    `timestamp` is when it happened, for a note that records the past, such
+    as a backfilled pull-request lane (sd:7859); else now.
 
     `harness_session` is the harness session that wrote a note whose
     `session` names someone else, as a CLI ruling does (pack sd:6046).
@@ -610,7 +614,8 @@ def add_note(
         cursor = connection.execute(
             "INSERT INTO note (item, timestamp, kind, body, session, started, "
             "ended, exit_code, output_path, harness_session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (item, now(), kind, body, session, started, ended, exit_code, output_path, harness_session),
+            (item, stamp(timestamp) if timestamp else now(), kind, body, session, started, ended, exit_code,
+             output_path, harness_session),
         )
     return int(cursor.lastrowid)
 

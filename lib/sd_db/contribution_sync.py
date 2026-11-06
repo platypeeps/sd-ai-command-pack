@@ -186,6 +186,13 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
     """
     from . import contributions as core
 
+    # sd:7859: each registered pull request's lane note, and the backfill of one never noted, even a merged one the
+    # queue no longer observes. A failure is the run's error, never a quiet pass.
+    try:
+        core.record_lanes(connection)
+        lane_errors = []
+    except WorkflowError as error:
+        lane_errors = [f"pull-request lane notes were not written: {error}"]
     known = {row["key"]: row for row in planned["pending"]}
     invalid = any(row.get("kind") == "pull" and "author" in row.get("why", [])
                   and not github.PULL.fullmatch(row["url"]) for row in issues)
@@ -200,7 +207,7 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
             why = row["why"] if search_complete is True and not invalid else sorted(set(current["why"]) | set(row["why"]))
             additions[index] = {**current, "why": why}
     pending = _merge(planned["pending"], additions)
-    errors = ["search returned a malformed contribution identity"] if invalid else []
+    errors = lane_errors + (["search returned a malformed contribution identity"] if invalid else [])
     if not pending:
         return {"errors": errors, "queued": 0, "attempted": 0, "completed_keys": [], "incomplete": [], "staged": not invalid}
     try:

@@ -698,3 +698,25 @@ class IssueSync(SyncCase):
         with self.assertRaisesRegex(ValueError, "unpriced dependency kind"):
             adapter._cost({"key": "item:1", "depends_on": [{"kind": "merge", "url": URL}, {"kind": "closed", "url": URL}]})
         self.assertEqual(set(adapter.DEPENDENCY_REQUESTS), {"item", "merge", "release", "issue"})
+
+
+class LaneNotePass(SyncCase):
+    """sd:7859: each refresh notes every registered pull request's lane, so a merged one the queue left is noted too."""
+
+    def test_a_refresh_with_nothing_queued_still_notes_a_registered_pull_requests_lane(self):
+        item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
+        state = core.snapshot(self.db, "github:" + URL)
+        state["observation"] = {"state": "merged", "observed_at": AT}
+        with transaction(self.db):
+            core._save(self.db, state)
+        self.assertEqual(core.lane_notes(self.db, item), [])
+        planned: dict = {"pending": [], "revision": None, "snapshots": {}}
+        result = adapter.refresh(self.db, planned, [], client=self.api.client(), observed_at=self.now.isoformat())
+        self.assertEqual(result["errors"], [])
+        self.assertEqual([(n["lane"], n["state"]) for n in core.lane_notes(self.db, item)], [("merged", "merged")])
+
+    def test_a_lane_pass_that_fails_is_the_runs_error(self):
+        with patch.object(core, "record_lanes", side_effect=core.WorkflowError("item 7 has malformed contribution metadata")):
+            result = adapter.refresh(self.db, {"pending": [], "revision": None, "snapshots": {}}, [],
+                                     client=self.api.client(), observed_at=self.now.isoformat())
+        self.assertEqual(result["errors"], ["pull-request lane notes were not written: item 7 has malformed contribution metadata"])

@@ -15,7 +15,7 @@ from sd_db import contributions as c
 from sd_db.migrate import migrate
 from sd_db.schema import migrations
 from sd_db.workflow import StaleItem, WorkflowError, item_state
-from sd_db.writes import set_item_fields, transition, upsert_shadow
+from sd_db.writes import add_note, set_item_fields, transition, upsert_shadow
 
 URL = "https://github.com/upstream/project/pull/12"
 ISSUE = "https://github.com/upstream/project/issues/56"
@@ -1256,3 +1256,114 @@ class DismissTests(ContributionCase):
                               ("contribution:github:" + URL,)).fetchone()
         body = {k: v for k, v in observed.items() if k not in {"key", "revision"}}
         self.assertEqual(observed["revision"], c._digest({"key": "github:" + URL, "id": row["id"], "body": body}))
+
+
+class LaneNoteTests(ContributionCase):
+    """sd:7859: each lane change of an item's pull request is a `comment` note; checkpoints get pruned, notes stay."""
+
+    def item(self):
+        return c.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
+
+    def lanes(self, item):
+        return [(n["lane"], n["state"], n["backfilled"]) for n in c.lane_notes(self.db, item)]
+
+    def test_an_observed_pull_writes_one_lane_note_and_a_rerun_writes_none(self):
+        item = self.item()
+        self.assertEqual(self.lanes(item), [], "not yet observed: no lane to record")
+        self.observe()
+        self.observe(observed_at=T1)
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
+        body = self.db.execute("SELECT kind, session, body FROM note WHERE id = ?",
+                               (c.lane_notes(self.db, item)[0]["id"],)).fetchone()
+        self.assertEqual(tuple(body), ("comment", "contribution-observer", f"PR lane: awaiting_them · open · {URL}"))
+        self.assertEqual(c.record_lanes(self.db), [], "a refresh pass after it writes nothing either")
+
+    def test_a_maintainer_comment_is_on_you_and_acknowledging_it_is_on_reviewers_again(self):
+        item = self.item()
+        self.observe()
+        result = self.observe(observed_at=T1, events=[self.event()])
+        c.acknowledge(self.db, "github:" + URL, [result["attention"][0]["id"]], expected_revision=result["revision"],
+                      who="operator")
+        self.observe(observed_at=T2, state="merged")
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False), ("awaiting_you", "open", False),
+                                            ("awaiting_them", "open", False), ("merged", "merged", False)])
+
+    def test_a_failed_lane_note_rolls_back_the_observation(self):
+        item = self.item()
+        before = c.snapshot(self.db, "github:" + URL)
+        with mock.patch.object(c, "add_note", side_effect=sqlite3.OperationalError("disk I/O error")):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.observe()
+        self.assertEqual(c.snapshot(self.db, "github:" + URL)["revision"], before["revision"])
+        self.assertEqual(self.lanes(item), [])
+        self.observe()
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)], "the next observation writes both")
+
+    def history(self, item):
+        upsert_shadow(self.db, tracker="github", url=URL, repo="upstream/project", number=12, kind="pull",
+                      title="Contribution", state="merged", created_at=T0, merged_at=T3)
+        note = add_note(self.db, item, "followup", "Changes requested", session="contribution-observer", timestamp=T1)
+        self.db.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (T2, note))
+        self.db.commit()
+
+    def test_backfill_reads_the_shadow_and_the_followups(self):
+        item = self.item()
+        self.history(item)
+        self.observe(observed_at=T3, state="merged")
+        notes = c.lane_notes(self.db, item)
+        self.assertEqual([(n["at"], n["lane"], n["backfilled"]) for n in notes],
+                         [(T0, "awaiting_them", True), (T1, "awaiting_you", True), (T2, "awaiting_them", True),
+                          (T3, "merged", True)], "the current lane equals the last backfilled one: no extra note")
+        wait = c.pr_waits(self.db, now=T3)[0]
+        self.assertEqual((wait["on_reviewers"], wait["on_you"], wait["to_merge"], wait["open"]), (120, 60, 180, False))
+
+    def test_a_backfill_that_fails_writes_no_note(self):
+        item = self.item()
+        self.history(item)
+        real = c.add_note
+        calls = []
+
+        def second_fails(*args, **kwargs):
+            calls.append(args)
+            if len(calls) == 2:
+                raise sqlite3.OperationalError("disk I/O error")
+            return real(*args, **kwargs)
+        with mock.patch.object(c, "add_note", side_effect=second_fails):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.observe(observed_at=T3, state="merged")
+        self.assertEqual(self.lanes(item), [])
+        self.assertIsNone(c.snapshot(self.db, "github:" + URL)["observation"], "the observation rolled back too")
+        self.observe(observed_at=T3, state="merged")
+        self.assertEqual(len(self.lanes(item)), 4, "the next observation backfills it all")
+
+    def test_record_lanes_backfills_a_merged_item_the_queue_no_longer_observes(self):
+        item = self.item()
+        self.observe(observed_at=T3, state="merged")
+        self.db.execute("DELETE FROM note WHERE body LIKE 'PR lane: %'")
+        self.db.commit()
+        self.history(item)
+        c.record_lanes(self.db)
+        self.assertEqual(self.lanes(item)[0], ("awaiting_them", "open", True))
+        self.assertEqual(self.lanes(item)[-1], ("merged", "merged", True))
+
+    def test_waits_split_on_you_and_on_reviewers_and_an_open_one_runs_to_now(self):
+        item = self.item()
+        for at, lane in ((T0, "awaiting_them"), (T1, "awaiting_you"), (T2, "awaiting_them")):
+            add_note(self.db, item, "comment", f"PR lane: {lane} · open · {URL}", session="contribution-observer",
+                     timestamp=at)
+        wait = c.pr_waits(self.db, now="2026-09-10T00:05:00+00:00")[0]
+        self.assertEqual({k: wait[k] for k in ("item", "open", "on", "since", "waited", "on_you", "on_reviewers", "to_merge")},
+                         {"item": item, "open": True, "on": "reviewers", "since": T2, "waited": 180, "on_you": 60,
+                          "on_reviewers": 240, "to_merge": None})
+
+    def test_without_a_shadow_row_the_wait_starts_at_the_first_note(self):
+        item = self.item()
+        self.observe()
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
+        self.assertTrue(c.pr_waits(self.db)[0]["open"])
+
+    def test_the_projection_lane_is_the_one_rule_the_note_reads(self):
+        item = self.item()
+        self.observe(events=[self.event()])
+        row = next(r for r in c.projection(self.db) if r["item_id"] == item)
+        self.assertEqual((row["lane"], self.lanes(item)[-1][0]), ("awaiting_you", "awaiting_you"))
