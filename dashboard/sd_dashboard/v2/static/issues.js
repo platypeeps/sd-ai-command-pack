@@ -33,6 +33,8 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   const jira = r => r.tracker === 'Jira';
   const actions = id => window.shell?.commands?.rowActions ? window.shell.commands.rowActions(id) : '';
+  // pack sd:7752: the category pickers list by name, case ignored; the groups keep the stored order.
+  const byName = () => [...CATS].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   const groupOf = r => r.category && CATS.includes(r.category) ? `cat:${r.category}` : 'none';
   // The Jira rows in view by category, in the list's order, then Uncategorized; under Hidden an empty category is left out.
   function groups(rows) {
@@ -217,7 +219,7 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   // Details' Category (pack sd:7708): a Jira row's select, or why there is none to pick.
   const category = r => !jira(r) ? '' : html`<dt>Category</dt><dd>${STORE ? html`<span class="ph">not read: ${STORE}</span>`
     : !CATS.length ? html`<span class="ph">none yet: New category, in the list's head, adds one</span>`
-    : html`<select class="cap-in" data-iss-cat="${oid(r)}" aria-label="Category">${[...CATS.map(n => [n, n]), ['', 'None (Uncategorized)']].map(([v, l]) => html`<option value="${v}"${(r.category || '') === v ? html` selected` : ''}>${l}</option>`)}</select>`}</dd>`;
+    : html`<select class="cap-in" data-iss-cat="${oid(r)}" aria-label="Category">${[...byName().map(n => [n, n]), ['', 'None (Uncategorized)']].map(([v, l]) => html`<option value="${v}"${(r.category || '') === v ? html` selected` : ''}>${l}</option>`)}</select>`}</dd>`;
   const stamp = (r, v) => v ? html`<time class="rel" data-long datetime="${v}"></time>` : ph(r);
   function details(id, open = true) {
     const r = rowOf(id); if (!r) return;
@@ -257,8 +259,8 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
     REG_CAT = { id: 'jira issue.category', on: 'jira issue', label: 'Set category', key: 'g', risk: 'undo', bar: false,
       does: 'Puts this Jira issue in a category, or in none. Jira is not changed.',
       when: o => off() !== true ? off() : CATS.length ? true : 'no category yet: New category adds one',
-      fields: o => [{ name: 'category', label: 'Category', value: o.category || CATS[0],
-        options: [...CATS.map(n => ({ value: n, label: n })), { value: '', label: 'None (Uncategorized)' }] }],
+      fields: o => [{ name: 'category', label: 'Category', value: o.category || byName()[0],
+        options: [...byName().map(n => ({ value: n, label: n })), { value: '', label: 'None (Uncategorized)' }] }],
       cli: () => NO_CAT_CLI,
       run: (o, v) => { const was = o.category || null, to = v?.category || null;
         return categorize(o.key, to).then(() => ({ text: to ? `Category ${to} · ${o.label}` : `Category cleared · ${o.label}`, was })); },

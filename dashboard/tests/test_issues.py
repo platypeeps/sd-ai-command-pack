@@ -764,6 +764,19 @@ class TheCategoryGroups(ScreenCase):
         self.assertIn(("none", "true"), re.findall(self.GROUPS, r["after"]))
         self.assertIn(("cat:Alerts", "true"), re.findall(self.GROUPS, r["back"]))
 
+    def test_the_category_pickers_list_by_name_ignoring_case_and_none_last(self):
+        """pack sd:7752: the Details select and Set category's options sort by name; the groups keep the stored order."""
+        out = self.page("show('issues'); await flush(); window.issues.details('iss:jira:EXAMPLE-9'); R.details = ELS.details.html;"
+                        " R.rows = ELS.issues.html;"
+                        " R.fields = cmd('jira issue.category').fields(C.get('iss:jira:EXAMPLE-9'))[0];",
+                        categories=("beta", "Alpha", "gamma"))
+        r = out["R"]
+        self.assertEqual(re.findall(r'<option value="[^"]*"(?: selected)?>([^<]+)</option>', r["details"]),
+                         ["Alpha", "beta", "gamma", "None (Uncategorized)"])
+        self.assertEqual([o["label"] for o in r["fields"]["options"]], ["Alpha", "beta", "gamma", "None (Uncategorized)"])
+        self.assertEqual(r["fields"]["value"], "Alpha")
+        self.assertEqual([g for g, _ in re.findall(self.GROUPS, r["rows"])], ["cat:beta", "cat:Alpha", "cat:gamma", "none"])
+
     def test_remove_asks_nothing_leaves_its_issues_uncategorized_and_undo_restores_the_list(self):
         # The open group left, so the first group with a row, Uncategorized, opens.
         out = self.page("show('issues'); await flush(); act('issue category.remove', 'isscat:Alerts'); await flush();"
