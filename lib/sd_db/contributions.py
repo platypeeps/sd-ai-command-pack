@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import paths, shadow_sync
 from .database import transaction
+from .errors import SdDbError
 from .workflow import (
     StaleItem,
     WorkflowError,
@@ -27,7 +28,7 @@ from .workflow import (
     capture_task,
     item_state,
 )
-from .writes import add_note, now, record_state, resolve_note, set_item_fields
+from .writes import add_note, now, record_state, resolve_note, set_item_fields, stamp
 
 FIELDS = frozenset({"local_clone", "local_branch", "tested_commit", "pull_url", "evidence",
                     "blocked_on", "depends_on", "blocking_labels",
@@ -134,11 +135,18 @@ def _metadata(row: dict) -> dict | None:
         raise WorkflowError(f"item {row.get('id')} has malformed contribution metadata") from None
 
 
-def _registered(connection) -> list[tuple[dict, dict]]:
+def _registered(connection, errors: list[str] | None = None) -> list[tuple[dict, dict]]:
+    """Each task with contribution metadata. With `errors`, a malformed one is said there and skipped, not raised."""
     result = []
     for raw in connection.execute("SELECT * FROM item WHERE kind='task' ORDER BY id"):
         row = dict(raw)
-        metadata = _metadata(row)
+        try:
+            metadata = _metadata(row)
+        except WorkflowError as error:
+            if errors is None:
+                raise
+            errors.append(f"item {row['id']}: {error}")
+            continue
         if metadata is not None:
             result.append((row, metadata))
     return result
@@ -852,23 +860,36 @@ def lane_notes(connection, item, url=None) -> list[dict]:
     return found
 
 
-def _history(connection, item, url) -> list[tuple[str, str, str]]:
-    """What history still holds of the item's pull request before its first lane note: `(at, lane, state)`, oldest first.
+def _history(connection, item, url) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """What history still holds of the item's pull request before its first lane note: `(at, lane, state)`, oldest
+    first, and each time it skipped because it names no instant (a time with no zone).
 
     The shadow's `created_at` opens it on reviewers; each `contribution-observer` followup on the item is on you from
     its time to its `resolved_at`; the shadow's `merged_at`, else `closed_at`, ends it. A span the shadow never saw,
     or attention that was never a followup, is not recoverable.
     """
     times = _shadow_times(connection, url)
-    events = []
-    if times.get("created_at"):
+    events, skipped = [], []
+
+    def instant(value):
+        """`value` as an instant `add_note` takes, or None, said in `skipped`: a time with no zone is not one."""
+        try:
+            _moment(value)
+            return stamp(value)
+        except SdDbError:
+            skipped.append(value)
+            return None
+
+    if times.get("created_at") and instant(times["created_at"]):
         events.append((times["created_at"], 0))
     for note in connection.execute("SELECT timestamp, resolved_at FROM note WHERE item = ? AND kind = 'followup' "
                                    "AND session = ?", (item, OBSERVER)):
-        events.append((note["timestamp"], 1))
-        if note["resolved_at"]:
-            events.append((note["resolved_at"], -1))
-    end = times.get("merged_at") or times.get("closed_at")
+        if instant(note["timestamp"]):
+            events.append((note["timestamp"], 1))
+            if note["resolved_at"] and instant(note["resolved_at"]):
+                events.append((note["resolved_at"], -1))
+    end = next((value for value in (times.get("merged_at"), times.get("closed_at")) if value and instant(value)), None)
+    merged = bool(end) and end == times.get("merged_at")
     history: list[tuple[str, str, str]] = []
     open_attention = 0
     for at, step in sorted(events, key=lambda pair: (_moment(pair[0]), -pair[1])):
@@ -879,9 +900,8 @@ def _history(connection, item, url) -> list[tuple[str, str, str]]:
         if not history or history[-1][1] != lane:
             history.append((at, lane, "open"))
     if end and history:
-        history.append((end, "merged" if times.get("merged_at") else "closed",
-                        "merged" if times.get("merged_at") else "closed"))
-    return history
+        history.append((end, "merged" if merged else "closed", "merged" if merged else "closed"))
+    return history, skipped
 
 
 def record_lane(connection, item) -> int | None:
@@ -907,9 +927,13 @@ def record_lane(connection, item) -> int | None:
                         bool(metadata.get("blocked_on") or metadata.get("depends_on")), None)
         notes, written = lane_notes(connection, item, url), None
         if not notes:
-            for at, old, state in _history(connection, item, url):
+            history, skipped = _history(connection, item, url)
+            for at, old, state in history:
                 written = add_note(connection, item, "comment", f"{LANE_NOTE}{old} · {state} · {url} (backfilled)",
                                    session=OBSERVER, timestamp=at)
+            if skipped:
+                add_note(connection, item, "comment", f"PR lane backfill skipped {len(skipped)} time(s) with no zone: "
+                         + ", ".join(repr(value) for value in skipped), session=OBSERVER)
             notes = lane_notes(connection, item, url)
         if notes and (notes[-1]["lane"], notes[-1]["state"]) == (lane, observation["state"]):
             return written
@@ -917,45 +941,65 @@ def record_lane(connection, item) -> int | None:
                         session=OBSERVER)
 
 
-def record_lanes(connection) -> list[int]:
-    """`record_lane` for every item with a `pull_url`, each in its own transaction: the refresh's pass (sd:7859)."""
-    written = []
-    for row, metadata in _registered(connection):
+def record_lanes(connection) -> tuple[list[int], list[str]]:
+    """`record_lane` for every item with a `pull_url`, each in its own transaction: the refresh's pass (sd:7859).
+
+    Returns the notes written and an error per item that failed; a failed item is said and skipped, so it stops no
+    other item's note.
+    """
+    written: list[int] = []
+    errors: list[str] = []
+    for row, metadata in _registered(connection, errors):
         if metadata.get("pull_url"):
-            note = record_lane(connection, row["id"])
+            try:
+                note = record_lane(connection, row["id"])
+            except SdDbError as error:
+                errors.append(f"item {row['id']}: {error}")
+                continue
             if note is not None:
                 written.append(note)
-    return written
+    return written, errors
 
 
-def link_shipped(connection) -> list[int]:
+def link_shipped(connection) -> tuple[list[int], list[str]]:
     """Link the pull request `sd-ship prepare` opened to its item as the item's `pull_url` (sd:7859).
 
     The receipt holds the item and its `pull_request` url; the operator's own pull request is observed already, so
     the link makes its lane the item's. A receipt that merged, an item that is done or names a pull request or
     issue, and a url another item holds (a bundle's second item) are left alone; so a rerun links nothing.
-    Each link is `configure`'s one transaction, which notes the lane too. Returns the items linked.
+    Each link is `configure`'s one transaction, which notes the lane too. Returns the items linked and an error per
+    receipt that could not be read or linked; a bad receipt is said and skipped, so it stops no other.
     """
     from . import ship
 
-    taken = {metadata["pull_url"] for _, metadata in _registered(connection) if metadata.get("pull_url")}
-    receipts = [ship.read(connection, key)[1] for key in _latest(connection, "checkpoint", "ship:")]
-    linked = []
-    for receipt in sorted(receipts, key=lambda value: str(value.get("item"))):
+    errors: list[str] = []
+    taken = {metadata["pull_url"] for _, metadata in _registered(connection, errors) if metadata.get("pull_url")}
+    receipts = []
+    for key in _latest(connection, "checkpoint", "ship:"):
+        try:
+            receipts.append((key, ship.read(connection, key)[1]))
+        except SdDbError as error:
+            errors.append(f"ship receipt {key}: {error}")
+    linked: list[int] = []
+    for key, receipt in sorted(receipts, key=lambda pair: str(pair[1].get("item"))):
         url, item = (receipt.get("pull_request") or {}).get("url"), receipt.get("item")
         if type(item) is not int or not isinstance(url, str) or receipt.get("phase") == "merged":
             continue
-        url = _url(url)
-        row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
-        if url in taken or row is None or row["kind"] != "task" or row["status"] == "done":
+        try:
+            url = _url(url)
+            row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
+            if url in taken or row is None or row["kind"] != "task" or row["status"] == "done":
+                continue
+            metadata = _metadata(dict(row)) or {}
+            if metadata.get("pull_url") or metadata.get("issue_url"):
+                continue
+            configure(connection, item, {"pull_url": url}, who=OBSERVER)
+        except SdDbError as error:
+            errors.append(f"ship receipt {key}: {error}")
             continue
-        metadata = _metadata(dict(row)) or {}
-        if metadata.get("pull_url") or metadata.get("issue_url"):
-            continue
-        configure(connection, item, {"pull_url": url}, who=OBSERVER)
         taken.add(url)
         linked.append(item)
-    return linked
+    return linked, errors
 
 
 def _seconds(start, end) -> int:
@@ -965,8 +1009,9 @@ def _seconds(start, end) -> int:
 def pr_waits(connection, *, now=None) -> list[dict]:
     """Each item's pull-request wait, from its lane notes (sd:7859), newest-noted first.
 
-    `on_you` and `on_reviewers` are seconds: the span after each note goes to its lane (`ON_YOU`, `ON_REVIEWERS`),
-    and the last one of an open pull request runs to `now`. `to_merge` is the first note to the first `merged`
+    `on_you` and `on_reviewers` are seconds: the span after each note of an open pull request goes to its lane
+    (`ON_YOU`, `ON_REVIEWERS`), and the last one runs to `now`; a span after the pull request closed or merged is no
+    wait, whatever attention its lane still shows. `to_merge` is the first note to the first `merged`
     one, or None. `open` is a pull request still open in a waiting lane, `on` who it waits on (`you`, `reviewers`)
     and `since` when that lane began.
     """
@@ -982,7 +1027,7 @@ def pr_waits(connection, *, now=None) -> list[dict]:
         spans = {"you": 0, "reviewers": 0}
         for note, after in zip(notes, [*notes[1:], None], strict=True):
             who = "you" if note["lane"] in ON_YOU else "reviewers" if note["lane"] in ON_REVIEWERS else None
-            if who and (after or note["state"] == "open"):
+            if who and note["state"] == "open":  # a closed or merged pull request waits on no one
                 spans[who] += _seconds(note["at"], after["at"] if after else end)
         last = notes[-1]
         merged = next((note for note in notes if note["lane"] == "merged" or note["state"] == "merged"), None)

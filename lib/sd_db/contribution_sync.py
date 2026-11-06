@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from . import contribution_github as github
 from .database import transaction
+from .errors import SdDbError
 from .workflow import WorkflowError
 from .writes import record_state, resolve_state
 
@@ -188,12 +189,12 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
 
     # sd:7859: each registered pull request's lane note, and the backfill of one never noted, even a merged one the
     # queue no longer observes. A failure is the run's error, never a quiet pass. The pull requests `sd-ship prepare`
-    # opened are linked to their items first, so their lanes are noted in the same pass.
+    # opened are linked to their items first, so their lanes are noted in the same pass. A bad receipt or item is said
+    # and skipped by its pass; a pass that fails as a whole, a store error too, is said once.
     try:
-        core.link_shipped(connection)
-        core.record_lanes(connection)
-        lane_errors = []
-    except WorkflowError as error:
+        lane_errors = [f"pull-request lane: {error}" for error in core.link_shipped(connection)[1]]
+        lane_errors += [f"pull-request lane: {error}" for error in core.record_lanes(connection)[1]]
+    except SdDbError as error:
         lane_errors = [f"pull-request lane notes were not written: {error}"]
     known = {row["key"]: row for row in planned["pending"]}
     invalid = any(row.get("kind") == "pull" and "author" in row.get("why", [])

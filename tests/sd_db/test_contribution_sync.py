@@ -727,10 +727,21 @@ class LaneNotePass(SyncCase):
         state["observation"] = {"state": "open", "observed_at": AT}
         with transaction(self.db):
             core._save(self.db, state)
+            # Review of sd:7859: one corrupt receipt is reported; it stops neither the good one nor the lane pass.
+            self.db.execute("INSERT INTO state(kind,key,timestamp,body) VALUES ('checkpoint','ship:bad',?,'{}')", (AT,))
         result = adapter.refresh(self.db, {"pending": [], "revision": None, "snapshots": {}}, [],
                                  client=self.api.client(), observed_at=self.now.isoformat())
-        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["errors"], ["pull-request lane: ship receipt ship:bad: unreadable ship receipt: "
+                                            "unsupported receipt protocol"])
         self.assertEqual([(n["lane"], n["url"]) for n in core.lane_notes(self.db, item)], [("awaiting_them", URL)])
+
+    def test_a_store_error_in_the_lane_pass_is_the_runs_error_not_a_crash(self):
+        from sd_db.errors import SdDbError
+
+        with patch.object(core, "record_lanes", side_effect=SdDbError("'2026-09-10T00:00:00' has no zone")):
+            result = adapter.refresh(self.db, {"pending": [], "revision": None, "snapshots": {}}, [],
+                                     client=self.api.client(), observed_at=self.now.isoformat())
+        self.assertEqual(result["errors"], ["pull-request lane notes were not written: '2026-09-10T00:00:00' has no zone"])
 
     def test_a_lane_pass_that_fails_is_the_runs_error(self):
         with patch.object(core, "record_lanes", side_effect=core.WorkflowError("item 7 has malformed contribution metadata")):

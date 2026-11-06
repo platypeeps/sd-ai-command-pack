@@ -1276,7 +1276,7 @@ class LaneNoteTests(ContributionCase):
         body = self.db.execute("SELECT kind, session, body FROM note WHERE id = ?",
                                (c.lane_notes(self.db, item)[0]["id"],)).fetchone()
         self.assertEqual(tuple(body), ("comment", "contribution-observer", f"PR lane: awaiting_them · open · {URL}"))
-        self.assertEqual(c.record_lanes(self.db), [], "a refresh pass after it writes nothing either")
+        self.assertEqual(c.record_lanes(self.db), ([], []), "a refresh pass after it writes nothing either")
 
     def test_a_maintainer_comment_is_on_you_and_acknowledging_it_is_on_reviewers_again(self):
         item = self.item()
@@ -1319,10 +1319,10 @@ class LaneNoteTests(ContributionCase):
         self.shipped(item)
         self.shipped(bundled)
         self.shipped(merged, phase="merged", url="https://github.com/upstream/project/pull/13")
-        self.assertEqual(c.link_shipped(self.db), [item], "one item per pull request; a merged receipt is history")
+        self.assertEqual(c.link_shipped(self.db), ([item], []), "one item per pull request; a merged receipt is history")
         self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": URL})
         self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
-        self.assertEqual(c.link_shipped(self.db), [], "a rerun links nothing")
+        self.assertEqual(c.link_shipped(self.db), ([], []), "a rerun links nothing")
         self.assertIsNone(c._metadata(item_state(self.db, bundled)["item"]))
 
     def test_an_item_that_names_a_pull_request_or_is_done_keeps_what_it_has(self):
@@ -1331,7 +1331,7 @@ class LaneNoteTests(ContributionCase):
         transition(self.db, done, "done", who="operator")
         self.shipped(named, url="https://github.com/upstream/project/pull/14")
         self.shipped(done, url="https://github.com/upstream/project/pull/15")
-        self.assertEqual(c.link_shipped(self.db), [])
+        self.assertEqual(c.link_shipped(self.db), ([], []))
         self.assertEqual((c._metadata(item_state(self.db, named)["item"]) or {}).get("pull_url"), URL)
 
     def history(self, item):
@@ -1390,6 +1390,83 @@ class LaneNoteTests(ContributionCase):
         self.assertEqual({k: wait[k] for k in ("item", "open", "on", "since", "waited", "on_you", "on_reviewers", "to_merge")},
                          {"item": item, "open": True, "on": "reviewers", "since": T2, "waited": 180, "on_you": 60,
                           "on_reviewers": 240, "to_merge": None})
+
+    def notes(self, item, *rows):
+        for at, lane, state in rows:
+            add_note(self.db, item, "comment", f"PR lane: {lane} · {state} · {URL}", session="contribution-observer",
+                     timestamp=at)
+
+    def test_a_close_then_a_later_acknowledgement_adds_no_wait(self):
+        # Review of sd:7859: a maintainer closes without merging (awaiting_you, closed); acknowledging it later is on
+        # reviewers again. The closed span is no wait.
+        item = self.item()
+        self.notes(item, (T0, "awaiting_them", "open"), (T1, "awaiting_you", "closed"), (T2, "awaiting_them", "closed"))
+        wait = c.pr_waits(self.db, now=T3)[0]
+        self.assertEqual((wait["on_you"], wait["on_reviewers"], wait["open"]), (0, 60, False))
+
+    def test_attention_after_a_merge_adds_no_wait(self):
+        item = self.item()
+        self.notes(item, (T0, "awaiting_them", "open"), (T1, "merged", "merged"), (T2, "awaiting_you", "merged"),
+                   (T3, "merged", "merged"))
+        wait = c.pr_waits(self.db, now="2026-09-10T00:05:00+00:00")[0]
+        self.assertEqual((wait["on_you"], wait["on_reviewers"], wait["to_merge"]), (0, 60, 60))
+
+    def test_a_corrupt_receipt_is_reported_and_the_good_one_is_still_linked(self):
+        self.observe()
+        item = self.task()
+        self.db.execute("INSERT INTO state(kind,key,timestamp,body) VALUES ('checkpoint','ship:bad',?, 'not json')", (T0,))
+        self.db.commit()
+        self.shipped(item)
+        odd = self.task("Odd url")
+        self.shipped(odd, url="https://example.test/pull/1")
+        linked, errors = c.link_shipped(self.db)
+        self.assertEqual(linked, [item])
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("ship receipt ship:bad: unreadable ship receipt", errors[0])
+        self.assertIn("pull_url must be a canonical GitHub pull-request URL", errors[1])
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
+
+    def test_an_item_with_malformed_metadata_is_reported_and_stops_neither_pass(self):
+        broken, item = self.task("Broken"), self.item()
+        self.observe()
+        self.db.execute("DELETE FROM note WHERE body LIKE 'PR lane: %'")
+        set_item_fields(self.db, broken, fields={"contribution": "not an object"})
+        self.db.commit()
+        written, errors = c.record_lanes(self.db)
+        self.assertEqual((len(written), errors), (1, [f"item {broken}: item {broken} has malformed contribution metadata"]))
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
+        self.assertEqual(c.link_shipped(self.db)[1], errors)
+
+    def test_one_item_that_fails_its_lane_note_is_reported_and_the_rest_are_noted(self):
+        first = self.item()
+        second = c.capture(self.db, title="Other", changes={"pull_url": DEPENDENCY}, who="operator")["item"]["id"]
+        self.observe()
+        c.observe_pull(self.db, DEPENDENCY, self.observation(repo="upstream/library"),
+                       expected_revision=c.snapshot(self.db, "github:" + DEPENDENCY)["revision"])
+        self.db.execute("DELETE FROM note WHERE body LIKE 'PR lane: %'")
+        self.db.commit()
+        real = c.record_lane
+
+        def first_fails(connection, item):
+            if item == first:
+                raise c.WorkflowError("contribution checkpoint is malformed")
+            return real(connection, item)
+        with mock.patch.object(c, "record_lane", side_effect=first_fails):
+            _, errors = c.record_lanes(self.db)
+        self.assertEqual(errors, [f"item {first}: contribution checkpoint is malformed"])
+        self.assertEqual((self.lanes(first), self.lanes(second)), ([], [("awaiting_them", "open", False)]))
+
+    def test_a_backfill_event_with_no_zone_is_skipped_and_said_on_the_item(self):
+        item = self.item()
+        self.history(item)
+        self.db.execute("UPDATE shadow SET created_at = '2026-09-10T00:00:00' WHERE url = ?", (URL,))
+        self.db.commit()
+        self.observe(observed_at=T3, state="merged")
+        self.assertEqual(self.lanes(item), [("awaiting_you", "open", True), ("awaiting_them", "open", True),
+                                            ("merged", "merged", True)])
+        skipped = self.db.execute("SELECT body FROM note WHERE item = ? AND body LIKE 'PR lane backfill skipped%'",
+                                  (item,)).fetchone()
+        self.assertIn("'2026-09-10T00:00:00'", skipped["body"])
 
     def test_without_a_shadow_row_the_wait_starts_at_the_first_note(self):
         item = self.item()
