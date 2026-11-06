@@ -45,6 +45,10 @@ from pathlib import Path
 from .realm_sweep import WITH_TOKEN, alive, claude_binary, write_record
 from .sweep import DASHBOARD, _held, _since, spawn
 
+#: The login run's shell: env.sh's PATH and the rest, but no CLAUDE_CODE_OAUTH_TOKEN. The setup token's
+#: user:inference scope disables Claude in Chrome, so claude signs in from the keychain (pack sd:7750).
+NO_TOKEN = WITH_TOKEN.replace('exec "$@"', 'unset CLAUDE_CODE_OAUTH_TOKEN; exec "$@"')
+
 __all__ = ["LOGIN_SECONDS", "SOURCES", "allowed_tools", "portal_url", "request", "run", "start", "state_dir",
            "status"]
 
@@ -274,7 +278,7 @@ def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiti
     """Step 2: the login wait, judged by its reply's last RESULT line; `on_waiting()` once it prints WAITING."""
     argv = claude_argv(claude_binary(), source, url)
     try:
-        proc = subprocess.Popen([*alarmed(LOGIN_SECONDS + GRACE), "sh", "-c", WITH_TOKEN, "claude-run", *argv], cwd=cwd,
+        proc = subprocess.Popen([*alarmed(LOGIN_SECONDS + GRACE), "sh", "-c", NO_TOKEN, "claude-run", *argv], cwd=cwd,
                                 env={**os.environ, "SD_HANDOFF_RESTORE": "0"}, text=True, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True, pass_fds=keep)
     except OSError as error:
