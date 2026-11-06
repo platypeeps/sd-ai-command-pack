@@ -1158,6 +1158,22 @@ class Unmanaged(Case):
         self.assertEqual(build.run(self.db, self.bundle["id"])["review_round"], 1)
         self.assertEqual(len(self.pulls()), 1)
 
+    def test_a_check_that_edits_a_tracked_file_is_a_failure_not_a_pass(self):
+        """Lane review of b64873f13: a check that rewrites a tracked file and exits 0 tested a tree the head does
+        not hold; it goes back to the builder naming the path, and nothing is published."""
+        edit = [sys.executable, "-c", "open('README.md', 'a').write('regenerated\\n')"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass", "fix", "fix", "fix"], sd_review=["clean"] * 4)
+        ended = self.supervisor(checks=lambda work: [edit]).run()
+        self.assertNotEqual(ended.get("step"), "enqueued", ended)
+        self.assertEqual(self.pulls(), [])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+        fix = self.calls("claude")[1]["argv"]
+        self.assertIn("README.md", fix[fix.index("-p") + 1])
+        notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", (self.items[0],))]
+        self.assertFalse([body for body in notes if "passed at" in body], notes)
+
     def test_a_check_that_ignores_sigterm_ends_with_the_run(self):
         """Review of 8fa8c7cca: `sd gate run` puts the check in a group of its own; a timeout ends that group too."""
         pid_file = self.root / "check.pid"

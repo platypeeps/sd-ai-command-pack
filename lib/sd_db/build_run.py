@@ -672,6 +672,13 @@ class Supervisor:
                 tail = "".join(path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
                                for path in (self.out("checks"), self.out("checks.err")))
                 return [{"path": said, "line": "-", "summary": f"exit {code}: {tail.strip()[-1500:]}"}]
+            # A check that rewrote a tracked file tested a tree `head` does not hold; an unread status raises Unread.
+            changed = _read([*self.tools.git, "-C", str(self.work), "-c", "core.quotePath=false", "status",
+                             "--porcelain", "--untracked-files=no"], env=self.env)
+            if changed.strip():
+                paths = ", ".join(line[3:] for line in changed.splitlines() if line.strip())
+                return [{"path": said, "line": "-", "summary": f"exit 0, but it changed tracked files: {paths}; "
+                         "commit or undo them, so the checked tree is the pushed head"}]
             passed.append(f"`{said}`")
         add_note(self.db, self.lead, "comment", f"Build run {self.ident}: {', '.join(passed)} passed at {head[:12]}")
         return []

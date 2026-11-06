@@ -32,7 +32,10 @@ when the run's repository reads unmanaged.
   them (`sd_lib.detect_entrypoints`: the local block, Makefile, Taskfile,
   package.json, Cargo.toml, pyproject.toml), each through `sd gate run`
   so it queues for a machine gate slot. A failure goes back to the
-  builder as a blocker, as `gate_failed` does. No entrypoint found is
+  builder as a blocker, as `gate_failed` does. So does a check that
+  exits 0 but changes a tracked file (`git status --porcelain
+  --untracked-files=no` not empty): it tested a tree the head does not
+  hold, so publish would push an untested commit. No entrypoint found is
   noted on the lead item and is no failure.
 - `enqueuing`: the same compare-and-set, delivery read, title check and
   `sd-docs-lint --pr-body`. Then, instead of `sd-ship lane enqueue`:
