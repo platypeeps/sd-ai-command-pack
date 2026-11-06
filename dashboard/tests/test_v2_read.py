@@ -32,7 +32,8 @@ WIRING = re.search(r"^  // read:start\n(.*?)^  // read:end$", SHELL_JS, re.S | r
 #: The reader in a page stand-in: read.js, then shell.js's own wiring lines, run against the stand-in's shell.
 READ_SHELL = READ_JS + """
 { const commands = window.shell.commands, state = (...a) => window.shell.state(...a),
-    rowParam = () => (window.shell.row ? window.shell.row() : null);
+    rowParam = () => (window.shell.row ? window.shell.row() : null),
+    afterBulk = (...a) => (window.shell.afterBulk ? window.shell.afterBulk(...a) : a[1]());
 """ + (WIRING.group(1) if WIRING else "") + """
   window.shell.read = read; }
 """

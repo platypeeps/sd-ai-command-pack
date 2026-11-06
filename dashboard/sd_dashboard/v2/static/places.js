@@ -174,7 +174,9 @@
   // each is the other's Undo. Registered before the Briefs page's commands, so Seen, not Read, is an open row's act.
   function briefs(view) {
     const B = window.briefDetails; if (!B) return null;
-    const mark = (o, until) => window.shell.post('/api/snooze', { page: 'today', row: o.mark, until, seen: o.seen }).then(() => window.places.reread(view));
+    // pack sd:7852: a bulk Seen reads the view again once, after the group (shell.afterBulk).
+    const mark = (o, until) => window.shell.post('/api/snooze', { page: 'today', row: o.mark, until, seen: o.seen })
+      .then(() => window.shell.afterBulk(`places:${view}`, () => window.places.reread(view)));
     const cli = () => 'no sd verb: the dashboard writes the Today snooze (POST /api/snooze)';
     window.shell.commands.register(
       { id: 'brief.seen', on: 'brief', label: 'Seen', does: 'Marks the brief seen here and on Today until it changes; Undo clears it.', icon: 'check', risk: 'undo', bulk: true,

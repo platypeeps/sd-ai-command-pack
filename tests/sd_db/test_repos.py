@@ -739,7 +739,7 @@ class TheChannelsWriter(RepoCase):
         self.assertEqual(list(found), [path])
         self.assertEqual([(row["tracker"], row["number"], row["reason"]) for row in found[path]],
                          [("jira", 8, "filed"), ("github", 2, "filed"), ("github", 1, "assigned")])
-        self.assertEqual(set(found[path][0]), {"tracker", "url", "number", "title", "state", "reason", "last_seen"})
+        self.assertEqual(set(found[path][0]), {"tracker", "repo", "url", "number", "title", "state", "reason", "last_seen"})
 
     def test_mail_aliases_read_the_labels_and_ride_along_with_every_other_set(self):
         """sd:4191: `email` is inbound like `feed`, so a set of the outbound
