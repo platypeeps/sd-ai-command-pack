@@ -378,14 +378,17 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   // The PNGs the lane drew of the row's changed dashboard pages (sd:6728), or why it drew none.
   const shots = r => r.shots ? html` · screenshots ${r.shots.map((f, i) => html`${i ? ', ' : ''}<a href="${f.url}" target="_blank" rel="noopener">${f.name}</a>`)}`
     : r.shots_warning ? html` · screenshots not drawn: ${r.shots_warning}` : '';
-  function entryRow(l, r) {
-    const [s, type, facts] = ENTRY[r.state](r), last = l.rows.filter(x => x.state === 'next').length, e = { ...r, lane: l.path };
+  // `p`, a prepared entry's pull-request wait (pack sd:7859): in a manual-merge repo the lane stops prepared and the PR
+  // waits on a person's review, so the row leads with that wait and keeps its Retry and Approve.
+  function entryRow(l, r, p) {
+    const [s0, type, facts] = ENTRY[r.state](r), last = l.rows.filter(x => x.state === 'next').length, e = { ...r, lane: l.path };
+    const s = p ? (p.on === 'you' ? 'warning' : 'queued') : s0;
     const ctl = r.state === 'next' ? controls(e, last) : r.state === 'blocked' ? again(e, l.runner_merge === 'manual') : r.state === 'cancelled' ? back(e) : r.state === 'merging' ? free(e) : '';
     const id = r.state === 'building' ? null : entryId(l, r);
-    return [type, s, html`<tr class="child" data-type="${type}"${id ? html` data-id="${id}" aria-selected="${String(row() === id)}"` : ''}${r.held ? html` data-held=""` : ''}>${marker(s, type)}
+    return [type, s, html`<tr class="child" data-type="${type}"${id ? html` data-id="${id}" aria-selected="${String(row() === id)}"` : ''}${r.held ? html` data-held=""` : ''}${p ? html` data-pr="${String(p.item)}"` : ''}>${marker(s, type)}
       <td class="what">${r.state === 'building' ? html`<code>${r.builder}</code>` : html`<a href="${shell.itemHref(r.item)}">#${r.item} ${r.title}</a>`}</td>
-      <td class="detail">${facts}${shots(r)}</td><td class="num">${r.state === 'next' ? `#${r.position}` : ''}</td>
-      <td class="act">${ctl}${id ? shell.commands.rowActions(id) : ''}</td></tr>`];
+      <td class="detail">${p ? html`${prFacts(p)} · ` : ''}${facts}${shots(r)}</td><td class="num">${r.state === 'next' ? `#${r.position}` : p ? dur(p.waited) : ''}</td>
+      <td class="act">${ctl}${p ? prWaitLink(p) : ''}${id ? shell.commands.rowActions(id) : ''}</td></tr>`];
   }
   // A build run's state (pack sd:6095): working; waiting on me (held, or an open question asks); stalled (the log has not
   // grown for 15 min); lost (no supervisor beat for 3 min, which the dispatcher's next reap settles).
@@ -430,6 +433,15 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       <td class="detail"><ul class="sessions">${rows.map(r => html`<li>${r.verified ? '' : html`<span class="g-unknown" title="not confirmed">${GLYPH.unknown} </span>`}${r.session}<span class="via">${r.via}</span></li>`)}</ul></td>
       <td class="num">${top.elapsed || 'not known'}</td><td class="act">${shell.commands.rowActions(id)}</td></tr>`];
   }
+  // pack sd:7859: an item whose pull request waits on review (/api/queue's `prs`) is blocked by its PR, not working: on
+  // you (changes requested, failing checks, a comment to answer) needs you; on reviewers waits. It counts in the blocked box.
+  const prFacts = p => html`<b>blocked: PR</b> · on ${p.on} · waited ${dur(p.waited)} since ${at(p.since)}`;
+  const prWaitLink = p => html`<div class="ctl" role="group" aria-label="Pull request of sd:${String(p.item)}"><a class="btn quiet sm" href="${p.url}" target="_blank" rel="noopener noreferrer" aria-label="Open the pull request of sd:${p.item} on GitHub">Open PR</a></div>`;
+  const prRow = p => { const s = p.on === 'you' ? 'warning' : 'queued';
+    return ['blocked', s, html`<tr class="child" data-type="blocked" data-pr="${String(p.item)}">${marker(s, 'blocked')}
+    <td class="what"><a href="${shell.itemHref(p.item)}">#${p.item} ${p.title}</a></td>
+    <td class="detail">${prFacts(p)}</td><td class="num">${dur(p.waited)}</td>
+    <td class="act">${prWaitLink(p)}</td></tr>`]; };
   // A suggested row (pack sd:7271) is a task: a click shows the Tasks page's Details, and its act is Build on a ready one,
   // else its next status, as on Tasks. Its detail says why it is suggested (pack sd:7314): ready, planned for its due
   // date, or unscheduled, with its priority; a row that is not ready shows its status too.
@@ -470,16 +482,23 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       if (!G.has(k)) G.set(k, { key: k, host: '', rows: [] });
       G.get(k).rows.push({ type, s, tr });
     };
-    const live = new Map();
-    ((ACTIVE || {}).rows || []).forEach(r => { if (!live.has(r.item)) live.set(r.item, []); live.get(r.item).push(r); });
+    const live = new Map(), prs = ((QV.lanes || {}).prs || {}).rows || [], waits = new Set(prs.map(p => Number(p.item)));
+    // pack sd:7859: an item waiting on its PR is its PR row alone: no live-session, suggested or open row beside it.
+    ((ACTIVE || {}).rows || []).filter(r => !waits.has(Number(r.item))).forEach(r => { if (!live.has(r.item)) live.set(r.item, []); live.get(r.item).push(r); });
     live.forEach((rows, item) => add(rows[0].repo, liveRow(item, rows)));
     const B = QV.built && !QV.built.error ? QV.built : { runs: [], recent: [] }, held = new Set();
     B.runs.forEach(r => { r.items.forEach(m => held.add(m.assignment)); add(r.repo, runRow(r)); });
     ((QV.runner || {}).live || []).filter(a => !held.has(a.id)).forEach(a => add(a.repo, asgRow(a)));
-    (QV.lanes ? QV.lanes.lanes : []).forEach(l => { l.rows.forEach(r => add(l.path, entryRow(l, r)));
+    // A prepared entry and its item's PR wait are one row (pack sd:7859): the lane's, leading with the wait.
+    const waitOf = new Map(prs.map(p => [Number(p.item), p])), drawn = new Set();
+    (QV.lanes ? QV.lanes.lanes : []).forEach(l => { l.rows.forEach(r => {
+      const p = r.state === 'blocked' && r.status === 'prepared' ? waitOf.get(Number(r.item)) : undefined;
+      if (p) drawn.add(p);
+      add(l.path, entryRow(l, r, p)); });
       if (G.has(repoKey(l.path))) G.get(repoKey(l.path)).host = l.host; });
-    SUGG.forEach(r => add(r.repo, suggestRow(r)));
-    OPENI.forEach(t => add(t.repo_path, openRow(t)));
+    prs.filter(p => !drawn.has(p)).forEach(p => add(p.repo, prRow(p)));
+    SUGG.forEach(r => { if (!waits.has(Number(r.id))) add(r.repo, suggestRow(r)); });
+    OPENI.forEach(t => { if (!waits.has(Number(t.id))) add(t.repo_path, openRow(t)); });
     B.recent.forEach(r => add(r.repo, endedRun(r)));
     const RANK = { warning: 0, caution: 1, unknown: 2, ok: 3, queued: 4 };
     // pack sd:7679: the busiest repo first, box by box in the boxes' order, each most first; then the name. Unassociated last.
@@ -502,7 +521,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     // pack sd:7470: merging is the leftmost box.
     const { working: w, merging: m, next: n, blocked: b, suggested: s } = g.n;
     // Each box says its count and what it counts, in its title (pack sd:7383); the label above says all five at once.
-    return html`<td class="detail pipe" aria-label="${m} merging, ${w} working, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane until someone acts')}${pip(s, ' on', `suggested: up to ${NEXT} ready or planned tasks to do next`)}</td>`;
+    return html`<td class="detail pipe" aria-label="${m} merging, ${w} working, ${n} next, ${b} blocked, ${s} suggested">${pip(m, ' on', 'merging: claimed by the lane runner, being merged')}${pip(w, ' on', 'working: live sessions, build runs and lane gates now running')}${pip(n, ' on', 'next: queued in the lane, not started')}${pip(b, ' warn', 'blocked: stopped in the lane, or waiting on a pull request, until someone acts')}${pip(s, ' on', `suggested: up to ${NEXT} ready or planned tasks to do next`)}</td>`;
   }
   function queueView() {
     const unread = [];
@@ -510,6 +529,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     if (!DOC) { put($('queue'), html`<tr class="empty"><td colspan="5">The queue could not be read: ${failed}. Read again tries again.</td></tr>`); return; }
     if (!QV.lanes) unread.push(`Lanes not read: ${QV.lanesErr || 'no answer yet'}`);
     else QV.lanes.problems.forEach(p => unread.push(`${p.repo}: lane not read. ${p.error}`));
+    if (QV.lanes && QV.lanes.prs && QV.lanes.prs.error) unread.push(QV.lanes.prs.error);
     if (!QV.built || QV.built.error) unread.push(`Build runs not read: ${QV.built ? QV.built.error : QV.builtErr || 'no answer yet'}`);
     if (!QV.runner) unread.push(`Runner assignments not read: ${QV.runnerErr || 'no answer yet'}`);
     Object.entries((ACTIVE || {}).sources || {}).filter(([, why]) => why).forEach(([k, why]) => unread.push(`${SOURCE[k] || k} not read: ${why}`));

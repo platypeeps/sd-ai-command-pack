@@ -21,6 +21,8 @@ Progress areas made:
   and the slowest entry, enqueue to end, read from each entry's history rows by the pack's `sd_lane.lane_times`. A
   median wait past the 30 min target (pack sd:7412) is `over`: the lane runner files the parallel-lanes question
   then. The range leaves it at 7 days, as it leaves Age.
+- `prs`: pull-request waits from each item's PR lane notes (`_prs`, pack sd:7859): the time on you and on reviewers,
+  the median first PR to merge, and the slowest items. All time, whatever the range.
 - `controls`: the provider registry as `provider_controls.snapshot` reads it, with its `revision`, and per bill the
   one cap write the route takes (`_writes`, sd:3387).
 - `range`: the page's range, `7d` or `6mo` (`RANGES`, pack sd:7208). With `6mo`, `ranged` holds the parts the range
@@ -456,6 +458,28 @@ def times(connection, remote: str | None, now: float) -> dict:
         return {"error": f"the lane times were not read: {type(error).__name__}: {error}"}
 
 
+#: How many of the slowest pull-request waits the PR waits table lists (pack sd:7859).
+SLOWEST = 5
+
+
+def _prs(connection, now) -> dict:
+    """Pull-request waits (pack sd:7859): the totals on you and on reviewers, first PR to merge, and the slowest items.
+
+    Read from each item's PR lane notes (`contributions.pr_waits`), all time: an open one counts to `now`. `to_merge`
+    is the median of the merged ones, or None when none merged.
+    """
+    from sd_db import contributions
+
+    waits = contributions.pr_waits(connection, now=now)
+    merged = [wait["to_merge"] for wait in waits if wait["to_merge"] is not None]
+    keys = ("item", "title", "url", "open", "on", "on_you", "on_reviewers", "to_merge")
+    slowest = sorted(waits, key=lambda wait: (-(wait["on_you"] + wait["on_reviewers"]), wait["item"]))[:SLOWEST]
+    return {"error": "", "items": len(waits), "open": sum(1 for wait in waits if wait["open"]),
+            "on_you": sum(wait["on_you"] for wait in waits), "on_reviewers": sum(wait["on_reviewers"] for wait in waits),
+            "merged": len(merged), "to_merge": statistics.median(merged) if merged else None,
+            "slowest": [{key: wait[key] for key in keys} for wait in slowest]}
+
+
 def _lanes(connection, now) -> dict:
     """Each managed repository's lane times (pack sd:7233), by folder name: the history is in the database, so a lane
     needs no checkout here."""
@@ -526,6 +550,7 @@ def document(connection, *, now: str, kept=None, span: str = "7d", month: str | 
         "controls": _guard(lambda: _controls(connection)),
         "ci": _guard(lambda: _ci(connection, now)),
         "lanes": _guard(lambda: _lanes(connection, now)),
+        "prs": _guard(lambda: _prs(connection, now)),
         "unread": list(UNREAD),
         **ranged,
     }

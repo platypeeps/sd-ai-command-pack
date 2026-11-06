@@ -799,3 +799,71 @@ class IssueSync(SyncCase):
         with self.assertRaisesRegex(ValueError, "unpriced dependency kind"):
             adapter._cost({"key": "item:1", "depends_on": [{"kind": "merge", "url": URL}, {"kind": "closed", "url": URL}]})
         self.assertEqual(set(adapter.DEPENDENCY_REQUESTS), {"item", "merge", "release", "issue"})
+
+
+class LaneNotePass(SyncCase):
+    """sd:7859: each sync notes every registered pull request's lane, so a merged one the queue left is noted too.
+
+    The pass is a side observation (review round 2): what it cannot do is said in `lanes`, never a failed sync or a
+    held watermark, as the protection collector's is.
+    """
+
+    def observed(self, state):
+        snapshot = core.snapshot(self.db, "github:" + URL)
+        snapshot["observation"] = {"state": state, "observed_at": AT}
+        with transaction(self.db):
+            core._save(self.db, snapshot)
+
+    def shipped(self):
+        from sd_db import ship
+        from sd_db.workflow import capture_task
+
+        item = capture_task(self.db, title="Shipped", priority=3, who="operator")["item"]["id"]
+        ship.save(self.db, ship.receipt_key("example/project", "feat/x", item), 0,
+                  {"item": item, "repository": "example/project", "branch": "feat/x", "phase": "ready_to_send",
+                   "pull_request": {"url": URL}})
+        return item
+
+    def bad_receipts(self):
+        with transaction(self.db):
+            self.db.execute("INSERT INTO state(kind,key,timestamp,body) VALUES ('checkpoint','ship:bad',?,'{}')", (AT,))
+            self.db.execute("INSERT INTO state(kind,key,timestamp,body) VALUES ('checkpoint','ship:odd',?,?)",
+                            (AT, json.dumps({"protocol": 1, "item": 1, "pull_request": "not an object"})))
+
+    def test_the_pass_notes_a_registered_pull_requests_lane(self):
+        item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
+        self.observed("merged")
+        self.assertEqual(core.lane_notes(self.db, item), [])
+        self.assertEqual(adapter.note_lanes(self.db), [])
+        self.assertEqual([(n["lane"], n["state"]) for n in core.lane_notes(self.db, item)], [("merged", "merged")])
+
+    def test_bad_receipts_are_said_and_the_good_one_is_linked_and_noted(self):
+        item = self.shipped()
+        self.observed("open")
+        self.bad_receipts()
+        self.assertEqual(adapter.note_lanes(self.db), [
+            "ship receipt ship:bad: unreadable ship receipt: unsupported receipt protocol",
+            "ship receipt ship:odd: pull_request is not an object"])
+        self.assertEqual([(n["lane"], n["url"]) for n in core.lane_notes(self.db, item)], [("awaiting_them", URL)])
+
+    def test_a_pass_that_raises_anything_is_said_and_the_other_pass_still_runs(self):
+        item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
+        self.observed("open")
+        with patch.object(core, "link_shipped", side_effect=AttributeError("'str' object has no attribute 'get'")):
+            self.assertEqual(adapter.note_lanes(self.db),
+                             ["pull-request links were not read: AttributeError: 'str' object has no attribute 'get'"])
+        self.assertEqual(len(core.lane_notes(self.db, item)), 1)
+        from sd_db.errors import SdDbError
+        with patch.object(core, "record_lanes", side_effect=SdDbError("'2026-09-10T00:00:00' has no zone")):
+            self.assertEqual(adapter.note_lanes(self.db),
+                             ["pull-request lane notes were not written: SdDbError: '2026-09-10T00:00:00' has no zone"])
+
+    def test_a_bad_receipt_fails_no_sync_and_holds_no_watermark(self):
+        self.run_sync([URL])
+        self.bad_receipts()
+        result = self.run_sync()
+        self.assertTrue(result.ok, result.reason)
+        self.assertTrue(result.watermark_moved)
+        self.assertTrue(self.tracker_heartbeat()["ok"])
+        self.assertEqual(len(result.lanes), 2)
+        self.assertIn("shadow sync: pull-request lanes: " + "; ".join(result.lanes), result.report())

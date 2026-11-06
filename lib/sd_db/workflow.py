@@ -93,9 +93,9 @@ DETAIL_KINDS = ("task", "followup", "work")
 #: by a reader that also keys on the row's kind. A row carrying one is a
 #: produced row whatever its kind says, so its kind stays put:
 #: `contribution` is written by `contributions.configure` and read by
-#: `contributions._registered`, which takes only `kind='task'` rows -- a move
-#: away and back would skip its one-per-pull-request and dependency-cycle
-#: checks; `skill_review` is written by `skills_catalog` onto the `task` rows
+#: `contributions._registered`, which takes only `contributions.KINDS` rows
+#: -- a move away and back would skip its one-per-pull-request and
+#: dependency-cycle checks; `skill_review` is written by `skills_catalog` onto the `task` rows
 #: that promote, demote or apply proposals to a skill, which the runner and
 #: `delivery_candidates` read by kind.
 PRODUCED_FIELDS = ("contribution", "skill_review")

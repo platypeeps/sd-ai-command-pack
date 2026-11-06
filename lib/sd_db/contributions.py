@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import paths, shadow_sync
 from .database import transaction
+from .errors import SdDbError
 from .workflow import (
     StaleItem,
     WorkflowError,
@@ -27,7 +28,7 @@ from .workflow import (
     capture_task,
     item_state,
 )
-from .writes import add_note, now, record_state, resolve_note, set_item_fields
+from .writes import add_note, now, record_state, resolve_note, set_item_fields, stamp
 
 FIELDS = frozenset({"local_clone", "local_branch", "tested_commit", "pull_url", "evidence",
                     "blocked_on", "depends_on", "blocking_labels",
@@ -51,6 +52,18 @@ EVENTS = frozenset({"comment", "label_added", "label_removed", "converted_to_dra
 ISSUE_EVENTS = EVENTS - {"converted_to_draft", "ready_for_review"}
 # An issue observation carries none of these; one that does was read as a pull.
 PULL_ONLY = frozenset({"reviews", "ci", "ci_head", "ci_ids", "head", "base", "mergeable", "draft"})
+#: Who writes the attention followups and the lane notes.
+OBSERVER = "contribution-observer"
+#: A lane change of an item's pull request, kept as a `comment` note (sd:7859): checkpoints get pruned, notes stay.
+#: `PR lane: <lane> · <state> · <url>`, and ` (backfilled)` on one `_history` wrote at the time it happened.
+LANE_NOTE = "PR lane: "
+LANE_BODY = re.compile(r"PR lane: (\w+) · (\w+) · (\S+?)( \(backfilled\))?")
+#: The lanes whose time is the operator's (fixes and answers) and the reviewers'; `merged` and `closed` end a wait.
+ON_YOU = frozenset({"awaiting_you", "newly_unblocked"})
+ON_REVIEWERS = frozenset({"awaiting_them"})
+#: The item kinds a contribution may hang on: those `sd-ship --deliver` closes (its `DELIVERING_KINDS`), since a
+#: lane-opened pull request delivers a work, task or followup item and each one waits on it (sd:7859).
+KINDS = ("task", "work", "followup")
 
 
 def _digest(value) -> str:
@@ -125,11 +138,19 @@ def _metadata(row: dict) -> dict | None:
         raise WorkflowError(f"item {row.get('id')} has malformed contribution metadata") from None
 
 
-def _registered(connection) -> list[tuple[dict, dict]]:
+def _registered(connection, errors: list[str] | None = None) -> list[tuple[dict, dict]]:
+    """Each item of `KINDS` with contribution metadata. With `errors`, a malformed one is said there and skipped."""
     result = []
-    for raw in connection.execute("SELECT * FROM item WHERE kind='task' ORDER BY id"):
+    marks = ",".join("?" * len(KINDS))
+    for raw in connection.execute(f"SELECT * FROM item WHERE kind IN ({marks}) ORDER BY id", KINDS):
         row = dict(raw)
-        metadata = _metadata(row)
+        try:
+            metadata = _metadata(row)
+        except WorkflowError as error:
+            if errors is None:
+                raise
+            errors.append(f"item {row['id']}: {error}")
+            continue
         if metadata is not None:
             result.append((row, metadata))
     return result
@@ -339,8 +360,8 @@ def configure(connection, item, changes, *, who, expected_revision=None) -> dict
     who = _text(who, "who")
     with transaction(connection):
         current = _checked_state(connection, item, expected_revision)
-        if current["item"]["kind"] != "task":
-            raise WorkflowError("contributions use local task items")
+        if current["item"]["kind"] not in KINDS:
+            raise WorkflowError("contributions use local work, task or followup items")
         old = _metadata(current["item"]) or {}
         value = _configuration(connection, item, old, changes)
         if old != value:
@@ -364,6 +385,7 @@ def configure(connection, item, changes, *, who, expected_revision=None) -> dict
                 for prefix, name in OBSERVED.items():
                     if value.get(name):
                         _save(connection, snapshot(connection, prefix + value[name]))
+            _note_lane(connection, item)
         return item_state(connection, item)
 
 
@@ -518,7 +540,7 @@ def _publish_attention(connection, state, attention, item=None) -> None:
         notice = {"status": "pending", "event": event, "created_at": now()}
         if item is not None:
             notice["note_id"] = add_note(connection, item, "followup", event["reason"] +
-                                        ("\n" + event["url"] if event.get("url") else ""), session="contribution-observer")
+                                        ("\n" + event["url"] if event.get("url") else ""), session=OBSERVER)
         state["notifications"][event["id"]] = notice
 
 
@@ -584,6 +606,8 @@ def observe_pull(connection, url, observation, *, expected_revision) -> dict:
         _publish_attention(connection, state, attention, item)
         result = _save(connection, state)
         record_state(connection, "heartbeat", key="contribution-observe:" + state["key"], body={"ok": True})
+        if item is not None:
+            _note_lane(connection, item)
         return result
 
 
@@ -769,6 +793,7 @@ def observe_dependencies(connection, item, observations, *, observed_at, expecte
         _publish_attention(connection, state, attention, item)
         result = _save(connection, state)
         record_state(connection, "heartbeat", key="contribution-observe:" + state["key"], body={"ok": True})
+        _note_lane(connection, item)
         return result
 
 
@@ -800,6 +825,248 @@ def _freshness(heartbeats, sources) -> dict:
     return result
 
 
+def _lane(sources, observation, url, waiting, dismissed) -> tuple[str, bool]:
+    """The row's lane and whether it needs the operator: the one rule the projection and `record_lane` read."""
+    needs_you = any(s["attention"] for s in sources) or (not url and not waiting)
+    # An issue or a pull request closed without merge awaits no one; a later
+    # observation that reads `open` returns the row to live work. A dismissed
+    # row (sd:3432) is closed too, until new attention or a lifecycle change.
+    closed = observation.get("state") == "closed" or bool(dismissed)
+    lane = "awaiting_you" if needs_you else "merged" if observation.get("state") == "merged" \
+        else "closed" if closed else "awaiting_them"
+    if any(e["kind"] == "newly_unblocked" for s in sources for e in s["attention"]):
+        lane = "newly_unblocked"
+    return lane, needs_you
+
+
+def _shadow_times(connection, url) -> dict:
+    """The shadow's `created_at`, `merged_at` and `closed_at` of pull request `url`; `{}` when none was read."""
+    try:
+        row = connection.execute(
+            "SELECT created_at, merged_at, closed_at FROM shadow WHERE tracker = 'github' "
+            "AND lower(rtrim(url, '/')) = ? ORDER BY last_seen DESC, id DESC LIMIT 1", (url,)).fetchone()
+    except sqlite3.OperationalError as error:
+        if "no such column" not in str(error):
+            raise
+        return {}  # a store before migration 38 holds none of these
+    return dict(row) if row else {}
+
+
+def lane_notes(connection, item, url=None) -> list[dict]:
+    """The item's PR lane notes (sd:7859), oldest first: `{id, at, lane, state, url, backfilled}`; one url's alone with `url`."""
+    found = []
+    for row in connection.execute("SELECT id, timestamp, body FROM note WHERE item = ? AND kind = 'comment' "
+                                  "AND body LIKE ? ORDER BY timestamp, id", (item, LANE_NOTE + "%")):
+        match = LANE_BODY.fullmatch(row["body"])
+        if match and match[1] in LANES and (url is None or match[3] == url):
+            found.append({"id": row["id"], "at": row["timestamp"], "lane": match[1], "state": match[2],
+                          "url": match[3], "backfilled": bool(match[4])})
+    return found
+
+
+def _history(connection, item, url) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """What history still holds of the item's pull request before its first lane note: `(at, lane, state)`, oldest
+    first, and each time it skipped because it names no instant (a time with no zone).
+
+    The shadow's `created_at` opens it on reviewers; each `contribution-observer` followup on the item is on you from
+    its time to its `resolved_at`; the shadow's `merged_at`, else `closed_at`, ends it. A span the shadow never saw,
+    or attention that was never a followup, is not recoverable.
+    """
+    times = _shadow_times(connection, url)
+    events, skipped = [], []
+
+    def instant(value):
+        """`value` as an instant `add_note` takes, or None, said in `skipped`: a time with no zone is not one."""
+        try:
+            _moment(value)
+            return stamp(value)
+        except SdDbError:
+            skipped.append(value)
+            return None
+
+    if times.get("created_at") and instant(times["created_at"]):
+        events.append((times["created_at"], 0))
+    for note in connection.execute("SELECT timestamp, resolved_at FROM note WHERE item = ? AND kind = 'followup' "
+                                   "AND session = ?", (item, OBSERVER)):
+        if instant(note["timestamp"]):
+            events.append((note["timestamp"], 1))
+            if note["resolved_at"] and instant(note["resolved_at"]):
+                events.append((note["resolved_at"], -1))
+    end = next((value for value in (times.get("merged_at"), times.get("closed_at")) if value and instant(value)), None)
+    merged = bool(end) and end == times.get("merged_at")
+    history: list[tuple[str, str, str]] = []
+    open_attention = 0
+    for at, step in sorted(events, key=lambda pair: (_moment(pair[0]), -pair[1])):
+        if end and _moment(at) >= _moment(end):
+            break
+        open_attention = max(0, open_attention + step)
+        lane = "awaiting_you" if open_attention else "awaiting_them"
+        if not history or history[-1][1] != lane:
+            history.append((at, lane, "open"))
+    if end and history:
+        history.append((end, "merged" if merged else "closed", "merged" if merged else "closed"))
+    return history, skipped
+
+
+def record_lane(connection, item) -> int | None:
+    """Write the item's PR lane note when its lane or its pull request's state changed (sd:7859): the newest note's id
+    it wrote, or None for none.
+
+    The lane is the projection's (`_lane`), read from the same checkpoints; the note is `LANE_NOTE`, so a rerun that
+    finds the same lane and state as the newest note writes nothing. An item with no `pull_url`, or one not yet
+    observed, has no lane to record. The first note for an item and url is preceded by its `_history`, at the times it
+    happened. All in one transaction: the caller's, when it holds one.
+    """
+    with transaction(connection):
+        row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
+        metadata = (_metadata(dict(row)) if row else None) or {}
+        url = metadata.get("pull_url")
+        if not url:
+            return None
+        pull = snapshot(connection, "github:" + url)
+        observation = pull["observation"] or {}
+        if observation.get("state") not in {"open", "closed", "merged"}:
+            return None
+        lane, _ = _lane([snapshot(connection, f"item:{item}"), pull], observation, url,
+                        bool(metadata.get("blocked_on") or metadata.get("depends_on")), None)
+        notes, written = lane_notes(connection, item, url), None
+        if not notes:
+            history, skipped = _history(connection, item, url)
+            for at, old, state in history:
+                written = add_note(connection, item, "comment", f"{LANE_NOTE}{old} · {state} · {url} (backfilled)",
+                                   session=OBSERVER, timestamp=at)
+            if skipped:
+                add_note(connection, item, "comment", f"PR lane backfill skipped {len(skipped)} time(s) with no zone: "
+                         + ", ".join(repr(value) for value in skipped), session=OBSERVER)
+            notes = lane_notes(connection, item, url)
+        if notes and (notes[-1]["lane"], notes[-1]["state"]) == (lane, observation["state"]):
+            return written
+        return add_note(connection, item, "comment", f"{LANE_NOTE}{lane} · {observation['state']} · {url}",
+                        session=OBSERVER)
+
+
+#: The failures of one row's data that the PR-lane pass says and skips (sd:7859): a refusal, or a stored value of the
+#: wrong shape. A store failure (`sqlite3.Error`) is none of these.
+ROW_ERRORS = (SdDbError, ValueError, TypeError, AttributeError, KeyError)
+
+
+def _note_lane(connection, item) -> None:
+    """`record_lane` beside the write its note describes (sd:7859, review round 2): a side observation.
+
+    A failure of the row's data (`ROW_ERRORS`) rolls back the note alone and leaves the write standing; the sync's lane pass,
+    `record_lanes`, tries that item again and says why it could not. A store failure (`sqlite3.Error`) still undoes
+    both, as it would the write alone.
+    """
+    try:
+        record_lane(connection, item)
+    except ROW_ERRORS:
+        pass
+
+
+def record_lanes(connection) -> tuple[list[int], list[str]]:
+    """`record_lane` for every item with a `pull_url`, each in its own transaction: the refresh's pass (sd:7859).
+
+    Returns the notes written and an error per item that failed; a failed item is said and skipped, so it stops no
+    other item's note.
+    """
+    written: list[int] = []
+    errors: list[str] = []
+    for row, metadata in _registered(connection, errors):
+        if metadata.get("pull_url"):
+            try:
+                note = record_lane(connection, row["id"])
+            except ROW_ERRORS as error:
+                errors.append(f"item {row['id']}: {error}")
+                continue
+            if note is not None:
+                written.append(note)
+    return written, errors
+
+
+def link_shipped(connection) -> tuple[list[int], list[str]]:
+    """Link the pull request `sd-ship prepare` opened to its item as the item's `pull_url` (sd:7859).
+
+    The receipt holds the item and its `pull_request` url; the operator's own pull request is observed already, so
+    the link makes its lane the item's. A receipt that merged, an item that is done or names a pull request or
+    issue, and a url another item holds (a bundle's second item) are left alone; so a rerun links nothing.
+    Each link is `configure`'s one transaction, which notes the lane too. Returns the items linked and an error per
+    receipt that could not be read or linked; a bad receipt is said and skipped, so it stops no other.
+    """
+    from . import ship
+
+    errors: list[str] = []
+    taken = {metadata["pull_url"] for _, metadata in _registered(connection, errors) if metadata.get("pull_url")}
+    receipts = []
+    for key in _latest(connection, "checkpoint", "ship:"):
+        try:
+            receipts.append((key, ship.read(connection, key)[1]))
+        except ROW_ERRORS as error:
+            errors.append(f"ship receipt {key}: {error}")
+    linked: list[int] = []
+    for key, receipt in sorted(receipts, key=lambda pair: str(pair[1].get("item"))):
+        pull = receipt.get("pull_request")
+        if pull is not None and not isinstance(pull, dict):
+            errors.append(f"ship receipt {key}: pull_request is not an object")
+            continue
+        url, item = (pull or {}).get("url"), receipt.get("item")
+        if type(item) is not int or not isinstance(url, str) or receipt.get("phase") == "merged":
+            continue
+        try:
+            url = _url(url)
+            row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
+            if url in taken or row is None or row["kind"] not in KINDS or row["status"] == "done":
+                continue
+            metadata = _metadata(dict(row)) or {}
+            if metadata.get("pull_url") or metadata.get("issue_url"):
+                continue
+            configure(connection, item, {"pull_url": url}, who=OBSERVER)
+        except ROW_ERRORS as error:
+            errors.append(f"ship receipt {key}: {error}")
+            continue
+        taken.add(url)
+        linked.append(item)
+    return linked, errors
+
+
+def _seconds(start, end) -> int:
+    return max(0, int((_moment(end) - _moment(start)).total_seconds()))
+
+
+def pr_waits(connection, *, now=None) -> list[dict]:
+    """Each item's pull-request wait, from its lane notes (sd:7859), newest-noted first.
+
+    `on_you` and `on_reviewers` are seconds: the span after each note of an open pull request goes to its lane
+    (`ON_YOU`, `ON_REVIEWERS`), and the last one runs to `now`; a span after the pull request closed or merged is no
+    wait, whatever attention its lane still shows. `to_merge` is the first note to the first `merged`
+    one, or None. `open` is a pull request still open in a waiting lane, `on` who it waits on (`you`, `reviewers`)
+    and `since` when that lane began.
+    """
+    end = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    found = []
+    for row, metadata in _registered(connection):
+        url = metadata.get("pull_url")
+        if not url:
+            continue
+        notes = lane_notes(connection, row["id"], url)
+        if not notes:
+            continue
+        spans = {"you": 0, "reviewers": 0}
+        for note, after in zip(notes, [*notes[1:], None], strict=True):
+            who = "you" if note["lane"] in ON_YOU else "reviewers" if note["lane"] in ON_REVIEWERS else None
+            if who and note["state"] == "open":  # a closed or merged pull request waits on no one
+                spans[who] += _seconds(note["at"], after["at"] if after else end)
+        last = notes[-1]
+        merged = next((note for note in notes if note["lane"] == "merged" or note["state"] == "merged"), None)
+        waiting = last["state"] == "open" and (last["lane"] in ON_YOU or last["lane"] in ON_REVIEWERS)
+        found.append({"item": row["id"], "title": row["title"], "repo": row["repo"], "status": row["status"],
+                      "url": url, "lane": last["lane"], "state": last["state"], "open": waiting,
+                      "on": ("you" if last["lane"] in ON_YOU else "reviewers") if waiting else None,
+                      "since": last["at"], "waited": _seconds(last["at"], end) if waiting else None,
+                      "on_you": spans["you"], "on_reviewers": spans["reviewers"],
+                      "to_merge": _seconds(notes[0]["at"], merged["at"]) if merged else None})
+    return sorted(found, key=lambda value: (value["since"], value["item"]), reverse=True)
+
+
 def _projection_row(heartbeats, row, metadata, sources) -> dict:
     source = next((s for s in sources if _observed_url(s["key"])), sources[0])
     observation = source["observation"] or {}
@@ -811,15 +1078,7 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
     active.sort(key=lambda a: (0 if any(e["kind"] == "newly_unblocked" for s in sources if s["key"] == a["key"] for e in s["attention"]) else 1, a["key"]))
     primary = active[0] if active else {"key": source["key"], "revision": source["revision"], "event_ids": [], "reasons": []}
     waiting = bool(metadata.get("blocked_on") or metadata.get("depends_on"))
-    needs_you = bool(active) or (not url and not waiting)
-    # An issue or a pull request closed without merge awaits no one; a later
-    # observation that reads `open` returns the row to live work. A dismissed
-    # row (sd:3432) is closed too, until new attention or a lifecycle change.
-    closed = observation.get("state") == "closed" or bool(dismissed)
-    lane = "awaiting_you" if needs_you else "merged" if observation.get("state") == "merged" \
-        else "closed" if closed else "awaiting_them"
-    if any(e["kind"] == "newly_unblocked" for s in sources for e in s["attention"]):
-        lane = "newly_unblocked"
+    lane, needs_you = _lane(sources, observation, url, waiting, dismissed)
     try:
         verified = _local_proof(metadata)
     except WorkflowError:
@@ -1005,7 +1264,14 @@ def acknowledge(connection, key, event_ids, *, who, expected_revision) -> dict:
         if not set(event_ids) <= active:
             raise WorkflowError("acknowledgement includes an event that is no longer active")
         _acknowledge(connection, state, event_ids, who)
-        return _save(connection, state)
+        result = _save(connection, state)
+        # The lane may move from on you to on reviewers now (sd:7859).
+        url = _observed_url(state["key"])
+        # Another item's malformed metadata is not this acknowledgement's concern: skipped, never raised here.
+        for row, metadata in _registered(connection, []):
+            if state["key"] == f"item:{row['id']}" or (url and url == metadata.get("pull_url")):
+                _note_lane(connection, row["id"])
+        return result
 
 
 def _acknowledge(connection, state, event_ids, who) -> None:
