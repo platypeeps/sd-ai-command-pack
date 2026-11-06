@@ -14,7 +14,7 @@ the one writer in the lane, and `tests/test_sd_review_boundary.py` counts its
 write sites -- and nothing here parses YAML: a consumer's `dependabot.yml`
 carries comments the pack does not own, and a round-trip through a YAML
 library would drop them. The transform finds every github-actions entry, its
-`ignore:` list and the one item naming the action by indentation, and touches
+`ignore:` list and each item naming the action by indentation, and touches
 those lines and no others.
 
 The pack ships two actions, and which one a consumer pins is the consumer's
@@ -31,7 +31,7 @@ from __future__ import annotations
 import difflib
 import pathlib
 import re
-from typing import Any, Mapping, TextIO
+from typing import Any, Iterable, Mapping, TextIO
 
 DEPENDABOT_RELATIVE_PATH = pathlib.Path(".github") / "dependabot.yml"
 
@@ -49,7 +49,13 @@ class GuardError(Exception):
     """The file has no place for the guard; the message names why."""
 
 
-ACTIONS_PREFIX = "platypeeps/sd-ai-command-pack/actions"
+#: Every slug the pack's actions have lived under, the one written first.
+#: Readers accept each: a consumer pinned before sd:7633 still names the old
+#: one. A guard is per slug, because Dependabot matches the dependency name:
+#: a workflow that still names the old slug needs the old guard (sd:7633).
+ACTION_SLUGS = ("platypeeps/sd-workflow", "platypeeps/sd-ai-command-pack")
+ACTIONS_PREFIX = f"{ACTION_SLUGS[0]}/actions"
+_PREFIXES = "|".join(re.escape(f"{slug}/actions") for slug in ACTION_SLUGS)
 
 #: Every action the pack ships, in the order a reader meets them. Enumerated
 #: here rather than assumed to be one: `actions/docs-gate` had a consumer, a
@@ -64,10 +70,42 @@ ACTIONS = ("review-route", "docs-gate")
 DEFAULT_ACTION = "review-route"
 
 
-def dependency_name(action: str = DEFAULT_ACTION) -> str:
-    """The Dependabot dependency name for one of the pack's actions."""
+def dependency_name(action: str = DEFAULT_ACTION, slug: str = ACTION_SLUGS[0]) -> str:
+    """The Dependabot dependency name for one of the pack's actions, under one slug."""
 
-    return f"{ACTIONS_PREFIX}/{action}"
+    return f"{slug}/actions/{action}"
+
+
+def _named(key: str) -> tuple[str, str]:
+    """`(action, slug)` for a guard key: an action, under the written slug, or a whole dependency name."""
+
+    slug, _, action = key.rpartition("/actions/")
+    return (action, slug) if slug else (key, ACTION_SLUGS[0])
+
+
+def pinned_slugs(workflows: Iterable[str], action: str = DEFAULT_ACTION) -> tuple[str, ...]:
+    """The slugs, in `ACTION_SLUGS` order, under which any of `workflows` names `action`.
+
+    Any mention counts, quoted or not: keeping a guard costs nothing, and
+    lifting a needed one lets Dependabot bump a pin (sd:7633).
+    """
+
+    texts = tuple(workflows)
+    return tuple(slug for slug in ACTION_SLUGS if any(dependency_name(action, slug) in text for text in texts))
+
+
+def workflow_slugs(root: pathlib.Path, workflow: pathlib.Path, text: str) -> tuple[str, ...]:
+    """`pinned_slugs` once `workflow` holds `text`, read with every workflow beside it."""
+
+    return pinned_slugs([text, *sibling_workflows(root, workflow).values()])
+
+
+def sibling_workflows(root: pathlib.Path, workflow: pathlib.Path) -> dict[str, str]:
+    """Every other workflow beside `workflow`, by path relative to `root`."""
+
+    target = root / workflow
+    return {str(path.relative_to(root)): path.read_text(encoding="utf-8")
+            for path in sorted((root / workflow.parent).glob("*.y*ml")) if path != target}
 
 
 DEPENDENCY = dependency_name(DEFAULT_ACTION)
@@ -86,7 +124,7 @@ DEPENDENCIES = tuple(dependency_name(action) for action in ACTIONS)
 # its own README and no other action's.
 _PROSE: dict[str, tuple[str, ...]] = {
     "review-route": (
-        "# The sd-ai-command-pack pin is set by hand, not by Dependabot. The action",
+        "# The {repo} pin is set by hand, not by Dependabot. The action",
         "# runs the pack's own code out of the pinned checkout, so a bump is a",
         "# behaviour change across the whole pack, not a version number. Bump it",
         "# deliberately, in its own commit, with",
@@ -96,7 +134,7 @@ _PROSE: dict[str, tuple[str, ...]] = {
         "# go stale the next time the pin moves.",
     ),
     "docs-gate": (
-        "# The sd-ai-command-pack pin is set by hand, not by Dependabot. The action",
+        "# The {repo} pin is set by hand, not by Dependabot. The action",
         "# runs the pack's own code out of the pinned checkout, so a bump is a",
         "# behaviour change across the whole pack, not a version number. Bump it",
         "# deliberately, in its own commit; `sd-review setup-github` installs the",
@@ -109,11 +147,13 @@ _PROSE: dict[str, tuple[str, ...]] = {
 
 
 def guard_lines(action: str = DEFAULT_ACTION) -> tuple[str, ...]:
-    """The guard's comment and its one `ignore:` item, for one action."""
+    """The guard's comment and its one `ignore:` item, for an action or a whole dependency name."""
 
-    if action not in _PROSE:
+    action, slug = _named(action)
+    if action not in _PROSE or slug not in ACTION_SLUGS:
         raise GuardError(f"{action} is not one of the pack's actions: {', '.join(ACTIONS)}")
-    return _PROSE[action] + (f'- dependency-name: "{dependency_name(action)}"',)
+    first, *rest = _PROSE[action]
+    return (first.format(repo=slug.rpartition("/")[2]), *rest, f'- dependency-name: "{dependency_name(action, slug)}"')
 
 
 #: The review-route guard, kept as a module constant because `sd-review`'s
@@ -125,14 +165,14 @@ GUARD_LINES = guard_lines(DEFAULT_ACTION)
 _ENTRY = re.compile(r"""^\s*- package-ecosystem:\s*["']?github-actions["']?(?:\s+#.*)?\s*$""")
 _ANY_ENTRY = re.compile(r"^\s*- package-ecosystem:")
 _GUARD_ITEM = re.compile(
-    rf"""dependency-name:\s*["']?{re.escape(ACTIONS_PREFIX)}/"""
+    rf"""dependency-name:\s*["']?(?P<slug>{"|".join(re.escape(slug) for slug in ACTION_SLUGS)})/actions/"""
     rf"""(?P<action>{"|".join(re.escape(name) for name in ACTIONS)})["']?\s*$"""
 )
 
 
 def _pin_pattern(action: str) -> re.Pattern[str]:
     return re.compile(
-        rf"^\s*(?:- )?uses:\s*{re.escape(dependency_name(action))}@([0-9a-fA-F]{{7,40}})\b",
+        rf"^\s*(?:- )?uses:\s*(?:{_PREFIXES})/{re.escape(action)}@([0-9a-fA-F]{{7,40}})\b",
         re.M,
     )
 
@@ -240,29 +280,39 @@ def _blocks(lines: list[str], first: int, stop: int, indent: int) -> list[tuple[
 
 
 def _guarded(line: str, wanted: str | None) -> str | None:
-    """The pack action this `ignore:` item names, or None.
+    """The dependency name this `ignore:` item guards, or None.
 
-    With `wanted` the search is narrowed to one action; without it any of the
-    pack's actions counts, which is what lets a reader say `same` about a
-    docs-gate consumer it was never told about.
+    With `wanted` the search is narrowed to one action under any slug, or to
+    one whole dependency name; without it any of the pack's actions counts,
+    which is what lets a reader say `same` about a docs-gate consumer it was
+    never told about.
     """
 
     found = _GUARD_ITEM.search(line)
     if found is None:
         return None
-    action = found.group("action")
-    return action if wanted is None or action == wanted else None
+    name = dependency_name(found.group("action"), found.group("slug"))
+    return name if wanted is None or wanted in (name, found.group("action")) else None
 
 
-def _place(lines: list[str], start: int, wanted: str | None) -> tuple[str, int, int, int, str | None]:
+#: One placement: (kind, at, until, indent, guarded, matches); see `_place`.
+Place = tuple[str, int, int, int, str | None, tuple[tuple[int, int, str], ...]]
+
+
+def _place(lines: list[str], start: int, wanted: str | None) -> Place:
     """Where the guard goes in the entry at `start`.
 
-    ('replace'|'append'|'ignore', at, until, indent, action). `replace` names
-    the block the existing guard item occupies, and `action` the pack action
-    that item names; `append` the index the guard is inserted at in an
-    existing `ignore:` list; `ignore` the index a new `ignore:` key goes at,
-    with the entry's key indentation. Only `replace` carries an action; the
-    other two have found no guard to read one from.
+    ('replace'|'append'|'ignore', at, until, indent, action, matches).
+    `replace` names the block the first guard item occupies, and `action` the
+    dependency name that item guards; `append` the index the guard is
+    inserted at in an existing `ignore:` list; `ignore` the index a new
+    `ignore:` key goes at, with the entry's key indentation. Only `replace`
+    carries an action; the other two have found no guard to read one from.
+
+    `matches` is every guard block in the list that `wanted` matches, as
+    (begin, end, dependency name), first included. A reader that stopped at
+    the first read a reworded old-slug guard behind a pack-worded new one as
+    `same`, and the installer dropped it without `--force` (sd:7633).
     """
 
     key = _indent(lines[start]) + 2
@@ -272,24 +322,26 @@ def _place(lines: list[str], start: int, wanted: str | None) -> tuple[str, int, 
         None,
     )
     if ignore is None:
-        return "ignore", _trim(lines, start, stop), stop, key, None
+        return "ignore", _trim(lines, start, stop), stop, key, None, ()
     first = next((i for i in range(ignore + 1, stop) if lines[i].strip()), stop)
     indent = _indent(lines[first]) if first < stop and _indent(lines[first]) > key else key + 2
     until = _end(lines, ignore, indent) if first < stop else ignore + 1
     blocks = _blocks(lines, ignore + 1, until, indent)
-    for begin, end in blocks:
-        guarded = next(
-            (found for found in (_guarded(line, wanted) for line in lines[begin:end]) if found),
-            None,
-        )
-        if guarded is not None:
-            return "replace", begin, end, indent, guarded
+    matches = tuple(
+        (begin, end, guarded)
+        for begin, end in blocks
+        if (guarded := next((found for found in (_guarded(line, wanted) for line in lines[begin:end]) if found),
+                            None)) is not None
+    )
+    if matches:
+        begin, end, guarded = matches[0]
+        return "replace", begin, end, indent, guarded, matches
     # After the last item, not after a comment trailing it: the guard would
     # take that comment as its own leading comment and read `differs`.
-    return "append", blocks[-1][1] if blocks else _trim(lines, ignore + 1, until), until, indent, None
+    return "append", blocks[-1][1] if blocks else _trim(lines, ignore + 1, until), until, indent, None, ()
 
 
-def _places(lines: list[str], wanted: str | None = None) -> list[tuple[str, int, int, int, str | None]]:
+def _places(lines: list[str], wanted: str | None = None) -> list[Place]:
     """One placement per github-actions entry, in file order.
 
     Dependabot allows a file more than one `github-actions` entry -- separate
@@ -317,19 +369,46 @@ def guard_states(text: str | None, action: str | None = None) -> tuple[str, ...]
 
     if text is None:
         return ("missing",)
+    entries = _verdicts(text, action)
+    if entries is None:
+        return ("absent",)
+    return tuple("absent" if not verdicts else "differs" if "differs" in verdicts.values() else "same"
+                 for verdicts in entries)
+
+
+def _verdicts(text: str, action: str | None) -> list[dict[str, str]] | None:
+    """Per github-actions entry, each guard `action` matches: dependency name to `same` or `differs`.
+
+    Every matching guard counts, under each slug, not the first: one reworded
+    guard makes its name `differs` however many pack-worded ones sit beside
+    it. None when the file has no github-actions entry.
+    """
+
     lines = text.splitlines()
     try:
         places = _places(lines, action)
     except GuardError:
-        return ("absent",)
-    states = []
-    for placement, at, until, indent, guarded in places:
-        if placement != "replace" or guarded is None:
-            states.append("absent")
-            continue
-        wanted = guard_block(" " * indent, guarded).splitlines()
-        states.append("same" if lines[at:until] == wanted else "differs")
-    return tuple(states)
+        return None
+    entries = []
+    for _placement, _at, _until, indent, _guarded, matches in places:
+        verdicts: dict[str, str] = {}
+        for begin, end, name in matches:
+            same = lines[begin:end] == guard_block(" " * indent, name).splitlines()
+            verdicts[name] = "differs" if not same or verdicts.get(name) == "differs" else "same"
+        entries.append(verdicts)
+    return entries
+
+
+def differing(text: str | None, action: str | None = None) -> tuple[str, ...]:
+    """The dependency names, in `ACTION_SLUGS` order, whose guard in `text` differs anywhere.
+
+    What a refusal names: replacing or removing any of them needs `--force`.
+    """
+
+    entries = _verdicts(text, action) if text is not None else None
+    names = {name for verdicts in entries or [] for name, verdict in verdicts.items() if verdict == "differs"}
+    order = [dependency_name(each, slug) for slug in ACTION_SLUGS for each in ACTIONS]
+    return tuple(name for name in order if name in names)
 
 
 #: Worst first: the fold `guard_state` reports, and the order matters because
@@ -355,7 +434,7 @@ def guard_state(text: str | None, action: str | None = None) -> str:
     return next(verdict for verdict in _WORST_FIRST if verdict in states)
 
 
-def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
+def rendered(text: str | None, action: str = DEFAULT_ACTION, *, slugs: Iterable[str] = ACTION_SLUGS[:1]) -> str:
     """`text` with the guard in place: the one the installer writes and `--check` expects.
 
     Idempotent: rendering a rendered file changes nothing, which is what lets
@@ -376,10 +455,27 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
     them is also what makes the transform converge -- a read that folds every
     entry (see `guard_states`) and a write that touches one have no fixed
     point, and `--check` compares this output with the tracked bytes.
+
+    `slugs` are the ones some workflow in the repository names
+    (`pinned_slugs`): each gets its own guard, since Dependabot matches the
+    dependency name. A guard for an older slug no workflow names goes, so
+    moving the last pin moves the guard; one a workflow names stays (sd:7633).
     """
 
+    keep = [slug for slug in ACTION_SLUGS if slug in tuple(slugs)] or [ACTION_SLUGS[0]]
     if text is None:
-        return minimal_file(action)
+        text = minimal_file(dependency_name(action, keep[0]))
+    for slug in keep:
+        text = _rendered(text, dependency_name(action, slug))
+    for slug in ACTION_SLUGS[1:]:
+        if slug not in keep and set(guard_states(text, dependency_name(action, slug))) != {"absent"}:
+            text = _dropped(text, dependency_name(action, slug))
+    return text
+
+
+def _rendered(text: str, action: str) -> str:
+    """`text` with one guard in place; `action` is an action or a whole dependency name."""
+
     if set(guard_states(text, action)) == {"same"}:
         return text
     lines = text.splitlines()
@@ -398,40 +494,59 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
         return "\n".join(lines[:at] + new + lines[at:]) + "\n"
     # Last entry first: every placement is an index into `lines`, and editing
     # an earlier entry would move the later ones out from under theirs.
-    for placement, at, until, indent, guarded in reversed(places):
+    for placement, at, until, indent, guarded, matches in reversed(places):
         wanted = guarded or action
         if placement == "ignore":
             new = [" " * indent + "ignore:"] + guard_block(" " * (indent + 2), wanted).splitlines()
             stop = at
         else:
+            # A second copy of the same guard goes: the first is rewritten,
+            # and a reworded copy left behind would read `differs` forever.
+            for begin, end, name in reversed(matches[1:]):
+                if name == guarded:
+                    del lines[begin:end]
             new = guard_block(" " * indent, wanted).splitlines()
             stop = until if placement == "replace" else at
         lines = lines[:at] + new + lines[stop:]
     return "\n".join(lines) + "\n"
 
 
-def unguarded(text: str, action: str = DEFAULT_ACTION) -> str | None:
+def unguarded(text: str, action: str = DEFAULT_ACTION, *, keep: Iterable[str] = ()) -> str | None:
     """`text` with `action`'s guard taken out: what `setup-github --remove` writes.
 
     The inverse of `rendered` for the lines it owns. Each guard item goes with
     its comment run, an `ignore:` list the removal empties goes too, and every
     other line stays: the rest of the file is the consumer's. A file that is
     exactly `minimal_file(action)` was created by the installer, so it answers
-    None, which the caller reads as delete.
+    None, which the caller reads as delete. A guard for a slug in `keep`, one
+    another workflow still names, stays (sd:7633).
     """
 
-    if text == minimal_file(action):
+    keep = tuple(keep)
+    if not keep and text in {minimal_file(dependency_name(action, slug)) for slug in ACTION_SLUGS}:
         return None
+    for slug in ACTION_SLUGS:
+        if slug not in keep:
+            text = _dropped(text, dependency_name(action, slug))
+    return text
+
+
+def _dropped(text: str, action: str) -> str:
+    """`text` with every copy of one guard taken out; `action` is an action or a whole dependency name."""
+
     lines = text.splitlines()
     try:
         places = _places(lines, action)
     except GuardError:
         return text
-    for placement, at, until, indent, _action in reversed(places):
+    for placement, at, _until, indent, _action, matches in reversed(places):
         if placement != "replace":
             continue
         key = next(i for i in range(at - 1, -1, -1) if lines[i].strip() == "ignore:")
-        del lines[at:until]
+        # Every copy, last first: a second one left behind still guards a
+        # slug the caller meant to lift, or lifts one it meant to keep.
+        for begin, end, _name in reversed(matches):
+            del lines[begin:end]
         # Comments do not keep the key: a consumer's note can outlive the list.
         following = next((line for line in lines[key + 1:] if line.strip() and not line.lstrip().startswith("#")), "")
         if _indent(following) < indent or not following.lstrip().startswith("- "):
@@ -458,14 +573,17 @@ HEAD_CHECK_STEP = """\
 """
 
 
-def known_texts(text: str) -> tuple[str, str]:
-    """`text`, a workflow the pack writes now, and the same workflow as it was written before `HEAD_CHECK_STEP`.
+def known_texts(text: str) -> tuple[str, ...]:
+    """`text`, a workflow the pack writes now, and the same workflow as written before.
 
-    A file holding the older text is the pack's own at that pin, so a stamp
+    Before `HEAD_CHECK_STEP`, and under each older slug in `ACTION_SLUGS`.
+    A file holding an older text is the pack's own at that pin, so a stamp
     may move it forward and `--remove` may delete it without `--force`.
     """
 
-    return text, text.replace(HEAD_CHECK_STEP, "", 1)
+    texts = (text, text.replace(HEAD_CHECK_STEP, "", 1))
+    return texts + tuple(each.replace(f"{ACTIONS_PREFIX}/", f"{slug}/actions/")
+                         for slug in ACTION_SLUGS[1:] for each in texts)
 
 
 def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_install: bool,
@@ -478,6 +596,7 @@ def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_
     The guard stays while another workflow still names review-route, because
     Dependabot would bump that pin the day the guard went. Any mention counts,
     quoted or not: keeping a guard costs nothing, and lifting a needed one does.
+    A guard it would lift that differs from the pack's text needs `force`.
     """
 
     target = root / workflow
@@ -489,18 +608,33 @@ def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_
     plan: list[tuple[pathlib.Path, str | None, str]] = [(target, None, f"{verdict} {workflow}")]
     dependabot = root / DEPENDABOT_RELATIVE_PATH
     before = dependabot.read_text(encoding="utf-8") if dependabot.is_file() else None
-    pinned = sorted(str(path.relative_to(root)) for path in (root / workflow.parent).glob("*.y*ml")
-                    if path != target and DEPENDENCY in path.read_text(encoding="utf-8"))
+    others = sibling_workflows(root, workflow)
+    kept = pinned_slugs(others.values())
+    pinned = [rel for rel, text in others.items() if pinned_slugs([text])]
+    _refuse_lifting(before, kept, force=force)
+    after = None if before is None else unguarded(before, keep=kept)
     if before is None:
         plan.append((dependabot, None, f"absent {DEPENDABOT_RELATIVE_PATH}"))
-    elif pinned:
-        plan.append((dependabot, before, f"kept {DEPENDABOT_RELATIVE_PATH} ({', '.join(pinned)} still pins "
-                                         f"{DEPENDENCY})"))
+    elif pinned and after == before:
+        names = ", ".join(dependency_name(DEFAULT_ACTION, slug) for slug in kept)
+        plan.append((dependabot, before, f"kept {DEPENDABOT_RELATIVE_PATH} ({', '.join(pinned)} still pins {names})"))
     else:
-        after = unguarded(before)
         verb = "remove" if after is None else "unguard" if after != before else "same"
         plan.append((dependabot, after, f"{verb} {DEPENDABOT_RELATIVE_PATH}"))
     return plan
+
+
+def _refuse_lifting(before: str | None, kept: tuple[str, ...], *, force: bool) -> None:
+    """Refuse, without `force`, to lift a reworded review-route guard no sibling keeps.
+
+    A reworded guard is the repository's edit, as a reworded workflow is, so
+    lifting it needs `force` too. Every copy under each slug is read (sd:7633).
+    """
+
+    lifted = [name for name in differing(before, DEFAULT_ACTION) if _named(name)[1] not in kept]
+    if lifted and not force:
+        raise GuardError(f"{DEPENDABOT_RELATIVE_PATH} carries a guard for {', '.join(lifted)} that differs from "
+                         "what the pack writes; rerun with --force to remove it")
 
 
 def report_drift(root: pathlib.Path, expected: Mapping[pathlib.Path, str], stream: TextIO) -> int:
