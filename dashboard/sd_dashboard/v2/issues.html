@@ -3,7 +3,8 @@
   Issues (pack sd:7682), at /issues: GitHub's Your issues and Intake views until then, in two views.
   Your issues (sd:4628): each repo's issues assigned to or filed by the operator, and their other GitHub issues the
   Pull requests view listed until sd:5899; Issue Intake (sd:4840, GitHub's Intake until pack sd:7682): each
-  policy.issues repo's open third-party issues no item carries, File as item posts /api/items with the ref. Both are
+  policy.issues repo's open third-party issues no item carries, File as item posts /api/items with the ref; pack sd:7787
+  adds a checkbox per row and one in the head for the rows shown, for the shell's bulk bar. Both are
   /api/github/issues (issues.document, issues.intake), read by github.js when either view first shows and on Read
   again; issues.js draws them. An issue row of either selects into Details (sd:5877), from what the same read carries.
   Hide and Unhide (sd:6175) on a row of either post /api/github/issues/view; Open | Hidden, at each filter bar's left
@@ -58,16 +59,16 @@
     <div id="view-intake" aria-label="Issue Intake" hidden>
       <section class="issues-sec" aria-labelledby="intake-h">
         <div class="sec-head">
-          <h2 id="intake-h">Issue Intake <button class="help" type="button" aria-label="Help: Issue Intake" data-help="&lt;b&gt;Issues that need an item.&lt;/b&gt; Open GitHub issues someone else opened, in each repo with GitHub issues on (Management), that no item carries yet. File as item adds a task in that repo, linked to the issue, and the row leaves. Press an issue for its details, as on Your issues. Hide and Hidden work as on Your issues. Refresh from GitHub syncs in the background.">
+          <h2 id="intake-h">Issue Intake <button class="help" type="button" aria-label="Help: Issue Intake" data-help="&lt;b&gt;Issues that need an item.&lt;/b&gt; Open GitHub issues someone else opened, in each repo with GitHub issues on (Management), that no item carries yet. File as item adds a task in that repo, linked to the issue, and the row leaves. Tick rows, or the box in the head for every row shown, to File as item, Hide or Unhide them together from the bar at the bottom; a row that was not changed stays and says why. Press an issue for its details, with File as item there too. Hide and Hidden work as on Your issues. Refresh from GitHub syncs in the background.">
             <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
           <p class="tally" id="intake-tally"></p>
           <div class="tools"><span id="intake-sync"></span></div>
         </div>
         <div class="filters toolbar-2" id="intake-filters"></div>
         <p class="why" id="intake-said"></p>
-        <table class="ledger issues" aria-labelledby="intake-h" data-toolbar="intake-filters">
-          <thead><tr><th>Issue</th><th>Title</th><th>Repo</th><th>Opened by</th><th><span class="sr">File</span></th></tr></thead>
-          <tbody id="intake"><tr class="empty"><td colspan="5">Reading issue intake…</td></tr></tbody>
+        <table class="ledger issues intake" aria-labelledby="intake-h" data-toolbar="intake-filters">
+          <thead><tr><th class="sel"><label class="pick"><input type="checkbox" id="intake-all" aria-label="Select every intake issue shown"><span></span></label><label class="all-l" for="intake-all">Select all shown</label></th><th>Issue</th><th>Title</th><th>Repo</th><th>Opened by</th><th><span class="sr">File</span></th></tr></thead>
+          <tbody id="intake"><tr class="empty"><td colspan="6">Reading issue intake…</td></tr></tbody>
         </table>
       </section>
     </div>

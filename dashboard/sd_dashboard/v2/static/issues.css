@@ -2,9 +2,9 @@
  * operator. Your mail (sd:4191) on Today is the same ledger; its subject is the link and opens the thread in Gmail, and its
  * rows are not selectable. An issue row (sd:5877) is: the shared ledger's tr[data-id] look; its title opens Details.
  * Issue intake (sd:4840) on GitHub is the same ledger plus one row control, File as item (the shell's btn quiet sm): busy
- * disables it, a refusal is a line under it, and a filed row names its item where the button was.
+ * disables it, a refusal is a line under it, and a filed row leaves the list (pack sd:7787).
  * Hallmark · component: issue row · genre: modern-minimal · theme: design.md instrument panel
- * states: default · hover (the reference link) · focus · active · disabled (filing) · error (not filed) · success (filed);
+ * states: default · hover (the reference link) · focus · active · disabled (filing) · error (not filed) · success (the row leaves);
  * a failed read is a row naming it. */
 .issues-sec { margin-top: var(--space-xl); }
 /* pack sd:7215: GitHub's filter bars are put straight into their .filters row, where the shell's full-width .fbar
@@ -30,6 +30,35 @@
   .issues td { border: 0; padding: 0 var(--space-xs); }
   .issues .ref { grid-area: ref; } .issues .why { grid-area: why; } .issues .what { grid-area: what; } .issues .repo { grid-area: repo; white-space: normal; } .issues .act { grid-area: act; align-self: end; } .issues .when { grid-area: act; align-self: end; text-align: right; }
   .issues tr.empty { display: block; }
+}
+/* Issue Intake's picks (pack sd:7787): a box per row and one in the head for the rows shown, Tasks' pick box (tasks.css
+ * .pick) scoped to this table; a picked row wears the accent wash, as Contributions' and Documents' picked rows do. Under
+ * 900px the head hides but its box, which says Select all shown beside it.
+ * Hallmark · component: checkbox · genre: modern-minimal · theme: design.md instrument panel
+ * states: default · hover · focus · active · disabled (no row shown) · checked · mixed (some shown picked) · picked row
+ * contrast: pass (foundation tokens) */
+.intake .sel { width: 1%; padding-inline-end: 0; }
+.intake .pick { position: relative; display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; vertical-align: middle; }
+.intake .pick input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.intake .pick span { width: 1rem; height: 1rem; border: var(--rule-hair) solid var(--color-muted); border-radius: var(--radius-sm); background: var(--color-paper); pointer-events: none; }
+.intake .pick:hover span { border-color: var(--color-ink-2); }
+.intake .pick input:active + span { border-color: var(--color-accent); }
+.intake .pick input:checked + span { border-color: var(--color-accent); background: var(--color-accent); box-shadow: inset 0 0 0 2px var(--color-paper); }
+.intake .pick input:indeterminate + span { border-color: var(--color-accent); background: linear-gradient(var(--color-accent), var(--color-accent)) center / 0.5rem 2px no-repeat, var(--color-paper); }
+.intake .pick input:focus-visible + span { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+.intake .pick input:disabled { cursor: not-allowed; }
+.intake .pick input:disabled + span { opacity: 0.5; }
+.intake .all-l { display: none; }
+.intake tbody tr[data-picked] td { background: var(--color-accent-bg); }
+@media (pointer: coarse) { .intake .pick { width: var(--row-touch); height: var(--row-touch); } }
+@media (max-width: 899px) {
+  .intake thead { display: block; border-bottom: var(--rule-hair) solid var(--color-rule); }
+  .intake thead tr { display: flex; }
+  .intake thead th:not(.sel) { display: none; }
+  .intake thead th.sel { display: flex; align-items: center; gap: var(--space-xs); width: auto; border: 0; padding: var(--space-2xs) var(--space-xs); }
+  .intake .all-l { display: inline; cursor: pointer; }
+  .intake tbody tr:not(.empty) { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "sel ref why" "sel what what" "sel repo act"; }
+  .intake .sel { grid-area: sel; align-self: start; padding-inline-end: 0; }
 }
 /* Your issues' category groups (pack sd:7708): the Jira rows under Pull requests' repo group rows (today.css lists .cats
  * beside .pulls for the chevron, the name and the row's press), and an Actions cell per row for the shell's ⋯ menu. */
