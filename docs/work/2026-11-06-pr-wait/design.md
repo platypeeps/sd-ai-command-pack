@@ -42,7 +42,7 @@ An item's linked pull request is its contribution `pull_url`, the one link `cont
    Today's Queue view draws it as a `blocked` row, `blocked: PR · on you` or `on reviewers`, with how long it waited,
    and drops that item's live-session row and its suggested or open row. Build runs and runner assignments stay:
    they are a live process.
-5. **Metrics.** `/api/metrics` gains `pr_wait`: totals on you, on reviewers, waiting, and first PR to merge,
+5. **Metrics.** `/api/metrics` gains `prs`: totals on you, on reviewers, waiting, and first PR to merge,
    and the five slowest items. The Metrics page draws it as one ledger table, as it draws the lanes.
 
 `comment` is the note kind. `status_change` is `transition`'s alone and feeds status ages;
@@ -65,8 +65,8 @@ and a read that joins three sources every page load is slower and drifts from wh
 | --- | --- | --- | --- | --- |
 | observe writes checkpoint, then lane note | checkpoint row and one note | process stops between the two | both are in one transaction: neither lands; the next observation writes both | `test_a_failed_lane_note_rolls_back_the_observation` |
 | backfill notes, then the current lane note | several notes for one item | process stops mid-backfill | one transaction per item; nothing lands, the next refresh backfills again | `test_a_backfill_that_fails_writes_no_note` |
-| rerun of observe or refresh | none | a second note for the same lane | `record_lane` compares with the newest note for the url and writes nothing | `test_a_rerun_writes_no_second_note` |
-| acknowledge moves attention | checkpoint, then lane note | lane changes on you to on reviewers without a note | `acknowledge` calls `record_lane` in its transaction | `test_acknowledging_the_last_event_records_on_reviewers` |
+| rerun of observe or refresh | none | a second note for the same lane | `record_lane` compares with the newest note for the url and writes nothing | `test_an_observed_pull_writes_one_lane_note_and_a_rerun_writes_none` |
+| acknowledge moves attention | checkpoint, then lane note | lane changes on you to on reviewers without a note | `acknowledge` calls `record_lane` in its transaction | `test_a_maintainer_comment_is_on_you_and_acknowledging_it_is_on_reviewers_again` |
 | older state: item configured before this change | no lane notes | durations read nothing | refresh calls `record_lanes`, which backfills from shadow and followups | `test_backfill_reads_the_shadow_and_the_followups` |
 | older state: rollback to the previous commit | lane notes stay | the old code ignores them | none needed: they are plain comments | not tested: no code reads them there |
 | shadow row missing | no opened time | first note is the first observation | durations start there; Metrics counts no first-to-merge without a merge note | `test_without_a_shadow_row_the_wait_starts_at_the_first_note` |
