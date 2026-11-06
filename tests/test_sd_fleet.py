@@ -817,6 +817,19 @@ class Exemptions(Fleet):
                                 plan["refused"])
 
 
+class OldSlug(unittest.TestCase):
+    """A route workflow pinned before sd:7633 names the old action slug."""
+
+    def test_an_old_slug_route_workflow_is_the_route_template(self) -> None:
+        pin = "0" * 40
+        text = sd_setup_github.workflow_text(sd_setup_github.action_reference(pin))
+        old = text.replace("platypeeps/sd-workflow/", "platypeeps/sd-ai-command-pack/")
+        self.assertNotEqual(old, text)
+        self.assertTrue(sd_fleet.is_route_template(old, self_install=False))
+        self.assertTrue(sd_fleet.is_route_template(old.replace(sd_setup_guard.HEAD_CHECK_STEP, "", 1),
+                                                   self_install=False))
+
+
 class Wiring(unittest.TestCase):
     def test_sd_exposes_the_verb(self) -> None:
         done = subprocess.run([sys.executable, str(REPO_ROOT / "bin" / "sd"), "fleet", "stamp", "--help"],

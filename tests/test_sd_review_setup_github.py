@@ -1261,6 +1261,58 @@ class CliTests(SetupFixture):
         self.assertIn("every provider", text)
         self.assertIn("requests nobody", text)
 
+OLD_SLUG = "platypeeps/sd-ai-command-pack"
+
+
+def old_slug(text: str) -> str:
+    """`text` as the pack wrote it before sd:7633 moved the action slug."""
+
+    return text.replace(f"{setup.ACTION_REPOSITORY}/", f"{OLD_SLUG}/").replace(
+        "# The sd-workflow pin", "# The sd-ai-command-pack pin")
+
+
+class OldSlugTests(SetupFixture):
+    """A consumer pinned before sd:7633 names the old slug; every reader accepts it."""
+
+    def test_read_pin_reads_an_old_slug_pin(self) -> None:
+        old = old_slug(setup.workflow_text(setup.action_reference(PIN)))
+        self.assertIn(f"{OLD_SLUG}/actions/review-route@{PIN}", old)
+        self.assertEqual(guard.read_pin(old), PIN)
+        self.assertEqual(guard.pinned_actions(old), ("review-route",))
+
+    def test_rendered_replaces_an_old_slug_guard_rather_than_adding_a_second(self) -> None:
+        old = old_slug(guard.minimal_file())
+        self.assertIn(f'"{OLD_SLUG}/actions/review-route"', old)
+        self.assertEqual(guard.guard_state(old), "differs")
+        self.assertEqual(guard.rendered(old), guard.minimal_file())
+
+    def test_check_reads_the_pin_of_an_old_slug_workflow(self) -> None:
+        root = self.make_repo()
+        install(root)
+        self.workflow(root).write_text(old_slug(self.workflow(root).read_text()), encoding="utf-8")
+        stream = io.StringIO()
+        code = setup.check_files(root, setup_args(check=True, pin=None), stream)
+        self.assertEqual(code, 1)
+        self.assertEqual(stream.getvalue().splitlines()[0], f"DIFFERS {setup.WORKFLOW_RELATIVE_PATH}")
+
+    def test_remove_takes_an_old_slug_workflow_without_force(self) -> None:
+        root = self.make_repo()
+        install(root)
+        self.workflow(root).write_text(old_slug(self.workflow(root).read_text()), encoding="utf-8")
+        code = setup.remove(root, setup_args(remove=True), io.StringIO())
+        self.assertEqual(code, 0)
+        self.assertFalse(self.workflow(root).exists())
+
+    def test_remove_keeps_the_guard_while_another_workflow_pins_the_old_slug(self) -> None:
+        root = self.make_repo()
+        install(root)
+        (self.workflow(root).parent / "other.yml").write_text(
+            f"jobs:\n  x:\n    steps:\n      - uses: {OLD_SLUG}/actions/review-route@{PIN}\n", encoding="utf-8")
+        stream = io.StringIO()
+        setup.remove(root, setup_args(remove=True, dry_run=True), stream)
+        self.assertIn(f"kept {guard.DEPENDABOT_RELATIVE_PATH}", stream.getvalue())
+
+
 class RemoveTests(SetupFixture):
     """`--remove`: the supported way out of the lane (sd:1843 fleet cleanup)."""
 

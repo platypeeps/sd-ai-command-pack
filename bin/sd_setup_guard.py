@@ -49,7 +49,12 @@ class GuardError(Exception):
     """The file has no place for the guard; the message names why."""
 
 
-ACTIONS_PREFIX = "platypeeps/sd-workflow/actions"
+#: Every slug the pack's actions have lived under, the one written first.
+#: Readers accept each: a consumer pinned before sd:7633 still names the old
+#: one, and reading it as unpinned added a second guard beside its own.
+ACTION_SLUGS = ("platypeeps/sd-workflow", "platypeeps/sd-ai-command-pack")
+ACTIONS_PREFIX = f"{ACTION_SLUGS[0]}/actions"
+_PREFIXES = "|".join(re.escape(f"{slug}/actions") for slug in ACTION_SLUGS)
 
 #: Every action the pack ships, in the order a reader meets them. Enumerated
 #: here rather than assumed to be one: `actions/docs-gate` had a consumer, a
@@ -125,14 +130,14 @@ GUARD_LINES = guard_lines(DEFAULT_ACTION)
 _ENTRY = re.compile(r"""^\s*- package-ecosystem:\s*["']?github-actions["']?(?:\s+#.*)?\s*$""")
 _ANY_ENTRY = re.compile(r"^\s*- package-ecosystem:")
 _GUARD_ITEM = re.compile(
-    rf"""dependency-name:\s*["']?{re.escape(ACTIONS_PREFIX)}/"""
+    rf"""dependency-name:\s*["']?(?:{_PREFIXES})/"""
     rf"""(?P<action>{"|".join(re.escape(name) for name in ACTIONS)})["']?\s*$"""
 )
 
 
 def _pin_pattern(action: str) -> re.Pattern[str]:
     return re.compile(
-        rf"^\s*(?:- )?uses:\s*{re.escape(dependency_name(action))}@([0-9a-fA-F]{{7,40}})\b",
+        rf"^\s*(?:- )?uses:\s*(?:{_PREFIXES})/{re.escape(action)}@([0-9a-fA-F]{{7,40}})\b",
         re.M,
     )
 
@@ -458,14 +463,17 @@ HEAD_CHECK_STEP = """\
 """
 
 
-def known_texts(text: str) -> tuple[str, str]:
-    """`text`, a workflow the pack writes now, and the same workflow as it was written before `HEAD_CHECK_STEP`.
+def known_texts(text: str) -> tuple[str, ...]:
+    """`text`, a workflow the pack writes now, and the same workflow as written before.
 
-    A file holding the older text is the pack's own at that pin, so a stamp
+    Before `HEAD_CHECK_STEP`, and under each older slug in `ACTION_SLUGS`.
+    A file holding an older text is the pack's own at that pin, so a stamp
     may move it forward and `--remove` may delete it without `--force`.
     """
 
-    return text, text.replace(HEAD_CHECK_STEP, "", 1)
+    texts = (text, text.replace(HEAD_CHECK_STEP, "", 1))
+    return texts + tuple(each.replace(f"{ACTIONS_PREFIX}/", f"{slug}/actions/")
+                         for slug in ACTION_SLUGS[1:] for each in texts)
 
 
 def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_install: bool,
@@ -490,7 +498,8 @@ def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_
     dependabot = root / DEPENDABOT_RELATIVE_PATH
     before = dependabot.read_text(encoding="utf-8") if dependabot.is_file() else None
     pinned = sorted(str(path.relative_to(root)) for path in (root / workflow.parent).glob("*.y*ml")
-                    if path != target and DEPENDENCY in path.read_text(encoding="utf-8"))
+                    if path != target and any(f"{slug}/actions/{DEFAULT_ACTION}" in path.read_text(encoding="utf-8")
+                                              for slug in ACTION_SLUGS))
     if before is None:
         plan.append((dependabot, None, f"absent {DEPENDABOT_RELATIVE_PATH}"))
     elif pinned:

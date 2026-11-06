@@ -99,7 +99,7 @@ LOGIN = re.compile(r"[A-Za-z0-9](?:-?[A-Za-z0-9])*")
 #: The pack's own remote. The repository is `platypeeps/sd-workflow` since
 #: sd:6027; a clone made before then still names the old slug, which GitHub
 #: redirects, so a remote reads as the pack under either.
-PACK_SLUGS = (sd_setup_github.ACTION_REPOSITORY, "platypeeps/sd-ai-command-pack")
+PACK_SLUGS = sd_setup_guard.ACTION_SLUGS
 
 ROUTE_PATH = str(sd_setup_github.WORKFLOW_RELATIVE_PATH)
 DEPENDABOT_PATH = str(sd_setup_guard.DEPENDABOT_RELATIVE_PATH)
