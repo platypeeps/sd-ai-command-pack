@@ -120,13 +120,19 @@ FAKE = textwrap.dedent('''
         Path("work.txt").write_text(Path("work.txt").read_text() + mode + "\\n" if Path("work.txt").exists()
                                     else mode + "\\n")
         git("add", "work.txt")
+        # `extra`: plans/extra.json adds files (name to hex bytes) and message lines, as a builder may write.
+        extra = json.loads((plans / "extra.json").read_text()) if mode == "extra" else {}
+        for name, data in extra.get("files", {}).items():
+            Path(name).write_bytes(bytes.fromhex(data))
+            git("add", "--", name)
         # One `Closes: sd:N` trailer per item the brief lists, as the brief asks; `skip` leaves out the last
         # one, as a builder that skips an item for the operator does, and `none` delivers nothing.
         prompt = sys.argv[sys.argv.index("-p") + 1]
         items = re.findall(r"^- sd:(\\d+)", prompt, re.M)
         items = [] if mode == "none" else items[:-1] if mode == "skip" else items
         trailers = "".join(f"\\nCloses: sd:{item}" for item in items)
-        git("-c", "commit.gpgsign=false", "commit", "-qm", f"fix: {mode}" + (f"\\n{trailers}" if items else ""))
+        message = f"fix: {mode}" + "".join("\\n\\n" + text for text in extra.get("message", []))
+        git("-c", "commit.gpgsign=false", "commit", "-qm", message + (f"\\n{trailers}" if items else ""))
         final = {"type": "result", "subtype": "success", "is_error": False, "permission_denials": [],
                  "session_id": session, "result": f"built ({mode})", "total_cost_usd": 0.42,
                  "usage": {"input_tokens": 10, "output_tokens": 20}}
@@ -224,12 +230,12 @@ FAKE = textwrap.dedent('''
             signal.signal(signum, lambda number, _frame: os.killpg(child.pid, number))
         code = child.wait()
         sys.exit(128 - code if code < 0 else code)
-    if role == "guard":  # `leak-guard.sh scan`: the text on stdin; `match` names each line holding PRIVATE
-        text = sys.stdin.read()
-        (plans / "guard.txt").write_text(text)
+    if role == "guard":  # `leak-guard.sh scan`: bytes on stdin, lines numbered on LF as `grep -a -n` does
+        text = sys.stdin.buffer.read()
+        (plans / "guard.txt").write_bytes(text)
         if mode == "none":  # no pattern file: unknown, exit 3
             sys.exit(3)
-        hits = [str(number) for number, line in enumerate(text.splitlines(), 1) if "PRIVATE" in line]
+        hits = [str(number) for number, line in enumerate(text.split(b"\\n"), 1) if b"PRIVATE" in line]
         print(" ".join(hits))
         sys.exit(1 if hits else 0)
     if role == "sd-docs-lint":
@@ -1194,6 +1200,62 @@ class Unmanaged(Case):
         scanned = (self.plans / "guard.txt").read_text()
         self.assertIn("feat(fixture): build the fixture", scanned.splitlines()[0], "the title is line 1")
         self.assertIn("work.txt", scanned, "the paths each commit touches")
+
+    def extra(self, files=None, message=None):
+        """A builder commit with `files` (name to bytes) and `message` lines, through the public scan."""
+        (self.plans / "extra.json").write_text(json.dumps({"files": {name: data.hex() for name, data in
+                                                                     (files or {}).items()},
+                                                           "message": message or []}))
+        self.press()
+        self.write_pr()
+        self.plan(claude=["extra"], sd_review=["clean"])
+        return self.supervisor(checks=lambda work: [PASS]).run()
+
+    def scan_blocks(self, **case):
+        ended = self.extra(**case)
+        self.assertEqual(ended.get("outcome"), "blocked", ended)
+        self.assertIn("nothing was pushed: a privacy pattern matches the commits", ended["blocked"])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+
+    # Review of ac8175265, class: the scan's diff parse. Each holds PRIVATE where only a misread drops it.
+
+    def test_the_scan_reads_an_added_line_that_starts_with_plus_plus(self):
+        """An added `++PRIVATE` shows as `+++PRIVATE`: a hunk line, not the `+++ ` file header."""
+        self.scan_blocks(files={"plus.txt": b"++PRIVATE\n"})
+
+    def test_the_scan_reads_a_file_that_is_not_utf8(self):
+        """A Latin-1 file: `git log -p` is no UTF-8, and a strict decode crashed the supervisor."""
+        self.scan_blocks(files={"latin.txt": b"caf\xe9 PRIVATE\n"})
+
+    def test_the_scan_keeps_a_line_whole_across_a_cr_or_form_feed(self):
+        """splitlines cut a line at CR or form feed, and the part after lost its `+`; only LF ends a line now."""
+        self.scan_blocks(files={"cr.txt": b"ok\rPRIVATE\n"})
+        self.assertIn(b"ok\rPRIVATE", (self.plans / "guard.txt").read_bytes())
+
+    def test_the_scan_reads_a_message_line_that_looks_like_a_diff_header(self):
+        """A message line `diff --git ...` ended the message for the mixed parse; messages are read apart now."""
+        self.scan_blocks(message=["diff --git a/x b/x\nPRIVATE"])
+
+    def test_the_scan_reads_a_binary_files_path(self):
+        """A binary file has no `+++` line; its path still reaches the scan."""
+        self.scan_blocks(files={"PRIVATE.bin": b"\x00\xff\x00"})
+
+    def test_binary_content_and_a_missing_final_newline_are_not_scanned(self):
+        """Binary content is not read, as `leak-guard.sh check` reads none; `\\ No newline` is git's marker."""
+        ended = self.extra(files={"bin.dat": b"\x00PRIVATE\x00", "tail.txt": b"no newline"})
+        self.assertEqual(ended.get("step"), "enqueued", ended)
+
+    def test_a_body_that_is_not_utf8_blocks_and_does_not_crash(self):
+        """Review of ac8175265: the body read caught only OSError, so a Latin-1 body killed the supervisor."""
+        self.press()
+        self.write_pr()
+        logs = build_run.log_dir(self.logs, self.bundle["repo"])
+        (logs / f"sd-{self.bundle['assignment']}.body.md").write_bytes(b"## Summary\n\ncaf\xe9\n")
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended.get("outcome"), "blocked", ended)
+        self.assertIn("is not UTF-8 text", ended["blocked"])
+        self.assertEqual(self.pulls(), [])
 
     def test_a_private_repository_publishes_without_the_scan(self):
         """Operator ruling on sd:7868: a private repository's owners see work names already, so no scan runs."""

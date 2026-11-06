@@ -273,6 +273,19 @@ def _read(argv: list[str], *, env: dict | None = None) -> str:
     return done.stdout
 
 
+def _read_bytes(argv: list[str], *, env: dict | None = None) -> bytes:
+    """`_read` for output in no known encoding: its stdout as bytes, `Unread` the same way."""
+    try:
+        done = subprocess.run(argv, capture_output=True, timeout=READ_SECONDS, check=False, stdin=subprocess.DEVNULL,
+                              env=env)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Unread(f"{argv[0]} gave no answer: {error}") from None
+    if done.returncode != 0:
+        said = done.stderr.decode("utf-8", "replace").strip()[:200]
+        raise Unread(f"{' '.join(argv[:4])} failed: exit {done.returncode}: {said}")
+    return done.stdout
+
+
 def kept_files(git: Collection[str], work: str, *, env: dict | None = None) -> str:
     """The status lines of `work` that `git worktree remove` would lose: changes, untracked and ignored
     files, those config hides too, less the ignored ones under a `DISPOSABLE` folder; "" when it may go."""
@@ -666,7 +679,10 @@ class Supervisor:
     def prechecked(self, head: str) -> list[str]:
         if self.checked is None:
             return []
-        title, body = (path.read_text(encoding="utf-8") if path.exists() else "" for path in (self.title, self.body))
+        try:
+            title, body = (path.read_text(encoding="utf-8") if path.exists() else "" for path in (self.title, self.body))
+        except ValueError:  # not UTF-8: the builder rewrites it, as for any other refusal
+            return [f"the title at {self.title} or the body at {self.body} is not UTF-8 text"]
         return self.checked(self.work, self.base(), head, title.strip(), body)
 
     def blocked_round(self, blockers: list[dict]) -> str | dict:
@@ -704,6 +720,8 @@ class Supervisor:
             body = self.body.read_text(encoding="utf-8")
         except OSError:
             body = ""
+        except ValueError:
+            return self.finish("blocked", f"the body at {self.body} is not UTF-8 text")
         cited = self.cited(self.work, self.base(), head, body)
         if cited is None:
             raise Unread(f"the commits {head[:12]} adds were not read")
@@ -731,10 +749,11 @@ class Supervisor:
                 return self.lane_done(entry, delivered)
         try:
             title = self.title.read_text(encoding="utf-8").strip()
-        except OSError:
+        except (OSError, ValueError):  # missing or not UTF-8: refused just below
             title = ""
         if not title or len(title) > TITLE_MAX or "\n" in title:
-            return self.finish("blocked", f"the title at {self.title} is missing or over {TITLE_MAX} characters")
+            return self.finish("blocked", f"the title at {self.title} is missing, not UTF-8 text, or over "
+                                          f"{TITLE_MAX} characters")
         errors = self.out("lint.err")
         errors.write_bytes(b"")
         # A foreign repository's docs tree follows none of this pack's rules: only the body is linted there.
@@ -837,28 +856,34 @@ class Supervisor:
         the paths it touches and its added lines. A scan that matches, fails or has no pattern is a refusal:
         unknown is not clean before a push to someone else's repository.
         """
+        # Bytes throughout, split on LF alone: a file or body that is not UTF-8 is scanned, not a crash, and a CR
+        # or form feed inside a line does not cut it in two (review of ac8175265). Patterns match ASCII values.
         try:
-            body = self.body.read_text(encoding="utf-8")
+            body = self.body.read_bytes()
         except OSError:
-            body = ""
-        log = _read([*self.tools.git, "-C", str(self.work), "log", "--no-color", "--unified=0", "--format=%x00%B",
-                     "-p", f"{self.base()}..{head}"], env=self.env)
-        commits, message = [], False
-        for line in log.splitlines():
-            if line.startswith("\0"):
-                message, line = True, line[1:]
-            elif line.startswith("diff --git "):
-                message = False
-                commits.append(line[len("diff --git "):])
-                continue
-            if message:
-                commits.append(line)
-            elif line.startswith("+") and not line.startswith("+++"):
-                commits.append(line[1:])
-        parts = [("the title", [title]), ("the body", body.splitlines()), ("the commits", commits)]
-        text = "".join(line + "\n" for _part, lines in parts for line in lines)
+            body = b""
+        span = f"{self.base()}..{head}"
+        git = [*self.tools.git, "-C", str(self.work), "-c", "core.quotePath=false", "log", "--no-color",
+               "--no-ext-diff", "--no-renames"]
+        messages = _read_bytes([*git, "--format=%B", span], env=self.env)
+        touched = _read_bytes([*git, "--format=", "--name-only", "-z", span], env=self.env)
+        diff = _read_bytes([*git, "--format=", "-p", "--unified=0", span], env=self.env)
+        # A file's header runs from `diff --git` to its first `@@`: mode, index, rename, `Binary files` and the
+        # `---`/`+++` lines are skipped there, and a hunk line is `+`, `-` or `\`, so `+++x` in a hunk is the
+        # added line `++x`. Messages and paths come from their own reads, never from this parse.
+        added, header = [], False
+        for line in diff.split(b"\n"):
+            if line.startswith(b"diff --git "):
+                header = True
+            elif line.startswith(b"@@"):
+                header = False
+            elif not header and line.startswith(b"+"):
+                added.append(line[1:])
+        parts = [("the title", [title.encode("utf-8", "surrogateescape")]), ("the body", body.split(b"\n")),
+                 ("the commits", [*messages.split(b"\n"), *(name for name in touched.split(b"\0") if name), *added])]
+        text = b"".join(line.replace(b"\n", b" ") + b"\n" for _part, lines in parts for line in lines)
         try:
-            done = subprocess.run(self.tools.guard, input=text, capture_output=True, text=True, timeout=READ_SECONDS,
+            done = subprocess.run(self.tools.guard, input=text, capture_output=True, timeout=READ_SECONDS,
                                   check=False, env=self.env)
         except (OSError, subprocess.SubprocessError) as error:
             return f"the privacy-pattern scan did not run: {type(error).__name__}"
@@ -866,7 +891,7 @@ class Supervisor:
             return ""
         if done.returncode != 1:
             return (f"the privacy-pattern scan could not check the text (exit {done.returncode}; 3 is no pattern "
-                    f"file): {done.stderr.strip()[-300:]}")
+                    f"file): {done.stderr.decode('utf-8', 'replace').strip()[-300:]}")
         hits, first = set(), 1
         numbers = {int(word) for word in done.stdout.split() if word.isdigit()}
         for part, lines in parts:

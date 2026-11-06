@@ -145,6 +145,20 @@ push     | none                   | a private value in   | blocked before the pu
          |                        | title, body, commits | scan reads all three            | commit, title; no patterns
 push     | none                   | visibility unread    | read as public: the scan runs;  | test_build_run: private repo
          |                        | or repo private      | private skips it, noted         | publishes; unread scans
+scan     | none                   | added `++x` reads as | header only between diff --git  | test_build_run: reads an
+         |                        | `+++x`, the header   | and @@; hunk `+` lines all kept | added line starting ++
+scan     | none                   | a file or body not   | read as bytes; patterns match   | not utf8 file; body not
+         |                        | UTF-8 crashed        | ASCII; body refused, not crash  | utf8 blocks, no crash
+scan     | none                   | CR or form feed cut  | split on LF alone, as grep -n   | keeps a line whole across
+         |                        | a line in two        | numbers lines                   | a CR
+scan     | none                   | message line `diff   | messages read by their own      | message line that looks
+         |                        | --git` ended message | git log --format=%B             | like a diff header
+scan     | none                   | binary file: no +++  | paths from --name-only -z;      | binary file's path; binary
+         |                        | line, no text        | content unread, as leak-guard   | content not scanned
+scan     | none                   | `-` line, `\ No      | not added text: skipped, as     | none needed: no text the
+         |                        | newline`, mode line  | leak-guard check skips them     | push adds
+scan     | none                   | CRLF line            | LF split keeps `x\r`; grep     | none needed: the CR stays
+         |                        |                      | matches inside it               | inside the scanned line
 push     | none                   | foreign docs tree    | --body-only: the body alone     | test_build_run: body lint
          |                        | breaks the tree lint | is linted                       | skips a foreign docs tree
 flag     | none (a read)          | draft not marked     | lane awaiting_you with DRAFTED  | test_contributions: draft
