@@ -2,6 +2,7 @@
 title: Queue shows an item waiting on its PR, and Metrics times the wait
 created: 2026-11-06
 item: sd:7859
+branch: feat/sd-7859-pr-wait
 ---
 
 # Design — pr-wait
