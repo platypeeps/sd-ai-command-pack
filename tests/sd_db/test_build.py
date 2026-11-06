@@ -302,6 +302,38 @@ class Claim(Case):
         taken = self.claim()
         self.assertEqual(([m["item"] for m in taken["members"]], self.statuses([item])), ([item], ["in_progress"]))
 
+    LINKED = {"issue_url": ("https://github.com/owner/third-party/issues/3", "already links the issue"),
+              "pull_url": ("https://github.com/owner/third-party/pull/4", "already links the pull request")}
+
+    def test_a_press_refuses_an_unmanaged_task_whose_contribution_is_already_linked(self):
+        """Review of 3072db937: a task linked to an issue or another pull request takes no build that would push and
+        open a draft, then fail to link it, on every Retry."""
+        from sd_db import contributions
+
+        upsert_repo(self.db, "/fixture/gh", remote="git@github.com:owner/third-party.git", managed=0)
+        for name, (url, reason) in self.LINKED.items():
+            with self.subTest(link=name):
+                item = self.item(repo="/fixture/gh")
+                contributions.configure(self.db, item, {name: url}, who="operator")
+                self.assertNotIn(item, [row["id"] for row in build.eligible(self.db)])
+                with self.assertRaisesRegex(build.BuildRefused, reason):
+                    build.queue(self.db, [item], who="operator")
+
+    def test_a_claim_refuses_an_unmanaged_task_linked_after_the_press(self):
+        """Review of 3072db937: the claim reads the same rule, so a link made after the press pushes nothing."""
+        from sd_db import contributions
+
+        upsert_repo(self.db, "/fixture/gh", remote="git@github.com:owner/third-party.git", managed=0)
+        for name, (url, reason) in self.LINKED.items():
+            with self.subTest(link=name):
+                item = self.item(repo="/fixture/gh")
+                (queued,) = build.queue(self.db, [item], who="operator")
+                contributions.configure(self.db, item, {name: url}, who="operator")
+                self.assertIsNone(self.claim())
+                row = self.db.execute("SELECT status, result FROM assignment WHERE id = ?", (queued["id"],)).fetchone()
+                self.assertEqual(row["status"], "blocked")
+                self.assertIn(reason, row["result"])
+
     def test_a_kill_whose_descendants_did_not_read_passes_once_its_group_is_gone(self):
         """Review of 3072db937: a failed `ps` read with the recorded group gone blocked every reap, managed too."""
         gone = subprocess.Popen(["true"], start_new_session=True)

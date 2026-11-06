@@ -142,6 +142,17 @@ def _repo_refusal(row) -> str | None:
         if row["kind"] != "task":
             return (f"item {item} is a {row['kind']} item; a build in the unmanaged repository {row['repo']} "
                     f"takes task items only")
+        # Its draft becomes the task's one contribution. One already linked would refuse that link only after the
+        # push and the draft, on every Retry (review of 3072db937). A press or a claim precedes every run, so
+        # no link here is this build's own: a retry passes through neither.
+        try:
+            linked = json.loads(row["fields"] or "{}").get("contribution") or {}
+        except (ValueError, AttributeError):
+            linked = {}
+        for name, what in (("issue_url", "the issue"), ("pull_url", "the pull request")):
+            if isinstance(linked, dict) and linked.get(name):
+                return (f"item {item} already links {what} {linked[name]}; a build in the unmanaged repository "
+                        f"{row['repo']} would push and open a draft pull request it cannot link")
     if not row["remote"]:
         return f"item {item}'s repository {row['repo']} has no remote"
     if row["lane_host"] is not None:
