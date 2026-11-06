@@ -850,6 +850,52 @@ class TheIntakeBulk(ScreenCase):
         self.assertEqual([p[1]["ref"] for p in out["posts"] if p[0] == "/api/items"],
                          ["github:example/project#21", "github:example/project#23"])
 
+    def test_a_pick_keeps_keyboard_focus_on_its_box_after_the_redraw(self):
+        """pack sd:7794: the redraw read document.activeElement after it replaced the rows, when the browser had already
+        moved focus to the body, so Space on a box lost focus and the next Tab started from the top of the page."""
+        out = self.page(
+            "show('intake'); await flush(); R.focused = null;"
+            " document.activeElement = { dataset: { intakePick: 'iss:github:example/project#21' } };"
+            # As a browser does: replacing the rows drops the focus of the box that held it.
+            " const rc = ELS.intake.replaceChildren; ELS.intake.replaceChildren = f => { rc(f); document.activeElement = document.body; };"
+            " ELS.intake.querySelectorAll = s => s === '[data-intake-pick]' ? [21, 23].map(n => ({ dataset:"
+            " { intakePick: `iss:github:example/project#${n}` }, focus() { R.focused = this.dataset.intakePick; } })) : [];"
+            " change({ dataset: { intakePick: 'iss:github:example/project#21' } }); await flush();")
+        self.assertEqual(out["R"]["focused"], self.ID.format(21))
+
+    def test_read_again_drops_the_pick_of_a_row_it_no_longer_lists(self):
+        """pack sd:7794: a picked Your issues row that Read again no longer listed stayed picked as a 'not listed'
+        object, so the bulk bar's Hide ran on it; the reader retires such a pick first, as read.js does."""
+        gone = "github:example/project#12"
+        out = self.page(
+            f"show('issues'); await flush(); C.pick('iss:{gone}'); R.before = [...PICKED];"
+            " const was = ANSWER; ANSWER = (p, b) => { const a = was(p, b); if (p !== '/api/github/issues') return a;"
+            f" return [a[0], {{ ...a[1], issues: a[1].issues.filter(r => r.key !== '{gone}') }}]; }};"
+            f" await window.PAGE_AGAIN.run(); await flush(); R.after = [...PICKED]; R.type = C.get('iss:{gone}').type;")
+        r = out["R"]
+        self.assertEqual(r["before"], [f"iss:{gone}"])
+        self.assertEqual((r["after"], r["type"]), ([], "not listed"))
+
+    def test_a_filed_row_stays_out_only_of_reads_begun_before_its_filing_landed(self):
+        """pack sd:7794: a filed row stayed out of every read that still listed it, for as long as the page was open; a
+        read begun after the filing landed is the server's answer, so a row it still lists shows again and files again."""
+        listed = json.dumps(INTAKE_ROWS)
+        out = self.page(
+            "show('intake'); await flush(); act('github issue.file', 'iss:github:example/project#21'); await flush();"
+            " R.gone = ELS.intake.html;"
+            # The page's first read, begun before the filing landed, answers late and still lists the row.
+            f" document.dispatchEvent(new CustomEvent('intake:read', {{ detail: {{ intake: {listed}, error: '',"
+            " store: { available: true }, read: 1 } })); R.early = ELS.intake.html;"
+            " const was = ANSWER; ANSWER = (p, b) => { const a = was(p, b); if (p !== '/api/github/issues') return a;"
+            f" return [a[0], {{ ...a[1], intake: {listed} }}]; }};"
+            " await window.githubIssues.again(); await flush(); R.late = ELS.intake.html;"
+            " R.off = C.offWhy(cmd('github issue.file'), C.get('iss:github:example/project#21'));")
+        r = out["R"]
+        self.assertNotIn("Docs typo", r["gone"])
+        self.assertNotIn("Docs typo", r["early"])
+        self.assertIn("Docs typo", r["late"])
+        self.assertEqual(r["off"], "")
+
 CATEGORY_ROWS = [
     {"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget", "reason": "filed",
      "url": None, "state": None, "hidden": False, "category": "Alerts", "updated_at": "2026-11-01T10:00:00Z"},

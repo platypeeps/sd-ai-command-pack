@@ -134,16 +134,17 @@ def pull_url(job: str | None, basis: str | None) -> str | None:
 
 
 def report_realm(job: str | None, basis: str | None, rules: list | None, hoa: str | None, *, checkouts: dict,
-                 families: list) -> str | None:
+                 families: list | None) -> str | None:
     """A report's realm (pack sd:7774): a pr-attention report's is its pull repo's registered checkout's (`checkouts`,
-    lower-case `owner/name` to path, `sd_db.today.repo_keys`, by `realm_of`); any other's is its family's key when that key is a realm id
-    (`families`, `reports_screen.families`' list). No match is Personal; without a realm list it is unknown, None."""
-    if rules is None:
-        return None
+    lower-case `owner/name` to path, `sd_db.today.repo_keys`), by `realm_of`: the hoa checkout is HOA without a realm
+    list, and a pull in no checkout has no repo, so it is Personal (pack sd:7792). Any other's is its family's key when
+    that key is a realm id (`families`, `reports_screen.families`' list); no match is Personal. Without a realm list,
+    or with `families` None (the family list did not read), it is unknown, None, as a repo row's."""
     found = PULL.fullmatch(pull_url(job, basis) or "")
     if found:
-        path = checkouts.get(f"{found[1]}/{found[2]}".lower())
-        return realm_of(path, "task", rules, hoa) if path else "personal"
+        return realm_of(checkouts.get(f"{found[1]}/{found[2]}".lower()), "task", rules, hoa)
+    if rules is None or families is None:
+        return None
     ids = {realm["id"] for realm in rules}
     return next((family["key"] for family in families if family["key"] in ids and job in family["jobs"]), "personal")
 

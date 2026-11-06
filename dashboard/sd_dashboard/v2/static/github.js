@@ -28,7 +28,7 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'dependabot'
     try { detail = await window.shell.getJSON('/api/github/issues'); } catch (e) { detail = { issues_error: e.message, intake_error: e.message }; }
     if (n !== reads) return; // of overlapping reads only the newest draws
     document.dispatchEvent(new CustomEvent('issues:read', { detail: { issues: detail.issues || [], error: detail.issues_error || '', github: detail.github_error || '', store: detail.store, categories: detail.categories || [] } }));
-    document.dispatchEvent(new CustomEvent('intake:read', { detail: { intake: detail.intake || [], error: detail.intake_error || '', store: detail.store } }));
+    document.dispatchEvent(new CustomEvent('intake:read', { detail: { intake: detail.intake || [], error: detail.intake_error || '', store: detail.store, read: n } }));
     const was = SYNC?.state === 'running';
     SYNC = detail.sync || null; SYNCED = detail.synced || null; drawSync();
     if (SYNC?.state === 'running') poll(); else if (was) { window.githubPulls?.again(); window.githubDependabot?.again(); window.githubTracked?.again(); }
@@ -66,6 +66,7 @@ window.PAGE_VIEWS = [{ id: 'pulls', label: 'Pull requests' }, { id: 'dependabot'
   document.addEventListener('shell:view', e => { if (['pulls', 'issues', 'intake', 'dependabot', 'tracked'].includes(e.detail && e.detail.id) && !started) load(); });
   // Read again (sd:5638): every view that has been read reads again; Pull requests is today-github.js's own read.
   window.PAGE_AGAIN = { title: 'Read GitHub again', run: () => Promise.all([window.githubPulls && window.githubPulls.again(), window.githubDependabot?.again(), window.githubTracked?.again(), started && load()]) };
-  // issues.js reads again after a Hide or Unhide (sd:6175).
-  window.githubIssues = { again: () => load() };
+  // issues.js reads again after a Hide or Unhide (sd:6175). reads() is the count of reads begun: an intake:read event's
+  // `read` at or below the count when a filing landed began before it (pack sd:7794).
+  window.githubIssues = { again: () => load(), reads: () => reads };
 })();

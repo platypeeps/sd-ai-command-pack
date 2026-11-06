@@ -303,7 +303,10 @@ addEventListener('DOMContentLoaded', () => {
   const parkUndo = parked => (o, v) => window.shell.post(`/api/items/${o.id}/${parked ? 'revive' : 'park'}`, { revision: v.revision })
     .then(() => reading?.reread(), e => { reading?.load(); throw e; });
   const asked = p => { const n = p.grill?.open.length; return n ? `${markup.plural(n, 'grill question')} open; answer them first` : ''; };
-  const fixPost = (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision }).then(out => { reading?.reread(); return out; });
+  // A refused stale press reads again too, as `write` does, so the next press carries the revision the page now holds.
+  const fixPost = (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision })
+    .then(out => { reading?.reread(); return out; }, e => { if (e.stale) reading?.load(); throw e; });
+  const fixAgain = () => reading?.load();
   // An answer is Decide's: /api/decisions/answer writes the ruling and resolves the question under the piece's revision.
   // pack sd:7242: a gate's view opens its report in the editor; Draft's refresh reads the pieces again.
   document.getElementById('details').addEventListener('click', e => {
@@ -357,9 +360,10 @@ addEventListener('DOMContentLoaded', () => {
       when: o => { const p = P_(o); return !p ? 'not listed' : p.draft.length ? true : 'no draft yet'; },
       run: o => { select(o.id); setView('editor'); return null; } },
     // pack sd:6700: Grill writes the piece's questions as notes; Details walks them; Apply answers edits the draft to follow them.
-    window.commands.grill('piece', 'ask', { item: o => P_(o).id, post: fixPost,
+    // pack sd:7783: a launch that failed, or gave no answer, may have noted its cause on the piece: `fixAgain` reads again.
+    window.commands.grill('piece', 'ask', { item: o => P_(o).id, post: fixPost, again: fixAgain,
       ready: o => { const p = P_(o); return !p ? 'not listed' : !p.words ? 'no draft to grill yet' : asked(p) || true; } }),
-    window.commands.grill('piece', 'apply', { item: o => P_(o).id, post: fixPost,
+    window.commands.grill('piece', 'apply', { item: o => P_(o).id, post: fixPost, again: fixAgain,
       ready: o => { const p = P_(o); return !p ? 'not listed' : asked(p) || (p.grill?.answered ? true : 'no grill question answered yet; press Grill first'); } }),
     // pack sd:6699: Refresh review is the shared adversarial review with kind piece; it rewrites the piece's adversarial.md.
     window.commands.adversarialReview('piece', { id: 'piece.review', label: 'Refresh review',
@@ -369,7 +373,7 @@ addEventListener('DOMContentLoaded', () => {
     // Apply review is the shared Fix with apply: adversarial; the page reads again once the session starts.
     window.commands.applyReview('piece', { item: o => P_(o).id,
       ready: o => { const p = P_(o); return !p ? 'not listed' : reviewed(p); },
-      post: fixPost }),
+      post: fixPost, again: fixAgain }),
   ];
   // A piece's review that lands rewrites adversarial.md, so the page reads again for its time.
   document.addEventListener('adversarial:run', e => { if (e.detail.run.kind === 'piece' && e.detail.run.filed) reading?.reread(); });

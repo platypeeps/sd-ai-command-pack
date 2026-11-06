@@ -614,6 +614,23 @@ R.icon = btn.html;""")
         out = self.run_page("R.off = cmd('piece.grill').when(C.get('12'));", prelude=self.GRILLED)
         self.assertEqual(out["R"]["off"], "2 grill questions open; answer them first")
 
+    def test_a_failed_grill_or_apply_review_launch_reads_the_pieces_again(self):
+        """pack sd:7783: a failed launch (5xx) notes its cause on the piece, and a post with no answer may have noted it,
+        so either moves the revision the page holds: Writing reads again, or the next press is refused stale. A refusal
+        that wrote nothing (400) reads nothing."""
+        newer = "DOC.pieces[1].adversarial = { state: 'current', detail: 'draft ba9876543210' };\n"
+        failed = "(path) => path === '/api/writing' ? [200, DOC] : [503, { error: 'Fix failed: herdr.sh launch: no session.' }]"
+        silent = "(path) => { if (path !== '/api/writing') throw new TypeError('Load failed'); return [200, DOC]; }"
+        refused = "(path) => path === '/api/writing' ? [200, DOC] : [400, { error: 'item 12 is done' }]"
+        # A press refused stale (409) wrote nothing, but the page holds an old revision: it reads again, as `write` does.
+        stale = "(path) => path === '/api/writing' ? [200, DOC] : [409, { error: 'item 12 changed; read it again' }]"
+        for command in ("piece.grill", "piece.apply-review"):
+            for answer, reads in ((failed, 1), (silent, 1), (stale, 1), (refused, 0)):
+                out = self.run_page(f"const before = OUT.gets.length; shellRun(cmd('{command}'), C.get('12')); await flush();"
+                                    " await flush(); R.reads = OUT.gets.slice(before).filter(g => g === '/api/writing').length;",
+                                    answer=answer, prelude=newer)
+                self.assertEqual(out["R"]["reads"], reads, (command, answer))
+
     def test_apply_answers_waits_for_every_answer_then_posts_fix_with_grill_apply(self):
         out = self.run_page("R.off = [cmd('piece.apply-answers').when(C.get('12')), cmd('piece.apply-answers').when(C.get('11'))];",
                             prelude=self.GRILLED)
