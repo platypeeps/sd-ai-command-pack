@@ -225,17 +225,15 @@ def _kill_group(process: subprocess.Popen) -> str:
         pass
     except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
         process.kill()
-        try:
-            output, _ = process.communicate(timeout=REAP_SECONDS)
-        except subprocess.TimeoutExpired as error:
-            # A descendant the refused group kill left alive holds the pipe: stop reading it.
-            if process.stdout is not None:
-                process.stdout.close()
-            process.wait()
-            said = error.output or ""
-            return said.decode(errors="replace") if isinstance(said, bytes) else said
-        return output
-    output, _ = process.communicate()
+    try:
+        output, _ = process.communicate(timeout=REAP_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        # A descendant the group kill missed (refused, or in a group of its own) holds the pipe: stop reading it.
+        if process.stdout is not None:
+            process.stdout.close()
+        process.wait()
+        said = error.output or ""
+        return said.decode(errors="replace") if isinstance(said, bytes) else said
     return output
 
 
