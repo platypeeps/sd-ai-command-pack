@@ -400,9 +400,10 @@ def runner(connection) -> dict:
 
 #: The lane states that keep an item's row in the lane: its pull request waits there, not on review (pack sd:7859).
 #: A `prepared` blocked entry is the exception: in a repo whose `runner_merge` is manual the lane stops there and the
-#: pull request waits on a person's review, so its row shows the wait beside its Approve. A landed or cancelled row
-#: is the lane's last word until the next sync notes the merge (sd:7863): a just-merged item read "blocked: PR".
-LANED = ("merging", "next", "blocked", "cancelled", "landed")
+#: pull request waits on a person's review, so its row shows the wait beside its Approve. A landed row is the lane's
+#: last word until the next sync notes the merge (sd:7863): a just-merged item read "blocked: PR". A cancelled entry
+#: left its pull request open, so its wait still shows.
+LANED = ("merging", "next", "blocked", "landed")
 #: What the page reads of each pull-request wait (`contributions.pr_waits`).
 PR_FIELDS = ("item", "title", "repo", "url", "lane", "on", "since", "waited")
 

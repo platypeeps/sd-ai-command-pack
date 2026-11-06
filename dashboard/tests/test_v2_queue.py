@@ -327,9 +327,9 @@ class TheRows(Lane, ScreenCase):
                     "started_at": "2026-09-06T11:50:00Z", "step": "merge"}])
         self.assertEqual([(r["item"], r["on"]) for r in self.doc()["prs"]["rows"]], [(manual, "reviewers")])
 
-    def test_a_landed_or_cancelled_item_keeps_its_lane_row_not_a_pr_row(self):
-        # sd:7863 (note 46123): LANED missed landed and cancelled, so a just-merged item read "blocked: PR" until the
-        # next sync wrote its merged lane note.
+    def test_a_landed_item_keeps_its_lane_row_and_a_cancelled_one_keeps_its_pr_wait(self):
+        # sd:7863 (note 46123): LANED missed landed, so a just-merged item read "blocked: PR" until the next sync
+        # wrote its merged lane note. A cancelled entry left the pull request open: its wait still shows (review).
         landed, _ = self.pr_item(907, ("2026-09-06T10:00:00Z", "awaiting_them"))
         cancelled, _ = self.pr_item(908, ("2026-09-06T10:00:00Z", "awaiting_them"))
         self.list([{"item": landed, "title": "Landed", "status": "merged", "finished_at": "2026-09-06T11:00:00Z"},
@@ -338,7 +338,8 @@ class TheRows(Lane, ScreenCase):
         doc = self.doc()
         states = {row.get("item"): row["state"] for row in doc["lanes"][0]["rows"]}
         self.assertEqual((states[landed], states[cancelled]), ("landed", "cancelled"))
-        self.assertEqual(doc["prs"]["rows"], [])
+        self.assertEqual([row["item"] for row in doc["prs"]["rows"]], [cancelled],
+                         "a cancelled entry hid the open pull request's wait")
 
     def test_a_malformed_item_is_said_and_the_other_pr_rows_still_show(self):
         # sd:7863 (note 46123): pr_waits read every item strictly, so one malformed item emptied the PR rows.
