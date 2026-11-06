@@ -1531,6 +1531,86 @@ class LaneNoteTests(ContributionCase):
         self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
         self.assertTrue(c.pr_waits(self.db)[0]["open"])
 
+    def test_a_bundles_pull_request_goes_to_the_lowest_item_number(self):
+        # sd:7863: receipts sorted by str(item), so item 10 took the bundle's pull request before item 9.
+        self.observe()
+        items = [self.task(f"Item {n}") for n in range(10)]
+        nine, ten = next(i for i in items if i == 9), next(i for i in items if i == 10)
+        self.shipped(ten)
+        self.shipped(nine)
+        self.assertEqual(c.link_shipped(self.db), ([nine], []))
+
+    def receipt(self, item, branch, url):
+        """A second receipt for `item`, on another branch: a re-prepare after its first pull request closed."""
+        from sd_db import ship
+
+        key = ship.receipt_key("upstream/project", branch, item)
+        ship.save(self.db, key, ship.read(self.db, key)[0],
+                  {"item": item, "repository": "upstream/project", "branch": branch, "phase": "ready_to_send",
+                   "pull_request": {"number": 13, "repository": "upstream/project", "base": "main", "url": url}})
+
+    def test_the_newest_receipt_of_an_item_is_the_one_linked(self):
+        newer = "https://github.com/upstream/project/pull/13"
+        item = self.task()
+        self.receipt(item, "feat/sd-z-old", URL)
+        self.receipt(item, "feat/sd-a-new", newer)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": newer})
+
+    def test_an_item_tied_to_a_closed_pull_request_is_relinked_to_its_newer_receipt(self):
+        # sd:7863: a receipt has no closed phase, so an item re-prepared after its PR closed stayed on the stale PR.
+        newer = "https://github.com/upstream/project/pull/13"
+        item = self.task()
+        self.receipt(item, "feat/sd-first", URL)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.observe(state="closed")
+        self.receipt(item, "feat/sd-second", newer)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": newer})
+        self.assertEqual(c.link_shipped(self.db), ([], []), "a rerun links nothing")
+
+    def test_an_open_linked_pull_request_is_not_replaced_by_a_newer_receipt(self):
+        item = self.task()
+        self.receipt(item, "feat/sd-first", URL)
+        c.link_shipped(self.db)
+        self.observe()
+        self.receipt(item, "feat/sd-second", "https://github.com/upstream/project/pull/13")
+        self.assertEqual(c.link_shipped(self.db), ([], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": URL})
+
+    def test_an_unrelated_malformed_item_stops_no_receipts_link(self):
+        # sd:7863 (note 46123): configure rescanned every item strictly, so one malformed item failed every link.
+        self.observe()
+        broken, item = self.task("Broken"), self.task()
+        set_item_fields(self.db, broken, fields={"contribution": "not an object"})
+        self.db.commit()
+        self.shipped(item)
+        self.assertEqual(c.link_shipped(self.db),
+                         ([item], [f"item {broken}: item {broken} has malformed contribution metadata"]))
+
+    def test_the_lane_note_reads_the_issue_source_the_projection_reads(self):
+        # sd:7863: record_lane read the item and pull sources only; the projection reads the issue too.
+        item = self.item()
+        fields = json.loads(item_state(self.db, item)["item"]["fields"])
+        fields["contribution"]["issue_url"] = ISSUE
+        set_item_fields(self.db, item, fields=fields)
+        self.store_issue(attention=[c._event("event:1", "New comment")])
+        self.db.commit()
+        self.observe()
+        row = next(r for r in c.projection(self.db) if r["item_id"] == item)
+        self.assertEqual((row["lane"], self.lanes(item)[-1][0]), ("awaiting_you", "awaiting_you"))
+
+    def test_an_observed_issue_notes_the_lane_of_the_item_that_holds_it(self):
+        item = self.item()
+        self.observe()
+        fields = json.loads(item_state(self.db, item)["item"]["fields"])
+        fields["contribution"]["issue_url"] = ISSUE
+        set_item_fields(self.db, item, fields=fields)
+        self.db.commit()
+        c.observe_issue(self.db, ISSUE, self.issue_observation(events=[self.event(url=ISSUE + "#issuecomment-1")]),
+                        expected_revision=c.snapshot(self.db, "issue:" + ISSUE)["revision"])
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False), ("awaiting_you", "open", False)])
+
     def test_the_projection_lane_is_the_one_rule_the_note_reads(self):
         item = self.item()
         self.observe(events=[self.event()])

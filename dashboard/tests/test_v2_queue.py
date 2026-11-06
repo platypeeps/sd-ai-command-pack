@@ -37,6 +37,7 @@ from unittest import mock
 
 from sd_dashboard import hoa_screen, now_screen, pack_bin, places, queue_screen, v2
 from sd_db import upsert_repo
+from sd_db.writes import create_item
 from support import NOW, ScreenCase
 from test_v2_registry import GROUP_BLOCK
 from test_v2_today import OSASCRIPT
@@ -292,6 +293,9 @@ class TheRows(Lane, ScreenCase):
         from sd_db.writes import add_note
 
         url = f"https://github.com/example/system/pull/{n}"
+        # Past every item the fixture lane names (1 to 12), so a fixture lane row never holds a pull request's item.
+        while (self.connection.execute("SELECT max(id) FROM item").fetchone()[0] or 0) < 12:
+            create_item(self.connection, kind="task", title="Filler", status="planning", priority=3)
         item = contributions.capture(self.connection, title=f"PR {n}", changes={"pull_url": url}, who="test")["item"]["id"]
         for at, lane in lanes:
             add_note(self.connection, item, "comment", f"PR lane: {lane} · open · {url}", session="contribution-observer",
@@ -322,6 +326,33 @@ class TheRows(Lane, ScreenCase):
                    {"item": auto, "title": "Auto", "status": "running", "expected_head": "f" * 40, "id": "e-6",
                     "started_at": "2026-09-06T11:50:00Z", "step": "merge"}])
         self.assertEqual([(r["item"], r["on"]) for r in self.doc()["prs"]["rows"]], [(manual, "reviewers")])
+
+    def test_a_landed_or_cancelled_item_keeps_its_lane_row_not_a_pr_row(self):
+        # sd:7863 (note 46123): LANED missed landed and cancelled, so a just-merged item read "blocked: PR" until the
+        # next sync wrote its merged lane note.
+        landed, _ = self.pr_item(907, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        cancelled, _ = self.pr_item(908, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        self.list([{"item": landed, "title": "Landed", "status": "merged", "finished_at": "2026-09-06T11:00:00Z"},
+                   {"item": cancelled, "title": "Cancelled", "status": "cancelled", "expected_head": "e" * 40,
+                    "finished_at": "2026-09-06T11:00:00Z"}])
+        doc = self.doc()
+        states = {row.get("item"): row["state"] for row in doc["lanes"][0]["rows"]}
+        self.assertEqual((states[landed], states[cancelled]), ("landed", "cancelled"))
+        self.assertEqual(doc["prs"]["rows"], [])
+
+    def test_a_malformed_item_is_said_and_the_other_pr_rows_still_show(self):
+        # sd:7863 (note 46123): pr_waits read every item strictly, so one malformed item emptied the PR rows.
+        from sd_db.workflow import capture_task
+        from sd_db.writes import set_item_fields
+
+        theirs, _ = self.pr_item(909, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        broken = capture_task(self.connection, title="Broken", priority=3, who="test")["item"]["id"]
+        set_item_fields(self.connection, broken, fields={"contribution": "not an object"})
+        self.connection.commit()
+        prs = self.doc()["prs"]
+        self.assertEqual([row["item"] for row in prs["rows"]], [theirs])
+        self.assertEqual(prs["error"], f"pull-request waits skipped item {broken}: item {broken} has malformed "
+                                       "contribution metadata")
 
     def test_a_pr_wait_read_that_failed_says_so_and_shows_no_rows(self):
         from sd_db import contributions

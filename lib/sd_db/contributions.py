@@ -315,7 +315,9 @@ def _configuration(connection, item: int, old: dict, changes: dict) -> dict:
         _dependency(dependency)
     if len({_digest(d) for d in dependencies}) != len(dependencies):
         raise WorkflowError("duplicate dependencies are not allowed")
-    graph = {row["id"]: metadata.get("depends_on", []) for row, metadata in _registered(connection)}
+    # Another item's malformed metadata holds no value to compare with, and failed every link (sd:7863): skip it.
+    others = _registered(connection, [])
+    graph = {row["id"]: metadata.get("depends_on", []) for row, metadata in others}
     graph[item] = dependencies
 
     def visit(node, ancestors):
@@ -329,7 +331,7 @@ def _configuration(connection, item: int, old: dict, changes: dict) -> dict:
 
     visit(item, set())
     _local_proof(value)
-    for row, metadata in _registered(connection):
+    for row, metadata in others:
         if row["id"] == item:
             continue
         if value.get("pull_url") and metadata.get("pull_url") == value["pull_url"]:
@@ -698,6 +700,8 @@ def observe_issue(connection, url, observation, *, expected_revision) -> dict:
         _publish_attention(connection, state, attention, item)
         result = _save(connection, state)
         record_state(connection, "heartbeat", key="contribution-observe:" + state["key"], body={"ok": True})
+        if item is not None:
+            _note_lane(connection, item)  # the issue is one of the lane's sources (sd:7863)
         return result
 
 
@@ -839,6 +843,13 @@ def _lane(sources, observation, url, waiting, dismissed) -> tuple[str, bool]:
     return lane, needs_you
 
 
+def _sources(connection, item, metadata, latest=None) -> list[dict]:
+    """The item's checkpoint, then one per url it names (`OBSERVED`): the one input set `_lane` reads, for the
+    projection and `record_lane` alike (sd:7863). `latest` is `_latest`'s checkpoints, as `snapshot` takes them."""
+    return [snapshot(connection, f"item:{item}", latest),
+            *(snapshot(connection, prefix + metadata[name], latest) for prefix, name in OBSERVED.items() if metadata.get(name))]
+
+
 def _shadow_times(connection, url) -> dict:
     """The shadow's `created_at`, `merged_at` and `closed_at` of pull request `url`; `{}` when none was read."""
     try:
@@ -923,12 +934,11 @@ def record_lane(connection, item) -> int | None:
         url = metadata.get("pull_url")
         if not url:
             return None
-        pull = snapshot(connection, "github:" + url)
-        observation = pull["observation"] or {}
+        sources = _sources(connection, item, metadata)
+        observation = sources[1]["observation"] or {}  # the pull request's: `OBSERVED` names it first
         if observation.get("state") not in {"open", "closed", "merged"}:
             return None
-        lane, _ = _lane([snapshot(connection, f"item:{item}"), pull], observation, url,
-                        bool(metadata.get("blocked_on") or metadata.get("depends_on")), None)
+        lane, _ = _lane(sources, observation, url, bool(metadata.get("blocked_on") or metadata.get("depends_on")), None)
         notes, written = lane_notes(connection, item, url), None
         if not notes:
             history, skipped = _history(connection, item, url)
@@ -987,8 +997,11 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
     """Link the pull request `sd-ship prepare` opened to its item as the item's `pull_url` (sd:7859).
 
     The receipt holds the item and its `pull_request` url; the operator's own pull request is observed already, so
-    the link makes its lane the item's. A receipt that merged, an item that is done or names a pull request or
-    issue, and a url another item holds (a bundle's second item) are left alone; so a rerun links nothing.
+    the link makes its lane the item's. Each item reads its newest receipt alone, and items go in number order, so a
+    bundle's pull request goes to its lowest item (sd:7863). A newest receipt that merged, an item that is done or
+    names an issue, and a url another item holds (a bundle's second item) are left alone. An item that names a pull
+    request keeps it unless that one is observed closed and the newest receipt names another: a receipt has no
+    closed phase, so a re-prepare after a closed pull request is that newer receipt. A rerun links nothing.
     Each link is `configure`'s one transaction, which notes the lane too. Returns the items linked and an error per
     receipt that could not be read or linked; a bad receipt is said and skipped, so it stops no other.
     """
@@ -996,20 +1009,24 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
 
     errors: list[str] = []
     taken = {metadata["pull_url"] for _, metadata in _registered(connection, errors) if metadata.get("pull_url")}
-    receipts = []
-    for key in _latest(connection, "checkpoint", "ship:"):
+    newest: dict[int, tuple[int, str, dict]] = {}
+    for key, row in _latest(connection, "checkpoint", "ship:").items():
         try:
-            receipts.append((key, ship.read(connection, key)[1]))
+            receipt = ship.read(connection, key)[1]
         except ROW_ERRORS as error:
             errors.append(f"ship receipt {key}: {error}")
-    linked: list[int] = []
-    for key, receipt in sorted(receipts, key=lambda pair: str(pair[1].get("item"))):
-        pull = receipt.get("pull_request")
+            continue
+        pull, item = receipt.get("pull_request"), receipt.get("item")
         if pull is not None and not isinstance(pull, dict):
             errors.append(f"ship receipt {key}: pull_request is not an object")
             continue
-        url, item = (pull or {}).get("url"), receipt.get("item")
-        if type(item) is not int or not isinstance(url, str) or receipt.get("phase") == "merged":
+        if type(item) is int and (item not in newest or row["id"] > newest[item][0]):
+            newest[item] = (row["id"], key, receipt)
+    linked: list[int] = []
+    for item in sorted(newest):
+        _, key, receipt = newest[item]
+        url = (receipt.get("pull_request") or {}).get("url")
+        if not isinstance(url, str) or receipt.get("phase") == "merged":
             continue
         try:
             url = _url(url)
@@ -1017,7 +1034,10 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
             if url in taken or row is None or row["kind"] not in KINDS or row["status"] == "done":
                 continue
             metadata = _metadata(dict(row)) or {}
-            if metadata.get("pull_url") or metadata.get("issue_url"):
+            if metadata.get("issue_url"):
+                continue
+            held = metadata.get("pull_url")
+            if held and (snapshot(connection, "github:" + held)["observation"] or {}).get("state") != "closed":
                 continue
             configure(connection, item, {"pull_url": url}, who=OBSERVER)
         except ROW_ERRORS as error:
@@ -1032,18 +1052,19 @@ def _seconds(start, end) -> int:
     return max(0, int((_moment(end) - _moment(start)).total_seconds()))
 
 
-def pr_waits(connection, *, now=None) -> list[dict]:
+def pr_waits(connection, *, now=None, errors: list[str] | None = None) -> list[dict]:
     """Each item's pull-request wait, from its lane notes (sd:7859), newest-noted first.
 
     `on_you` and `on_reviewers` are seconds: the span after each note of an open pull request goes to its lane
     (`ON_YOU`, `ON_REVIEWERS`), and the last one runs to `now`; a span after the pull request closed or merged is no
     wait, whatever attention its lane still shows. `to_merge` is the first note to the first `merged`
     one, or None. `open` is a pull request still open in a waiting lane, `on` who it waits on (`you`, `reviewers`)
-    and `since` when that lane began.
+    and `since` when that lane began. With `errors`, an item whose metadata is malformed is said there and skipped
+    (sd:7863); without, it fails the read.
     """
     end = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
     found = []
-    for row, metadata in _registered(connection):
+    for row, metadata in _registered(connection, errors):
         url = metadata.get("pull_url")
         if not url:
             continue
@@ -1195,16 +1216,12 @@ def projection(connection, *, repo=None) -> list[dict]:
     connection.execute("SAVEPOINT contribution_projection")
     try:
         result = []
-        registered_urls = set()
+        registered_urls: set[str] = set()
         checkpoints = _latest(connection, "checkpoint", "contribution:")
         heartbeats = _latest(connection, "heartbeat", "contribution-observe:")
         for row, metadata in _registered(connection):
-            sources = [snapshot(connection, f"item:{row['id']}", checkpoints)]
-            for prefix, name in OBSERVED.items():
-                if metadata.get(name):
-                    registered_urls.add(metadata[name])
-                    sources.append(snapshot(connection, prefix + metadata[name], checkpoints))
-            value = _projection_row(heartbeats, row, metadata, sources)
+            registered_urls.update(metadata[name] for name in OBSERVED.values() if metadata.get(name))
+            value = _projection_row(heartbeats, row, metadata, _sources(connection, row["id"], metadata, checkpoints))
             if filters is None or filters.intersection({value["repo"], row.get("repo"), metadata.get("local_clone")}):
                 result.append(value)
         keys = connection.execute("SELECT DISTINCT key FROM state WHERE kind='checkpoint' AND ("
