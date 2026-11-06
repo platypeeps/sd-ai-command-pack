@@ -1396,6 +1396,10 @@ class LaneNoteTests(ContributionCase):
                       title="Contribution", state="merged", created_at=T0, merged_at=T3)
         note = add_note(self.db, item, "followup", "Changes requested", session="contribution-observer", timestamp=T1)
         self.db.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (T2, note))
+        # The pull request's own followup: its checkpoint names the note (sd:7908).
+        state = c.snapshot(self.db, "github:" + URL)
+        state["notifications"]["review:1"] = {"status": "done", "note_id": note}
+        c._save(self.db, state)
         self.db.commit()
 
     def test_backfill_reads_the_shadow_and_the_followups(self):
@@ -1610,6 +1614,44 @@ class LaneNoteTests(ContributionCase):
         c.observe_issue(self.db, ISSUE, self.issue_observation(events=[self.event(url=ISSUE + "#issuecomment-1")]),
                         expected_revision=c.snapshot(self.db, "issue:" + ISSUE)["revision"])
         self.assertEqual(self.lanes(item), [("awaiting_them", "open", False), ("awaiting_you", "open", False)])
+
+    def test_a_pull_request_already_merged_at_first_sync_has_no_time_to_merge(self):
+        # sd:7908: with no open note before the merge, to_merge read 0.
+        item = self.item()
+        self.notes(item, (T1, "merged", "merged"))
+        self.assertIsNone(c.pr_waits(self.db, now=T3)[0]["to_merge"])
+
+    def test_a_merged_pull_request_with_no_merge_time_backfills_no_open_span(self):
+        # sd:7908: a shadow with created_at and no merged_at left the backfilled span open until the sync wrote merged.
+        item = self.item()
+        upsert_shadow(self.db, tracker="github", url=URL, repo="upstream/project", number=12, kind="pull",
+                      title="Contribution", state="merged", created_at=T0)
+        self.db.commit()
+        self.observe(observed_at=T3, state="merged")
+        self.assertEqual(self.lanes(item), [("merged", "merged", False)])
+        wait = c.pr_waits(self.db)[0]
+        self.assertEqual((wait["on_reviewers"], wait["on_you"], wait["to_merge"]), (0, 0, None))
+
+    def test_backfill_reads_only_the_pull_requests_followups_from_its_creation(self):
+        # sd:7908: every observer followup on the item started the wait, one from before the PR was made too.
+        item = self.item()
+        upsert_shadow(self.db, tracker="github", url=URL, repo="upstream/project", number=12, kind="pull",
+                      title="Contribution", state="merged", created_at=T1, merged_at=T3)
+        other = add_note(self.db, item, "followup", "All contribution dependencies are satisfied",
+                         session="contribution-observer", timestamp=T0)
+        early = add_note(self.db, item, "followup", "Changes requested", session="contribution-observer",
+                         timestamp=T0)
+        self.db.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (T2, early))
+        self.db.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (T3, other))
+        state = c.snapshot(self.db, "github:" + URL)
+        state["notifications"] = {"review:1": {"status": "done", "note_id": early}}
+        c._save(self.db, state)
+        self.db.commit()
+        self.observe(observed_at=T3, state="merged")
+        self.assertEqual([(n["at"], n["lane"]) for n in c.lane_notes(self.db, item)],
+                         [(T1, "awaiting_you"), (T2, "awaiting_them"), (T3, "merged")])
+        wait = c.pr_waits(self.db, now=T3)[0]
+        self.assertEqual((wait["on_you"], wait["on_reviewers"], wait["to_merge"]), (60, 60, 120))
 
     def test_the_projection_lane_is_the_one_rule_the_note_reads(self):
         item = self.item()

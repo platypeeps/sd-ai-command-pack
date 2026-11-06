@@ -875,13 +875,16 @@ def lane_notes(connection, item, url=None) -> list[dict]:
     return found
 
 
-def _history(connection, item, url) -> tuple[list[tuple[str, str, str]], list[str]]:
+def _history(connection, item, url, state) -> tuple[list[tuple[str, str, str]], list[str]]:
     """What history still holds of the item's pull request before its first lane note: `(at, lane, state)`, oldest
     first, and each time it skipped because it names no instant (a time with no zone).
 
-    The shadow's `created_at` opens it on reviewers; each `contribution-observer` followup on the item is on you from
-    its time to its `resolved_at`; the shadow's `merged_at`, else `closed_at`, ends it. A span the shadow never saw,
-    or attention that was never a followup, is not recoverable.
+    The shadow's `created_at` opens it on reviewers; each followup the pull request's own attention raised (its
+    checkpoint's `notifications`) is on you from its time, or the pull request's creation if that is later, to its
+    `resolved_at`; the shadow's `merged_at`, else `closed_at`, ends it. A followup of another source or an older pull
+    request is not this one's wait (sd:7908). A pull request observed in `state` merged or closed with no end time
+    has no history: its open span would run to this sync, not to its end. A span the shadow never saw, or attention
+    that was never a followup, is not recoverable.
     """
     times = _shadow_times(connection, url)
     events, skipped = [], []
@@ -895,15 +898,27 @@ def _history(connection, item, url) -> tuple[list[tuple[str, str, str]], list[st
             skipped.append(value)
             return None
 
-    if times.get("created_at") and instant(times["created_at"]):
-        events.append((times["created_at"], 0))
-    for note in connection.execute("SELECT timestamp, resolved_at FROM note WHERE item = ? AND kind = 'followup' "
-                                   "AND session = ?", (item, OBSERVER)):
-        if instant(note["timestamp"]):
-            events.append((note["timestamp"], 1))
-            if note["resolved_at"] and instant(note["resolved_at"]):
-                events.append((note["resolved_at"], -1))
+    created = times.get("created_at") if times.get("created_at") and instant(times["created_at"]) else None
+    if created:
+        events.append((created, 0))
+    raised = {notice.get("note_id") for notice in snapshot(connection, "github:" + url)["notifications"].values()
+              if isinstance(notice, dict)}
+    for note in connection.execute("SELECT id, timestamp, resolved_at FROM note WHERE item = ? AND kind = 'followup' "
+                                   "AND session = ? ORDER BY id", (item, OBSERVER)):
+        if note["id"] not in raised or not instant(note["timestamp"]):
+            continue
+        resolved = note["resolved_at"] if note["resolved_at"] and instant(note["resolved_at"]) else None
+        start = note["timestamp"]
+        if created and _moment(start) < _moment(created):
+            if resolved and _moment(resolved) <= _moment(created):
+                continue
+            start = created
+        events.append((start, 1))
+        if resolved:
+            events.append((resolved, -1))
     end = next((value for value in (times.get("merged_at"), times.get("closed_at")) if value and instant(value)), None)
+    if state in ("merged", "closed") and not end:
+        return [], skipped
     merged = bool(end) and end == times.get("merged_at")
     history: list[tuple[str, str, str]] = []
     open_attention = 0
@@ -941,7 +956,7 @@ def record_lane(connection, item) -> int | None:
         lane, _ = _lane(sources, observation, url, bool(metadata.get("blocked_on") or metadata.get("depends_on")), None)
         notes, written = lane_notes(connection, item, url), None
         if not notes:
-            history, skipped = _history(connection, item, url)
+            history, skipped = _history(connection, item, url, observation["state"])
             for at, old, state in history:
                 written = add_note(connection, item, "comment", f"{LANE_NOTE}{old} · {state} · {url} (backfilled)",
                                    session=OBSERVER, timestamp=at)
@@ -1057,10 +1072,10 @@ def pr_waits(connection, *, now=None, errors: list[str] | None = None) -> list[d
 
     `on_you` and `on_reviewers` are seconds: the span after each note of an open pull request goes to its lane
     (`ON_YOU`, `ON_REVIEWERS`), and the last one runs to `now`; a span after the pull request closed or merged is no
-    wait, whatever attention its lane still shows. `to_merge` is the first note to the first `merged`
-    one, or None. `open` is a pull request still open in a waiting lane, `on` who it waits on (`you`, `reviewers`)
-    and `since` when that lane began. With `errors`, an item whose metadata is malformed is said there and skipped
-    (sd:7863); without, it fails the read.
+    wait, whatever attention its lane still shows. `to_merge` is the first `open` note to the first `merged` one
+    after it, or None: a pull request first seen merged has no time to merge (sd:7908). `open` is a pull request still
+    open in a waiting lane, `on` who it waits on (`you`, `reviewers`) and `since` when that lane began. With
+    `errors`, an item whose metadata is malformed is said there and skipped (sd:7863); without, it fails the read.
     """
     end = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
     found = []
@@ -1077,14 +1092,15 @@ def pr_waits(connection, *, now=None, errors: list[str] | None = None) -> list[d
             if who and note["state"] == "open":  # a closed or merged pull request waits on no one
                 spans[who] += _seconds(note["at"], after["at"] if after else end)
         last = notes[-1]
-        merged = next((note for note in notes if note["lane"] == "merged" or note["state"] == "merged"), None)
+        opened = next((index for index, note in enumerate(notes) if note["state"] == "open"), len(notes))
+        merged = next((note for note in notes[opened:] if note["lane"] == "merged" or note["state"] == "merged"), None)
         waiting = last["state"] == "open" and (last["lane"] in ON_YOU or last["lane"] in ON_REVIEWERS)
         found.append({"item": row["id"], "title": row["title"], "repo": row["repo"], "status": row["status"],
                       "url": url, "lane": last["lane"], "state": last["state"], "open": waiting,
                       "on": ("you" if last["lane"] in ON_YOU else "reviewers") if waiting else None,
                       "since": last["at"], "waited": _seconds(last["at"], end) if waiting else None,
                       "on_you": spans["you"], "on_reviewers": spans["reviewers"],
-                      "to_merge": _seconds(notes[0]["at"], merged["at"]) if merged else None})
+                      "to_merge": _seconds(notes[opened]["at"], merged["at"]) if merged else None})
     return sorted(found, key=lambda value: (value["since"], value["item"]), reverse=True)
 
 
