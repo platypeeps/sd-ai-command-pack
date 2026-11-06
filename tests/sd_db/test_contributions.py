@@ -15,7 +15,13 @@ from sd_db import contributions as c
 from sd_db.migrate import migrate
 from sd_db.schema import migrations
 from sd_db.workflow import StaleItem, WorkflowError, item_state
-from sd_db.writes import add_note, set_item_fields, transition, upsert_shadow
+from sd_db.writes import (
+    add_note,
+    create_item,
+    set_item_fields,
+    transition,
+    upsert_shadow,
+)
 
 URL = "https://github.com/upstream/project/pull/12"
 ISSUE = "https://github.com/upstream/project/issues/56"
@@ -1349,6 +1355,32 @@ class LaneNoteTests(ContributionCase):
         self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
         self.assertEqual(c.link_shipped(self.db), ([], []), "a rerun links nothing")
         self.assertIsNone(c._metadata(item_state(self.db, bundled)["item"]))
+
+    def test_every_kind_the_lane_delivers_is_linked_and_waits_on_its_pull_request(self):
+        """`sd-ship --deliver` closes work, task and followup items; an idea rides only as an associated slice."""
+        import ast
+
+        script = (Path(__file__).resolve().parents[2] / "bin" / "sd-ship").read_text()
+        delivering = next(ast.literal_eval(node.value) for node in ast.parse(script).body
+                          if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "DELIVERING_KINDS")
+        self.observe()
+        made = {kind: create_item(self.db, kind=kind, title=kind, status="in_progress", priority=3)
+                for kind in ("work", "followup", "task", "idea")}
+        for number, kind in enumerate(made):
+            self.shipped(made[kind], url=URL if kind == "work" else f"https://github.com/upstream/project/pull/{20 + number}")
+        self.assertEqual(c.link_shipped(self.db), (sorted([made["work"], made["followup"], made["task"]]), []))
+        self.assertIsNone(c._metadata(item_state(self.db, made["idea"])["item"]))
+        self.assertEqual(self.lanes(made["work"]), [("awaiting_them", "open", False)])
+        self.assertEqual([(w["item"], w["on"]) for w in c.pr_waits(self.db)], [(made["work"], "reviewers")])
+        self.assertEqual(c.link_shipped(self.db), ([], []), "a rerun links nothing")
+        self.assertEqual(set(c.KINDS), set(delivering), "contributions take what the lane delivers")
+
+    def test_the_operator_can_name_a_work_items_pull_request(self):
+        work = create_item(self.db, kind="work", title="Slice", status="in_progress", priority=3)
+        c.configure(self.db, work, {"pull_url": URL}, who="operator")
+        self.observe()
+        self.assertEqual(self.lanes(work), [("awaiting_them", "open", False)])
+        self.assertEqual([w["item"] for w in c.pr_waits(self.db)], [work])
 
     def test_an_item_that_names_a_pull_request_or_is_done_keeps_what_it_has(self):
         named = self.item()

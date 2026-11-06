@@ -61,6 +61,9 @@ LANE_BODY = re.compile(r"PR lane: (\w+) · (\w+) · (\S+?)( \(backfilled\))?")
 #: The lanes whose time is the operator's (fixes and answers) and the reviewers'; `merged` and `closed` end a wait.
 ON_YOU = frozenset({"awaiting_you", "newly_unblocked"})
 ON_REVIEWERS = frozenset({"awaiting_them"})
+#: The item kinds a contribution may hang on: those `sd-ship --deliver` closes (its `DELIVERING_KINDS`), since a
+#: lane-opened pull request delivers a work, task or followup item and each one waits on it (sd:7859).
+KINDS = ("task", "work", "followup")
 
 
 def _digest(value) -> str:
@@ -136,9 +139,10 @@ def _metadata(row: dict) -> dict | None:
 
 
 def _registered(connection, errors: list[str] | None = None) -> list[tuple[dict, dict]]:
-    """Each task with contribution metadata. With `errors`, a malformed one is said there and skipped, not raised."""
+    """Each item of `KINDS` with contribution metadata. With `errors`, a malformed one is said there and skipped."""
     result = []
-    for raw in connection.execute("SELECT * FROM item WHERE kind='task' ORDER BY id"):
+    marks = ",".join("?" * len(KINDS))
+    for raw in connection.execute(f"SELECT * FROM item WHERE kind IN ({marks}) ORDER BY id", KINDS):
         row = dict(raw)
         try:
             metadata = _metadata(row)
@@ -356,8 +360,8 @@ def configure(connection, item, changes, *, who, expected_revision=None) -> dict
     who = _text(who, "who")
     with transaction(connection):
         current = _checked_state(connection, item, expected_revision)
-        if current["item"]["kind"] != "task":
-            raise WorkflowError("contributions use local task items")
+        if current["item"]["kind"] not in KINDS:
+            raise WorkflowError("contributions use local work, task or followup items")
         old = _metadata(current["item"]) or {}
         value = _configuration(connection, item, old, changes)
         if old != value:
@@ -1010,7 +1014,7 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
         try:
             url = _url(url)
             row = connection.execute("SELECT * FROM item WHERE id = ?", (item,)).fetchone()
-            if url in taken or row is None or row["kind"] != "task" or row["status"] == "done":
+            if url in taken or row is None or row["kind"] not in KINDS or row["status"] == "done":
                 continue
             metadata = _metadata(dict(row)) or {}
             if metadata.get("pull_url") or metadata.get("issue_url"):

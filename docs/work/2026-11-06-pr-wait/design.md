@@ -49,7 +49,11 @@ A pull request `sd-ship prepare` opened is linked the same way from its ship rec
    the item's `pull_url` through `configure`, in its one transaction, which notes the lane too.
    `note_lanes` calls it before `record_lanes`, so new pull requests and the open receipts from before
    this change are linked by the same pass. The operator's pull request is already observed as authored.
-   Left alone: a merged receipt, a done item, an item that names a pull request or issue, and a url another item holds
+   It links every kind `sd-ship --deliver` closes, work, task and followup (`contributions.KINDS`, which a test ties
+   to sd-ship's `DELIVERING_KINDS`), so `configure`, `_registered` and the projection take those kinds too: one list,
+   not a second item-to-PR link read from receipts beside the contribution one.
+   Left alone: a merged receipt, a done item, an item of another kind (an idea rides a pull request only as an
+   associated slice), an item that names a pull request or issue, and a url another item holds
    (a bundle's second item). A `prepared` lane entry, where a manual-merge lane stops for a person's review, no longer
    hides the wait: Queue draws one row that leads with `blocked: PR` and keeps Retry and Approve.
    A merging or next entry, as an auto-merge lane's is, keeps its lane row.
@@ -80,6 +84,7 @@ and a read that joins three sources every page load is slower and drifts from wh
 | acknowledge moves attention | checkpoint, then lane note | lane changes on you to on reviewers without a note | `acknowledge` notes the lane in its transaction | `test_a_maintainer_comment_is_on_you_and_acknowledging_it_is_on_reviewers_again` |
 | older state: item configured before this change | no lane notes | durations read nothing | the sync's `note_lanes` calls `record_lanes`, which backfills from shadow and followups | `test_backfill_reads_the_shadow_and_the_followups` |
 | link a receipt's pull request | item metadata, a comment, a lane note | process stops mid-pass | one transaction per item; a rerun skips linked items and links the rest | `test_a_pull_request_prepare_opened_is_linked_to_its_item_and_noted_on_reviewers` |
+| link a receipt whose item is work or a followup | item metadata, a comment, a lane note | the item never waits on its pull request | `KINDS` holds every delivering kind; a test fails when it and sd-ship's `DELIVERING_KINDS` differ | `test_every_kind_the_lane_delivers_is_linked_and_waits_on_its_pull_request` |
 | per-row loop: receipts in `link_shipped` | none for a bad receipt | `ship.read` or `_url` rejects it, its `pull_request` is no object, or `configure` refuses | said as `ship receipt <key>: <error>` and skipped; the rest are linked | `test_a_corrupt_receipt_is_reported_and_the_good_one_is_still_linked`, `test_bad_receipts_are_said_and_the_good_one_is_linked_and_noted` |
 | per-row loop: items in `record_lanes` | none for a bad item | `record_lane` raises for one item | said as `item <n>: <error>` and skipped; the rest are noted | `test_one_item_that_fails_its_lane_note_is_reported_and_the_rest_are_noted` |
 | per-row loop: registered items in both passes and in `acknowledge` | none | one item's contribution metadata is malformed | said and skipped by both passes (`_registered(errors=)`); `acknowledge` skips it and keeps the operator's acknowledgement | `test_an_item_with_malformed_metadata_is_reported_and_stops_neither_pass`, `test_an_unrelated_malformed_item_does_not_roll_back_an_acknowledgement` |
