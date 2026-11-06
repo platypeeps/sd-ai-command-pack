@@ -1573,6 +1573,28 @@ class LaneNoteTests(ContributionCase):
         self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": newer})
         self.assertEqual(c.link_shipped(self.db), ([], []), "a rerun links nothing")
 
+    def test_a_hand_linked_pull_request_that_closes_is_not_replaced_by_an_older_receipt(self):
+        # sd:7931: a closed held link was swapped for the newest receipt, though the operator linked theirs after it.
+        older = "https://github.com/upstream/project/pull/11"
+        item = self.task()
+        self.receipt(item, "feat/sd-first", older)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        c.configure(self.db, item, {"pull_url": URL}, who="operator")
+        self.observe(state="closed")
+        self.assertEqual(c.link_shipped(self.db), ([], []), "an older receipt replaced the operator's own link")
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": URL})
+
+    def test_a_closed_hand_link_gives_way_to_a_receipt_whose_pull_request_is_open(self):
+        newer = "https://github.com/upstream/project/pull/13"
+        item = self.task()
+        c.configure(self.db, item, {"pull_url": URL}, who="operator")
+        self.observe(state="closed")
+        self.receipt(item, "feat/sd-second", newer)
+        c.observe_pull(self.db, newer, {**self.observation(), "url": newer},
+                       expected_revision=c.snapshot(self.db, "github:" + newer)["revision"])
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": newer})
+
     def test_an_open_linked_pull_request_is_not_replaced_by_a_newer_receipt(self):
         item = self.task()
         self.receipt(item, "feat/sd-first", URL)

@@ -1008,6 +1008,11 @@ def record_lanes(connection) -> tuple[list[int], list[str]]:
     return written, errors
 
 
+def _state(connection, url: str):
+    """The observed state of the pull request at `url`, or None when none is observed."""
+    return (snapshot(connection, "github:" + url)["observation"] or {}).get("state")
+
+
 def link_shipped(connection) -> tuple[list[int], list[str]]:
     """Link the pull request `sd-ship prepare` opened to its item as the item's `pull_url` (sd:7859).
 
@@ -1016,7 +1021,9 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
     bundle's pull request goes to its lowest item (sd:7863). A newest receipt that merged, an item that is done or
     names an issue, and a url another item holds (a bundle's second item) are left alone. An item that names a pull
     request keeps it unless that one is observed closed and the newest receipt names another: a receipt has no
-    closed phase, so a re-prepare after a closed pull request is that newer receipt. A rerun links nothing.
+    closed phase, so a re-prepare after a closed pull request is that newer receipt. The newest receipt replaces a
+    closed link only when it postdates it, the link being an older receipt's, or names a pull request observed open:
+    a link the operator set by hand after the receipt stays (sd:7931). A rerun links nothing.
     Each link is `configure`'s one transaction, which notes the lane too. Returns the items linked and an error per
     receipt that could not be read or linked; a bad receipt is said and skipped, so it stops no other.
     """
@@ -1025,6 +1032,7 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
     errors: list[str] = []
     taken = {metadata["pull_url"] for _, metadata in _registered(connection, errors) if metadata.get("pull_url")}
     newest: dict[int, tuple[int, str, dict]] = {}
+    shipped: dict[int, set[str]] = {}
     for key, row in _latest(connection, "checkpoint", "ship:").items():
         try:
             receipt = ship.read(connection, key)[1]
@@ -1035,6 +1043,8 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
         if pull is not None and not isinstance(pull, dict):
             errors.append(f"ship receipt {key}: pull_request is not an object")
             continue
+        if type(item) is int and isinstance((pull or {}).get("url"), str):
+            shipped.setdefault(item, set()).add((pull or {})["url"])
         if type(item) is int and (item not in newest or row["id"] > newest[item][0]):
             newest[item] = (row["id"], key, receipt)
     linked: list[int] = []
@@ -1052,7 +1062,8 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
             if metadata.get("issue_url"):
                 continue
             held = metadata.get("pull_url")
-            if held and (snapshot(connection, "github:" + held)["observation"] or {}).get("state") != "closed":
+            if held and (_state(connection, held) != "closed" or not (
+                    held in {_url(other) for other in shipped[item] if other != url} or _state(connection, url) == "open")):
                 continue
             configure(connection, item, {"pull_url": url}, who=OBSERVER)
         except ROW_ERRORS as error:
