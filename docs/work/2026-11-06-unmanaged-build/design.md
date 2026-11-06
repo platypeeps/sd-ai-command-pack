@@ -2,6 +2,7 @@
 title: Build an unmanaged repository's item to a draft pull request
 created: 2026-11-06
 item: sd:7868
+branch: feat/sd-7868-unmanaged-build
 ---
 
 # Design — unmanaged-build
