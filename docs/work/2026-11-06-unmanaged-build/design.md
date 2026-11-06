@@ -57,6 +57,17 @@ when the run's repository reads unmanaged.
   operator sees it until it is marked ready (note #46134). The Builds
   panel's Open PR link reads the lead task's `pull_url` when the run's
   repository is unmanaged.
+- Dashboard (note #46134): Tasks Details gains a "Pull request" section
+  for an item with a contribution `pull_url`: a link that opens it in a
+  new tab, its observed state and lane, and a "Needs you" line with the
+  projection's reasons while `needs_you` holds. Queue's row and its Open
+  PR link come from sd:7859 ("blocked: PR · on you"), which reads the
+  same lane; its DOM test for a draft follows once sd:7859 lands.
+- The needs-you signal is the contribution lane `awaiting_you`, chosen
+  over a new pr-attention report or a Queue-only state: Today's Needs
+  you `prs` rows, the Contributions page and sd:7859's Queue "on you"
+  all read that lane already, so one rule in `_projection_row` flags the
+  draft everywhere with no new report kind or state.
 
 Rejected: letting `sd-check` or `sd-ship` run in an unmanaged checkout.
 Both refuse there on purpose (sd:2566), and `sd-ship` writes receipts and
@@ -106,6 +117,11 @@ merge    | tasks done, run at     | observation unread   | nothing moves; next t
          | cleaning               | or stale             | again                           | unread
 merge    | run lane_failed        | closed unmerged      | operator reopens or cancels;    | watch: closed ends lane_failed
          |                        |                      | worktree kept                   |
+flag     | none (a read)          | draft not marked     | lane awaiting_you with DRAFTED  | test_contributions: draft
+         |                        | ready by operator    | until observed ready            | reads awaiting_you; Details
+         |                        |                      |                                 | flags it (DOM test)
+link UI  | none (a read)          | operator cannot      | Details links pull_url in a new | test_v2_tasks: Details link
+         |                        | find the draft       | tab; Queue via sd:7859          | opens it (DOM test)
 ```
 
 ## Acceptance criteria
@@ -117,6 +133,9 @@ merge    | run lane_failed        | closed unmerged      | operator reopens or c
   request, no `sd-ship` call, the branch on the fixture origin, and the
   lead task's `pull_url` set; `tests/sd_db/test_build_run.py` passes.
 - [ ] Every managed-path test in both files passes unchanged.
+- [ ] Tasks Details for a task with a draft pull request links it in
+  a new tab and flags it as needing the operator; `test_v2_tasks`
+  passes.
 
 ## Risks
 
