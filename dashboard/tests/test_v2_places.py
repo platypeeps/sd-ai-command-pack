@@ -234,12 +234,14 @@ class Realms(Fixture):
         self.assertEqual(places.realms(self.connection, path)["state"], "error")
 
     def test_each_tasks_row_carries_its_realm_and_the_document_the_files_state(self):
-        with mock.patch.object(places, "REALMS_CONFIG", self.conf("realm|work|Work|/repos/sys*\n")):
+        with mock.patch.object(places, "REALMS_CONFIG", self.conf("realm|work|Work|/repos/sys*\n")), \
+                mock.patch.object(reports_screen, "FAMILIES_CONFIG", self.dir / "absent.conf"):
             doc = tasks_screen.document(self.connection, now=NOW)
         realm = {r["id"]: r["realm"] for r in doc["rows"]}
         self.assertEqual((realm[self.hoa_item], realm[self.home_item], realm[self.other_item]),
                          ("hoa", "personal", "work"))
-        self.assertTrue(all(r["realm"] is None for r in doc["rows"] if r["kind"] == "report"))
+        # pack sd:7774: a report no rule places is Personal (`places.report_realm`), as a repo no line claims.
+        self.assertEqual({r["realm"] for r in doc["rows"] if r["kind"] == "report"}, {"personal"})
         self.assertEqual(doc["realms"], {"state": "read", "source": "<config>/project-dashboard/realms.conf",
                                          "problems": []})
         with mock.patch.object(places, "REALMS_CONFIG", self.dir / "absent.conf"):
@@ -247,6 +249,45 @@ class Realms(Fixture):
         realm = {r["id"]: r["realm"] for r in doc["rows"]}
         self.assertEqual((realm[self.hoa_item], realm[self.home_item], realm[self.other_item]), ("hoa", "personal", None))
         self.assertEqual(doc["realms"]["state"], "missing")
+
+    def pull_report(self, url, run):
+        return reporting.ingest(self.connection, job="pr-attention", run_id=run, started="2026-09-05T08:00:00Z",
+                                ended="2026-09-05T08:00:00Z", exit_code=0, text=f"example\n{url}\n",
+                                source_path="sd shadow sync", attention=True,
+                                attention_basis=f"review_requested {url}")["item"]["id"]
+
+    def report_realms(self, families=FAMILIES):
+        (self.dir / "families.conf").write_text(families, encoding="utf-8")
+        with mock.patch.object(places, "REALMS_CONFIG", self.conf("realm|work|Work|/repos/example-work/*\n")), \
+                mock.patch.object(reports_screen, "FAMILIES_CONFIG", self.dir / "families.conf"):
+            return {r["id"]: r["realm"] for r in tasks_screen.document(self.connection, now=NOW)["rows"]}
+
+    def test_a_pr_attention_report_takes_the_realm_of_its_pull_repos_checkout(self):
+        """pack sd:7774: a pr-attention report sat on Personal, as every report had no realm. Its realm is that of the
+        registered checkout whose remote is the pull's repo, by realm_of's globs; a pull in no checkout stays Personal."""
+        upsert_repo(self.connection, "/repos/example-work/bench", remote="git@github.com:Example/Bench.git")
+        work = self.pull_report("https://github.com/example/bench/pull/617", "r9")
+        elsewhere = self.pull_report("https://github.com/example/unknown/pull/3", "r10")
+        realm = self.report_realms()
+        self.assertEqual(realm[work], "work")
+        self.assertEqual(realm[elsewhere], "personal")
+
+    def test_another_report_takes_its_familys_key_when_that_key_is_a_realm(self):
+        """pack sd:7774: a report whose job is in a family keyed by a realm id is that realm's; the hoa and home families
+        are no realm, so their reports, and a job in no family, stay Personal."""
+        scan, other = report(self, "weekly-scan", "r4", attention=True), report(self, "disk-check", "r5", attention=True)
+        realm = self.report_realms(FAMILIES + "family|work|Work|bot|weekly-scan\n")
+        self.assertEqual((realm[scan], realm[self.alarm], realm[other]), ("work", "personal", "personal"))
+        with mock.patch.object(places, "REALMS_CONFIG", self.dir / "absent.conf"):
+            unread = {r["id"]: r["realm"] for r in tasks_screen.document(self.connection, now=NOW)["rows"]}
+        self.assertIsNone(unread[scan], "without the realm list a report's realm is unknown, as a repo row's")
+
+    def test_the_pull_url_helper_reads_a_pr_attention_basis_only(self):
+        url = "https://github.com/example/bench/pull/617"
+        self.assertEqual(places.pull_url("pr-attention", f"changes_requested {url}"), url)
+        self.assertIsNone(places.pull_url("weekly-scan", f"changes_requested {url}"))
+        for basis in ("", None, "review_requested https://example.test/x/pull/1", "checks_failing github.com/a/b/pull/2"):
+            self.assertIsNone(places.pull_url("pr-attention", basis), basis)
 
 
 class Briefs(Fixture):

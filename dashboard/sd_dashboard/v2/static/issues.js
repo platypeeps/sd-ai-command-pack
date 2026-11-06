@@ -37,10 +37,14 @@ window.PAGE_VIEWS = [{ id: 'issues', label: 'Your issues', key: 'y' }, { id: 'in
   // pack sd:7752: the category pickers list by name, case ignored; the groups keep the stored order.
   const byName = () => [...CATS].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   const repoOf = r => r.repo || r.slug || 'GitHub';
-  const groupOf = r => !jira(r) ? `repo:${repoOf(r)}` : r.category && CATS.includes(r.category) ? `cat:${r.category}` : 'none';
+  // pack sd:7754: a registered checkout's row has its short label as repo, a with_github row owner/name, so a repo keys on
+  // its GitHub name (slug), case ignored, where the row has one; the group shows a checkout's short label.
+  const repoKey = r => `repo:${r.slug ? r.slug.toLowerCase() : repoOf(r)}`;
+  const groupOf = r => !jira(r) ? repoKey(r) : r.category && CATS.includes(r.category) ? `cat:${r.category}` : 'none';
   // pack sd:7753: the GitHub rows in view, one group per repo, by repo name with case ignored.
-  const repoGroups = rows => [...new Set(rows.map(repoOf))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-    .map(name => ({ key: `repo:${name}`, name, rows: rows.filter(r => repoOf(r) === name) }));
+  const repoGroups = rows => [...new Set(rows.map(repoKey))]
+    .map(key => { const of = rows.filter(r => repoKey(r) === key); return { key, name: repoOf(of.find(r => r.repo_path) || of[0]), rows: of }; })
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   // The Jira rows in view by category, in the list's order, then Uncategorized; under Hidden an empty category is left out.
   function groups(rows) {
     const G = CATS.map(name => ({ key: `cat:${name}`, name, rows: rows.filter(r => groupOf(r) === `cat:${name}`) }));

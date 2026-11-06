@@ -412,11 +412,13 @@
         cli: o => rowOr(o, t => `sd task note ${t.id} "…" --kind comment`),
         run: o => { window.shell.capture(o); const r = document.querySelector('dialog.capture input[value="note"]'); if (r && !r.disabled) { r.checked = true; r.form.dispatchEvent(new Event('input')); } return 'Write the note'; } },
       // Fix (sd:3456): the shared declaration (commands.js). The post carries the row's revision, so a click from a page read
-      // before an earlier Fix's note is stale; the Details read again after it.
+      // before an earlier Fix's note is stale; the Details read again after it. pack sd:7756: a failed launch (5xx) notes its
+      // cause on the item, so the page reads again too: Details keep the cause after the toast fades.
       window.commands.fix('item', { item: o => T(o).id, report: o => T(o).kind === 'report',
         when: o => { const t = T(o); return !t ? 'the task is no longer listed' : t.status === 'done' ? 'it is done' : true; },
         post: (o, path) => { const t = must(o);
-          return write(t.key, () => path, {}).then(v => { redrawDet(t.id); return v; }, err => { if (err.stale) refused(); throw err; }); } }),
+          return write(t.key, () => path, {}).then(v => { redrawDet(t.id); return v; },
+            err => { if (err.stale) refused(); else if (err.status >= 500) { host.reread(); redrawDet(t.id); } throw err; }); } }),
       // Adversarial review (sd:5064): the shared declaration (commands.js); the server reviews the item in its repository,
       // so an item with none is off.
       window.commands.adversarialReview('item', { payload: o => ({ kind: 'task', target: T(o).id }),

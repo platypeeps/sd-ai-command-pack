@@ -52,6 +52,11 @@ class FixCase(BrowserSession):
     def fix(self, item, **body):
         return self.post(f"/api/items/{item}/fix", {"revision": self.revision(item), **body})
 
+    def fix_notes(self, item):
+        """The Fix notes on the item: a started session's, or a failed launch's (pack sd:7756)."""
+        return [note["body"] for note in workflow.item_state(self.connection, item)["notes"]
+                if note["kind"] == "comment" and note["body"].startswith("Fix: ")]
+
     def task(self, title="Make the thing", **columns):
         columns.setdefault("repo", self.repo(str(self.work)))
         return self.item(title, kind="task", **columns)
@@ -105,41 +110,96 @@ class TheLaunch(FixCase):
         self.assertNotIn("pwned", "".join(sum(self.calls(), [])))
 
 
-class TheRefusals(FixCase):
-    def test_no_running_session_is_a_503_naming_herdr_sh_start_and_writes_nothing(self):
+class TheFailedLaunch(FixCase):
+    """pack sd:7756: Fix on a Dependabot row filed example-site sd:7661, then its launch answered 503 (herdr's session sd
+    was not running). The cause went to a toast and the journal's holder item only, so the item said nothing. A launch
+    that fails leaves one comment note on the item naming the cause; the item's revision moves, the answer keeps its
+    status and its error."""
+
+    def notes(self, item):
+        return [(note["kind"], note["session"], note["body"]) for note in workflow.item_state(self.connection, item)["notes"]]
+
+    def test_a_dependabot_item_filed_then_a_launch_with_no_session_notes_the_cause(self):
+        status, _, filed = self.post("/api/items", {"title": "Dependabot: 3 open alerts in example/anvil",
+                                                    "repo": self.repo(str(self.work)), "ref": "dependabot:example/anvil"})
+        self.assertEqual(status, 201, filed)
+        item = filed["item"]["id"]
+        before = self.notes(item)
+        status, _, answer = self.post(f"/api/items/{item}/fix", {"revision": filed["revision"]})
+        self.assertEqual(status, 503)
+        self.assertEqual(answer["error"], "Fix failed: herdr.sh launch: session sd is not running; run herdr.sh start first."
+                                          f" A note on sd:{item} keeps the cause.")
+        self.assertEqual(self.notes(item), [*before, ("comment", "dashboard", "Fix: launch failed: herdr.sh launch: "
+                                                      "session sd is not running; run herdr.sh start first")])
+
+    def test_a_launch_with_no_answer_notes_that_the_outcome_is_not_known(self):
+        self.running()
+        hook = self.fixture / "on-agent-start"
+        hook.write_text("#!/bin/sh\nexec sleep 5\n")
+        hook.chmod(0o755)
+        item = self.task()
+        with patch.object(fix_session, "TIMEOUT", 1):
+            status, _, answer = self.fix(item)
+        self.assertEqual(status, 504)
+        kind, who, body = self.notes(item)[-1]
+        self.assertEqual((kind, who), ("comment", "dashboard"))
+        self.assertEqual(f"{body} A note on sd:{item} keeps the cause.", f"Fix: {answer['error']}")
+        self.assertIn("whether a session started is not known", body)
+
+    def test_a_failure_note_that_cannot_be_written_is_said_in_the_answer(self):
         item = self.task()
         before = self.unjournalled()
+        with patch.object(workflow, "add_item_note", side_effect=sqlite3.OperationalError("database is locked")):
+            status, _, answer = self.fix(item)
+        self.assertEqual(status, 503)
+        self.assertEqual(answer["error"], "Fix failed: herdr.sh launch: session sd is not running; run herdr.sh start first."
+                                          " The item has no note of it: database is locked")
+        self.assertEqual(self.unjournalled(), before)
+
+    def test_the_failure_note_is_no_started_session_to_working_now(self):
+        # Today's Working now reads the pane back from NOTE; a failure note must not read as a started session.
+        item = self.task()
+        self.fix(item)
+        body = self.notes(item)[-1][2]
+        self.assertTrue(body.startswith("Fix: "), body)
+        self.assertFalse(body.startswith(fix_session.NOTE.split("{", 1)[0]), body)
+
+
+class TheRefusals(FixCase):
+    def test_no_running_session_is_a_503_naming_herdr_sh_start_and_notes_the_cause(self):
+        item = self.task()
         status, _, answer = self.fix(item)
         self.assertEqual(status, 503)
-        self.assertEqual(answer["error"], "Fix failed: herdr.sh launch: session sd is not running; run herdr.sh start first")
+        self.assertEqual(answer["error"], "Fix failed: herdr.sh launch: session sd is not running; run herdr.sh start first."
+                                          f" A note on sd:{item} keeps the cause.")
         self.assertEqual([call[:2] for call in self.calls()], [["session", "list"]])
-        self.assertEqual(self.unjournalled(), before)
+        self.assertEqual(self.fix_notes(item), ["Fix: launch failed: herdr.sh launch: session sd is not running; run herdr.sh start first"])
         self.assertEqual(self.journalled(), [(f"Fix session · sd:{item}", 1)])  # sd:5541
 
-    def test_herdr_not_installed_is_a_503_naming_herdr_sh_start_and_writes_nothing(self):
+    def test_herdr_not_installed_is_a_503_naming_herdr_sh_start_and_notes_the_cause(self):
         bare = Path(self.tmp.name) / "bin"
         bare.mkdir()
         for tool in ("sh", "dirname"):
             (bare / tool).symlink_to(shutil.which(tool))
         os.environ["PATH"] = str(bare)
         item = self.task()
-        before = self.unjournalled()
         status, _, answer = self.fix(item)
         self.assertEqual(status, 503)
-        self.assertEqual(answer["error"], "Fix failed: herdr.sh launch: herdr is not installed; install it, then run herdr.sh start")
-        self.assertEqual(self.unjournalled(), before)
+        self.assertEqual(answer["error"], "Fix failed: herdr.sh launch: herdr is not installed; install it, then run herdr.sh start."
+                                          f" A note on sd:{item} keeps the cause.")
+        self.assertEqual(self.fix_notes(item), ["Fix: launch failed: herdr.sh launch: herdr is not installed; install it, then run herdr.sh start"])
         self.assertEqual(self.journalled(), [(f"Fix session · sd:{item}", 1)])  # sd:5541
 
     def test_a_refused_start_is_a_503_that_says_the_workspace_is_left(self):
         self.running()
         (self.fixture / "agent-start-fail").write_text("")
         item = self.task()
-        before = self.unjournalled()
         status, _, answer = self.fix(item)
         self.assertEqual(status, 503)
         self.assertIn("w9:p1: claude did not start", answer["error"])
         self.assertIn("left at its shell prompt", answer["error"])
-        self.assertEqual(self.unjournalled(), before)
+        [noted] = self.fix_notes(item)
+        self.assertIn("w9:p1: claude did not start", noted)
         self.assertEqual(self.journalled(), [(f"Fix session · sd:{item}", 1)])  # sd:5541
 
     def test_no_answer_in_time_is_a_504_that_says_the_outcome_is_not_known(self):
@@ -148,13 +208,12 @@ class TheRefusals(FixCase):
         hook.write_text("#!/bin/sh\nexec sleep 5\n")
         hook.chmod(0o755)
         item = self.task()
-        before = self.unjournalled()
         with patch.object(fix_session, "TIMEOUT", 1):
             status, _, answer = self.fix(item)
         self.assertEqual(status, 504)
         self.assertIn("whether a session started is not known", answer["error"])
         self.assertIn(f"workspace sd-{item}", answer["error"])
-        self.assertEqual(self.unjournalled(), before)
+        self.assertEqual(len(self.fix_notes(item)), 1)
         self.assertEqual(self.journalled(), [(f"Fix session · sd:{item}", -1)])  # sd:5541
 
     def test_a_note_that_cannot_be_written_after_the_launch_names_the_pane(self):

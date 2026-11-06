@@ -960,6 +960,23 @@ class TheCategoryGroups(ScreenCase):
         # A repo group carries no Rename or Remove: its Actions cell is empty.
         self.assertRegex(r["first"], r'data-cat="repo:Brass"[^\n]*(?:\n[^\n]*){0,4}<td class="act"></td></tr>')
 
+    def test_one_repos_rows_from_both_sources_share_one_group_named_by_its_checkout(self):
+        """pack sd:7754: a registered checkout's row has its short label as `repo` and the GitHub name as `slug`; a row
+        `with_github` adds has owner/name as both. Both rows key on the GitHub name, case ignored, so one repo is one
+        group, and the group shows the checkout's short label."""
+        rows = [{"repo": "anvil", "repo_path": "/srv/example/anvil", "slug": "Example/Anvil", "tracker": "GitHub",
+                 "ref": "#12", "key": "github:example/anvil#12", "title": "Crash on start", "reason": "assigned",
+                 "url": None, "state": "open", "hidden": False},
+                {"repo": "example/anvil", "repo_path": None, "slug": "example/anvil", "tracker": "GitHub", "ref": "#13",
+                 "key": "github:example/anvil#13", "title": "Slow on load", "reason": "assigned", "url": None,
+                 "state": "open", "hidden": False}]
+        out = self.run_page("show('issues'); await flush(); R.first = ELS.issues.html;", issues_rows=rows, categories=())
+        first = out["R"]["first"]
+        self.assertEqual(re.findall(self.GROUPS, first), [("repo:example/anvil", "true")])
+        self.assertIn('data-cat-open="repo:example/anvil">anvil</button>', first)
+        self.assertIn("Crash on start", first)
+        self.assertIn("Slow on load", first)
+
     def test_remove_asks_nothing_leaves_its_issues_uncategorized_and_undo_restores_the_list(self):
         # The repo group stays open; a press opens Uncategorized, which now holds both Jira issues.
         out = self.page(self.PRESS + "show('issues'); await flush(); act('issue category.remove', 'isscat:Alerts'); await flush();"

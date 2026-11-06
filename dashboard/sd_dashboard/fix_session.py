@@ -14,7 +14,8 @@ a report (kind `report`) starts a debug and fix session for that report. Tasks, 
    never the item's title. herdr missing or its session down answers 503 with herdr.sh's own words, which name
    `herdr.sh start`; nothing falls back to a hidden process. A later step that fails says what it left: a workspace at
    its shell prompt, or claude without its prompt. No answer within `TIMEOUT` is a 504 that says whether a session
-   started is not known.
+   started is not known. Either failure leaves a comment note on the item that names its cause, `Fix: launch
+   failed: ...` or the 504's words (pack sd:7756): a toast fades, and the journal keeps its record elsewhere.
 3. A comment note on the item names the session, the pane and the checkout. A note that cannot be written after a
    launch answers 503 naming the pane, so the operator knows a session runs without its record.
 
@@ -69,6 +70,8 @@ LAUNCHING = threading.Lock()
 BUILD = ("Build sd:{id}. Follow the command pack's builder workflow: read `sd task show {id}`, work in a worktree "
          "outside ~/repos, commit the change with a pull-request body, and enqueue it through the lane "
          "(`sd-ship lane enqueue`).")
+#: How a failed launch's answer begins; its note (pack sd:7756) says "launch failed" instead.
+FAILED = "Fix failed: "
 #: The note step 3 writes; Today's Working now (sd:3466, `active_sessions`) reads the pane back from it.
 NOTE = "Fix: started a {session} session (claude) in herdr workspace sd-{item}, pane {pane}, at {where}."
 GRILL = ("Grill piece sd:{id} for its author. Read `sd task show {id}` for the piece's path, then the `## Draft` of "
@@ -163,7 +166,7 @@ def start(connection, item: int, *, expected_revision: str, who: str, grill: str
                    or ("apply-review" if apply else "debug" if row["kind"] == "report" else "builder"))
         pane = _launch(directory, f"sd-{item}", prompt(row["kind"], item, grill=grill, apply=apply))
         if isinstance(pane, tuple):
-            return pane
+            return _noted(connection, item, who, *pane)
         where = paths.key(str(directory))
         body = NOTE.format(session=session, item=item, pane=pane, where=where)
         try:
@@ -173,6 +176,19 @@ def start(connection, item: int, *, expected_revision: str, who: str, grill: str
                                   f"Record it with: sd task note {item} {shlex.quote(body)}"}
         state["fix"] = {"session": session, "pane": pane, "checkout": where}
         return state
+
+
+def _noted(connection, item: int, who: str, status: int, answer: dict):
+    """A failed launch's answer, after a comment note on the item names its cause (pack sd:7756): the page's toast
+    fades, and the journal keeps its record on the holder item, so without the note the item said nothing. The answer
+    says where the cause is kept, or that no note holds it."""
+    said = answer["error"]
+    cause = f"launch failed: {said.removeprefix(FAILED)}" if said.startswith(FAILED) else said
+    try:
+        workflow.add_item_note(connection, item, kind="comment", who=who, body=f"Fix: {cause}")
+    except (SdDbError, sqlite3.Error) as problem:
+        return status, {"error": f"{said.rstrip('.')}. The item has no note of it: {problem}"}
+    return status, {"error": f"{said.rstrip('.')}. A note on sd:{item} keeps the cause."}
 
 
 def _grillable(row: dict, notes: list[dict], grill: str) -> None:
@@ -212,7 +228,7 @@ def _launch(directory: Path, label: str, text: str):
     if done.returncode != 0:
         said = (done.stderr.strip() or done.stdout.strip() or f"exit {done.returncode}").splitlines()[-1]
         # herdr.sh's line says what is left: nothing, a workspace at its prompt, or claude without the prompt.
-        return 503, {"error": f"Fix failed: {said}"}
+        return 503, {"error": f"{FAILED}{said}"}
     found = re.match(r"launched (\S+): ", done.stdout.strip())
     return found[1] if found else "unknown"
 

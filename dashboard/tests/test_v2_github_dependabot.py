@@ -172,6 +172,20 @@ class TheScript(unittest.TestCase):
         self.assertEqual(posts[1], ["/api/items/77/fix", {"revision": "a" * 64}])
         self.assertEqual(out["toasts"][-1], "Fix started · #77 · builder session in herdr pane p1")
 
+    def test_a_failed_launch_after_filing_names_the_filed_item_and_its_note(self):
+        """pack sd:7756: the item is filed and the launch answers 503; the toast said "not changed" and the cause alone,
+        so nothing named sd:77, the item filed for the repo, whose note now keeps the cause (fix_session._noted)."""
+        doc = health_screen.dependabot_document(FOUND)
+        error = ("Fix failed: herdr.sh launch: session sd is not running; run herdr.sh start first."
+                 " A note on sd:77 keeps the cause.")
+        answer = (f"(path, body) => path === '/api/github/dependabot' ? [200, {json.dumps(doc)}]"
+                  " : path === '/api/items' ? [201, { item: { id: 77 }, revision: 'a'.repeat(64) }]"
+                  f" : path === '/api/items/77/fix' ? [503, {{ error: {json.dumps(error)} }}] : [404, {{ error: 'no answer' }}]")
+        out = self.run_page("show(); await flush(); const c = cmd('dependabot alerts.fix'), o = C.get('dep:/checkouts/bellows');"
+                            " shellRun(c, o); await flush();", answer)
+        self.assertEqual([post[0] for post in out["posts"]], ["/api/items", "/api/items/77/fix"])
+        self.assertEqual(out["toasts"][-1], f"example/bellows not changed: filed sd:77, but {error}")
+
     def test_a_failed_read_is_a_row_naming_it_never_an_empty_list(self):
         out = self.run_page("show(); await flush(); R.rows = ELS['dependabot'].html;",
                             "(path, body) => [500, { error: 'database is locked' }]")

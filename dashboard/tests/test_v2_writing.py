@@ -18,6 +18,7 @@ import re
 import sqlite3
 import subprocess
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 from unittest import mock
 
@@ -33,6 +34,7 @@ from test_workflow_actions import BrowserSession
 V2 = Path(v2.__file__).resolve().parent
 PAGE_JS = (V2 / "static" / "writing.js").read_text(encoding="utf-8")
 MARKUP_JS = (V2 / "static" / "markup.js").read_text(encoding="utf-8")
+WRITING_CSS = (V2 / "static" / "writing.css").read_text(encoding="utf-8")
 NOW = "2026-09-23T12:00:00Z"
 
 
@@ -778,6 +780,56 @@ R.all = ELS['view-board'].html; press('Work'); R.work = ELS['view-board'].html; 
         self.assertNotIn("An idea with no source", col(r["work"]))
         self.assertIn("Highest 1 of 50 Work ideas.", col(r["work"]))
         self.assertIn("An idea with no source", col(r["off"]))
+
+    def test_the_vault_columns_body_takes_the_stretching_row_with_tiles_or_without(self):
+        """pack sd:7773: `.col` gave two rows, header and body; the tiles made the vault column's children three, so the
+        tiles took the 1fr row and stretched to the board's height (1069 px in headless Chrome), far above the ideas.
+        Whatever the column holds, the rows `writing.css` gives it are one per child and only the last, the body, is 1fr."""
+        def children(board):
+            # The direct children of the vault column: each child's tag and classes.
+            found, depth, inside, done = [], 0, None, False
+
+            class Walk(HTMLParser):
+                def handle_starttag(self, tag, attrs):
+                    nonlocal depth, inside
+                    cls = (dict(attrs).get("class") or "").split()
+                    if inside is None and tag == "div" and cls[:2] == ["col", "vault"]:
+                        inside = depth
+                    elif inside is not None and not done and depth == inside + 1:
+                        found.append((tag, set(cls)))
+                    depth += 1
+
+                def handle_endtag(self, tag):
+                    nonlocal depth, done
+                    depth -= 1
+                    if inside is not None and depth == inside:
+                        done = True
+
+            Walk().feed(board)
+            return found
+
+        def rows_for(kids):
+            # The grid-template-rows of the most specific `.col` rule that matches a vault column with these children.
+            best = None
+            for sels, body in re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", WRITING_CSS, flags=re.S)):
+                rows = re.search(r"grid-template-rows:\s*([^;]+);", body)
+                for sel in (s.strip() for s in sels.split(",")):
+                    has = re.fullmatch(r"\.col\.vault:has\(> \.([\w-]+)\)", sel)
+                    if rows and (sel in (".col", ".col.vault") or (has and any(has.group(1) in c for _, c in kids))):
+                        if best is None or len(sel) >= len(best[0]):
+                            best = (sel, rows.group(1).strip())
+            return re.findall(r"minmax\([^)]*\)|\S+", best[1])
+
+        tiled = children(self.run_page("")["html"]["view-board"])
+        unread = "DOC.ideas = { state: 'unknown', reason: 'no such column: stage', count: null, rows: [] };\n"
+        bare = children(self.run_page("", prelude=unread)["html"]["view-board"])
+        self.assertEqual([tag for tag, _ in tiled], ["header", "div", "div"])
+        self.assertIn("idea-areas", tiled[1][1])
+        self.assertEqual([tag for tag, _ in bare], ["header", "div"])
+        for kids in (tiled, bare):
+            rows = rows_for(kids)
+            self.assertEqual(len(rows), len(kids), (rows, kids))
+            self.assertEqual([r for r in rows if "1fr" in r], [rows[-1]], rows)
 
     def test_a_pressed_no_area_tile_that_vanishes_on_a_read_again_clears(self):
         """pack sd:7695: No area pressed, then a read again in which every idea has an area: the tile is gone, so the

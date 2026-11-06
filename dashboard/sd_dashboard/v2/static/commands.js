@@ -47,7 +47,10 @@
       run: o => window.shell.post('/api/items', { title: `Dependabot: ${o.facts.Shown} open alerts in ${o.slug}`, repo: o.repo_path, ref: `dependabot:${o.slug}`,
         body: `${o.facts.Shown} open Dependabot alerts in ${o.slug}, ${o.grave} critical or high. Land an open Dependabot PR through sd-ship if one exists; `
           + 'else bump the dependency in a worktree. Never re-enable Actions.' })
-        .then(filed => inner.run({ ...o, filed: filed.item.id, filedRevision: filed.revision })) };
+        // pack sd:7756: the item is filed whatever the launch answers, so a failed launch names it; the server's words
+        // say whether a note on it keeps the cause.
+        .then(filed => inner.run({ ...o, filed: filed.item.id, filedRevision: filed.revision }).catch(err => {
+          throw Object.assign(new Error(`filed sd:${filed.item.id}, but ${err.message}`), { status: err.status, stale: err.stale }); })) };
   }
 
   // Grill and Apply answers on a piece (pack sd:6700): Fix with grill: ask or apply. Ask starts claude to write the piece's
