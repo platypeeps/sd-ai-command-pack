@@ -89,6 +89,17 @@ def _merge(row) -> dict:
     return {"review": review, "checks": checks, "mergeable": mergeable, "ready": ready}
 
 
+def _closes(row) -> list[str]:
+    """The issue addresses a pull request closes, as the search stored them (`linked_issues`, sd:5315); none unread."""
+    value = row.get("linked_issues")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            value = None
+    return [url for url in value if isinstance(url, str)] if isinstance(value, list) else []
+
+
 def _ref(url: str) -> tuple[str, str | None, int | None]:
     """`(kind, owner/name, number)` from a GitHub pull request or issue address; kind is "" for any other address."""
     for kind, pattern in (("pull", contributions.PULL), ("issue", contributions.ISSUE)):
@@ -142,7 +153,8 @@ def document(connection: sqlite3.Connection, *, now: str) -> dict:
         if kind and key not in rows:
             state = row.get("external_state") or ("open" if row["lane"] in OPEN_LANES else row["lane"])
             rows[key] = {"url": row["url"], "kind": kind, "repo": slug, "number": number, "title": row.get("title"),
-                         "state": state, "merged_at": row.get("merged_at"), "closed_at": row.get("closed_at")}
+                         "state": state, "merged_at": row.get("merged_at"), "closed_at": row.get("closed_at"),
+                         "linked_issues": [link["url"] for link in row.get("linked") or () if link.get("kind") == "github"]}
 
     for key, row in rows.items():
         contribution = projected.get(key) or {}
@@ -169,6 +181,8 @@ def document(connection: sqlite3.Connection, *, now: str) -> dict:
                  # sd:5633: what a row's Details show, each None when the store did not record it.
                  **{name: row.get(name) for name in FACTS}, "attention": list(contribution.get("reasons") or []),
                  "checkout": checkouts.get(f"github.com/{str(row['repo']).lower()}"),
+                 # pack sd:7841: the issues a pull request closes, so Issues can name the pull request on each.
+                 "closes": _closes(row) if row["kind"] == "pull" else [],
                  **_merge(row)}
         if state == "open":
             found["pulls" if row["kind"] == "pull" else "issues"].append(entry)

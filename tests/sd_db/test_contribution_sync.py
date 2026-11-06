@@ -363,7 +363,9 @@ class ContributionSync(SyncCase):
         self.assertTrue(first.watermark_moved)
         self.assertEqual(len(core.projection(self.db)), 4)
         saved = adapter._queue(self.db)
-        self.assertEqual(saved["pending"][0]["url"], urls[4])
+        # The two head slots read 7 and 8, then the newest never-read pulls
+        # 14 and 13 (sd:7840); the oldest unread one heads the queue.
+        self.assertEqual(saved["pending"][0]["url"], urls[2])
         self.assertLessEqual(first.requests, 40)
         second = self.run_sync(max_requests=40)
         self.assertEqual(second.queued, 4)
@@ -458,6 +460,65 @@ class ContributionSync(SyncCase):
         self.run_sync([URL])
         self.assertEqual(adapter._queue(self.db)["pending"][0]["url"], URL)
         self.assertEqual(core.projection(self.db), [])
+
+    def backlog(self, numbers):
+        """Stage never-read pulls in the queue, as an old search left them."""
+        urls = self.clone_pull([7, *numbers])[1:]
+        pending = [{"key": "github:" + url, "url": url, "why": ["author"], "blocking_labels": [],
+                    "explicit": False} for url in urls]
+        adapter._save_queue(self.db, pending, adapter._queue(self.db)["revision"])
+        return urls
+
+    def test_a_pull_found_tonight_is_read_ahead_of_a_never_read_backlog(self):
+        # sd:7840: the queue read in discovery order, so a pull found tonight
+        # waited behind thousands of old never-read pulls for weeks.
+        old = self.backlog(range(8, 14))
+        planned = adapter.plan(self.db)
+        found = [{"kind": "pull", "url": URL, "why": ["author"]}]
+        # The identity and three pulls: the two head slots, then the new one.
+        client = self.api.client(requests=1 + 3 * adapter.PULL_REQUESTS)
+        result = adapter.refresh(self.db, planned, found, client=client, observed_at=self.now.isoformat())
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["completed_keys"], ["github:" + old[0], "github:" + old[1], "github:" + URL])
+
+    def test_a_never_read_pull_that_fails_loses_its_place_ahead(self):
+        old = self.backlog(range(8, 13))
+        rows: dict = self.api.rows
+        rows[ROOT + "/pulls/7"] = Response(503, {}, "")
+        planned = adapter.plan(self.db)
+        found = [{"kind": "pull", "url": URL, "why": ["author"]}]
+        client = self.api.client(requests=1 + 3 * adapter.PULL_REQUESTS)
+        first = adapter.refresh(self.db, planned, found, client=client, observed_at=self.now.isoformat())
+        # Two head slots, the new pull failing on one request, then the
+        # newest old pull on what is left.
+        self.assertEqual(first["completed_keys"], ["github:" + url for url in (old[0], old[1], old[4])])
+        self.assertTrue(first["incomplete"][0].startswith("github:" + URL + ": "), first["incomplete"])
+        # Its heartbeat marks it read: it rotates like any other key and
+        # does not jump the queue again.
+        planned = adapter.plan(self.db)
+        fresh = adapter._fresh(self.db, planned["pending"], planned["snapshots"])
+        self.assertEqual(fresh, {"github:" + old[2], "github:" + old[3]})
+        ordered = adapter._order(planned["pending"], fresh)
+        self.assertEqual([row["url"] for row in ordered], [old[2], old[3], old[0], old[1], URL, old[4]])
+
+    def test_a_never_read_backlog_takes_a_few_slots_and_observed_work_keeps_its_turn(self):
+        # Review of sd:7840: every never-read key went ahead of the rotation,
+        # the ~4,900 backlog included, so explicit work past the first three
+        # and every observed open pull waited weeks behind it.
+        explicit = [{"key": f"item:{n}", "explicit": True} for n in range(4)]
+        head = [{"key": f"github:head{n}", "explicit": False} for n in range(2)]
+        observed = {"key": "github:observed", "explicit": False}
+        backlog = [{"key": f"github:old{n}", "explicit": False} for n in range(30)]
+        new = {"key": "github:new", "explicit": False}
+        pending = [*explicit, *head, observed, *backlog, new]
+        fresh = {row["key"] for row in [*backlog, new]}
+        keys = [row["key"] for row in adapter._order(pending, fresh)]
+        # The new pull is read first after the head slots, then the newest
+        # few of the backlog; the rest follow the rotation.
+        self.assertEqual(keys[5:10], ["github:new", "github:old29", "github:old28", "github:old27", "github:old26"])
+        self.assertEqual(keys[10:12], ["item:3", "github:observed"])
+        self.assertEqual(sorted(keys), sorted(row["key"] for row in pending))
+        self.assertEqual(adapter.FRESH_SLOTS, 5)
 
     def test_registered_work_refreshes_without_search_match(self):
         item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]

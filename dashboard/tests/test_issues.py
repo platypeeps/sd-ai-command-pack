@@ -170,6 +170,28 @@ class ThePages(ScreenCase):
             failed = github_issues(self.connection)
         self.assertEqual((failed["github_error"], len(failed["issues"])), ("database is locked", 3))
 
+    def test_each_issue_names_the_pull_requests_that_close_it_open_first(self):
+        # pack sd:7841: the pull requests GitHub's search says close an issue, from the same read; none is [].
+        def pull(number, **columns):
+            upsert_shadow(self.connection, tracker="github", url=f"https://github.com/example/project/pull/{number}",
+                          repo="example/project", number=number, kind="pull", title=f"Fix {number}", reason="filed",
+                          filed=True, author="me", **columns)
+        pull(41, state="merged", merged_at="2026-09-05T10:00:00Z", linked_issues=["https://github.com/example/project/issues/12"])
+        # Another spelling of the same address: GitHub's two reads do not always agree on case.
+        pull(40, state="open", updated_at="2026-09-06T09:00:00Z", linked_issues=["https://github.com/Example/Project/issues/12/"])
+        pull(42, state="open", updated_at="2026-09-06T10:00:00Z", linked_issues=[])
+        self.connection.commit()
+        with stub(return_value=FOUND), stub_intake(return_value=INTAKE):
+            found = github_issues(self.connection)
+        pulls = {row["url"] or row["ref"]: row["pulls"] for row in (*found["issues"], *found["intake"])}
+        self.assertEqual(pulls.pop("https://github.com/example/project/issues/12"), [
+            {"url": "https://github.com/example/project/pull/40", "ref": "example/project#40", "number": 40,
+             "state": "open", "title": "Fix 40"},
+            {"url": "https://github.com/example/project/pull/41", "ref": "example/project#41", "number": 41,
+             "state": "merged", "title": "Fix 41"}])
+        self.assertEqual(pulls, dict.fromkeys(pulls, []))
+        self.assertEqual(len(pulls), 4)
+
     def test_a_failed_issue_read_leaves_the_intake(self):
         with stub(side_effect=sqlite3.OperationalError("database is locked")), stub_intake(return_value=INTAKE):
             found = github_issues(self.connection)
@@ -312,7 +334,7 @@ window.shell = { itemHref: n => `/tasks?item=${n}`, openItem: n => `#${n} opens 
         writes.set_item_fields(self.connection, filed, source="task-ref", external_id="github:example/project#12")
         with stub(return_value=FOUND), stub_intake(return_value=INTAKE):
             found = github_issues(self.connection)
-        script = (self.PAGE + ISSUES_JS + "fire('DOMContentLoaded');"
+        script = (self.PAGE + COMMANDS_JS + ISSUES_JS + "fire('DOMContentLoaded');"
                   + f"fire('issues:read', {{ issues: {json.dumps(found['issues'])}, error: '' }});"
                   + f"fire('intake:read', {{ intake: {json.dumps(found['intake'])}, error: '' }});" + then
                   + "JSON.stringify({ sunk, opened, selected, panes, ids: registered.map(c => c.id), types: Object.values(objects).map(o => o.type) })")
@@ -341,9 +363,42 @@ window.shell = { itemHref: n => `/tasks?item=${n}`, openItem: n => `#${n} opens 
                                       "github issue.open", "github issue.item", "github issue.hide", "github issue.unhide",
                                       # pack sd:7787: File as item, in Details and the bulk bar.
                                       "github issue.file",
+                                      # pack sd:7841: Open PR, the pull request that closes the issue.
+                                      "github issue.pr",
                                       # pack sd:7708: Set category, then the category list's commands.
                                       "jira issue.category", "issue categories.add", "issue category.rename", "issue category.remove"])
         self.assertEqual(sorted(set(out["types"])), ["github issue", "issue categories", "jira issue"])
+
+    def test_a_row_a_pull_request_closes_has_its_icon_and_open_pr_and_the_others_neither(self):
+        # pack sd:7841: the row's icon and Details' Open PR open the open pull request in a new tab; a row none
+        # closes draws neither, and Open PR is off on it with the reason.
+        for number, state, linked in ((40, "open", ["https://github.com/example/project/issues/12"]),
+                                      (39, "merged", ["https://github.com/example/project/issues/12"])):
+            upsert_shadow(self.connection, tracker="github", url=f"https://github.com/example/project/pull/{number}",
+                          repo="example/project", number=number, kind="pull", title=f"Fix {number}", state=state,
+                          reason="filed", filed=True, author="me", linked_issues=linked,
+                          merged_at="2026-09-05T10:00:00Z" if state == "merged" else None)
+        self.connection.commit()
+        _, out = self.run_page(
+            "window.issues.details('iss:github:example/project#12');"
+            "const pr = registered.find(c => c.id === 'github issue.pr'), o = objects['iss:github:example/project#12'];"
+            "const none = objects['iss:github:example/project#21'];"
+            "if (pr) sunk.push(['ran', pr.run(o)], ['cli', pr.cli(o)], ['off', String(pr.when(none))], ['on', String(pr.when(o))]);")
+        drawn = dict(out["sunk"])
+        row = re.search(r'<tr data-id="iss:github:example/project#12".*?</tr>', drawn["issues"], re.S)[0]
+        self.assertIn('<a class="icon-btn" href="https://github.com/example/project/pull/40" target="_blank" '
+                      'rel="noopener noreferrer" aria-label="Open pull request example/project#40 on GitHub"', row)
+        self.assertIn('<use href="#i-git-pull-request"/>', row)
+        self.assertIn("1 more pull request", row)
+        self.assertNotIn("i-git-pull-request", drawn["intake"])
+        other = re.search(r'<tr data-id="iss:github:/home/example/repos/other/kiln#3".*?</tr>', drawn["issues"], re.S)
+        self.assertNotIn("i-git-pull-request", other[0] if other else "")
+        self.assertIn('<dt>Pull requests</dt><dd>example/project#40 · open, <a href="https://github.com/example/project/pull/39" '
+                      'target="_blank" rel="noopener noreferrer">example/project#39</a> · merged</dd>', drawn["details"])
+        self.assertEqual(out["opened"], [["https://github.com/example/project/pull/40", "_blank"]])
+        self.assertEqual((drawn["ran"], drawn["cli"], drawn["on"], drawn["off"]), (
+            "Opened on GitHub in a new tab", "gh pr view 40 --repo example/project --web", "true",
+            "no pull request closes this issue"))
 
     def test_a_jira_row_opens_in_jira_by_its_command_and_a_fact_not_stored_says_so(self):
         _, out = self.run_page("window.issues.details('iss:jira:EXAMPLE-8');"
@@ -813,6 +868,27 @@ class TheIntakeBulk(ScreenCase):
         self.assertEqual([p[1] for p in out["posts"]], [{"key": "github:example/project#21", "hidden": True},
                                                         {"key": "github:example/project#23", "hidden": True}])
 
+    def test_a_bulk_hide_keeps_three_writes_in_flight_and_reads_again_once(self):
+        """pack sd:7843, sd:7852: a bulk Hide sent all its writes at once, and each held a server thread and a store
+        connection; thirty of them stalled the dashboard. The shell's bulk runner keeps three in flight, each reply
+        sends the next, and the page reads again once, after the last."""
+        rows = [{**INTAKE_ROWS[0], "ref": f"#{n}", "key": f"github:example/project#{n}", "title": f"Issue {n}"}
+                for n in range(31, 41)]
+        out = self.run_page(self.PICK + "show('intake'); await flush(); all(true); await flush();"
+                            " const was = ANSWER, held = []; let now = 0; R.most = 0;"
+                            " ANSWER = (p, b) => p !== '/api/github/issues/view' ? was(p, b) : new Promise(ok => {"
+                            " now++; R.most = Math.max(R.most, now); held.push(() => { now--; ok(was(p, b)); }); });"
+                            " bulk('github issue.hide'); await flush(); R.first = held.length; R.gets = OUT.gets.length;"
+                            " while (held.length) { held.shift()(); await flush(); }"
+                            " await flush(); R.gets = OUT.gets.length - R.gets; R.toast = lastToast().msg; R.rows = ELS.intake.html;",
+                            intake_rows=rows)
+        r = out["R"]
+        self.assertEqual((r["first"], r["most"]), (3, 3))
+        self.assertEqual(r["gets"], 1)
+        self.assertEqual([p[1]["key"] for p in out["posts"]], [row["key"] for row in rows])
+        self.assertIn("Hide · 10 github issues", r["toast"])
+        self.assertNotIn("Issue 3", r["rows"])
+
     def test_unhide_on_the_picked_rows_under_hidden_shows_each_again(self):
         out = self.page("show('intake'); await flush(); click('hidden'); await flush();"
                         " all(true); await flush(); R.bar = shared(); R.picked = [...PICKED];"
@@ -1164,6 +1240,61 @@ class TheCategoryStore(ScreenCase):
     @staticmethod
     def jira_of(found):
         return next(row for row in found["issues"] if row["key"] == "jira:EXAMPLE-8")
+
+
+class TheHideCheck(ScreenCase):
+    """pack sd:7843: a Hide read every list in full before it wrote, about a second a write, and a bulk Hide sends one
+    write per row, so thirty rows held the store for half a minute. A key the stored lists hold now writes after their
+    own reads alone; any other key reads the lists in full, so a row only GitHub's search lists still hides, and a key
+    no list holds is still refused as stale."""
+
+    #: `repos.mine_issues` rows as the pack reads them now, each with its `shadow.repo`.
+    MINE = {path: [{**row, "repo": "EXAMPLE" if row["tracker"] == "jira" else "example/project"} for row in rows]
+            for path, rows in FOUND.items()}
+
+    def test_a_hide_of_a_key_the_stored_lists_hold_reads_no_list_in_full(self):
+        from sd_dashboard import today_github
+
+        keys = ("jira:EXAMPLE-8", "GitHub:Example/Project#12", "github:example/project#21")
+        with stub(return_value=self.MINE), stub_intake(return_value=INTAKE), \
+                mock.patch.object(today_github, "document", wraps=today_github.document) as github, \
+                mock.patch.object(progress, "tracker_items", wraps=progress.tracker_items) as details:
+            for key in keys:
+                issues.view({"key": key, "hidden": True})(self.connection)
+        self.assertEqual((github.call_count, details.call_count), (0, 0))
+        self.assertEqual({key: row["hidden"] for key, row in writes.views(self.connection).items()},
+                         {issues.view_key(key): True for key in keys})
+
+    def test_a_key_only_github_search_lists_still_hides_and_one_no_list_holds_is_refused(self):
+        from sd_dashboard import today_github
+
+        searched = {"error": "", "settled": [], "issues": [{
+            "repo": "example/elsewhere", "ref": "example/elsewhere#5", "number": 5, "title": "Found by search",
+            "why": "assigned", "url": "https://github.com/example/elsewhere/issues/5", "state": "open", "item": None,
+            "mine": True}]}
+        with stub(return_value=self.MINE), stub_intake(return_value=INTAKE), \
+                mock.patch.object(today_github, "document", return_value=searched):
+            issues.view({"key": "github:example/elsewhere#5", "hidden": True})(self.connection)
+            with self.assertRaises(workflow.StaleItem):
+                issues.view({"key": "github:example/gone#9", "hidden": True})(self.connection)
+        self.assertEqual(list(writes.views(self.connection)), ["issue:github:example/elsewhere#5"])
+
+
+    def test_a_stored_read_that_fails_falls_back_to_the_full_lists(self):
+        # Review of sd:7843: the stored reads had none of the handling `document` and `intake` have, so a locked store
+        # aborted the Hide. A failed stored read now falls back to the full lists, which hide a row they list.
+        calls = {"n": 0}
+
+        def mine(connection):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return self.MINE
+
+        with stub(side_effect=mine), stub_intake(return_value=INTAKE):
+            out = issues.view({"key": "jira:EXAMPLE-8", "hidden": True})(self.connection)
+        self.assertEqual((out["key"], out["hidden"]), ("jira:EXAMPLE-8", True))
+        self.assertEqual(calls["n"], 2, "the stored read, then the full lists' own read")
 
 
 class TheViewRoute(BrowserSession):

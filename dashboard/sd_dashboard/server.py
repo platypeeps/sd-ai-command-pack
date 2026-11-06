@@ -82,10 +82,28 @@ SESSION_SECONDS = 3600
 #: page's own fix is a reload (sd:5664); reselecting a row reads with the same dead session.
 SESSION_ENDED = "its session ended, as it does after an hour or when the dashboard restarts."
 MAX_BODY = 65536
+#: Requests that may hold a store connection for a read at once (sd:7842). Each open connection holds file handles
+#: (the store, its -wal and -shm); with no bound, polls that piled up under load ran the process out of handles, and
+#: the front door then refused every tailnet request. A read past the bound waits READ_WAIT seconds, then answers 503.
+READ_SLOTS = 8
+READ_WAIT = 20.0
 
 
 class NotFound(Exception):
     """A path with no screen behind it."""
+
+
+BUSY = f"The dashboard is busy: {READ_SLOTS} reads held the store for {READ_WAIT:g} seconds. Try again shortly."
+
+
+def _unchecked(error):
+    """The failure under a front-door refusal that means the check never ran: an `OSError` or a timeout, as the
+    error itself or along its `from` chain. None for a real refusal (sd:7842)."""
+    while error is not None:
+        if isinstance(error, (OSError, subprocess.TimeoutExpired)):
+            return error
+        error = error.__cause__
+    return None
 
 
 def _metrics_kept(database):
@@ -768,6 +786,8 @@ class Dashboard(BaseHTTPRequestHandler):
     served_commit = None
     #: Each page's rail badge (sd:3446); `build` gives each server its own.
     badges = None
+    #: The READ_SLOTS read connections (sd:7842); `build` gives each server its own, shared by its direct listener.
+    reads = None
     #: Set once `_send` begins an answer: a failure after it cannot answer again (sd:3529).
     _started = False
 
@@ -929,15 +949,23 @@ class Dashboard(BaseHTTPRequestHandler):
                 return self._json(403, {"error": f"Reload the page to read an issue run: {SESSION_ENDED}"})
             return self._json(*issue_filing.status(path[len("/api/issue-runs/"):]))
         parameters = parse_qs(split.query, keep_blank_values=True)
+        if not self.reads.acquire(timeout=READ_WAIT):
+            if self._session(context):
+                self.badges.remember(path, None, self.clock())  # a counted read that could not run is unknown (sd:3446)
+            return self._error(503, BUSY, path)
         try:
             connection = sd_db.connect(self.database, write=False)
         except (OSError, SdDbError, sqlite3.Error) as problem:
+            self.reads.release()
             if self._session(context):
                 self.badges.remember(path, None, self.clock())  # a counted read that could not run is unknown (sd:3446)
             return self._send(
                 503, error_page(503, str(problem)).encode("utf-8"),
                 "text/html; charset=utf-8",
             )
+        except BaseException:
+            self.reads.release()
+            raise
         try:
             if path.startswith("/studio/files/"):
                 return self._studio_file(context, connection, path[len("/studio/files/"):])
@@ -1062,6 +1090,7 @@ class Dashboard(BaseHTTPRequestHandler):
                               "text/html; charset=utf-8")
         finally:
             connection.close()
+            self.reads.release()
         session = self._session(context) or self._new_session(context)
         token = self._csrf(session)
         body = body.replace("</head>", f'<meta name="sd-csrf" content="{token}"></head>', 1)
@@ -1081,7 +1110,13 @@ class Dashboard(BaseHTTPRequestHandler):
             if context and context.remote:
                 if self.frontdoor_check() is not True:
                     return None
-        except (runtime.RuntimeRefused, OSError, ValueError):
+        except (runtime.RuntimeRefused, OSError, ValueError) as refused:
+            # A check that could not run is unknown, not a refusal (sd:7842): out of file handles, the front door's
+            # config read failed and every tailnet request read "Untrusted dashboard host". `_answer` makes it a 503
+            # that names the cause; a host or login that does not match still returns None, the 403.
+            cause = _unchecked(refused)
+            if cause is not None:
+                raise OSError(f"the dashboard could not check its front door: {cause}") from refused
             return None
         return context
 
@@ -1187,18 +1222,22 @@ class Dashboard(BaseHTTPRequestHandler):
 
         badges, realms = {}, []
         if self._session(context):
+            # A busy store reads as one that could not open (sd:7842): no live page, so each says unknown.
+            slot, connection = self.reads.acquire(timeout=READ_WAIT), None
             try:
-                connection = sd_db.connect(self.database, write=False)
-            except (FileNotFoundError, SdDbError, sqlite3.Error):
-                # No live page can be read, so each says unknown; the kept ones still show.
-                connection = None
-            try:
+                try:
+                    connection = sd_db.connect(self.database, write=False) if slot else None
+                except (FileNotFoundError, SdDbError, sqlite3.Error):
+                    # No live page can be read, so each says unknown; the kept ones still show.
+                    connection = None
                 # The realm labels are the operator's own (dashboard.realms), so a request without a session gets none.
                 realms = places.realm_places(connection)
                 badges = self.badges.read(self._read(connection, "", {}), connected=connection is not None)
             finally:
                 if connection is not None:
                     connection.close()
+                if slot:
+                    self.reads.release()
         self._send(200, v2.sections(badges, realms), "text/javascript; charset=utf-8")
 
     def _json(self, status, value):
@@ -1667,6 +1706,7 @@ def build(database: Path | str | None = None, *, port: int = DEFAULT_PORT,
         "loaded_build": runtime.build_digests(),
         "served_commit": _served_commit(),
         "badges": v2.Badges(),
+        "reads": threading.BoundedSemaphore(READ_SLOTS),
     })
     primary = DashboardServer((host, port), handler, bind_and_activate=bind)
     try:
