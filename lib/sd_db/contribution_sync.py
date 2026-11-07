@@ -128,7 +128,9 @@ def _order(pending, fresh=frozenset(), unread=frozenset(), *, snapshots=None, ob
     taken = {row["key"] for row in ordered}
     ordered += [row for row in reversed(pending) if row["key"] in fresh and row["key"] not in taken][:FRESH_SLOTS]
     taken = {row["key"] for row in ordered}
-    ordered += explicit[3:]
+    # Every tier past the first skips the keys already taken: the fresh tier
+    # can hold explicit rows, and a key read twice fails its revision check.
+    ordered += [row for row in explicit[3:] if row["key"] not in taken]
     taken = {row["key"] for row in ordered}
     ordered += [row for row in pending if row["key"] not in taken and stale(row)][:STALE_SLOTS]
     taken = {row["key"] for row in ordered}

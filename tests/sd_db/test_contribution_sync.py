@@ -547,6 +547,23 @@ class ContributionSync(SyncCase):
         self.assertEqual(keys, ["item:0", "item:1", "item:2", "github:stale/0", "github:stale/1",
                                 "item:3", "item:4", "github:stale/2"])
 
+    def test_every_key_is_ordered_once_whatever_tiers_it_falls_in(self):
+        # Review of 6037f294a: explicit rows past the first three went on
+        # again after the fresh tier had taken them, so a run read a key
+        # twice and the second read failed its revision check.
+        explicit = [{"key": f"item:{n}", "explicit": True} for n in range(5)]
+        keys = [row["key"] for row in adapter._order(explicit, {row["key"] for row in explicit})]
+        self.assertEqual(keys, ["item:0", "item:1", "item:2", "item:4", "item:3"])
+        # Every tier at once: each row explicit or not, and fresh, unread
+        # and stale together, with more rows than any tier's cap.
+        for explicit_every in (1, 2, 3):
+            stale, snapshots = self.stale_rows(30)
+            pending = [{**row, "explicit": n % explicit_every == 0} for n, row in enumerate(stale)]
+            every = {row["key"] for row in pending}
+            keys = [row["key"] for row in adapter._order(pending, every, every, snapshots=snapshots,
+                                                         observed_at="2026-10-18T08:00:00+00:00")]
+            self.assertEqual(sorted(keys), sorted(every), explicit_every)
+
     def test_a_stale_open_pull_with_no_item_reads_closed_next_run(self):
         urls = self.clone_pull(range(7, 20))
         self.assertTrue(self.run_sync(urls[:1]).ok)
