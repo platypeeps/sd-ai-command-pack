@@ -1409,9 +1409,7 @@ class Hosts(Case):
     def test_lane_of_reads_this_hubs_own_name_as_the_hub(self):
         with self.as_hub():
             self.assertEqual([build.lane_of(self.db, host) for host in (None, "hub", "work")], [None, None, "work"])
-        with mock.patch.object(build, "this_host", return_value="work"), \
-                mock.patch("sd_db.hub.configured", return_value=True), \
-                mock.patch.object(build, "served_by", return_value="hub.example.test:7000"):
+        with self.as_satellite():
             self.assertEqual([build.lane_of(self.db, host) for host in (None, "work")], [None, "work"],
                              "a satellite's own lane is a satellite's")
 
@@ -1484,6 +1482,20 @@ class Hosts(Case):
         self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked")
         self.assertIn("lane runs on work, and no build-dispatch@work beat",
                       self.count("SELECT body FROM note WHERE item = ? ORDER BY id DESC LIMIT 1", item))
+
+    def test_a_beat_a_few_seconds_ahead_is_fresh_for_the_press_and_the_claim(self):
+        """Review of e36844044: beats are stamped to the second on the satellite's clock, so a small lead is
+        clock skew and reads as age 0; only a lead past `CLOCK_LEAD_SECONDS` reads as no beat."""
+        for lead in (1, build.CLOCK_LEAD_SECONDS):
+            with self.subTest(lead=lead):
+                record_state(self.db, "heartbeat", key="build-dispatch@work", timestamp=later(build.clock(), lead),
+                             body={})
+                self.assertEqual(build.dispatcher_beat(self.db, "work"), 0)
+                item = self.item(repo=SAT)
+                queued = build.queue(self.db, [item], who="operator")[0]["id"]
+                self.assertIsNone(self.claim(hosts=HUB))
+                self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", queued), "queued",
+                                 "the hub's claim leaves a healthy satellite's row queued")
 
     def test_the_hub_blocks_a_row_whose_lane_moved_to_a_host_that_never_beat(self):
         item = self.item()

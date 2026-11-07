@@ -68,6 +68,10 @@ BUDGET_MINUTES = 60
 #: A supervisor beats every 30 s; one silent this long, or unspawned this long after its claim, is lost.
 #: 600, not 180: a beat a held lock skips no longer ends a 60-minute build (pack sd:6741).
 STALE_SECONDS = 600
+#: Seconds a satellite's build-dispatch beat may sit ahead of this clock and still read as fresh, at age 0. Beats
+#: are stamped to the whole second on the satellite's own clock, so a healthy one reads up to 1 s ahead, more with
+#: some skew; a lead past this is a clock that cannot be trusted, and reads as no beat (pack sd:7955).
+CLOCK_LEAD_SECONDS = 5
 #: The `heartbeat` state row each build-dispatch tick writes first: this key on the hub, `<key>@<host>` on a
 #: satellite (pack sd:7933).
 HEARTBEAT = "build-dispatch"
@@ -347,14 +351,17 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
 
 def dispatcher_beat(connection, host: str) -> int | None:
     """Seconds since the build-dispatch tick on the satellite `host` last beat; None when it never did, or when
-    its beat does not read: an unread beat is no beat. A beat stamped after now, from a satellite clock ahead
-    of this one, does not read either: its age is unknown, not fresh (pack sd:7955)."""
+    its beat does not read: an unread beat is no beat. A beat stamped up to `CLOCK_LEAD_SECONDS` after now is
+    age 0; one stamped further ahead, from a satellite clock that far ahead of this one, does not read either:
+    its age is unknown, not fresh (pack sd:7955)."""
     row = _beat(connection, host)
     try:
         age = _age(row["timestamp"], clock()) if row else None
     except (TypeError, ValueError):
         return None
-    return int(age) if age is not None and age >= 0 else None
+    if age is None or age < -CLOCK_LEAD_SECONDS:
+        return None
+    return max(int(age), 0)
 
 
 def _beat(connection, host: str):
