@@ -32,6 +32,7 @@ from sd_db import (
     build_run,
     database,
     draft,
+    hub,
     operations,
     runner,
     sessions,
@@ -310,10 +311,12 @@ class Case(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
         # The fixtures name a satellite lane `work`, which a real machine may be called too: each test runs as the
-        # hub `hub` unless it says otherwise (review round 3).
-        pinned = mock.patch.object(build, "this_host", return_value="hub")
-        pinned.start()
-        self.addCleanup(pinned.stop)
+        # hub `hub` unless it says otherwise (review round 3). A real `hub.json` in this HOME would make it a
+        # satellite under the wire harness, so it reads none (pack sd:7955).
+        for pinned in (mock.patch.object(build, "this_host", return_value="hub"),
+                       mock.patch("sd_db.hub.configured", return_value=False)):
+            pinned.start()
+            self.addCleanup(pinned.stop)
         self.database = self.root / "sd.db"
         initialise(self.database)
         self.db = connect(self.database)
@@ -2250,10 +2253,15 @@ class Hosts(Case):
                                   **{"load": 1.0, "load_cap": 40.0, "interactive": [], **inputs})
 
     def on(self, host):
-        """Run the next tick as the hub (`hub`) or as the satellite `work`: this_host, hub.json and served_by stubbed."""
+        """Run the next tick as the hub (`hub`) or as the satellite `work`: this_host, hub.json and served_by stubbed.
+
+        `hub.read` too: `build.hub_host` reads the file, and the satellite's must not be whatever this HOME holds
+        (pack sd:7955)."""
         stack = contextlib.ExitStack()
         stack.enter_context(mock.patch.object(build, "this_host", return_value=host))
         stack.enter_context(mock.patch("sd_db.hub.configured", return_value=host != "hub"))
+        satellite = hub.Hub(host="hub.example.test", port=7000, config=self.root / "hub.json")
+        stack.enter_context(mock.patch("sd_db.hub.read", return_value=None if host == "hub" else satellite))
         stack.enter_context(mock.patch.object(build, "served_by",
                                               return_value=None if host == "hub" else "hub.example.test:7000"))
         return stack

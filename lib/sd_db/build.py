@@ -186,20 +186,41 @@ def lane_of(connection, host: str | None) -> str | None:
 
     `host` is a `repo.lane_host` or a run's `run_host`. NULL is the hub's, and
     so is this machine's own name on the hub, as `sd_lane.ended_kind` reads
-    it. A satellite cannot tell the hub's name, so it reads that as another
-    host's; its own name is its own satellite lane.
+    it. A satellite reads the hub's name from `hub_host`; its own name is its
+    own satellite lane (pack sd:7955).
     """
-    if host is None or (host == this_host() and None in lane_hosts(connection)):
+    if host is None:
         return None
-    return host
+    if None in lane_hosts(connection):
+        return None if host == this_host() else host
+    return None if host == hub_host() else host
+
+
+def hub_host() -> str | None:
+    """The hub's lane host name as this satellite reads it, or None when no `hub.json` names a hub.
+
+    The first label of the host `hub.json` names, lower-cased: the hub's
+    `hostname -s` (`ship.this_host`) when its tailnet name is its machine
+    name, as `hub._matches` reads a bare `sd.hub_name` (pack sd:7955). An
+    address, or a tailnet name that differs, matches no lane, so a lane
+    named for the hub reads as another host's, as it did before. A
+    `hub.json` that does not read raises `HubConfigError`, as `hub.read`.
+    """
+    found = hub.read()
+    return found.host.rstrip(".").split(".")[0].lower() if found is not None else None
 
 
 def dispatcher_gone(connection, host: str) -> str | None:
     """Why no build-dispatch tick on the satellite `host` runs now, or None: its newest beat is under
-    `STALE_SECONDS`, the reap's own rule. The hub's reap asks it: a tick that beats reaps its own runs."""
+    `STALE_SECONDS`, the reap's own rule. The hub's reap asks it: a tick that beats reaps its own runs. A beat
+    too far ahead to read (`dispatcher_beat`) names the skew, not a dead dispatcher (pack sd:7955)."""
     beat = dispatcher_beat(connection, host)
     if beat is not None and beat < STALE_SECONDS:
         return None
+    ahead = _ahead(connection, host)
+    if ahead is not None:
+        return (f"the {HEARTBEAT}@{host} beat is {ahead} s ahead of this clock, past the {STALE_SECONDS} s "
+                f"a beat may lead; check that machine's clock")
     return f"no {HEARTBEAT}@{host} beat is under {STALE_SECONDS} s old"
 
 
@@ -316,9 +337,11 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
         raise BuildRefused(refused)
     away = lane_of(connection, row["lane_host"])
     gone = dispatcher_refusal(connection, away) if away else None
-    if gone:
-        # Nothing claims a satellite's press until its own dispatcher ticks, and the press locks the item.
-        raise BuildRefused(f"item {item}'s lane runs on {away}, and {gone}: no dispatcher there would claim it")
+    if away and gone:
+        # Nothing claims a satellite's press until its own dispatcher ticks, and the press locks the item. A beat
+        # too far ahead names the skew alone: its dispatcher may well tick (pack sd:7955).
+        dead = "" if _ahead(connection, away) is not None else ": no dispatcher there would claim it"
+        raise BuildRefused(f"item {item}'s lane runs on {away}, and {gone}{dead}")
     active = connection.execute(
         f"SELECT id, status FROM assignment WHERE item = ? AND status IN {OWNING} LIMIT 1", (item,)).fetchone()
     if active:
@@ -331,12 +354,34 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
 
 def dispatcher_beat(connection, host: str) -> int | None:
     """Seconds since the build-dispatch tick on the satellite `host` last beat; None when it never did, or when
-    its beat does not read: an unread beat is no beat."""
+    its beat does not read: an unread beat is no beat.
+
+    The satellite stamps its beat on its own clock, so a beat up to
+    `STALE_SECONDS` ahead of this one is skew and reads as age 0, the same
+    width staleness allows behind. A dead beat stamped ahead then reads
+    fresh for at most 2 x `STALE_SECONDS` after its tick. One further
+    ahead does not read: its age is unknown, not fresh, and `_ahead` names
+    it (pack sd:7955).
+    """
+    age = _beat_age(connection, host)
+    if age is None or age < -STALE_SECONDS:
+        return None
+    return max(int(age), 0)
+
+
+def _beat_age(connection, host: str) -> float | None:
+    """Seconds since the newest build-dispatch beat of `host`, negative when stamped ahead; None when unread."""
     row = _beat(connection, host)
     try:
-        return int(_age(row["timestamp"], clock())) if row else None
+        return _age(row["timestamp"], clock()) if row else None
     except (TypeError, ValueError):
         return None
+
+
+def _ahead(connection, host: str) -> int | None:
+    """Seconds the newest beat of `host` is stamped ahead of this clock, when past `STALE_SECONDS`; else None."""
+    age = _beat_age(connection, host)
+    return int(-age) if age is not None and age < -STALE_SECONDS else None
 
 
 def _beat(connection, host: str):

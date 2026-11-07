@@ -4,6 +4,7 @@ The design's failure table names most of these tests: system
 `docs/work/2026-10-24-build-dispatcher/design.md`.
 """
 import contextlib
+import json
 import sqlite3
 import subprocess
 import sys
@@ -76,10 +77,12 @@ class Case(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         # The fixtures name a satellite lane `work`, which a real machine may be called too: each test runs as the
-        # hub `hub` unless it says otherwise (review round 3).
-        pinned = mock.patch.object(build, "this_host", return_value="hub")
-        pinned.start()
-        self.addCleanup(pinned.stop)
+        # hub `hub` unless it says otherwise (review round 3). A real `hub.json` in this HOME would make it a
+        # satellite under the wire harness, so it reads none (pack sd:7955).
+        for pinned in (mock.patch.object(build, "this_host", return_value="hub"),
+                       mock.patch("sd_db.hub.configured", return_value=False)):
+            pinned.start()
+            self.addCleanup(pinned.stop)
         self.database = self.root / "sd.db"
         initialise(self.database)
         self.db = connect(self.database)
@@ -155,6 +158,15 @@ class Queue(Case):
                     build.queue(self.db, [hub, satellite], who="operator")
                 self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), 0)
                 self.assertEqual(self.statuses([hub, satellite]), ["ready", "ready"])
+        # Pack sd:7955: a beat further ahead than STALE_SECONDS names the skew, not a dead dispatcher.
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={},
+                     timestamp=later(build.clock(), build.STALE_SECONDS + 60))
+        with self.assertRaises(build.BuildRefused) as skewed:
+            build.queue(self.db, [hub, satellite], who="operator")
+        self.assertIn("lane runs on work, and the build-dispatch@work beat is", str(skewed.exception))
+        self.assertIn("s ahead of this clock", str(skewed.exception))
+        self.assertNotIn("no dispatcher", str(skewed.exception))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), 0)
         record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
         self.assertEqual(len(build.queue(self.db, [hub, satellite], who="operator")), 2, "a fresh beat takes it")
 
@@ -1404,11 +1416,35 @@ class Hosts(Case):
     def test_lane_of_reads_this_hubs_own_name_as_the_hub(self):
         with self.as_hub():
             self.assertEqual([build.lane_of(self.db, host) for host in (None, "hub", "work")], [None, None, "work"])
-        with mock.patch.object(build, "this_host", return_value="work"), \
-                mock.patch("sd_db.hub.configured", return_value=True), \
-                mock.patch.object(build, "served_by", return_value="hub.example.test:7000"):
+        with self.as_satellite():
             self.assertEqual([build.lane_of(self.db, host) for host in (None, "work")], [None, "work"],
                              "a satellite's own lane is a satellite's")
+
+    def as_satellite(self, names="Hub.example.test"):
+        """This machine as the satellite `work`, served by the hub its own `hub.json` names (pack sd:7955)."""
+        home = self.root / "satellite-home"
+        (home / ".config/sd").mkdir(parents=True, exist_ok=True)
+        (home / ".config/sd/hub.json").write_text(json.dumps({"hub": names, "port": 7000}))
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.dict("os.environ", {"HOME": str(home)}))
+        stack.enter_context(mock.patch.object(build, "this_host", return_value="work"))
+        stack.enter_context(mock.patch("sd_db.hub.configured", return_value=True))
+        stack.enter_context(mock.patch.object(build, "served_by", return_value=f"{names}:7000"))
+        return stack
+
+    def test_a_satellite_reads_the_lane_named_for_its_hub_as_the_hubs(self):
+        """Pack sd:7955: the hub's name is the first label of the host `hub.json` names, so a satellite press
+        and a satellite session's draft take a lane named for the hub, and the satellite claims none of it."""
+        item = self.hub_named()
+        with self.as_satellite():
+            self.assertEqual([build.lane_of(self.db, host) for host in (None, "hub", "work", "other")],
+                             [None, None, "work", "other"])
+            self.assertEqual(build.item_host(self.db, item), None)
+            self.assertEqual(len(build.queue(self.db, [item], who="operator")), 1, "no build-dispatch@hub beat needed")
+            self.assertIsNotNone(draft.queue_if_eligible(self.db, self.hub_named(status="planning"), who="dashboard"))
+            self.assertIsNone(self.claim(), "the satellite claims none of the hub's lane")
+        with self.as_satellite(names="192.0.2.10"):
+            self.assertEqual(build.lane_of(self.db, "hub"), "hub", "an address names no lane: another host's")
 
     def test_a_lane_named_for_the_hub_takes_a_press_pickup_and_draft_on_the_hub(self):
         with self.as_hub():
@@ -1441,6 +1477,35 @@ class Hosts(Case):
         self.assertIn("lane runs on work, and no build-dispatch@work beat",
                       self.count("SELECT body FROM note WHERE item = ? ORDER BY id DESC LIMIT 1", item))
         self.assertEqual(self.statuses([item]), ["ready"], "the item is free again")
+
+    def test_the_hub_blocks_a_row_whose_satellite_beat_comes_from_a_clock_ahead(self):
+        """Pack sd:7955: a beat stamped more than STALE_SECONDS after now has no age to trust, so the claim blocks
+        the row as for a stale beat, and its note names the skew, not a dead dispatcher."""
+        item = self.item(repo=SAT)
+        lead = build.queue(self.db, [item], who="operator")[0]["id"]
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={},
+                     timestamp=later(build.clock(), build.STALE_SECONDS + 60))
+        self.assertIsNone(build.dispatcher_beat(self.db, "work"), "no negative age")
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked")
+        note = self.count("SELECT body FROM note WHERE item = ? ORDER BY id DESC LIMIT 1", item)
+        self.assertIn("lane runs on work, and the build-dispatch@work beat is", note)
+        self.assertIn("s ahead of this clock", note)
+        self.assertNotIn("no dispatcher", note)
+
+    def test_a_beat_ahead_by_up_to_stale_seconds_is_fresh_for_the_press_and_the_claim(self):
+        """Reviews of e36844044 and dfd937c37: beats are stamped on the satellite's clock, so a lead up to
+        `STALE_SECONDS`, as long as staleness allows behind, is clock skew and reads as age 0."""
+        for lead in (1, 5, 60, build.STALE_SECONDS):
+            with self.subTest(lead=lead):
+                record_state(self.db, "heartbeat", key="build-dispatch@work", timestamp=later(build.clock(), lead),
+                             body={})
+                self.assertEqual(build.dispatcher_beat(self.db, "work"), 0)
+                item = self.item(repo=SAT)
+                queued = build.queue(self.db, [item], who="operator")[0]["id"]
+                self.assertIsNone(self.claim(hosts=HUB))
+                self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", queued), "queued",
+                                 "the hub's claim leaves a healthy satellite's row queued")
 
     def test_the_hub_blocks_a_row_whose_lane_moved_to_a_host_that_never_beat(self):
         item = self.item()

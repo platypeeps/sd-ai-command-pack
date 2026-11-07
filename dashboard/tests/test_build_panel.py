@@ -28,10 +28,12 @@ class Fixture(BrowserSession):
         kick = patch.object(builds, "kickstart", lambda: self.kicks.append(1) or {"ok": True, "service": "x", "why": ""})
         kick.start()
         self.addCleanup(kick.stop)
-        # The fixtures name a satellite lane `work`, which a real machine may be called too: run as the hub `hub`.
-        pinned = patch.object(build, "this_host", return_value="hub")
-        pinned.start()
-        self.addCleanup(pinned.stop)
+        # The fixtures name a satellite lane `work`, which a real machine may be called too: run as the hub `hub`,
+        # reading no real `hub.json` in this HOME (pack sd:7955).
+        for pinned in (patch.object(build, "this_host", return_value="hub"),
+                       patch("sd_db.hub.configured", return_value=False)):
+            pinned.start()
+            self.addCleanup(pinned.stop)
 
     def ready(self, status="ready", **columns):
         return self.item("Build me", kind="task", status=status, repo=REPO, **columns)
