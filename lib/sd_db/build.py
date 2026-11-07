@@ -1387,7 +1387,9 @@ def _strand(connection, hosts: Collection[str | None], *, now: str) -> list[dict
     Quiet is `dispatcher_gone` for the run's host and no run beat for
     `STALE_SECONDS`, read by `_lead_age`: that host stamps the beat on its
     own clock, so one too far ahead has no age and is no beat (pack
-    sd:7970). A missing beat does not prove that host's processes
+    sd:7970). A dispatcher beat too far ahead (`_ahead`) is a fast clock,
+    not a dead dispatcher: that host's ticks still reap its own runs, so
+    the hub leaves them. A missing beat does not prove that host's processes
     stopped, so the run keeps its lease: it ends `blocked` with the reason
     (a pending cancel named in it), unreleased, and no Retry or claim takes
     its items until that host's own reap reads its groups gone and releases
@@ -1403,8 +1405,8 @@ def _strand(connection, hosts: Collection[str | None], *, now: str) -> list[dict
         if quiet is not None and quiet < STALE_SECONDS:
             continue
         gone = dispatcher_gone(connection, host)
-        if gone is None:
-            continue
+        if gone is None or _ahead(connection, host) is not None:
+            continue  # a beat too far ahead is skew: that host's ticks still reap its own runs
         detail = f"{host}'s dispatcher went quiet ({gone}) and the run sent no beat for {STALE_SECONDS} s"
         if row["cancel_requested"]:
             detail = f"{row['cancel_requested']}, but {detail}"
