@@ -205,7 +205,7 @@ def dispatcher_gone(connection, host: str) -> str | None:
 
 def dispatcher_refusal(connection, host: str) -> str | None:
     """Why no build-dispatch tick on the satellite `host` would claim a press, or None: `dispatcher_gone`, or
-    the `why` its newest beat names (review round 4). A press and the hub's claim ask it.
+    the `why` its newest beat names (review round 4). The press asks it.
 
     A tick beats before it claims, so a beat alone does not say it can: one
     with no log folder, an unread load or a restore pending claims nothing.
@@ -213,12 +213,23 @@ def dispatcher_refusal(connection, host: str) -> str | None:
     gone = dispatcher_gone(connection, host)
     if gone:
         return gone
+    why = dispatcher_why(connection, host)
+    return f"{HEARTBEAT}@{host} claims nothing: {why}" if why else None
+
+
+def dispatcher_why(connection, host: str) -> str | None:
+    """The reason the newest beat of `host`'s tick names for claiming nothing, or None when it names none.
+
+    A reason may last one tick (an unread load), so the hub's claim leaves a
+    queued row queued on it and blocks only on `dispatcher_gone`; the Builds
+    panel shows it on the row (review round 5).
+    """
     row = _beat(connection, host)
     try:
         why = json.loads(row["body"]).get("why") if row else None
     except (TypeError, ValueError, AttributeError):
         why = None
-    return f"{HEARTBEAT}@{host} claims nothing: {why}" if isinstance(why, str) and why else None
+    return why if isinstance(why, str) and why else None
 
 
 def run_owner(owner: str, lane_host: str | None) -> str:
@@ -635,12 +646,12 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
             "ORDER BY item.priority IS NULL, item.priority, assignment.queued_at, assignment.id", (SCOPE,)).fetchall()
         lanes = {row["id"]: lane_of(connection, row["lane_host"]) for row in queued}
         if None in hosts:
-            # The hub blocks another host's row once that host's dispatcher went quiet or beats that it claims
-            # nothing: a lane moved after the press, or a dispatcher that died or broke after it, would leave the
-            # item locked with no word. A queued row has no process, so nothing is left running.
+            # The hub blocks another host's row once that host's dispatcher went quiet: a lane moved after the
+            # press, or a dispatcher that died after it, would leave the item locked with no word. A fresh beat
+            # that names a `why` leaves the row queued, as that reason may last one tick (review round 5).
             for row in queued:
                 away = lanes[row["id"]]
-                gone = dispatcher_refusal(connection, away) if away is not None and away not in hosts else None
+                gone = dispatcher_gone(connection, away) if away is not None and away not in hosts else None
                 if gone:
                     _refuse(connection, row, f"item {row['item']}'s lane runs on {away}, and {gone}")
         available = room(connection, load=load, load_cap=load_cap, interactive=interactive, hosts=hosts)

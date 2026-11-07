@@ -1449,13 +1449,17 @@ class Hosts(Case):
         record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": ""})
         self.assertEqual(len(build.queue(self.db, [item], who="operator")), 1, "a beat that claims takes the press")
 
-    def test_the_hub_blocks_a_queued_row_whose_satellite_claims_nothing(self):
+    def test_a_queued_row_whose_satellite_claims_nothing_stays_queued(self):
+        """Review round 5: a `why` may last one tick (an unread load), so the hub's claim blocks only on a stale beat."""
         item = self.item(repo=SAT)
         lead = build.queue(self.db, [item], who="operator")[0]["id"]
         record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": self.UNSET})
         self.assertIsNone(self.claim(hosts=HUB))
-        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked")
-        self.assertIn(self.UNSET, self.count("SELECT body FROM note WHERE item = ? ORDER BY id DESC LIMIT 1", item))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "queued")
+        self.assertEqual(build.dispatcher_why(self.db, "work"), self.UNSET)
+        self.quiet()
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked", "a stale beat blocks")
 
     def test_a_satellite_that_beats_and_claims_nothing_still_owns_its_runs(self):
         """Its tick reaps before it claims, so the hub leaves its runs: the beat says it is there."""

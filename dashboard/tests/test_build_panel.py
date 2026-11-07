@@ -226,6 +226,19 @@ class BuildsPanel(Fixture):
         self.assertIn("the run still holds its lease", body["error"])
         self.assertEqual(self.builds_of(item), 1, "nothing queued again")
 
+    def test_a_queued_satellite_row_names_why_its_dispatcher_claims_nothing(self):
+        """Review round 5: the hub's claim leaves the row queued on a fresh beat with a `why`, and the panel names it."""
+        upsert_repo(self.connection, "/fixture/repos/sat", remote="/fixture/remote-sat", managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/repos/sat'")
+        record_state(self.connection, "heartbeat", key="build-dispatch@work", body={"why": ""})
+        sat = self.item("Build me there", kind="task", status="ready", repo="/fixture/repos/sat")
+        [row] = build.queue(self.connection, [sat], who="fixture")
+        self.assertEqual(self.panel()["unclaimed"], {})
+        record_state(self.connection, "heartbeat", key="build-dispatch@work", body={"why": "the load was not read"})
+        self.assertIsNone(build.claim(self.connection, owner="fixture", root=self.path.parent / "worktrees", **IDLE))
+        self.assertEqual(runner.queue_state(self.connection, row["id"])["status"], "queued")
+        self.assertEqual(self.panel()["unclaimed"], {str(row["id"]): "work claims nothing: the load was not read"})
+
     def test_a_teammate_run_is_a_working_row_with_its_worktree_due_time_and_no_cancel(self):
         """pack sd:7221: a lead's in-session builder shows beside the headless runs; past its budget it is stalled."""
         from sd_db import teammate

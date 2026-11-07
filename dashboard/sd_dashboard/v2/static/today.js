@@ -422,9 +422,11 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
       <td class="act"><div class="ctl" role="group" aria-label="Run ${r.run}">${['blocked', 'cancelled'].includes(r.retry.bundle) ? html`${bb('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, off)}${bb('send', r, 'Send to builder…', `Send a finding to the builder of run ${r.run}`, off)}` : ''}${asgBtn(r.assignment)}${prLink(r)}${logBtn(r)}</div></td></tr>`];
   }
   // Runner assignments (pack sd:7115, sd:7217): the queued and running ones no open build run holds.
+  // A queued build of another host's lane whose dispatcher beats that it claims nothing names that reason (pack sd:7933).
+  const waitOn = a => ((QV.built || {}).unclaimed || {})[String(a.id)] || '';
   const asgRow = a => ['working', a.status === 'running' ? 'ok' : 'queued', html`<tr class="child" data-type="working">${marker(a.status === 'running' ? 'ok' : 'queued', 'working')}
     <td class="what">${a.item ? html`<a href="${shell.itemHref(a.item)}">#${a.item} ${a.title || a.role}</a>` : a.title || a.role}</td>
-    <td class="detail"><b>${a.status}</b> · assignment ${String(a.id)} · ${a.role} · since ${at(a.started || a.queued_at)}</td><td class="num"></td>
+    <td class="detail"><b>${a.status}</b> · assignment ${String(a.id)} · ${a.role} · since ${at(a.started || a.queued_at)}${waitOn(a) ? ` · ${waitOn(a)}` : ''}</td><td class="num"></td>
     <td class="act"><div class="ctl" role="group" aria-label="Assignment ${String(a.id)}">${asgBtn(a.id)}</div></td></tr>`];
   // A live item (In motion's sources: worktrees and processes, herdr agents, Fix notes, lane-less sessions): its sessions in
   // the row, Open item, Show assignment and Fix in its actions, and its Details on a click (sd:6714).

@@ -43,9 +43,11 @@ tell the hub's name, so it reads a lane named for the hub as another host's.
 The hub cannot see another host's processes, so it never releases that
 host's lease. A tick beats first, with `why` in its body: the reason it
 claims nothing (no log folder, an unread load, a restore pending), else "".
-`build.dispatcher_refusal` refuses a press, and the hub's claim blocks a
-queued row with the reason, when that host has no beat under
-`STALE_SECONDS` (`build.dispatcher_gone`) or its newest beat names a `why`.
+`build.dispatcher_refusal` refuses a press when that host has no beat
+under `STALE_SECONDS` (`build.dispatcher_gone`) or its newest beat names a
+`why`. The hub's claim blocks a queued row only on `dispatcher_gone`: a
+`why` may last one tick, such as an unread load, so the row stays queued,
+and the Builds panel shows "<host> claims nothing: <why>" on it.
 The hub's reap ends an open run blocked, with no probe or signal, only
 when no beat comes from that host or from the run for `STALE_SECONDS`.
 The run keeps its lease, a pending cancel named in its reason, so Retry
@@ -120,7 +122,8 @@ Foreign open run, host quiet | outcome blocked with the reason, items blocked; r
 Foreign open run, cancel asked | outcome blocked, the cancel named in the reason; lease kept | a release while that host's builder may still run | the same: blocked, not cancelled | test_build.Hosts.test_a_cancel_on_a_quiet_satellite_blocks_and_keeps_the_lease
 Foreign held run, host quiet | nothing | a release on a probe that answers gone for anything | it stays held until that host reads its groups gone | test_build.Hosts.test_the_hub_leaves_a_quiet_satellites_held_run_held
 Foreign run, supervisor still beats | nothing | the dispatcher died but its supervisor runs | the run's own beat keeps it | test_build.Hosts.test_the_hub_blocks_a_quiet_satellites_run_and_keeps_its_lease (after=60)
-Satellite beats but claims nothing | its beat body names why | a fresh beat read as a dispatcher that claims: the press locks items nothing claims | the tick writes why in its beat; the press refuses with it and the hub's claim blocks queued rows with it | test_build_run.Hosts.test_a_tick_that_cannot_claim_says_why_in_its_beat, test_build.Hosts.test_a_press_refuses_a_satellite_whose_beat_says_it_claims_nothing, test_build.Hosts.test_the_hub_blocks_a_queued_row_whose_satellite_claims_nothing
+Satellite beats but claims nothing, press | its beat body names why | a fresh beat read as a dispatcher that claims: the press locks items nothing claims | the tick writes why in its beat; the press and the plan refuse with it | test_build_run.Hosts.test_a_tick_that_cannot_claim_says_why_in_its_beat, test_build.Hosts.test_a_press_refuses_a_satellite_whose_beat_says_it_claims_nothing
+Satellite beats but claims nothing, queued row | nothing: the row stays queued | one tick's why (an unread load) blocks every queued row, and the operator presses again | the hub's claim blocks on dispatcher_gone only; the Builds panel names the why on the queued row; a stale beat still blocks | test_build.Hosts.test_a_queued_row_whose_satellite_claims_nothing_stays_queued, test_build_panel.BuildsPanel.test_a_queued_satellite_row_names_why_its_dispatcher_claims_nothing, test_v2_queue.TheView.test_a_queued_satellite_build_names_why_its_dispatcher_claims_nothing
 Satellite beats, claims nothing, runs open | nothing | the hub blocks runs the satellite still reaps | _strand reads only staleness: the tick reaps before it claims | test_build.Hosts.test_a_satellite_that_beats_and_claims_nothing_still_owns_its_runs
 Foreign run at a lane step | nothing | its branch waits on that host's lane | stays; that host's watch ends it when it returns | none: no state to settle here
 Satellite returns after the hub ended its run | its supervisor's next write | it acts on a run the hub ended | build.write changes no row, so the supervisor stops; its reap releases the run once its groups read gone | test_build_run.Supervise.test_a_lost_run_stops_before_the_next_step

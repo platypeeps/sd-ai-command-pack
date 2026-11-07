@@ -1449,6 +1449,13 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertIn("· on work · log <code>/logs/r1.jsonl</code>", out["R"]["alpha"])
         self.assertNotIn("tail -f", out["R"]["alpha"])
 
+    def test_a_queued_satellite_build_names_why_its_dispatcher_claims_nothing(self):
+        """Review round 5: a queued build the hub leaves queued shows the satellite's reason on its row."""
+        builds = {**self.BUILDS, "unclaimed": {"41": "work claims nothing: the load was not read"}}
+        out = self.run_view("open('sd'); R.sd = ELS.queue.html;", answers={"/api/queue/builds?show=all": [200, builds]})
+        self.assertIn("assignment 41 · merge · since", out["R"]["sd"])
+        self.assertIn(" · work claims nothing: the load was not read</td>", out["R"]["sd"])
+
     def test_the_working_rows_hold_live_items_build_runs_the_lane_builders_and_free_assignments(self):
         out = self.run_view("open('system'); R.system = ELS.queue.html; open('alpha'); R.alpha = ELS.queue.html;"
                             " open('sd'); R.sd = ELS.queue.html; R.count = OUT.counts.queue;")
