@@ -150,9 +150,7 @@ class Queue(Case):
         self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/sat'")
         hub, satellite = self.item(), self.item(repo="/fixture/sat")
         stale = (datetime.fromisoformat(build.clock()) - timedelta(seconds=build.STALE_SECONDS + 1)).isoformat()
-        ahead = (datetime.fromisoformat(build.clock()) + timedelta(seconds=30)).isoformat()
-        for case, stamp in (("no beat", None), ("a stale beat", stale), ("a beat that does not read", "soon"),
-                            ("a beat from a clock ahead", ahead)):
+        for case, stamp in (("no beat", None), ("a stale beat", stale), ("a beat that does not read", "soon")):
             with self.subTest(case=case):
                 if stamp is not None:
                     record_state(self.db, "heartbeat", key="build-dispatch@work", timestamp=stamp, body={})
@@ -160,6 +158,15 @@ class Queue(Case):
                     build.queue(self.db, [hub, satellite], who="operator")
                 self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), 0)
                 self.assertEqual(self.statuses([hub, satellite]), ["ready", "ready"])
+        # Pack sd:7955: a beat further ahead than STALE_SECONDS names the skew, not a dead dispatcher.
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={},
+                     timestamp=later(build.clock(), build.STALE_SECONDS + 60))
+        with self.assertRaises(build.BuildRefused) as skewed:
+            build.queue(self.db, [hub, satellite], who="operator")
+        self.assertIn("lane runs on work, and the build-dispatch@work beat is", str(skewed.exception))
+        self.assertIn("s ahead of this clock", str(skewed.exception))
+        self.assertNotIn("no dispatcher", str(skewed.exception))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), 0)
         record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
         self.assertEqual(len(build.queue(self.db, [hub, satellite], who="operator")), 2, "a fresh beat takes it")
 
@@ -1472,21 +1479,24 @@ class Hosts(Case):
         self.assertEqual(self.statuses([item]), ["ready"], "the item is free again")
 
     def test_the_hub_blocks_a_row_whose_satellite_beat_comes_from_a_clock_ahead(self):
-        """Pack sd:7955: a beat stamped after now has no age to trust, so the claim reads it as a stale one."""
+        """Pack sd:7955: a beat stamped more than STALE_SECONDS after now has no age to trust, so the claim blocks
+        the row as for a stale beat, and its note names the skew, not a dead dispatcher."""
         item = self.item(repo=SAT)
         lead = build.queue(self.db, [item], who="operator")[0]["id"]
-        ahead = (datetime.fromisoformat(build.clock()) + timedelta(seconds=30)).isoformat()
-        record_state(self.db, "heartbeat", key="build-dispatch@work", timestamp=ahead, body={})
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={},
+                     timestamp=later(build.clock(), build.STALE_SECONDS + 60))
         self.assertIsNone(build.dispatcher_beat(self.db, "work"), "no negative age")
         self.assertIsNone(self.claim(hosts=HUB))
         self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked")
-        self.assertIn("lane runs on work, and no build-dispatch@work beat",
-                      self.count("SELECT body FROM note WHERE item = ? ORDER BY id DESC LIMIT 1", item))
+        note = self.count("SELECT body FROM note WHERE item = ? ORDER BY id DESC LIMIT 1", item)
+        self.assertIn("lane runs on work, and the build-dispatch@work beat is", note)
+        self.assertIn("s ahead of this clock", note)
+        self.assertNotIn("no dispatcher", note)
 
-    def test_a_beat_a_few_seconds_ahead_is_fresh_for_the_press_and_the_claim(self):
-        """Review of e36844044: beats are stamped to the second on the satellite's clock, so a small lead is
-        clock skew and reads as age 0; only a lead past `CLOCK_LEAD_SECONDS` reads as no beat."""
-        for lead in (1, build.CLOCK_LEAD_SECONDS):
+    def test_a_beat_ahead_by_up_to_stale_seconds_is_fresh_for_the_press_and_the_claim(self):
+        """Reviews of e36844044 and dfd937c37: beats are stamped on the satellite's clock, so a lead up to
+        `STALE_SECONDS`, as long as staleness allows behind, is clock skew and reads as age 0."""
+        for lead in (1, 5, 60, build.STALE_SECONDS):
             with self.subTest(lead=lead):
                 record_state(self.db, "heartbeat", key="build-dispatch@work", timestamp=later(build.clock(), lead),
                              body={})

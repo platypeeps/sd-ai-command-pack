@@ -68,10 +68,6 @@ BUDGET_MINUTES = 60
 #: A supervisor beats every 30 s; one silent this long, or unspawned this long after its claim, is lost.
 #: 600, not 180: a beat a held lock skips no longer ends a 60-minute build (pack sd:6741).
 STALE_SECONDS = 600
-#: Seconds a satellite's build-dispatch beat may sit ahead of this clock and still read as fresh, at age 0. Beats
-#: are stamped to the whole second on the satellite's own clock, so a healthy one reads up to 1 s ahead, more with
-#: some skew; a lead past this is a clock that cannot be trusted, and reads as no beat (pack sd:7955).
-CLOCK_LEAD_SECONDS = 5
 #: The `heartbeat` state row each build-dispatch tick writes first: this key on the hub, `<key>@<host>` on a
 #: satellite (pack sd:7933).
 HEARTBEAT = "build-dispatch"
@@ -216,10 +212,15 @@ def hub_host() -> str | None:
 
 def dispatcher_gone(connection, host: str) -> str | None:
     """Why no build-dispatch tick on the satellite `host` runs now, or None: its newest beat is under
-    `STALE_SECONDS`, the reap's own rule. The hub's reap asks it: a tick that beats reaps its own runs."""
+    `STALE_SECONDS`, the reap's own rule. The hub's reap asks it: a tick that beats reaps its own runs. A beat
+    too far ahead to read (`dispatcher_beat`) names the skew, not a dead dispatcher (pack sd:7955)."""
     beat = dispatcher_beat(connection, host)
     if beat is not None and beat < STALE_SECONDS:
         return None
+    ahead = _ahead(connection, host)
+    if ahead is not None:
+        return (f"the {HEARTBEAT}@{host} beat is {ahead} s ahead of this clock, past the {STALE_SECONDS} s "
+                f"a beat may lead; check that machine's clock")
     return f"no {HEARTBEAT}@{host} beat is under {STALE_SECONDS} s old"
 
 
@@ -336,9 +337,11 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
         raise BuildRefused(refused)
     away = lane_of(connection, row["lane_host"])
     gone = dispatcher_refusal(connection, away) if away else None
-    if gone:
-        # Nothing claims a satellite's press until its own dispatcher ticks, and the press locks the item.
-        raise BuildRefused(f"item {item}'s lane runs on {away}, and {gone}: no dispatcher there would claim it")
+    if away and gone:
+        # Nothing claims a satellite's press until its own dispatcher ticks, and the press locks the item. A beat
+        # too far ahead names the skew alone: its dispatcher may well tick (pack sd:7955).
+        dead = "" if _ahead(connection, away) is not None else ": no dispatcher there would claim it"
+        raise BuildRefused(f"item {item}'s lane runs on {away}, and {gone}{dead}")
     active = connection.execute(
         f"SELECT id, status FROM assignment WHERE item = ? AND status IN {OWNING} LIMIT 1", (item,)).fetchone()
     if active:
@@ -351,17 +354,34 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
 
 def dispatcher_beat(connection, host: str) -> int | None:
     """Seconds since the build-dispatch tick on the satellite `host` last beat; None when it never did, or when
-    its beat does not read: an unread beat is no beat. A beat stamped up to `CLOCK_LEAD_SECONDS` after now is
-    age 0; one stamped further ahead, from a satellite clock that far ahead of this one, does not read either:
-    its age is unknown, not fresh (pack sd:7955)."""
-    row = _beat(connection, host)
-    try:
-        age = _age(row["timestamp"], clock()) if row else None
-    except (TypeError, ValueError):
-        return None
-    if age is None or age < -CLOCK_LEAD_SECONDS:
+    its beat does not read: an unread beat is no beat.
+
+    The satellite stamps its beat on its own clock, so a beat up to
+    `STALE_SECONDS` ahead of this one is skew and reads as age 0, the same
+    width staleness allows behind. A dead beat stamped ahead then reads
+    fresh for at most 2 x `STALE_SECONDS` after its tick. One further
+    ahead does not read: its age is unknown, not fresh, and `_ahead` names
+    it (pack sd:7955).
+    """
+    age = _beat_age(connection, host)
+    if age is None or age < -STALE_SECONDS:
         return None
     return max(int(age), 0)
+
+
+def _beat_age(connection, host: str) -> float | None:
+    """Seconds since the newest build-dispatch beat of `host`, negative when stamped ahead; None when unread."""
+    row = _beat(connection, host)
+    try:
+        return _age(row["timestamp"], clock()) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ahead(connection, host: str) -> int | None:
+    """Seconds the newest beat of `host` is stamped ahead of this clock, when past `STALE_SECONDS`; else None."""
+    age = _beat_age(connection, host)
+    return int(-age) if age is not None and age < -STALE_SECONDS else None
 
 
 def _beat(connection, host: str):
