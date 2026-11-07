@@ -1438,6 +1438,10 @@ class LaneNoteTests(ContributionCase):
                       title="Contribution", state="merged", created_at=T0, merged_at=T3)
         note = add_note(self.db, item, "followup", "Changes requested", session="contribution-observer", timestamp=T1)
         self.db.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (T2, note))
+        # The pull request's own followup: its checkpoint names the note (sd:7908).
+        state = c.snapshot(self.db, "github:" + URL)
+        state["notifications"]["review:1"] = {"status": "done", "note_id": note}
+        c._save(self.db, state)
         self.db.commit()
 
     def test_backfill_reads_the_shadow_and_the_followups(self):
@@ -1572,6 +1576,146 @@ class LaneNoteTests(ContributionCase):
         self.observe()
         self.assertEqual(self.lanes(item), [("awaiting_them", "open", False)])
         self.assertTrue(c.pr_waits(self.db)[0]["open"])
+
+    def test_a_bundles_pull_request_goes_to_the_lowest_item_number(self):
+        # sd:7863: receipts sorted by str(item), so item 10 took the bundle's pull request before item 9.
+        self.observe()
+        items = [self.task(f"Item {n}") for n in range(10)]
+        nine, ten = next(i for i in items if i == 9), next(i for i in items if i == 10)
+        self.shipped(ten)
+        self.shipped(nine)
+        self.assertEqual(c.link_shipped(self.db), ([nine], []))
+
+    def receipt(self, item, branch, url):
+        """A second receipt for `item`, on another branch: a re-prepare after its first pull request closed."""
+        from sd_db import ship
+
+        key = ship.receipt_key("upstream/project", branch, item)
+        ship.save(self.db, key, ship.read(self.db, key)[0],
+                  {"item": item, "repository": "upstream/project", "branch": branch, "phase": "ready_to_send",
+                   "pull_request": {"number": 13, "repository": "upstream/project", "base": "main", "url": url}})
+
+    def test_the_newest_receipt_of_an_item_is_the_one_linked(self):
+        newer = "https://github.com/upstream/project/pull/13"
+        item = self.task()
+        self.receipt(item, "feat/sd-z-old", URL)
+        self.receipt(item, "feat/sd-a-new", newer)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": newer})
+
+    def test_an_item_tied_to_a_closed_pull_request_is_relinked_to_its_newer_receipt(self):
+        # sd:7863: a receipt has no closed phase, so an item re-prepared after its PR closed stayed on the stale PR.
+        newer = "https://github.com/upstream/project/pull/13"
+        item = self.task()
+        self.receipt(item, "feat/sd-first", URL)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.observe(state="closed")
+        self.receipt(item, "feat/sd-second", newer)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": newer})
+        self.assertEqual(c.link_shipped(self.db), ([], []), "a rerun links nothing")
+
+    def test_a_hand_linked_pull_request_that_closes_is_not_replaced_by_an_older_receipt(self):
+        # sd:7931: a closed held link was swapped for the newest receipt, though the operator linked theirs after it.
+        older = "https://github.com/upstream/project/pull/11"
+        item = self.task()
+        self.receipt(item, "feat/sd-first", older)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        c.configure(self.db, item, {"pull_url": URL}, who="operator")
+        self.observe(state="closed")
+        self.assertEqual(c.link_shipped(self.db), ([], []), "an older receipt replaced the operator's own link")
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": URL})
+
+    def test_a_closed_hand_link_gives_way_to_a_receipt_whose_pull_request_is_open(self):
+        newer = "https://github.com/upstream/project/pull/13"
+        item = self.task()
+        c.configure(self.db, item, {"pull_url": URL}, who="operator")
+        self.observe(state="closed")
+        self.receipt(item, "feat/sd-second", newer)
+        c.observe_pull(self.db, newer, {**self.observation(), "url": newer},
+                       expected_revision=c.snapshot(self.db, "github:" + newer)["revision"])
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": newer})
+
+    def test_an_open_linked_pull_request_is_not_replaced_by_a_newer_receipt(self):
+        item = self.task()
+        self.receipt(item, "feat/sd-first", URL)
+        c.link_shipped(self.db)
+        self.observe()
+        self.receipt(item, "feat/sd-second", "https://github.com/upstream/project/pull/13")
+        self.assertEqual(c.link_shipped(self.db), ([], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": URL})
+
+    def test_an_unrelated_malformed_item_stops_no_receipts_link(self):
+        # sd:7863 (note 46123): configure rescanned every item strictly, so one malformed item failed every link.
+        self.observe()
+        broken, item = self.task("Broken"), self.task()
+        set_item_fields(self.db, broken, fields={"contribution": "not an object"})
+        self.db.commit()
+        self.shipped(item)
+        self.assertEqual(c.link_shipped(self.db),
+                         ([item], [f"item {broken}: item {broken} has malformed contribution metadata"]))
+
+    def test_the_lane_note_reads_the_issue_source_the_projection_reads(self):
+        # sd:7863: record_lane read the item and pull sources only; the projection reads the issue too.
+        item = self.item()
+        fields = json.loads(item_state(self.db, item)["item"]["fields"])
+        fields["contribution"]["issue_url"] = ISSUE
+        set_item_fields(self.db, item, fields=fields)
+        self.store_issue(attention=[c._event("event:1", "New comment")])
+        self.db.commit()
+        self.observe()
+        row = next(r for r in c.projection(self.db) if r["item_id"] == item)
+        self.assertEqual((row["lane"], self.lanes(item)[-1][0]), ("awaiting_you", "awaiting_you"))
+
+    def test_an_observed_issue_notes_the_lane_of_the_item_that_holds_it(self):
+        item = self.item()
+        self.observe()
+        fields = json.loads(item_state(self.db, item)["item"]["fields"])
+        fields["contribution"]["issue_url"] = ISSUE
+        set_item_fields(self.db, item, fields=fields)
+        self.db.commit()
+        c.observe_issue(self.db, ISSUE, self.issue_observation(events=[self.event(url=ISSUE + "#issuecomment-1")]),
+                        expected_revision=c.snapshot(self.db, "issue:" + ISSUE)["revision"])
+        self.assertEqual(self.lanes(item), [("awaiting_them", "open", False), ("awaiting_you", "open", False)])
+
+    def test_a_pull_request_already_merged_at_first_sync_has_no_time_to_merge(self):
+        # sd:7908: with no open note before the merge, to_merge read 0.
+        item = self.item()
+        self.notes(item, (T1, "merged", "merged"))
+        self.assertIsNone(c.pr_waits(self.db, now=T3)[0]["to_merge"])
+
+    def test_a_merged_pull_request_with_no_merge_time_backfills_no_open_span(self):
+        # sd:7908: a shadow with created_at and no merged_at left the backfilled span open until the sync wrote merged.
+        item = self.item()
+        upsert_shadow(self.db, tracker="github", url=URL, repo="upstream/project", number=12, kind="pull",
+                      title="Contribution", state="merged", created_at=T0)
+        self.db.commit()
+        self.observe(observed_at=T3, state="merged")
+        self.assertEqual(self.lanes(item), [("merged", "merged", False)])
+        wait = c.pr_waits(self.db)[0]
+        self.assertEqual((wait["on_reviewers"], wait["on_you"], wait["to_merge"]), (0, 0, None))
+
+    def test_backfill_reads_only_the_pull_requests_followups_from_its_creation(self):
+        # sd:7908: every observer followup on the item started the wait, one from before the PR was made too.
+        item = self.item()
+        upsert_shadow(self.db, tracker="github", url=URL, repo="upstream/project", number=12, kind="pull",
+                      title="Contribution", state="merged", created_at=T1, merged_at=T3)
+        other = add_note(self.db, item, "followup", "All contribution dependencies are satisfied",
+                         session="contribution-observer", timestamp=T0)
+        early = add_note(self.db, item, "followup", "Changes requested", session="contribution-observer",
+                         timestamp=T0)
+        self.db.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (T2, early))
+        self.db.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (T3, other))
+        state = c.snapshot(self.db, "github:" + URL)
+        state["notifications"] = {"review:1": {"status": "done", "note_id": early}}
+        c._save(self.db, state)
+        self.db.commit()
+        self.observe(observed_at=T3, state="merged")
+        self.assertEqual([(n["at"], n["lane"]) for n in c.lane_notes(self.db, item)],
+                         [(T1, "awaiting_you"), (T2, "awaiting_them"), (T3, "merged")])
+        wait = c.pr_waits(self.db, now=T3)[0]
+        self.assertEqual((wait["on_you"], wait["on_reviewers"], wait["to_merge"]), (60, 60, 120))
 
     def test_the_projection_lane_is_the_one_rule_the_note_reads(self):
         item = self.item()

@@ -178,6 +178,8 @@ def document(connection: sqlite3.Connection, *, now: str) -> dict:
                  "url": url if url.startswith("https://github.com/") else None, "why": why, "state": state,
                  "at": at, "at_what": what, "item": contribution.get("item_id") or delivered.get(key),
                  "mine": row.get("reason") == "assigned" or _mine(row) or bool(contribution),
+                 # The sync's own word (assignee:@me); `why` can name a stronger reason, such as waiting on you.
+                 "assigned": row.get("reason") == "assigned",
                  # sd:5633: what a row's Details show, each None when the store did not record it.
                  **{name: row.get(name) for name in FACTS}, "attention": list(contribution.get("reasons") or []),
                  "checkout": checkouts.get(f"github.com/{str(row['repo']).lower()}"),

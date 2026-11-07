@@ -966,6 +966,13 @@ class Dashboard(BaseHTTPRequestHandler):
         except BaseException:
             self.reads.release()
             raise
+        held = [connection]
+
+        def release():
+            """Close the read connection and give its slot back, once; a read that waits on no store calls it early."""
+            if held:
+                held.pop().close()
+                self.reads.release()
         try:
             if path.startswith("/studio/files/"):
                 return self._studio_file(context, connection, path[len("/studio/files/"):])
@@ -974,7 +981,7 @@ class Dashboard(BaseHTTPRequestHandler):
 
                 registered = v2.api(path)
                 if registered is not None:
-                    return self._api(context, connection, split, parameters, *registered)
+                    return self._api(context, connection, split, parameters, *registered, release)
                 if path == "/api/contributions":
                     from sd_db import contributions
 
@@ -1089,8 +1096,7 @@ class Dashboard(BaseHTTPRequestHandler):
             return self._send(503, error_page(503, str(problem)).encode("utf-8"),
                               "text/html; charset=utf-8")
         finally:
-            connection.close()
-            self.reads.release()
+            release()
         session = self._session(context) or self._new_session(context)
         token = self._csrf(session)
         body = body.replace("</head>", f'<meta name="sd-csrf" content="{token}"></head>', 1)
@@ -1179,7 +1185,7 @@ class Dashboard(BaseHTTPRequestHandler):
     def _csrf(self, session):
         return self._mac("csrf." + session)
 
-    def _api(self, context, connection, split, parameters, page, entry):
+    def _api(self, context, connection, split, parameters, page, entry, release=None):
         """A registered page's GET (sd:2418): one session rule and one query rule for every page, then its read.
 
         The read answers a document (200) or `(status, document)`. A route refuses a query unless it says it takes one.
@@ -1188,7 +1194,7 @@ class Dashboard(BaseHTTPRequestHandler):
             return self._json(403, {"error": f"Reload the page to read {page.section}: {SESSION_ENDED}"})
         if split.query and not entry.query:
             return self._json(400, {"error": f"{page.section} does not accept query parameters."})
-        read, ticket = self._read(connection, split.path, parameters), self.badges.ticket()
+        read, ticket = self._read(connection, split.path, parameters, release=release), self.badges.ticket()
         try:
             answer = entry.read(read)
         except BaseException:
@@ -1205,12 +1211,13 @@ class Dashboard(BaseHTTPRequestHandler):
         self.badges.remember(split.path, document if status == 200 else None, read.now, ticket)
         return self._json(status, document)
 
-    def _read(self, connection, path, parameters):
+    def _read(self, connection, path, parameters, *, release=None):
         from . import v2
 
         return v2.registry.Read(connection=connection, now=self.clock(), path=path, parameters=parameters,
                                 fleet=self.fleet_backend, jobs=self.operations_backend, services=self.services_backend,
-                                ports=self.ports_backend, metrics=self.metrics_backend, served_commit=self.served_commit)
+                                ports=self.ports_backend, metrics=self.metrics_backend, served_commit=self.served_commit,
+                                release=release)
 
     def _sections(self, context):
         """`/ui/sections.js`: the rail's map on every request, and each page's badge for a signed-in page (sd:3446).

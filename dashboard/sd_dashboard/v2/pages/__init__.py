@@ -38,6 +38,9 @@ class Read:
     metrics: Any = None
     #: The checkout commit the server started on (sd:3528), for Health's dashboard row.
     served_commit: Any = None
+    #: Closes `connection` and gives the request's read slot back, once (sd:7898): a read that then waits on no store,
+    #: such as Health's walkers, calls it first. None for a read the server did not open.
+    release: Any = None
 
 
 @dataclass(frozen=True)
