@@ -969,6 +969,20 @@ class IssueActivityTests(ContributionCase):
         return c.observe_issue(self.db, url, self.issue_observation(**changes),
                                expected_revision=c.snapshot(self.db, "issue:" + url)["revision"])
 
+    def test_an_unrelated_malformed_item_stops_no_observation(self):
+        # sd:7939: observe_pull and observe_issue read every item strictly, so one malformed item failed each.
+        broken = create_item(self.db, kind="task", title="Broken", status="ready")
+        set_item_fields(self.db, broken, fields={"contribution": "not an object"})
+        self.db.commit()
+        pull = c.capture(self.db, title="Pull", changes={"pull_url": URL}, who="operator")["item"]["id"]
+        c.capture(self.db, title="Issue", changes={"issue_url": ISSUE}, who="operator")
+        self.observe()
+        self.observe_issue()
+        for key in ("github:" + URL, "issue:" + ISSUE):
+            self.assertIsNotNone(c.snapshot(self.db, key)["observation"], key)
+        self.assertTrue(self.db.execute("SELECT 1 FROM note WHERE item = ? AND body LIKE 'PR lane: %'",
+                                        (pull,)).fetchone(), "the pull request's item got no lane note")
+
     def issue_event(self, kind="comment", **changes):
         # A plain comment: neither a maintainer's nor a mention, which raises nothing on a pull.
         return self.event(kind, **{"maintainer": False, "mentions_operator": False, "url": ISSUE + "#issuecomment-1", **changes})
@@ -1625,6 +1639,31 @@ class LaneNoteTests(ContributionCase):
         self.observe(state="closed")
         self.assertEqual(c.link_shipped(self.db), ([], []), "an older receipt replaced the operator's own link")
         self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": URL})
+
+    def test_a_hand_link_back_to_an_older_receipt_is_not_replaced_when_it_closes(self):
+        # sd:7939: receipts A then B, a hand link back to A, A closes: B replaced it, the hand link being newer.
+        newer = "https://github.com/upstream/project/pull/13"
+        item = self.task()
+        self.receipt(item, "feat/sd-first", URL)
+        self.receipt(item, "feat/sd-second", newer)
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        c.configure(self.db, item, {"pull_url": URL}, who="operator")
+        self.observe(state="closed")
+        self.assertEqual(c.link_shipped(self.db), ([], []), "the newest receipt replaced the operator's newer link")
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": URL})
+
+    def test_a_closed_hand_link_to_an_older_receipt_gives_way_to_a_receipt_written_after_it(self):
+        newer = "https://github.com/upstream/project/pull/13"
+        item = self.task()
+        self.receipt(item, "feat/sd-first", URL)
+        c.configure(self.db, item, {"pull_url": URL}, who="operator")
+        self.db.execute("UPDATE note SET timestamp = '2026-01-01T00:00:00+00:00' WHERE item = ? AND body LIKE ?",
+                        (item, "%" + c.LINKED + URL))
+        self.db.commit()
+        self.receipt(item, "feat/sd-second", newer)
+        self.observe(state="closed")
+        self.assertEqual(c.link_shipped(self.db), ([item], []))
+        self.assertEqual(c._metadata(item_state(self.db, item)["item"]), {"pull_url": newer})
 
     def test_a_closed_hand_link_gives_way_to_a_receipt_whose_pull_request_is_open(self):
         newer = "https://github.com/upstream/project/pull/13"

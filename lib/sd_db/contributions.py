@@ -59,6 +59,8 @@ DRAFTED = "Draft pull request: mark it ready for review"
 PULL_ONLY = frozenset({"reviews", "ci", "ci_head", "ci_ids", "head", "base", "mergeable", "draft"})
 #: Who writes the attention followups and the lane notes.
 OBSERVER = "contribution-observer"
+#: How `configure`'s note names the pull request a change linked (sd:7939).
+LINKED = "; linked "
 #: A lane change of an item's pull request, kept as a `comment` note (sd:7859): checkpoints get pruned, notes stay.
 #: `PR lane: <lane> · <state> · <url>`, and ` (backfilled)` on one `_history` wrote at the time it happened.
 LANE_NOTE = "PR lane: "
@@ -380,7 +382,10 @@ def configure(connection, item, changes, *, who, expected_revision=None) -> dict
                 state = snapshot(connection, prefix + value[name]) if value.get(name) else {}
                 if state.pop("moved_to", None):
                     _save(connection, state)
-            add_note(connection, item, "comment", f"Updated contribution metadata by {who}", session=who)
+            # The url a change links is named, so `link_shipped` reads when, and by whom, the link was set (sd:7939).
+            linked = value.get("pull_url") if value.get("pull_url") != old.get("pull_url") else None
+            add_note(connection, item, "comment", f"Updated contribution metadata by {who}"
+                                                  f"{LINKED + linked if linked else ''}", session=who)
             if old.get("depends_on", []) != value.get("depends_on", []):
                 key = f"item:{item}"
                 state = snapshot(connection, key)
@@ -598,7 +603,7 @@ def observe_pull(connection, url, observation, *, expected_revision) -> dict:
                     raise WorkflowError("review state is missing")
                 if name == "events" and event.get("kind") not in EVENTS:
                     raise WorkflowError("unsupported contribution event kind")
-        registered = next(((row, metadata) for row, metadata in _registered(connection) if metadata.get("pull_url") == url), None)
+        registered = next(((row, metadata) for row, metadata in _registered(connection, []) if metadata.get("pull_url") == url), None)
         item = registered[0]["id"] if registered else None
         if registered and value.get("blocking_labels", []) != registered[1].get("blocking_labels", []):
             raise StaleItem("blocking-label policy changed; recollect with the current configuration")
@@ -695,7 +700,7 @@ def observe_issue(connection, url, observation, *, expected_revision) -> dict:
             _moment(event.get("at"))
             if event.get("kind") not in ISSUE_EVENTS:
                 raise WorkflowError("unsupported contribution event kind")
-        registered = next(((row, metadata) for row, metadata in _registered(connection) if metadata.get("issue_url") == url), None)
+        registered = next(((row, metadata) for row, metadata in _registered(connection, []) if metadata.get("issue_url") == url), None)
         item = registered[0]["id"] if registered else None
         if registered and value.get("blocking_labels", []) != registered[1].get("blocking_labels", []):
             raise StaleItem("blocking-label policy changed; recollect with the current configuration")
@@ -815,7 +820,7 @@ def _latest(connection, kind, prefix) -> dict:
     """
     end = prefix[:-1] + chr(ord(prefix[-1]) + 1)
     return {row["key"]: row for row in connection.execute(
-        "SELECT key,id,body FROM state WHERE id IN (SELECT max(id) FROM state WHERE kind=? AND key>=? AND key<? GROUP BY key)",
+        "SELECT key,id,body,timestamp FROM state WHERE id IN (SELECT max(id) FROM state WHERE kind=? AND key>=? AND key<? GROUP BY key)",
         (kind, prefix, end))}
 
 
@@ -1039,7 +1044,7 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
     request keeps it unless that one is observed closed and the newest receipt names another: a receipt has no
     closed phase, so a re-prepare after a closed pull request is that newer receipt. The newest receipt replaces a
     closed link only when it postdates it, the link being an older receipt's, or names a pull request observed open:
-    a link the operator set by hand after the receipt stays (sd:7931). A rerun links nothing.
+    a link the operator set by hand after the newest receipt stays, an older receipt's url too (sd:7931, sd:7939). A rerun links nothing.
     Each link is `configure`'s one transaction, which notes the lane too. Returns the items linked and an error per
     receipt that could not be read or linked; a bad receipt is said and skipped, so it stops no other.
     """
@@ -1047,7 +1052,7 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
 
     errors: list[str] = []
     taken = {metadata["pull_url"] for _, metadata in _registered(connection, errors) if metadata.get("pull_url")}
-    newest: dict[int, tuple[int, str, dict]] = {}
+    newest: dict[int, tuple[int, str, dict, str]] = {}
     shipped: dict[int, set[str]] = {}
     for key, row in _latest(connection, "checkpoint", "ship:").items():
         try:
@@ -1062,10 +1067,10 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
         if type(item) is int and isinstance((pull or {}).get("url"), str):
             shipped.setdefault(item, set()).add((pull or {})["url"])
         if type(item) is int and (item not in newest or row["id"] > newest[item][0]):
-            newest[item] = (row["id"], key, receipt)
+            newest[item] = (row["id"], key, receipt, row["timestamp"])
     linked: list[int] = []
     for item in sorted(newest):
-        _, key, receipt = newest[item]
+        _, key, receipt, _ = newest[item]
         url = (receipt.get("pull_request") or {}).get("url")
         if not isinstance(url, str) or receipt.get("phase") == "merged":
             continue
@@ -1079,7 +1084,8 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
                 continue
             held = metadata.get("pull_url")
             if held and (_state(connection, held) != "closed" or not (
-                    held in {_url(other) for other in shipped[item] if other != url} or _state(connection, url) == "open")):
+                    _state(connection, url) == "open" or _receipts_link(connection, item, held, newest[item][3])
+                    and held in {_url(other) for other in shipped[item] if other != url})):
                 continue
             configure(connection, item, {"pull_url": url}, who=OBSERVER)
         except ROW_ERRORS as error:
@@ -1088,6 +1094,17 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
         taken.add(url)
         linked.append(item)
     return linked, errors
+
+
+def _receipts_link(connection, item: int, held: str, receipt_at: str) -> bool:
+    """Whether `held` is a receipt's link the newest receipt (written at `receipt_at`) may replace: one this observer
+    set, or one set by hand before that receipt. A hand link set after it, or at the same second, stays (sd:7939).
+    A link whose note names no url (set before sd:7939) reads as a receipt's."""
+    for row in connection.execute("SELECT timestamp, session, body FROM note WHERE item = ? AND kind = 'comment' "
+                                  "AND body LIKE 'Updated contribution metadata by %' ORDER BY id DESC", (item,)):
+        if row["body"].endswith(LINKED + held):
+            return row["session"] == OBSERVER or row["timestamp"] < receipt_at
+    return True
 
 
 def _seconds(start, end) -> int:
