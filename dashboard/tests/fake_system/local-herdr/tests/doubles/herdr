@@ -5,7 +5,10 @@
 # and answers from files under $HERDR_DOUBLE_FIXTURE: session-list.json,
 # agent-list.json and workspace-create.json, each with a default when absent;
 # agent-start-fail and agent-prompt-fail make those calls fail, and
-# on-agent-start runs before `agent start` answers.
+# on-agent-start runs before `agent start` answers. `--session <n> server`
+# writes a running session-list.json and exits 0, where the real headless
+# server stays up; with server-fail present it prints that file on stderr
+# and exits 1, the session still down.
 line="${HERDR_SESSION:-}	${HERDR_SOCKET_PATH:-}"
 for word in "$@"; do line="$line	$word"; done
 [ -z "${HERDR_DOUBLE_JOURNAL:-}" ] || printf '%s\n' "$line" >> "$HERDR_DOUBLE_JOURNAL"
@@ -14,6 +17,16 @@ FIX="${HERDR_DOUBLE_FIXTURE:-/nonexistent}"
 answer() {
   if [ -f "$FIX/$1" ]; then cat "$FIX/$1"; else printf '%s\n' "$2"; fi
 }
+
+if [ "${1:-}" = --session ] && [ "${3:-}" = server ]; then
+  if [ -f "$FIX/server-fail" ]; then
+    cat "$FIX/server-fail" >&2
+    exit 1
+  fi
+  printf '{"sessions":[{"name":"%s","running":true,"socket_path":"/tmp/%s/herdr.sock","default":false}]}\n' \
+    "$2" "$2" > "$FIX/session-list.json"
+  exit 0
+fi
 
 case "${1:-} ${2:-}" in
   "session list") answer session-list.json '{"sessions":[]}' ;;

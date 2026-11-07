@@ -363,6 +363,9 @@ class ContributionSync(SyncCase):
         self.assertTrue(first.watermark_moved)
         self.assertEqual(len(core.projection(self.db)), 4)
         saved = adapter._queue(self.db)
+        # All eight are open and never read, so they go first in queue order
+        # (pack sd:7844, ahead of sd:7840's newest-first slots): 7 to 10 are
+        # read and 11 heads the queue.
         self.assertEqual(saved["pending"][0]["url"], urls[4])
         self.assertLessEqual(first.requests, 40)
         second = self.run_sync(max_requests=40)
@@ -448,6 +451,45 @@ class ContributionSync(SyncCase):
         # The details that did not fit wait in the queue for the next run.
         self.assertGreater(result.queued, 0)
 
+    def queue_behind(self, settled):
+        """`settled` queued as authored pulls no run has read, as the hub's queue held 6,400 merged ones."""
+        planned = adapter._queue(self.db)
+        adapter._save_queue(self.db, [{"key": "github:" + url, "url": url, "why": ["author"], "blocking_labels": [],
+                                       "explicit": False} for url in settled], planned["revision"])
+
+    def test_a_new_open_pull_is_read_before_a_backlog_of_settled_ones(self):
+        """pack sd:7844: authored pulls ai-governance-service#147 and control-logdna#15528 joined the queue at
+        6,620 of 6,632, behind merged pulls no run had read, at about 47 details a run. Contributions lists a
+        pull only once read, so a new one waited weeks. A pull GitHub has open that no run has read goes first."""
+        urls = self.clone_pull(range(7, 11))
+        self.queue_behind(urls[1:])
+        # 14 requests: the search spends 4, the identity 1, so one pull fits.
+        result = self.run_sync([urls[0]], max_requests=14)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual([row["url"] for row in core.projection(self.db)], [urls[0]])
+
+    def test_an_open_pull_queued_by_an_earlier_run_is_read_first_too(self):
+        """The queue an older run left: the open pull sits behind settled ones and this run's search does not
+        return it. Its open shadow row still puts it first."""
+        from sd_db.shadow_sync import store
+
+        urls = self.clone_pull(range(7, 11))
+        self.queue_behind([*urls[1:], urls[0]])
+        with transaction(self.db):
+            store(self.db, [{"tracker": "github", "url": urls[0], "repo": "example/project", "number": 7,
+                             "kind": "pull", "title": "Contribution", "state": "open", "author": "operator",
+                             "updated_at": self.now.isoformat(), "why": ["author"]}])
+        result = self.run_sync(max_requests=14)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual([row["url"] for row in core.projection(self.db)], [urls[0]])
+
+    def test_an_open_pull_whose_read_failed_is_not_read_first_again(self):
+        """sd:7840's rule holds for open pulls too: a failed read leaves a heartbeat, the key is no longer fresh,
+        so it rotates and cannot take a first slot every run (pack sd:7844 with sd:7840)."""
+        found = [{"kind": "pull", "url": URL, "state": "open"}]
+        self.assertEqual(adapter._unread_open(self.db, found, {"github:" + URL}), {"github:" + URL})
+        self.assertEqual(adapter._unread_open(self.db, found, set()), set())
+
     def test_failed_first_record_rotates_and_explicit_work_retains_fairness(self):
         pending = [{"key": f"item:{n}", "explicit": True} for n in range(5)]
         pending += [{"key": f"github:{n}", "explicit": False} for n in range(5)]
@@ -469,23 +511,90 @@ class ContributionSync(SyncCase):
         snapshots["github:merged"] = {"observation": {"state": "merged", "observed_at": "2026-10-15T08:00:00+00:00"}}
         snapshots["github:fresh"] = {"observation": {"state": "open", "observed_at": "2026-10-18T07:00:00+00:00"}}
         snapshots["github:stale"] = {"observation": {"state": "open", "observed_at": "2026-10-15T08:00:00+00:00"}}
-        ordered = [row["key"] for row in adapter._order(pending, snapshots, now)]
+        ordered = [row["key"] for row in adapter._order(pending, snapshots=snapshots, observed_at=now)]
         self.assertEqual(ordered[2], "github:stale")
         self.assertGreater(ordered.index("github:fresh"), ordered.index("github:backlog/7"))
         self.assertEqual(sorted(ordered), sorted(keys))
 
     def test_a_stale_open_pull_with_no_item_reads_closed_next_run(self):
-        urls = self.clone_pull(range(7, 15))
+        urls = self.clone_pull(range(7, 20))
         self.assertTrue(self.run_sync(urls[:1]).ok)
         self.assertEqual(core.projection(self.db)[0]["external_state"], "open")
-        # Seven more authored pulls queue ahead of it; the budget reads only one.
-        self.assertTrue(self.run_sync(urls[1:], max_requests=4 + 1 + 9).ok)
+        # Twelve never-read pulls an old search left queue ahead of it,
+        # neither open in the shadow store nor explicit, as the authored
+        # backlog does.
+        saved = adapter._queue(self.db)
+        backlog = [{"key": "github:" + url, "url": url, "why": ["author"], "blocking_labels": [],
+                    "explicit": False} for url in urls[1:]]
+        adapter._save_queue(self.db, backlog + saved["pending"], saved["revision"])
         self.now += timedelta(days=2)
         self.api.detail.update(state="closed")
-        self.assertTrue(self.run_sync(max_requests=4 + 1 + 9 * 3).ok)
+        # Eight reads: the two head slots, the five newest never-read, then
+        # the stale open pull ahead of the other five.
+        self.assertTrue(self.run_sync(max_requests=4 + 1 + 9 * 8).ok)
         rows = {row["url"]: row for row in core.projection(self.db)}
         self.assertEqual(rows[urls[0]]["external_state"], "closed")
         self.assertEqual(rows[urls[0]]["lane"], "closed")
+        self.assertNotIn(urls[3], rows)
+
+    def backlog(self, numbers):
+        """Stage never-read pulls in the queue, as an old search left them."""
+        urls = self.clone_pull([7, *numbers])[1:]
+        pending = [{"key": "github:" + url, "url": url, "why": ["author"], "blocking_labels": [],
+                    "explicit": False} for url in urls]
+        adapter._save_queue(self.db, pending, adapter._queue(self.db)["revision"])
+        return urls
+
+    def test_a_pull_found_tonight_is_read_ahead_of_a_never_read_backlog(self):
+        # sd:7840: the queue read in discovery order, so a pull found tonight
+        # waited behind thousands of old never-read pulls for weeks.
+        old = self.backlog(range(8, 14))
+        planned = adapter.plan(self.db)
+        found = [{"kind": "pull", "url": URL, "why": ["author"]}]
+        # The identity and three pulls: the two head slots, then the new one.
+        client = self.api.client(requests=1 + 3 * adapter.PULL_REQUESTS)
+        result = adapter.refresh(self.db, planned, found, client=client, observed_at=self.now.isoformat())
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["completed_keys"], ["github:" + old[0], "github:" + old[1], "github:" + URL])
+
+    def test_a_never_read_pull_that_fails_loses_its_place_ahead(self):
+        old = self.backlog(range(8, 13))
+        rows: dict = self.api.rows
+        rows[ROOT + "/pulls/7"] = Response(503, {}, "")
+        planned = adapter.plan(self.db)
+        found = [{"kind": "pull", "url": URL, "why": ["author"]}]
+        client = self.api.client(requests=1 + 3 * adapter.PULL_REQUESTS)
+        first = adapter.refresh(self.db, planned, found, client=client, observed_at=self.now.isoformat())
+        # Two head slots, the new pull failing on one request, then the
+        # newest old pull on what is left.
+        self.assertEqual(first["completed_keys"], ["github:" + url for url in (old[0], old[1], old[4])])
+        self.assertTrue(first["incomplete"][0].startswith("github:" + URL + ": "), first["incomplete"])
+        # Its heartbeat marks it read: it rotates like any other key and
+        # does not jump the queue again.
+        planned = adapter.plan(self.db)
+        fresh = adapter._fresh(self.db, planned["pending"], planned["snapshots"])
+        self.assertEqual(fresh, {"github:" + old[2], "github:" + old[3]})
+        ordered = adapter._order(planned["pending"], fresh)
+        self.assertEqual([row["url"] for row in ordered], [old[2], old[3], old[0], old[1], URL, old[4]])
+
+    def test_a_never_read_backlog_takes_a_few_slots_and_observed_work_keeps_its_turn(self):
+        # Review of sd:7840: every never-read key went ahead of the rotation,
+        # the ~4,900 backlog included, so explicit work past the first three
+        # and every observed open pull waited weeks behind it.
+        explicit = [{"key": f"item:{n}", "explicit": True} for n in range(4)]
+        head = [{"key": f"github:head{n}", "explicit": False} for n in range(2)]
+        observed = {"key": "github:observed", "explicit": False}
+        backlog = [{"key": f"github:old{n}", "explicit": False} for n in range(30)]
+        new = {"key": "github:new", "explicit": False}
+        pending = [*explicit, *head, observed, *backlog, new]
+        fresh = {row["key"] for row in [*backlog, new]}
+        keys = [row["key"] for row in adapter._order(pending, fresh)]
+        # The new pull is read first after the head slots, then the newest
+        # few of the backlog; the rest follow the rotation.
+        self.assertEqual(keys[5:10], ["github:new", "github:old29", "github:old28", "github:old27", "github:old26"])
+        self.assertEqual(keys[10:12], ["item:3", "github:observed"])
+        self.assertEqual(sorted(keys), sorted(row["key"] for row in pending))
+        self.assertEqual(adapter.FRESH_SLOTS, 5)
 
     def test_registered_work_refreshes_without_search_match(self):
         item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
@@ -726,3 +835,71 @@ class IssueSync(SyncCase):
         with self.assertRaisesRegex(ValueError, "unpriced dependency kind"):
             adapter._cost({"key": "item:1", "depends_on": [{"kind": "merge", "url": URL}, {"kind": "closed", "url": URL}]})
         self.assertEqual(set(adapter.DEPENDENCY_REQUESTS), {"item", "merge", "release", "issue"})
+
+
+class LaneNotePass(SyncCase):
+    """sd:7859: each sync notes every registered pull request's lane, so a merged one the queue left is noted too.
+
+    The pass is a side observation (review round 2): what it cannot do is said in `lanes`, never a failed sync or a
+    held watermark, as the protection collector's is.
+    """
+
+    def observed(self, state):
+        snapshot = core.snapshot(self.db, "github:" + URL)
+        snapshot["observation"] = {"state": state, "observed_at": AT}
+        with transaction(self.db):
+            core._save(self.db, snapshot)
+
+    def shipped(self):
+        from sd_db import ship
+        from sd_db.workflow import capture_task
+
+        item = capture_task(self.db, title="Shipped", priority=3, who="operator")["item"]["id"]
+        ship.save(self.db, ship.receipt_key("example/project", "feat/x", item), 0,
+                  {"item": item, "repository": "example/project", "branch": "feat/x", "phase": "ready_to_send",
+                   "pull_request": {"url": URL}})
+        return item
+
+    def bad_receipts(self):
+        with transaction(self.db):
+            self.db.execute("INSERT INTO state(kind,key,timestamp,body) VALUES ('checkpoint','ship:bad',?,'{}')", (AT,))
+            self.db.execute("INSERT INTO state(kind,key,timestamp,body) VALUES ('checkpoint','ship:odd',?,?)",
+                            (AT, json.dumps({"protocol": 1, "item": 1, "pull_request": "not an object"})))
+
+    def test_the_pass_notes_a_registered_pull_requests_lane(self):
+        item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
+        self.observed("merged")
+        self.assertEqual(core.lane_notes(self.db, item), [])
+        self.assertEqual(adapter.note_lanes(self.db), [])
+        self.assertEqual([(n["lane"], n["state"]) for n in core.lane_notes(self.db, item)], [("merged", "merged")])
+
+    def test_bad_receipts_are_said_and_the_good_one_is_linked_and_noted(self):
+        item = self.shipped()
+        self.observed("open")
+        self.bad_receipts()
+        self.assertEqual(adapter.note_lanes(self.db), [
+            "ship receipt ship:bad: unreadable ship receipt: unsupported receipt protocol",
+            "ship receipt ship:odd: pull_request is not an object"])
+        self.assertEqual([(n["lane"], n["url"]) for n in core.lane_notes(self.db, item)], [("awaiting_them", URL)])
+
+    def test_a_pass_that_raises_anything_is_said_and_the_other_pass_still_runs(self):
+        item = core.capture(self.db, title="Filed", changes={"pull_url": URL}, who="operator")["item"]["id"]
+        self.observed("open")
+        with patch.object(core, "link_shipped", side_effect=AttributeError("'str' object has no attribute 'get'")):
+            self.assertEqual(adapter.note_lanes(self.db),
+                             ["pull-request links were not read: AttributeError: 'str' object has no attribute 'get'"])
+        self.assertEqual(len(core.lane_notes(self.db, item)), 1)
+        from sd_db.errors import SdDbError
+        with patch.object(core, "record_lanes", side_effect=SdDbError("'2026-09-10T00:00:00' has no zone")):
+            self.assertEqual(adapter.note_lanes(self.db),
+                             ["pull-request lane notes were not written: SdDbError: '2026-09-10T00:00:00' has no zone"])
+
+    def test_a_bad_receipt_fails_no_sync_and_holds_no_watermark(self):
+        self.run_sync([URL])
+        self.bad_receipts()
+        result = self.run_sync()
+        self.assertTrue(result.ok, result.reason)
+        self.assertTrue(result.watermark_moved)
+        self.assertTrue(self.tracker_heartbeat()["ok"])
+        self.assertEqual(len(result.lanes), 2)
+        self.assertIn("shadow sync: pull-request lanes: " + "; ".join(result.lanes), result.report())

@@ -32,7 +32,9 @@ def _issues(read):
     found = issues.with_github(issues.document(read.connection), github)
     # sd:6175: each row's Hide state, and Refresh from GitHub's job, as HOA's Refresh now reads its own; `synced` is
     # when GitHub was last read, shown beside it (pack sd:6702).
-    return {**issues.with_views({**found, **issues.intake(read.connection)}, read.connection),
+    # pack sd:7841: each row names the pull requests that close it, from the same GitHub read.
+    listed = issues.with_pulls({**found, **issues.intake(read.connection)}, github)
+    return {**issues.with_views(listed, read.connection),
             "sync": issues.sync_job(read.connection, read.jobs or operations.LaunchdBackend()),
             "synced": github["collector"]}
 

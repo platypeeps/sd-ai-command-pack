@@ -256,8 +256,8 @@ def run(cmd, cwd=None, timeout=25):
     except subprocess.TimeoutExpired:
         try:
             os.killpg(p.pid, signal.SIGKILL)
-        except OSError:
-            pass
+        except OSError:  # gone, or EPERM (sd:7900): the leader at least goes
+            p.kill()
         if capped:
             # The group is gone with its leader; what else holds the pipe is
             # not waited on, because the tile has no time left to wait with.
@@ -508,8 +508,8 @@ class Budget:
         except BaseException:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
-            except OSError:
-                pass
+            except OSError:  # gone, or EPERM (sd:7900): the leader at least goes, so the wait ends
+                proc.kill()
             proc.wait()
             raise
         finally:

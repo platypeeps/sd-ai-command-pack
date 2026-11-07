@@ -32,6 +32,9 @@ MAX_NOTIFICATIONS = 5
 PULL_REQUESTS = 9
 ISSUE_REQUESTS = 4
 DEPENDENCY_REQUESTS = {"item": 0, "merge": 1, "release": 7, "issue": 2}
+#: Open pulls no run has read, taken first each run (pack sd:7844). Capped so
+#: a pull whose read keeps failing cannot take the whole budget every run.
+UNREAD_SLOTS = 10
 
 
 def _queue(connection):
@@ -73,15 +76,33 @@ def _merge(pending, additions):
     return list(indexed.values())
 
 
-def _order(pending, snapshots=None, observed_at=None):
+#: The never-read keys a run reads ahead of the rotation, newest first (sd:7840).
+FRESH_SLOTS = 5
+
+
+def _order(pending, fresh=frozenset(), unread=frozenset(), *, snapshots=None, observed_at=None):
     # Explicit local work gets priority, while ordinary authored work has two
-    # guaranteed slots. Rows last observed open, and stale as the projection
-    # counts it, come next: search queues every authored pull, thousands,
-    # and a run reads a few dozen, so a closed pull with no item read open
-    # for weeks (sd:7864). The rest follow in queue order. The budget, not a
+    # guaranteed slots before the rest follow in queue order. The budget, not a
     # count, decides how far down the list a run gets; rotation in `refresh`
     # prevents a failing first item from starving the ones behind it.
+    # `unread` keys, open pulls no run has read, come before the ordinary
+    # slots (pack sd:7844): Contributions lists a pull only once read, and an
+    # open one queued behind newer discoveries waited too.
+    # `fresh` names the keys never read: the newest FRESH_SLOTS follow those
+    # slots, so a pull found tonight is not read behind a backlog of
+    # thousands (sd:7840). Only that many: the backlog itself is thousands
+    # of never-read keys, and all of them ahead would starve the rotation of
+    # explicit work and observed open pulls for weeks. A failed read leaves a
+    # heartbeat, so the key is no longer fresh, nor unread, and rotates like
+    # any other.
+    # Rows last observed open, and stale as the projection counts it, come
+    # next: search queues every authored pull, thousands, and a run reads a
+    # few dozen, so a closed pull with no item read open for weeks
+    # (sd:7864). A read resets that age, so these are the operator's open
+    # pulls once a day, not the backlog.
     from . import contributions as core
+
+    snapshots = snapshots or {}
 
     def stale(row):
         observation = (snapshots.get(row["key"]) or {}).get("observation") or {}
@@ -93,14 +114,44 @@ def _order(pending, snapshots=None, observed_at=None):
             return True
         return age.total_seconds() > core.STALE_SECONDS
 
-    snapshots = snapshots or {}
     explicit = [row for row in pending if row.get("explicit")]
-    ordinary = [row for row in pending if not row.get("explicit")]
-    ordered = explicit[:3] + ordinary[:2]
-    chosen = {row["key"] for row in ordered}
-    live = [row for row in pending if row["key"] not in chosen and stale(row)]
-    chosen.update(row["key"] for row in live)
-    return ordered + live + [row for row in pending if row["key"] not in chosen]
+    first = [row for row in pending if not row.get("explicit") and row["key"] in unread][:UNREAD_SLOTS]
+    taken = {row["key"] for row in first}
+    ordinary = [row for row in pending if not row.get("explicit") and row["key"] not in taken]
+    ordered = explicit[:3] + first + ordinary[:2]
+    taken = {row["key"] for row in ordered}
+    ordered += [row for row in reversed(pending) if row["key"] in fresh and row["key"] not in taken][:FRESH_SLOTS]
+    taken = {row["key"] for row in ordered}
+    ordered += [row for row in pending if row["key"] not in taken and stale(row)]
+    taken = {row["key"] for row in ordered}
+    return ordered + [row for row in pending if row["key"] not in taken]
+
+
+def _fresh(connection, pending, snapshots):
+    """The keys in `pending` never read: no observation and no heartbeat from an attempt.
+
+    `snapshots` are the plan's; a key search added since is read here and not
+    kept, so its attempt still checks the revision it reads then.
+    """
+    from . import contributions as core
+
+    fresh = set()
+    for row in pending:
+        state = snapshots.get(row["key"]) or core.snapshot(connection, row["key"])
+        if state["observation"] is None and connection.execute(
+                "SELECT 1 FROM state WHERE kind='heartbeat' AND key=? LIMIT 1",
+                ("contribution-observe:" + state["key"],)).fetchone() is None:
+            fresh.add(row["key"])
+    return fresh
+
+
+def _unread_open(connection, issues, fresh):
+    """The `fresh` keys of pulls GitHub has open, by this run's search or the
+    shadow store (pack sd:7844)."""
+    urls = {row["url"] for row in issues if row.get("kind") == "pull" and row.get("state") == "open"}
+    urls |= {row["url"] for row in connection.execute(
+        "SELECT url FROM shadow WHERE tracker='github' AND kind='pull' AND state='open'")}
+    return {"github:" + github.canonical_url(url) for url in urls if github.PULL.fullmatch(url)} & set(fresh)
 
 
 def _cost(entry):
@@ -190,6 +241,27 @@ def fold(connection, planned, key, url):
     return ""
 
 
+def note_lanes(connection) -> list[str]:
+    """Link the pull requests `sd-ship prepare` opened, then note each registered pull request's lane (sd:7859).
+
+    A side observation of the sync, as the protection collector is: what it could not do is returned, one line per
+    receipt or item, never raised, and never a failed sync or a held watermark (review round 2). Each pass is guarded
+    on its own, so a link pass that fails still lets the lane notes run.
+    """
+    from . import contributions as core
+
+    said: list[str] = []
+    try:
+        said += core.link_shipped(connection)[1]
+    except Exception as error:  # noqa: BLE001 - a side observation never fails the sync
+        said.append(f"pull-request links were not read: {type(error).__name__}: {error}")
+    try:
+        said += core.record_lanes(connection)[1]
+    except Exception as error:  # noqa: BLE001 - same rule
+        said.append(f"pull-request lane notes were not written: {type(error).__name__}: {error}")
+    return said
+
+
 def refresh(connection, planned, issues, *, client, observed_at, search_complete=False, reserve=0,
             reserve_seconds=0):
     """Stage discovered work durably, then collect details until the budget runs out.
@@ -227,7 +299,9 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
     except ValueError as error:
         return {"errors": [str(error)], "queued": len(pending), "attempted": 0, "completed_keys": [], "incomplete": [], "staged": False}
     snapshots = dict(planned["snapshots"])
-    ordered = _order(pending, snapshots, observed_at)
+    fresh = _fresh(connection, pending, snapshots)
+    ordered = _order(pending, fresh, _unread_open(connection, issues, fresh),
+                     snapshots=snapshots, observed_at=observed_at)
     completed, incomplete, attempted, terminal = [], [], [], set()
     operator, identified = None, False
     # Pagination is not priced, so the client itself stops at the reserve: an

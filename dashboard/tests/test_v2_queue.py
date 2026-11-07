@@ -286,6 +286,50 @@ class TheRows(Lane, ScreenCase):
                          (1, "success", "sd-check pass", "b" * 12, False))
         self.assertEqual((second["position"], second["gate"], second["held"]), (2, "not gated", True))
 
+    def pr_item(self, n, *lanes):
+        """An item whose pull request #n has these `(at, lane)` lane notes (pack sd:7859)."""
+        from sd_db import contributions
+        from sd_db.writes import add_note
+
+        url = f"https://github.com/example/system/pull/{n}"
+        item = contributions.capture(self.connection, title=f"PR {n}", changes={"pull_url": url}, who="test")["item"]["id"]
+        for at, lane in lanes:
+            add_note(self.connection, item, "comment", f"PR lane: {lane} · open · {url}", session="contribution-observer",
+                     timestamp=at)
+        return item, url
+
+    def test_an_item_whose_pull_request_waits_on_review_is_a_pr_row_split_by_who_it_waits_on(self):
+        mine, url = self.pr_item(901, ("2026-09-06T09:00:00Z", "awaiting_them"), ("2026-09-06T11:00:00Z", "awaiting_you"))
+        theirs, _ = self.pr_item(902, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        self.pr_item(903, ("2026-09-06T10:00:00Z", "awaiting_them"), ("2026-09-06T11:00:00Z", "merged"))
+        prs = self.doc()["prs"]
+        self.assertEqual(prs["error"], "")
+        self.assertEqual([(r["item"], r["on"], r["since"], r["waited"]) for r in prs["rows"]],
+                         [(mine, "you", "2026-09-06T11:00:00+00:00", 3600), (theirs, "reviewers", "2026-09-06T10:00:00+00:00", 7200)])
+        self.assertEqual(prs["rows"][0]["url"], url)
+
+    def test_an_item_in_the_lane_keeps_its_lane_row_not_a_pr_row(self):
+        item, _ = self.pr_item(904, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        self.list([*self.entries(), {"item": item, "title": "In the lane", "status": "pending", "expected_head": "e" * 40}])
+        self.assertEqual(self.doc()["prs"]["rows"], [])
+
+    def test_a_manual_merge_prepared_entry_waits_on_review_and_a_self_merging_entry_keeps_its_lane(self):
+        # pack sd:7859: a manual-merge lane stops `prepared` and a person reviews the PR; an auto-merge lane merges it.
+        manual, _ = self.pr_item(905, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        auto, _ = self.pr_item(906, ("2026-09-06T10:00:00Z", "awaiting_them"))
+        self.list([{"item": manual, "title": "Manual", "status": "prepared", "reason": "queued without --manual; merge by hand",
+                    "expected_head": "e" * 40, "finished_at": "2026-09-06T10:00:00Z"},
+                   {"item": auto, "title": "Auto", "status": "running", "expected_head": "f" * 40, "id": "e-6",
+                    "started_at": "2026-09-06T11:50:00Z", "step": "merge"}])
+        self.assertEqual([(r["item"], r["on"]) for r in self.doc()["prs"]["rows"]], [(manual, "reviewers")])
+
+    def test_a_pr_wait_read_that_failed_says_so_and_shows_no_rows(self):
+        from sd_db import contributions
+
+        with mock.patch.object(contributions, "pr_waits", side_effect=sqlite3.OperationalError("database is locked")):
+            prs = self.doc()["prs"]
+        self.assertEqual(prs, {"rows": [], "error": "pull-request waits were not read: OperationalError: database is locked"})
+
     def test_building_reads_the_builder_gate_logs(self):
         running, done = self.doc()["lanes"][0]["rows"][3:5]
         self.assertEqual((running["gate"], running["summary"]), ("running", None))
@@ -1190,7 +1234,7 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         system = [f[1:] for f in found]
         self.assertEqual(system[0], ("warning", "■", "needs you", "repo"))
         self.assertEqual([f[3] for f in system[1:]], ["working"] * 3 + ["merging", "next", "next", "blocked", "blocked"]
-                         + ["suggested"] * 3 + ["ended", "ended"])
+                         + ["suggested"] * 4 + ["ended", "ended"])
         self.assertIn(("caution", "▲", "look", "next"), system, "a held next row is ▲")
         self.assertEqual([f[3] for f in system if f[3] == "blocked"], ["blocked", "blocked"])
         self.assertTrue(all(f[0] == "warning" and f[1] == "■" for f in system if f[3] == "blocked"))
@@ -1206,14 +1250,14 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
     BOX = {"merging": "merging: claimed by the lane runner, being merged",
            "working": "working: live sessions, build runs and lane gates now running",
            "next": "next: queued in the lane, not started",
-           "blocked": "blocked: stopped in the lane until someone acts",
-           "suggested": "suggested: up to 3 ready or planned tasks to do next"}
+           "blocked": "blocked: stopped in the lane, or waiting on a pull request, until someone acts",
+           "suggested": "suggested: up to 6 ready or planned tasks to do next"}
 
     def test_each_box_says_its_count_and_what_it_counts_on_hover(self):
         # Pack sd:7383: the native title names the count and the meaning; the aria-label stays.
         out = self.run_view("open('system'); R.html = ELS.queue.html;")
         titles = re.findall(r'<span class="pip[^"]*" title="([^"]*)">', self.repo_detail(out["R"]["html"], "system")[2])
-        self.assertEqual(titles, [f"{n} {self.BOX[k]}" for n, k in zip((1, 3, 2, 2, 3), self.BOX, strict=True)])
+        self.assertEqual(titles, [f"{n} {self.BOX[k]}" for n, k in zip((1, 3, 2, 2, 4), self.BOX, strict=True)])
 
     def test_each_repo_row_counts_working_merging_next_blocked_and_suggested_in_five_boxes(self):
         # pack sd:7470: merging is the leftmost box (operator 2026-11-04).
@@ -1221,21 +1265,21 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         # of the text tally. Pack sd:7314 adds working first and suggested last (operator 07:10 MST: a repo with five
         # working rows read 0 0 0). Each counts every row of the repo, so a filter hides no count. A box is lit only when
         # its count is not zero; blocked is the warning lamp; the label says all five in words. Suggested is off in the
-        # first read and on in the second: its count is 3 in both.
+        # first read and on in the second: its count is 4 in both, all of system's ready items (sd:7869).
         out = self.run_view("R.closed = ELS.queue.html; press('ended'); press('suggested'); open('system');"
                             " R.open = ELS.queue.html; R.tally = ELS['queue-tally'].html;")
         # Pack sd:7383: each box also carries its count and meaning in its title.
-        system = ' aria-label="1 merging, 3 working, 2 next, 2 blocked, 3 suggested"', \
+        system = ' aria-label="1 merging, 3 working, 2 next, 2 blocked, 4 suggested"', \
             (f'<span class="pip on" title="1 {self.BOX["merging"]}">1</span><span class="pip on" title="3 {self.BOX["working"]}">3</span>'
              f'<span class="pip on" title="2 {self.BOX["next"]}">2</span><span class="pip warn" title="2 {self.BOX["blocked"]}">2</span>'
-             f'<span class="pip on" title="3 {self.BOX["suggested"]}">3</span>')
+             f'<span class="pip on" title="4 {self.BOX["suggested"]}">4</span>')
         alpha = ' aria-label="0 merging, 1 working, 0 next, 0 blocked, 0 suggested"', \
             f'<span class="pip" title="0 {self.BOX["merging"]}">0</span><span class="pip on" title="1 {self.BOX["working"]}">1</span>' + "".join(
                 f'<span class="pip" title="0 {self.BOX[k]}">0</span>' for k in ("next", "blocked", "suggested"))
         for html in (out["R"]["closed"], out["R"]["open"]):
             self.assertEqual(self.repo_detail(html, "system"), (" pipe", *system))
             self.assertEqual(self.repo_detail(html, "alpha"), (" pipe", *alpha))
-        self.assertEqual(re.sub(r"<[^>]*>", "", self.repo_detail(out["R"]["closed"], "system")[2]), "13223", "the text tally is gone")
+        self.assertEqual(re.sub(r"<[^>]*>", "", self.repo_detail(out["R"]["closed"], "system")[2]), "13224", "the text tally is gone")
         self.assertRegex(out["R"]["tally"], r"<span>\d+ working</span>", "the page's tally stays")
 
     def test_the_boxes_recount_on_the_30_s_read_and_on_a_read_after_a_build_starts(self):
@@ -1269,14 +1313,14 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
             self.assertNotIn("pip", self.repo_detail(unread, key)[2], key)
             self.assertIn("lane not read", self.repo_detail(unread, key)[2], key)
 
-    def test_suggested_adds_three_ready_items_per_repo_and_a_repo_that_has_only_those(self):
+    def test_suggested_adds_each_repos_ready_items_and_a_repo_that_has_only_those(self):
         out = self.run_view("R.before = repos(); press('suggested'); open('system'); R.after = repos(); R.kids = kids();"
                             " R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;")
         self.assertNotIn("beta:false", out["R"]["before"])
         self.assertIn("beta:false", out["R"]["after"])
-        self.assertEqual(out["R"]["kids"].count("suggested"), 3)
+        self.assertEqual(out["R"]["kids"].count("suggested"), 4, "all four, under the cap of six (sd:7869)")
         self.assertIn("#60 Ready 60", out["R"]["html"])
-        self.assertNotIn("#63 Ready 63", out["R"]["html"])
+        self.assertIn("#63 Ready 63", out["R"]["html"])
         self.assertEqual(out["urls"], [{"show": "suggested"}])
         self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="true"', out["R"]["filters"])
         kept = self.run_view("R.repos = repos();", search="?show=suggested")
@@ -1297,9 +1341,17 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
                 self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="false"', kept["R"]["filters"])
                 self.assertNotIn("beta:false", kept["R"]["repos"])
 
-    def test_suggested_is_sd_nexts_order_less_live_items_three_per_repo_each_with_why(self):
+    def test_a_repo_with_seven_suggested_items_draws_six(self):
+        # sd:7869 (operator 2026-11-06): Suggested keeps at most six items per repo, in sd-next's order.
+        self.doc["queues"]["suggested"] = [{"id": n, "repo": "~/repos/example/system", "title": f"Next {n}", "status": "ready",
+                                            "why": "ready", "due": None, "priority": None} for n in range(61, 68)]
+        out = self.run_view("open('system'); R.html = ELS.queue.html;", search="?show=suggested")
+        drawn = re.findall(r'<tr class="child" data-type="suggested" data-item="(\d+)"', out["R"]["html"])
+        self.assertEqual(drawn, [str(n) for n in range(61, 67)])
+
+    def test_suggested_is_sd_nexts_order_less_live_items_six_per_repo_each_with_why(self):
         # pack sd:7314: Suggested is what sd-next offers next, ranked server-side (sd_db.today.suggested): ready, then
-        # planned, then unscheduled. The view drops a live item and keeps the first three per repo. Each detail says why;
+        # planned, then unscheduled. The view drops a live item and keeps the first six per repo (sd:7869). Each detail says why;
         # a row that is not ready shows its status and offers no Build.
         def row(n, why, status, priority=None, due=None):
             return {"id": n, "repo": "~/repos/example/system", "title": f"Next {n}", "status": status, "why": why,
@@ -1312,8 +1364,8 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         found = re.findall(r'<tr class="child" data-type="suggested" data-item="(\d+)".*?<td class="detail">(.*?)</td>',
                            out["R"]["html"], re.S)
         self.assertEqual(found, [("60", "ready · P1"), ("80", "planned for 2026-09-20 · P2 · planning"),
-                                 ("81", "unscheduled P0 · planning")])
-        self.assertIn('aria-label="1 merging, 3 working, 2 next, 2 blocked, 3 suggested"', out["R"]["html"])
+                                 ("81", "unscheduled P0 · planning"), ("82", "unscheduled · ready")])
+        self.assertIn('aria-label="1 merging, 3 working, 2 next, 2 blocked, 4 suggested"', out["R"]["html"])
         self.assertEqual(out["R"]["build"], "a build takes a ready task; this one is planning")
 
     def test_suggested_leaves_out_an_item_with_no_repo_so_no_unassociated_group_shows(self):
@@ -1371,6 +1423,53 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertNotIn("assignment 7 ·", out["R"]["alpha"])
         self.assertIn("<b>queued</b> · assignment 41", out["R"]["sd"])
         self.assertEqual(out["R"]["count"], 10)
+
+    def test_an_item_waiting_on_its_pull_request_is_blocked_by_it_not_working(self):
+        # pack sd:7859 (operator 2026-11-06): live item 40's PR waits on the operator, item 44's on reviewers. Each is a
+        # blocked row naming who it waits on and for how long; item 40 is no working row, and no suggested row either.
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["prs"] = {"error": "", "rows": [
+            {"item": 40, "title": "Live work", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/40",
+             "lane": "awaiting_you", "on": "you", "since": "2026-09-06T11:00:00+00:00", "waited": 3600},
+            {"item": 44, "title": "Reviewed", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/44",
+             "lane": "awaiting_them", "on": "reviewers", "since": "2026-09-06T10:00:00+00:00", "waited": 7260}]}
+        self.doc["queues"]["suggested"] = [{"id": 40, "repo": "~/repos/example/system", "title": "Live work", "status": "in_progress",
+                                            "why": "planned", "due": "2026-09-08", "priority": 1}]
+        out = self.run_view("open('system'); R.html = ELS.queue.html; R.kids = kids();", search="?show=suggested",
+                            answers={"/api/queue": [200, lanes]})
+        html = out["R"]["html"]
+        self.assertNotIn('data-id="live:40"', html)
+        self.assertNotIn('data-type="suggested" data-item="40"', html)
+        rows = dict(re.findall(r'<tr class="child" data-type="blocked" data-pr="(\d+)">(.*?)</tr>', html, re.S))
+        self.assertEqual(sorted(rows), ["40", "44"])
+        self.assertIn('<span class="g-warning" aria-hidden="true">■</span><span class="sr">needs you · </span>blocked', rows["40"])
+        self.assertIn("<b>blocked: PR</b> · on you · waited 1h 0m", rows["40"])
+        self.assertIn('href="https://github.com/example/system/pull/40"', rows["40"])
+        self.assertIn('<span class="sr">waiting · </span>blocked', rows["44"])
+        self.assertIn("<b>blocked: PR</b> · on reviewers · waited 2h 1m", rows["44"])
+        self.assertEqual(out["R"]["kids"].count("working"), 2, "the lane builders stay; the live item is gone")
+        self.assertIn('aria-label="1 merging, 2 working, 2 next, 4 blocked, 0 suggested"', html)
+
+    def test_a_prepared_entry_whose_pr_waits_on_review_is_one_row_that_leads_with_the_wait(self):
+        # pack sd:7859: item 5 stopped prepared in a manual-merge lane; its PR waits on reviewers. One row, Approve kept.
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["prs"] = {"error": "", "rows": [
+            {"item": 5, "title": "Prepared only", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/5",
+             "lane": "awaiting_them", "on": "reviewers", "since": "2026-09-06T10:00:00+00:00", "waited": 7200}]}
+        out = self.run_view("open('system'); R.html = ELS.queue.html;", answers={"/api/queue": [200, lanes]})
+        rows = re.findall(r'<tr class="child" data-type="blocked"[^>]*data-pr="5">(.*?)</tr>', out["R"]["html"], re.S)
+        self.assertEqual(len(rows), 1, "the lane row and the PR wait are one row")
+        self.assertIn("<b>blocked: PR</b> · on reviewers · waited 2h 0m", rows[0])
+        self.assertIn('<span class="sr">waiting · </span>blocked', rows[0])
+        self.assertIn('data-act="approve" data-item="5"', rows[0])
+        self.assertIn('href="https://github.com/example/system/pull/5"', rows[0])
+        self.assertEqual(out["R"]["html"].count('data-item="5"'), 2, "Retry and Approve, on that one row")
+
+    def test_a_pr_wait_that_was_not_read_is_said_under_the_table(self):
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["prs"] = {"rows": [], "error": "pull-request waits were not read: OperationalError: database is locked"}
+        out = self.run_view("R.note = ELS['queue-note'].textContent;", answers={"/api/queue": [200, lanes]})
+        self.assertIn("pull-request waits were not read: OperationalError: database is locked", out["R"]["note"])
 
     def test_a_click_on_a_live_row_shows_its_details_and_keeps_its_fix_and_open_commands(self):
         out = self.run_view("open('system'); ELS.queue.listeners.click[0]({ target: { closest: s => s === 'tr[data-id]' ? "
@@ -1553,7 +1652,7 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
     def test_each_filter_counts_the_rows_of_repos_it_would_add(self):
         out = self.run_view("R.filters = ELS['queue-filters'].html;")
         counts = dict(re.findall(r'data-v="(\w+)" aria-pressed="false">[^<]+<span class="n">(\d+)</span>', out["R"]["filters"]))
-        self.assertEqual(counts, {"suggested": "4", "open": "0", "ended": "3"})
+        self.assertEqual(counts, {"suggested": "5", "open": "0", "ended": "3"})
 
     # pack sd:7251 (#41066): with Suggested off, All items shows the ready items Suggested would; on, each shows once.
     def test_all_items_alone_shows_the_ready_items_suggested_holds(self):

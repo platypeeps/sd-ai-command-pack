@@ -69,6 +69,9 @@ LEAK_GUARD = CHECKOUT / "local-leak-guard" / "leak-guard.sh"
 TARGETS = ("github", "jira")
 TRACKER = {"github": "GitHub", "jira": "Jira"}
 MODEL_TIMEOUT = 180
+#: How long a stopped run's pipes are read once it is killed: a grandchild a refused group kill left can hold
+#: them open (sd:7910).
+REAP_SECONDS = 5
 FILE_TIMEOUT = 60
 SCAN_TIMEOUT = 20
 GIT_SECONDS = 10
@@ -485,8 +488,18 @@ def _model(document: dict, log: Path) -> str:
         try:
             out, _ = child.communicate(text, timeout=MODEL_TIMEOUT)
         except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.communicate()
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError:  # EPERM: macOS for an exiting group, or a sandbox (sd:7900)
+                child.kill()
+            try:
+                child.communicate(timeout=REAP_SECONDS)
+            except subprocess.TimeoutExpired:
+                # A grandchild the group kill missed holds stdout; the run is dead, so stop reading it.
+                child.stdout.close()
+                child.wait()
             raise TimeoutError(f"claude -p gave no answer in {MODEL_TIMEOUT} s") from None
     if child.returncode != 0:
         said = [line for line in log.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]

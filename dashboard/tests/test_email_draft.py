@@ -179,6 +179,16 @@ class TheFailures(DraftCase):
         self.assertEqual(self.last_note(item)["body"], said)
         self.assert_gone(self.written())
 
+    def test_a_timeout_whose_group_kill_is_refused_still_ends_the_run(self):
+        # sd:7900: macOS or a sandbox answers EPERM to killpg; the run's own process is killed instead.
+        began = time.monotonic()
+        with self.hung(), patch.object(email_draft, "MODEL_TIMEOUT", 1), \
+                patch.object(email_draft.os, "killpg", side_effect=PermissionError(1, "Operation not permitted")):
+            status, _, answer = self.draft(self.task())
+        self.assertLess(time.monotonic() - began, patience(10))
+        self.assertEqual((status, answer["error"]),
+                         (504, "Draft email failed: claude -p gave no answer in 1 s. No Gmail draft was saved."))
+
     def test_a_run_slow_to_reach_its_hang_still_loses_its_child(self):
         # sd:6299: under load the double reached its hang after the 1 s bound; the stall makes that certain.
         (self.double / "stall").write_text("")

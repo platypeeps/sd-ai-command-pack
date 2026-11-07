@@ -470,7 +470,7 @@ function shellRun(c, o) {
   document.dispatchEvent(new CustomEvent('shell:ran', { detail: { cmd: c.id, obj: o.id } }));
 }
 C.run = shellRun;
-// shell.js's runBulk: runEach starts one run per picked object in the same tick, settled by settleBulk. A command with
+// shell.js's runBulk: runEach starts BULK_RUNS runs, each next as one settles, settled by settleBulk. A command with
 // batch(objs, done) takes the whole group in one call instead (handOver, sd:2590); done() clears the picks, recorded here.
 // A command with fields asks once for the group, and every row's run gets what was typed (sd:3012).
 function shellBulk(c, objs) {
@@ -485,7 +485,7 @@ function shellBulk(c, objs) {
 }
 C.runBulk = shellBulk;
 function shellToast(msg, undo) { OUT.toasts.push({ msg: msg, undo: undo || null }); }
-window.shell = { commands: C, post, getJSON, shown: stillShown, itemHref, itemPage, openItem, ICON: () => mk`<svg></svg>`, toast: shellToast, shq: s => `'${String(s ?? '').replace(/'/g, "'\\''")}'`,
+window.shell = { afterBulk, commands: C, post, getJSON, shown: stillShown, itemHref, itemPage, openItem, ICON: () => mk`<svg></svg>`, toast: shellToast, shq: s => `'${String(s ?? '').replace(/'/g, "'\\''")}'`,
   suggest() {}, openPane() {}, url() {}, chording: () => false, reconcile() {}, capture() {},
   // The Shapeshift bar's text (shell.filter, sd:5539): a page sets it with this and hears it as shell:filter.
   filter: q => (OUT.shift = String(q ?? '').trim()),
@@ -575,6 +575,26 @@ OUT.result = await settleBulk(c, objs, runEach(c, objs), { toast, plural }); OUT
         self.assertEqual(out["ran"], ["1", "3"])
         self.assertEqual(out["result"], {"landed": 2, "stale": 0, "failed": 1})
         self.assertEqual(out["toasts"], [["Move · 2 items · 1 of 3 not changed: #2 (the task is no longer listed)", True]])
+
+    def test_thirty_picks_run_three_at_a_time_and_a_reread_waits_for_the_group(self):
+        """pack sd:7852: runEach started every picked row at once, thirty requests for thirty picks, and each row's
+        reread ran as it landed. Three run at a time now, each next as one settles; the group still toasts once, its
+        Undo runs three at a time too, and a reread asked for during the group runs once, after it."""
+        out = self.settle(self.COMMAND + """const held = [], objs = Array.from({ length: 30 }, (_, i) => obj(i + 1));
+let now = 0, most = 0; OUT.reread = 0;
+const hold = () => new Promise(ok => { now++; most = Math.max(most, now); held.push(() => { now--; ok('v'); }); });
+c.run = o => hold().then(v => { afterBulk('page', () => { OUT.reread++; }); return v; });
+const p = settleBulk(c, objs, runEach(c, objs), { toast, plural }); OUT.first = held.length;
+while (held.length) { held.shift()(); await flush(); }
+OUT.result = await p; await flush(); OUT.most = most;
+c.undo = () => hold(); most = 0; OUT.toasts[0].undo(); await flush(); OUT.undoFirst = held.length;
+while (held.length) { held.shift()(); await flush(); }
+OUT.undoMost = most; afterBulk('page', () => { OUT.reread += 10; });""")
+        self.assertEqual((out["first"], out["most"]), (3, 3))
+        self.assertEqual(out["result"], {"landed": 30, "stale": 0, "failed": 0})
+        self.assertEqual(out["reread"], 11, "one reread after the group, and one at once with no group running")
+        self.assertEqual((out["undoFirst"], out["undoMost"]), (3, 3))
+        self.assertEqual(out["toasts"], [["Move · 30 items", True], ["Move undone · 30 of 30 reversed", False]])
 
     def test_a_bulk_group_with_nothing_landed_offers_no_undo(self):
         out = self.settle(self.COMMAND + """await settleBulk(c, [obj(1)], [Promise.reject(new Error('refused'))], { toast, plural });""")
@@ -2014,12 +2034,12 @@ open('{ask}'); await flush(); RELEASE(); await flush(); await flush(); R.det = E
 
     def test_a_refused_fix_says_why_and_offers_no_undo(self):
         plan = self.ids["plan"]
-        answer = """(path, body) => [503, { error: 'No session started: herdr.sh launch: session sd is not running; run herdr.sh start first' }]"""
+        answer = """(path, body) => [503, { error: 'No session started: herdr.sh launch: session sd is not running and did not start: herdr --session sd server exited 1' }]"""
         out = self.run_page(f"""R.on = cmd('item.fix').when(C.get('{plan}'));
 shellRun(cmd('item.fix'), C.get('{plan}')); await flush();""", answer)
         self.assertTrue(out["R"]["on"])
         self.assertEqual(len(out["posts"]), 1)
-        self.assertIn("run herdr.sh start first", out["toasts"][-1][0])
+        self.assertIn("did not start: herdr --session sd server exited 1", out["toasts"][-1][0])
         self.assertFalse(out["toasts"][-1][1])
 
     def test_a_failed_launch_reads_the_tasks_again_so_details_show_its_note(self):

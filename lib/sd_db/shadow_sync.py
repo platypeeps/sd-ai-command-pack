@@ -1005,6 +1005,8 @@ class Synced:
     intake_incomplete: list[str] = field(default_factory=list)
     #: What `pr_attention` filed and cleared after the sync (sd:6712); never a failure of the sync.
     attention: list[str] = field(default_factory=list)
+    #: What the pull-request lane pass could not link or note (sd:7859); a side observation, never a failure.
+    lanes: list[str] = field(default_factory=list)
 
     def report(self) -> list[str]:
         lines = [
@@ -1025,6 +1027,8 @@ class Synced:
         if self.intake_incomplete:
             lines.append(f"shadow sync: intake sweep incomplete: {'; '.join(self.intake_incomplete)}")
         lines += [f"shadow sync: {line}" for line in self.attention]
+        if self.lanes:
+            lines.append(f"shadow sync: pull-request lanes: {'; '.join(self.lanes)}")
         return lines
 
 
@@ -1197,6 +1201,8 @@ def _sync(
     # the tracker exists for. It is a side observation: it cannot fail this
     # sync, hold the watermark, or touch `result` beyond the requests it spent.
     _observe_protection(connection, client, iso(moment))
+    # The pull-request lane notes are a side observation too (sd:7859): said in `lanes`, never `result.ok`.
+    lanes = contribution_sync.note_lanes(connection)
     result.requests = budget.requests
     # Collection holds no write lock. Recheck the cursor under the transaction
     # because another collector can complete while this one waits for GitHub.
@@ -1223,7 +1229,7 @@ def _sync(
                   "window_start": result.window_start, "window_end": result.window_end,
                   "requests": result.requests, "coverage": result.coverage,
                   "queued": detail["queued"], "incomplete": detail["incomplete"],
-                  "intake_incomplete": result.incomplete, "revisit_unsettled": unsettled},
+                  "intake_incomplete": result.incomplete, "revisit_unsettled": unsettled, "lanes": lanes},
         )
     contribution_sync.dispatch_pending(connection, notifier=notifier, keys=detail["completed_keys"],
                                        deadline=budget.deadline)
@@ -1242,6 +1248,7 @@ def _sync(
         incomplete=detail["incomplete"],
         intake_incomplete=result.incomplete,
         attention=attention,
+        lanes=lanes,
     )
 
 
