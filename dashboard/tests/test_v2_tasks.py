@@ -2272,6 +2272,19 @@ shellRun(cmd('item.email'), C.get('{plan}')); await flush();""", answer)
         self.assertEqual(out["posts"], [[f"/api/items/{plan}/draft-email", {"revision": self.row("plan")["revision"]}, 64]])
         self.assertEqual(out["toasts"], [[f'Draft saved · #{plan} · "The plan is ready" · in Gmail Drafts, not sent', False]])
 
+    def test_a_draft_email_past_the_item_write_bound_still_lands_its_answer(self):
+        # sd:8033 review: the 30 s bound is for the item's status and field writes. Draft email runs a model and Gmail
+        # (email_draft: 120 s plus 30 s), so its post keeps the browser's wait: a 40 s draft still lands its answer.
+        plan = self.ids["plan"]
+        answer = f"""(path, body) => [200, {{ item: {{ id: {plan}, status: 'planning', priority: 2, due: '2026-09-09', recurrence: null }},
+  notes: [], revision: 'd'.repeat(64), draft: {{ subject: 'The plan is ready', id: 'r-1', link: 'https://mail.google.com/mail/#drafts' }} }}]"""
+        prelude = "var AbortSignal = { timeout: ms => ({ timedOut: true }) };\n"
+        out = self.run_page(f"""const F = fetch;
+fetch = (path, o) => o && o.signal && o.signal.timedOut
+  ? Promise.reject(Object.assign(new Error('signal timed out'), {{ name: 'TimeoutError' }})) : F(path, o);
+shellRun(cmd('item.email'), C.get('{plan}')); await flush();""", answer, prelude=prelude)
+        self.assertEqual(out["toasts"], [[f'Draft saved · #{plan} · "The plan is ready" · in Gmail Drafts, not sent', False]])
+
     def test_draft_email_is_off_for_a_kind_it_does_not_fit_and_a_failure_reads_again(self):
         plan, ask, port = self.ids["plan"], self.ids["ask"], self.ids["port"]
         answer = """(path, body) => [504, { error: 'Draft email failed: claude -p gave no answer in 120 s. No Gmail draft was saved.' }]"""
