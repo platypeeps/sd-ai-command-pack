@@ -775,25 +775,26 @@ class TheLedgerCanBeWrittenWithoutWaiting(JudgmentCase):
     """
 
     def test_a_zero_timeout_refuses_a_locked_table_at_once(self):
-        import sqlite3
-        import time
-
+        """The connection's own wait is read, not timed (sd:7942): a
+        wall-clock bound failed under gate load at 1.03 s."""
         holder = connect(self.path)
         self.addCleanup(holder.close)
         holder.execute("BEGIN IMMEDIATE")
         fast = connect(self.path, busy_timeout=0)
         self.addCleanup(fast.close)
-        started = time.monotonic()
-        with self.assertRaises(sqlite3.OperationalError):
+        self.assertEqual(
+            fast.execute("PRAGMA busy_timeout").fetchone()[0], 0)
+        with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
             record(fast, caller="c", stage="s", provider="p",
                    primitive="noul", outcome="ok", now=AT)
-        waited = time.monotonic() - started
-        # The wait SQLite allows is what this measures; the clock only
-        # separates no wait from the default 5 s one. A 1 s bound failed a
-        # loaded gate at 1.03 s (sd:7935).
-        self.assertEqual(fast.execute("PRAGMA busy_timeout").fetchone()[0], 0)
-        self.assertLess(waited, 2.5, f"waited {waited:.2f}s for a locked table")
         holder.execute("ROLLBACK")
+
+    def test_the_check_holds_on_a_slow_clock(self):
+        """REGRESSION (sd:7942). The check reads no clock, so a loaded
+        machine whose every clock read jumps a second cannot fail it."""
+        ticks = iter(range(0, 10_000))
+        with mock.patch("time.monotonic", lambda: float(next(ticks))):
+            self.test_a_zero_timeout_refuses_a_locked_table_at_once()
 
     def test_the_default_still_waits_for_a_busy_database(self):
         """The library's own callers are waited on by a person; they keep the

@@ -290,7 +290,9 @@ the same reach.
 - The merge closes the items only once `contribution_sync` observes it,
   which runs on its own schedule.
 - The draft's "needs you" reason waits for the first observation.
-- The gate's exit 125 and 127 readings are pack sd:7899.
+- A check's own exit 125 is a failure; the gate's refusal (125) ends
+  its stderr with `NOT_STARTED` and reads unknown (pack sd:7899).
+  A 127 still reads as a check failure.
 - Evidence: the watch ties a merge to the run by the pull request URL
   the run recorded and the observation keyed by that URL; the tests'
   pass is tied to the head the review read.
