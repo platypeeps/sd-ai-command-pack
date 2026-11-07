@@ -363,10 +363,24 @@ def dispatcher_beat(connection, host: str) -> int | None:
     ahead does not read: its age is unknown, not fresh, and `_ahead` names
     it (pack sd:7955).
     """
-    age = _beat_age(connection, host)
-    if age is None or age < -STALE_SECONDS:
+    row = _beat(connection, host)
+    age = _lead_age(row["timestamp"], clock()) if row else None
+    return None if age is None else int(age)
+
+
+def _lead_age(stamp: str | None, now: str) -> float | None:
+    """Seconds since `stamp`, written on another machine's clock, read on this one at `now`; None when unknown.
+
+    A stamp up to `STALE_SECONDS` ahead is skew and reads as age 0, the
+    width staleness allows behind. One further ahead, or one that does not
+    read, has no age to trust: None, never fresh. The dispatcher beat and
+    the run beat the hub strands on both take it (pack sd:7955, sd:7970).
+    """
+    try:
+        age = _age(stamp, now) if stamp else None
+    except (TypeError, ValueError):
         return None
-    return max(int(age), 0)
+    return None if age is None or age < -STALE_SECONDS else max(age, 0.0)
 
 
 def _beat_age(connection, host: str) -> float | None:
@@ -1371,7 +1385,11 @@ def _strand(connection, hosts: Collection[str | None], *, now: str) -> list[dict
     rounds 3 and 4).
 
     Quiet is `dispatcher_gone` for the run's host and no run beat for
-    `STALE_SECONDS`. A missing beat does not prove that host's processes
+    `STALE_SECONDS`, read by `_lead_age`: that host stamps the beat on its
+    own clock, so one too far ahead has no age and is no beat (pack
+    sd:7970). A dispatcher beat too far ahead (`_ahead`) is a fast clock,
+    not a dead dispatcher: that host's ticks still reap its own runs, so
+    the hub leaves them. A missing beat does not prove that host's processes
     stopped, so the run keeps its lease: it ends `blocked` with the reason
     (a pending cancel named in it), unreleased, and no Retry or claim takes
     its items until that host's own reap reads its groups gone and releases
@@ -1381,12 +1399,14 @@ def _strand(connection, hosts: Collection[str | None], *, now: str) -> list[dict
     settled: list[dict] = []
     for row in open_runs(connection):
         host = run_host(row["owner"])
-        if (mine(row, hosts) or host is None or row["outcome"] is not None or row["step"] in LANE_STEPS
-                or _age(row["heartbeat_at"] or row["created_at"], now) < STALE_SECONDS):
+        if mine(row, hosts) or host is None or row["outcome"] is not None or row["step"] in LANE_STEPS:
+            continue
+        quiet = _lead_age(row["heartbeat_at"] or row["created_at"], now)
+        if quiet is not None and quiet < STALE_SECONDS:
             continue
         gone = dispatcher_gone(connection, host)
-        if gone is None:
-            continue
+        if gone is None or _ahead(connection, host) is not None:
+            continue  # a beat too far ahead is skew: that host's ticks still reap its own runs
         detail = f"{host}'s dispatcher went quiet ({gone}) and the run sent no beat for {STALE_SECONDS} s"
         if row["cancel_requested"]:
             detail = f"{row['cancel_requested']}, but {detail}"

@@ -1588,6 +1588,40 @@ class Hosts(Case):
         self.assertIsNotNone(build.run(self.db, run["id"])["released_at"], "work's own probe releases it")
         self.assertFalse(self.lease_held(run))
 
+    def test_the_hub_strands_a_run_whose_beat_leads_past_stale_seconds(self):
+        """Pack sd:7970: a run beat is stamped on its satellite's clock, so it takes the dispatcher beat's lead
+        rule. A lead up to `STALE_SECONDS` is skew and reads as age 0; one further has no age to trust, so a
+        quiet dispatcher strands the run, not a wall clock that has yet to catch up."""
+        run = self.satellite_run()
+        now = later(run["created_at"], build.STALE_SECONDS + 1)
+        self.quiet()
+        for lead in (60, build.STALE_SECONDS):
+            with self.subTest(lead=lead):
+                self.db.execute("UPDATE runner_run SET heartbeat_at = ? WHERE id = ?", (later(now, lead), run["id"]))
+                self.assertEqual(self.strand(run), [], f"a beat {lead} s ahead is a fresh beat")
+                self.assertIsNone(build.run(self.db, run["id"])["outcome"])
+        self.db.execute("UPDATE runner_run SET heartbeat_at = ? WHERE id = ?", (later(now, 3600), run["id"]))
+        [settled] = self.strand(run)
+        self.assertEqual((settled["run"], settled["outcome"]), (run["id"], "blocked"))
+        self.assertIsNone(build.run(self.db, run["id"])["released_at"], "the lease stays until work reads it gone")
+        self.assertTrue(self.lease_held(run))
+
+    def test_the_hub_leaves_the_runs_of_a_satellite_whose_clock_runs_fast(self):
+        """Review of 563ab61fd: a dispatcher beat too far ahead names skew, not a dead dispatcher. That host's
+        ticks still beat and reap its own runs, so the hub strands none of them, run beat ahead or not."""
+        run = self.satellite_run()
+        now = later(run["created_at"], build.STALE_SECONDS + 1)
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={},
+                     timestamp=later(build.clock(), 3600))
+        self.assertIsNotNone(build.dispatcher_gone(self.db, "work"), "the press and the claim still refuse")
+        for beat in (later(now, 3600), None):
+            with self.subTest(beat=beat):
+                self.db.execute("UPDATE runner_run SET heartbeat_at = ? WHERE id = ?", (beat, run["id"]))
+                self.assertEqual(self.strand(run), [])
+                self.assertIsNone(build.run(self.db, run["id"])["outcome"], "the run stays open")
+        self.assertNotIn("went quiet", self.count("SELECT COALESCE(detail, '') FROM runner_run WHERE id = ?",
+                                                  run["id"]))
+
     def test_a_cancel_on_a_quiet_satellite_blocks_and_keeps_the_lease(self):
         run = self.satellite_run()
         lead = run["assignment"]
