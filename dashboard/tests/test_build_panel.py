@@ -85,6 +85,19 @@ class BuildRoutes(Fixture):
         self.assertEqual([row["id"] for row in out["refused"]], [planning])
         self.assertEqual((out["room"]["machine"], out["room"]["why"], out["bundles"][0]["room"]), (6, "", 3))
 
+    def test_the_plan_names_the_satellite_that_runs_a_bundle(self):
+        """Pack sd:7933: a satellite lane's bundle names its host and none of the hub's room."""
+        hub = self.ready()
+        upsert_repo(self.connection, "/fixture/repos/sat", remote="/fixture/remote-sat", managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/repos/sat'")
+        sat = self.item("Build me there", kind="task", status="ready", repo="/fixture/repos/sat")
+        out = builds.plan(self.connection, [hub, sat], now=NOW,
+                          sessions=lambda connection, *, now: {"sessions": [], "builders": {"running": 0, "why": ""}},
+                          gate=lambda: {"load": [1.0, 1.0, 1.0], "load_max": 40.0})
+        self.assertEqual(out["refused"], [])
+        self.assertEqual([(bundle["name"], bundle["host"], bundle["room"]) for bundle in out["bundles"]],
+                         [("alpha", "", 3), ("sat", "work", 0)])
+
     def test_the_plan_shows_no_room_when_the_load_was_not_read(self):
         out = builds.plan(self.connection, [self.ready()], now=NOW,
                           sessions=lambda connection, *, now: {"sessions": [], "builders": {"running": 0, "why": ""}},
@@ -133,6 +146,21 @@ class BuildsPanel(Fixture):
         self.assertIsNotNone(build.run(self.connection, run["id"])["cancel_requested"])
         again = builds.panel(self.connection, now=run["created_at"])["runs"][0]["cancel"]
         self.assertFalse(again["allowed"])
+
+    def test_a_satellite_run_names_its_host_and_reads_no_log_here(self):
+        """Pack sd:7933, failure table Report back: the hub reads no log path a satellite's run names."""
+        run = self.claimed([self.ready()])
+        log = self.path.parent / "sat.jsonl"
+        log.write_text("{}\n")
+        self.connection.execute("UPDATE runner_run SET owner = 'build-dispatch@work', log_path = ? WHERE id = ?",
+                                (str(log), run["id"]))
+        row = builds.panel(self.connection, now="2099-01-02T01:00:00Z")["runs"][0]
+        self.assertEqual((row["host"], row["log"], row["quiet"]), ("work", str(log), None))
+        hub = self.claimed([self.ready()])
+        self.connection.execute("UPDATE runner_run SET log_path = ? WHERE id = ?", (str(log), hub["id"]))
+        rows = {row["run"]: row for row in builds.panel(self.connection, now="2099-01-02T01:00:00Z")["runs"]}
+        self.assertEqual(rows[hub["id"]]["host"], "")
+        self.assertIsNotNone(rows[hub["id"]]["quiet"], "the hub's own run's log is read")
 
     def test_a_teammate_run_is_a_working_row_with_its_worktree_due_time_and_no_cancel(self):
         """pack sd:7221: a lead's in-session builder shows beside the headless runs; past its budget it is stalled."""

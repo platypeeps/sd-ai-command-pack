@@ -195,7 +195,7 @@
         <p class="why">${room}</p>
         ${P.refused.length ? html`<p class="why">▲ Nothing can be queued while one item is refused:</p>
           <ul class="start-list">${P.refused.map(r => html`<li><code>#${String(r.id)}</code> ${r.why}</li>`)}</ul>` : ''}
-        ${P.bundles.map(b => html`<section class="build-bundle" aria-label="Bundle in ${b.name}"><h3>${b.name} <small>${b.model} · branch ${b.branch} · ${b.room ? `${b.room} may start now` : 'waits for room'}</small></h3>
+        ${P.bundles.map(b => html`<section class="build-bundle" aria-label="Bundle in ${b.name}"><h3>${b.name} <small>${b.model} · branch ${b.branch} · ${b.host ? `runs on ${b.host}, whose dispatcher claims it` : b.room ? `${b.room} may start now` : 'waits for room'}</small></h3>
           <ol class="start-list">${b.items.map(r => html`<li><code>#${String(r.id)}</code> ${r.title}</li>`)}</ol></section>`)}
         <p class="why">One run per bundle, ${String(P.budget_minutes)} min each. The items lock until each run ends; Cancel on Queue › Builds stops one.</p>
         <div class="actions">

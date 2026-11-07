@@ -25,6 +25,10 @@ the head, behind the enqueuing compare-and-set that a requested cancel fails.
 The same tick reaps and claims draft runs (`sd_db.draft`, pack sd:6361), one
 at a time, and `DraftSupervisor` walks one: a read-only `claude -p` in the
 repository's checkout, its reply parsed and written by `draft.write`.
+
+The hub's tick and each satellite's act only on their own lanes' runs
+(`build.lane_hosts`, pack sd:7933): design
+`docs/work/2026-11-06-build-per-host/design.md`.
 """
 
 from __future__ import annotations
@@ -62,7 +66,7 @@ READ_SECONDS = 120
 DISPOSABLE = frozenset({"__pycache__", ".ruff_cache", ".mypy_cache", ".pytest_cache"})
 #: The pack checkout this module runs from: its `dashboard/dashboard.sh` is the health check.
 PACK = Path(__file__).resolve().parents[2]
-#: The `heartbeat` state row the tick writes first.
+#: The `heartbeat` state row the tick writes first; a satellite's tick writes `<key>@<host>` (pack sd:7933).
 HEARTBEAT = "build-dispatch"
 #: The lane entry states that end an `enqueued` run without a merge: the lane's `BLOCKED` ends, which
 #: `lane retry` queues again (`prepared` is a merge the lane refused), and a cancel.
@@ -290,16 +294,19 @@ def _lead_item(connection, ident: str) -> tuple[int, list[int]]:
     return members[0]["item"], [member["item"] for member in members[1:]]
 
 
-def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=Probe) -> list[dict]:
+def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=Probe,
+          hosts: Collection[str | None] | None = None) -> list[dict]:
     """Step 7's start: each open `enqueued` run whose lane entry merged moves to `cleaning`; one whose entry
     failed, was skipped or was cancelled ends `lane_failed`. An unread lane changes nothing this tick.
     One that failed only on prepare's merge of main also goes back to its builder (`build.lane_failed`, sd:6940).
 
     A merged or failed run moves only once `verdict` reads its last supervisor and child gone, so the fresh
-    supervisor or rebuild never shares the worktree.
+    supervisor or rebuild never shares the worktree. Only the runs of `hosts`
+    (`build.lane_hosts` when None) are watched: another host's lane and pids
+    are that host's to read (pack sd:7933).
     """
     moved = []
-    for row in build.open_runs(connection):
+    for row in build.open_runs(connection, build.lane_hosts(connection) if hosts is None else hosts):
         if row["step"] != "enqueued" or row["outcome"] is not None:
             continue
         delivered = [member["item"] for member in build.run(connection, row["id"])["members"]
@@ -320,7 +327,7 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
     return moved
 
 
-def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
+def sweep(connection, *, git: Collection[str] = ("git",), hosts: Collection[str | None] | None = None) -> list[str]:
     """Remove each build worktree, and its branch, that no run owns any more once every item it names is done.
 
     A blocked or cancelled run keeps its worktree for Retry, and a later build
@@ -335,9 +342,13 @@ def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
     head is first kept at `refs/sd-swept/<branch>`, outside `refs/heads`, and
     a note on the lead item names it; a head that cannot be kept removes
     nothing. `git branch <name> refs/sd-swept/<name>` brings it back.
+
+    Only the worktrees of `hosts`' runs (`build.lane_hosts` when None) are
+    swept: a path another host's run names is on that host's disk (pack sd:7933).
     """
+    hosts = build.lane_hosts(connection) if hosts is None else hosts
     rows = connection.execute(
-        "SELECT runner_run.work_path, runner_run.repo, runner_run.branch, runner_run.session_id, "
+        "SELECT runner_run.work_path, runner_run.repo, runner_run.branch, runner_run.session_id, runner_run.owner, "
         "runner_run.released_at, item.status, item.id AS item, "
         "assignment.id = runner_run.assignment AS lead FROM runner_run "
         "JOIN assignment ON assignment.id = runner_run.assignment OR assignment.parent = runner_run.assignment "
@@ -345,6 +356,8 @@ def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
         (build.SCOPE,)).fetchall()
     paths_: dict[str, dict] = {}
     for row in rows:
+        if not build.mine(row, hosts):
+            continue
         entry = paths_.setdefault(row["work_path"], {"repo": row["repo"], "branch": row["branch"], "keep": False,
                                                      "sessions": set(), "lead": row["item"]})
         entry["keep"] |= row["released_at"] is None or row["status"] != "done"
@@ -391,23 +404,35 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     """One tick: heartbeat, reap, watch the lane, sweep, claim, spawn; what each did.
 
     `load`, `load_cap` and `interactive` are read before the claim, outside
-    the database; any unread (None) means no claim this tick, as does `why`,
-    a reason the caller found (such as an unwritable log folder).
+    the database; any unread (None) means no claim this tick, and `why` names
+    it, as it names a reason the caller found (such as an unwritable log folder).
+
+    Each step takes only this machine's runs and lanes (`build.lane_hosts`,
+    pack sd:7933). Auto-pickup, its stop on blocks and the drafts run on the
+    hub only: a satellite's tick reaps, watches, sweeps, claims and spawns.
     """
-    record_state(connection, "heartbeat", key=HEARTBEAT, body={"pid": os.getpid(), "owner": owner})
-    reaped = build.reap(connection, probe=probe, kill=kill) + draft.reap(connection, probe=probe, kill=kill)
-    moved = watch(connection, lane=lane, probe=probe)
-    swept = sweep(connection)
-    stopped = build.stop_on_blocks(connection)
+    hosts = build.lane_hosts(connection)
+    hub = None in hosts
+    record_state(connection, "heartbeat", key=HEARTBEAT if hub else f"{HEARTBEAT}@{build.this_host()}",
+                 body={"pid": os.getpid(), "owner": owner})
+    reaped = build.reap(connection, probe=probe, kill=kill, hosts=hosts)
+    if hub:
+        reaped += draft.reap(connection, probe=probe, kill=kill, hosts=hosts)
+    moved = watch(connection, lane=lane, probe=probe, hosts=hosts)
+    swept = sweep(connection, hosts=hosts)
+    stopped = build.stop_on_blocks(connection) if hub else None
     picked: list[int] = []
     if not why:
-        picked = build.pickup(connection, build.room(connection, load=load, load_cap=load_cap,
-                                                     interactive=interactive))
+        available = build.room(connection, load=load, load_cap=load_cap, interactive=interactive, hosts=hosts)
+        # An unread input claims nothing; the tick says which (pack sd:7933, design "Claim, load unread").
+        why = available["why"] if available["why"] in build.UNREAD else ""
+    if not why and hub:
+        picked = build.pickup(connection, available)
     claimed: list[str] = []
     while not why and len(claimed) < build.MACHINE_CAP:
         try:
             taken = build.claim(connection, owner=owner, load=load, load_cap=load_cap, interactive=interactive,
-                                root=root)
+                                root=root, hosts=hosts)
         except build.BuildRefused as refusal:
             why = str(refusal)
             break
@@ -415,13 +440,13 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
             break
         claimed.append(taken["id"])
     drafted: list[str] = []
-    if not why:
+    if not why and hub:
         # After the builds: a draft takes what machine room they leave, and no repository slot.
-        available = build.room(connection, load=load, load_cap=load_cap, interactive=interactive)
+        available = build.room(connection, load=load, load_cap=load_cap, interactive=interactive, hosts=hosts)
         taken = draft.claim(connection, owner=owner, available=available)
         drafted += [taken["id"]] if taken else []
     spawned = []
-    for row in [*build.open_runs(connection), *draft.open_runs(connection)]:
+    for row in [*build.open_runs(connection, hosts), *draft.open_runs(connection, hosts)]:
         if row["outcome"] is None and row["supervisor_pid"] is None and row["step"] != "enqueued":
             spawn(row["id"])
             spawned.append(row["id"])

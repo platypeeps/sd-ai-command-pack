@@ -8,6 +8,7 @@ answer from a plan file and log each call. Each fake but `claude` first
 parses its argv with the real tool's own parser, so a call the tool would
 refuse fails here too.
 """
+import contextlib
 import dataclasses
 import importlib
 import json
@@ -1046,6 +1047,16 @@ class Tick(Case):
         again = self.tick()
         self.assertEqual((again["claimed"], again["spawned"]), ([], []), "a registered run is not spawned again")
 
+    def test_an_unread_load_says_why(self):
+        """Pack sd:7933, failure table Claim, load unread: no claim, and the tick names the unread input."""
+        build.queue(self.db, [create_item(self.db, kind="task", title="Built", repo=str(self.repo),
+                                          status="ready")], who="operator")
+        for inputs, why in (({"load": None}, "the load was not read"),
+                            ({"interactive": None}, "the interactive builders were not counted")):
+            with self.subTest(inputs=inputs):
+                result = self.tick(**inputs)
+                self.assertEqual((result["claimed"], result["why"]), ([], why))
+
     def test_an_unread_input_claims_nothing(self):
         build.queue(self.db, [create_item(self.db, kind="task", title="Built", repo=str(self.repo),
                                           status="ready")], who="operator")
@@ -1237,6 +1248,16 @@ class Sweep(Case):
         result = build_run.dispatch(self.db, owner="fixture", spawn=lambda ident: None, lane=lambda row, items: None,
                                     load=1.0, load_cap=40.0, interactive=[], root=self.root / "worktrees")
         self.assertEqual(result["swept"], [str(work)])
+
+    def test_sweep_leaves_another_hosts_worktree(self):
+        """Pack sd:7933: a done bundle's worktree another host's run names is on that host's disk."""
+        work = self.blocked()
+        self.done()
+        self.db.execute("UPDATE runner_run SET owner = 'fixture@work'")
+        self.db.commit()
+        self.assertEqual(build_run.sweep(self.db, hosts={None, "hub"}), [])
+        self.assertTrue(work.is_dir())
+        self.assertEqual(build_run.sweep(self.db, hosts={"work"}), [str(work)])
 
     def test_an_open_item_keeps_the_worktree(self):
         work = self.blocked()
@@ -1467,3 +1488,106 @@ class Spawn(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Hosts(Case):
+    """Pack sd:7933: the hub's tick and a satellite's each act on their own lanes' runs only."""
+
+    def setUp(self):
+        super().setUp()
+        self.spawned: list[str] = []
+        self.entries: dict[int, Any] = {}
+        self.satellite = self.root / "satellite"
+        upsert_repo(self.db, str(self.satellite), remote="https://github.com/fixture/sat.git", managed=1)
+        self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = ?", (str(self.satellite),))
+        self.db.commit()
+        self.asked: list[int] = []
+
+    def lane(self, row, items):
+        self.asked += items
+        return next((self.entries[item] for item in items if item in self.entries), None)
+
+    def tick(self, **inputs):
+        return build_run.dispatch(self.db, owner="fixture", spawn=self.spawned.append, lane=self.lane,
+                                  root=self.root / "worktrees",
+                                  **{"load": 1.0, "load_cap": 40.0, "interactive": [], **inputs})
+
+    def on(self, host):
+        """Run the next tick as the hub (`hub`) or as the satellite `work`: this_host and served_by stubbed."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(build, "this_host", return_value=host))
+        stack.enter_context(mock.patch.object(build, "served_by",
+                                              return_value=None if host == "hub" else "hub.example.test:7000"))
+        return stack
+
+    def both(self):
+        hub = create_item(self.db, kind="task", title="Hub", repo=str(self.repo), status="ready")
+        sat = create_item(self.db, kind="task", title="Satellite", repo=str(self.satellite), status="ready")
+        build.queue(self.db, [hub, sat], who="operator")
+        return hub, sat
+
+    def test_each_tick_spawns_only_its_own_runs(self):
+        self.both()
+        with self.on("hub"):
+            hub = self.tick()
+        self.assertEqual((len(hub["claimed"]), hub["spawned"]), (1, hub["claimed"]))
+        self.assertEqual(build.run(self.db, hub["claimed"][0])["repo"], str(self.repo))
+        self.spawned.clear()
+        with self.on("work"):
+            work = self.tick()
+        self.assertEqual((len(work["claimed"]), work["spawned"]), (1, work["claimed"]), "the hub's run is not spawned")
+        self.assertEqual(build.run(self.db, work["claimed"][0])["owner"], "fixture@work")
+        with self.on("hub"):
+            self.assertEqual(self.tick()["spawned"], hub["claimed"], "nor the satellite's on the hub")
+
+    def test_each_tick_watches_only_its_own_runs(self):
+        sat = create_item(self.db, kind="task", title="Satellite", repo=str(self.satellite), status="ready")
+        build.queue(self.db, [sat], who="operator")
+        with self.on("work"):
+            run = build.claim(self.db, owner="fixture", load=1.0, load_cap=40.0, interactive=[],
+                              root=self.root / "worktrees")
+        assert run is not None
+        build.write(self.db, run["id"], step="enqueuing")
+        self.assertTrue(build.enqueued(self.db, run["id"]))
+        self.entries[sat] = {"id": "e1", "status": "merged"}
+        with self.on("hub"):
+            self.assertEqual(self.tick()["moved"], [])
+        self.assertEqual((self.asked, build.run(self.db, run["id"])["step"]), ([], "enqueued"))
+        with self.on("work"):
+            self.assertEqual(self.tick()["moved"], [{"run": run["id"], "step": "cleaning"}])
+
+    def test_a_satellite_tick_runs_no_draft_or_pickup(self):
+        build.set_pickup(self.db, True)
+        ready = create_item(self.db, kind="task", title="Ready", repo=str(self.repo), status="ready")
+        planned = create_item(self.db, kind="task", title="Draft", repo=str(self.repo), status="planning")
+        self.assertIsNotNone(draft.queue_if_eligible(self.db, planned, who="dashboard"))
+        with self.on("work"):
+            result = self.tick()
+        self.assertEqual((result["picked"], result["drafted"], result["claimed"]), ([], [], []))
+        self.assertEqual(item_state(self.db, ready)["item"]["status"], "ready")
+        self.assertIsNone(draft.queue_if_eligible(
+            self.db, create_item(self.db, kind="task", title="Sat", repo=str(self.satellite), status="planning"),
+            who="dashboard"), "a satellite lane takes no draft")
+
+    def test_a_satellite_tick_beats_its_own_key(self):
+        with self.on("work"):
+            self.tick()
+        keys = [row[0] for row in self.db.execute("SELECT key FROM state WHERE kind = 'heartbeat'")]
+        self.assertEqual(keys, [f"{build_run.HEARTBEAT}@work"], "the hub's beat is the hub's job's alone")
+
+    def test_a_satellite_pushes_nothing(self):
+        """The hub pushes every host's failures once; a satellite's tick would send each a second time."""
+        hub, _ = self.both()
+        with self.on("hub"):
+            run = build.claim(self.db, owner="fixture", load=1.0, load_cap=40.0, interactive=[],
+                              root=self.root / "worktrees")
+        assert run is not None
+        build.end(self.db, run["id"], "blocked", "the review left blockers")
+        notify = self.root / "notify"
+        notify.write_text("#!/bin/sh\nexit 0\n")
+        notify.chmod(0o755)
+        environ = {**os.environ, "SD_NOTIFY": str(notify)}
+        with mock.patch.object(database, "served_by", return_value="hub.example.test:7000"):
+            self.assertEqual(ADAPTER.push_failures(self.db, environ), [])
+        self.assertEqual(ADAPTER.push_failures(self.db, environ), [f"build:{run['id']}"])
+

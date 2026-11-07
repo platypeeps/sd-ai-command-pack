@@ -114,7 +114,8 @@ def plan(connection, items: list[int], *, now: str, sessions=None, gate=None) ->
     """What a Build press on `items` would queue: `bundles` by repository, `refused` with each reason, the `room` now.
 
     A refused item refuses the whole press, as `build.queue` does; the dialog shows why and offers no Build.
-    `room` is informative: a press queues whatever the room, and the claim waits for room.
+    `room` is informative: a press queues whatever the room, and the claim waits for room. A bundle whose lane
+    runs on a satellite names that `host`, whose dispatcher claims it; this room is not its own (pack sd:7933).
     """
     taken, refused = [], []
     for item in items:
@@ -131,7 +132,9 @@ def plan(connection, items: list[int], *, now: str, sessions=None, gate=None) ->
     for repo, rows in groups.items():
         for start in range(0, len(rows), build.BUNDLE_MAX):
             chunk = rows[start:start + build.BUNDLE_MAX]
-            bundles.append({"repo": repo, "name": Path(repo).name, "room": build.room_for(room, repo),
+            host = chunk[0]["lane_host"] or ""
+            bundles.append({"repo": repo, "name": Path(repo).name, "host": host,
+                            "room": 0 if host else build.room_for(room, repo),
                             "model": build._model(connection, [row["id"] for row in chunk]),
                             "branch": "build/sd-<lead assignment>",
                             "items": [{"id": row["id"], "title": row["title"], "revision": revisions[row["id"]]}
@@ -209,7 +212,9 @@ def _open_row(connection, run: dict, now: str) -> dict:
     members = _members(connection, run)
     step = run["step"] or "claimed"
     beat = _seconds(run["heartbeat_at"] or run["created_at"], now)
-    quiet = _log_quiet(run["log_path"], now)
+    # A satellite's run logs on its own disk: the row names the host and the path, and reads no log here (sd:7933).
+    host = build.run_host(run["owner"]) or ""
+    quiet = None if host else _log_quiet(run["log_path"], now)
     waiting = _waiting(connection, run, [member["item"] for member in members])
     lost = step != "enqueued" and run["outcome"] is None and (beat is None or beat >= build.STALE_SECONDS)
     state = ("waiting" if waiting else "lost" if lost
@@ -226,7 +231,7 @@ def _open_row(connection, run: dict, now: str) -> dict:
     elif cancel["allowed"] and step not in build.CANCELLABLE:
         cancel.update(allowed=False, reason=f"the run is at {step}; cancel its lane entry with "
                                             f"sd-ship lane cancel {members[0]['item'] if members else '<item>'}")
-    return {"run": run["id"], "attempt": run["run"], "repo": run["repo"], "name": Path(run["repo"]).name,
+    return {"run": run["id"], "attempt": run["run"], "repo": run["repo"], "name": Path(run["repo"]).name, "host": host,
             "items": members, "model": run["model"] or "", "step": step, "state": state, "why": waiting,
             "outcome": run["outcome"], "started": run["created_at"], "elapsed": _seconds(run["created_at"], now),
             "beat": beat, "quiet": quiet, "usd": round(build.run_spent(connection, run["id"]), 2),
@@ -292,6 +297,7 @@ def panel(connection, *, now: str, show: str = "active") -> dict:
         for row in build.ended_runs(connection, limit=ENDED_MAX) if show == "all" else []:
             members = _members(connection, row)
             recent.append({"run": row["id"], "assignment": row["assignment"], "repo": row["repo"],
+                           "host": build.run_host(row["owner"]) or "",
                            "name": Path(row["repo"]).name, "items": members,
                            "pull": build.pull_url(connection, row["repo"], row["branch"], [m["item"] for m in members]),
                            "outcome": row["outcome"], "detail": row["detail"] or "",

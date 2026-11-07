@@ -74,7 +74,7 @@ def queue_if_eligible(connection, item: int, *, who: str) -> int | None:
     with transaction(connection):
         row = connection.execute(build._REPO, (item,)).fetchone()
         if (row is None or row["kind"] not in RUNNABLE_KINDS or row["status"] != "planning"
-                or build._repo_refusal(row) is not None or restoration_pending(connection)):
+                or build._repo_refusal(row, hub_only=True) is not None or restoration_pending(connection)):
             return None
         ident = create_assignment(connection, item=item, role="author", status="queued", lane="parallel",
                                   budget_minutes=BUDGET_MINUTES)
@@ -84,12 +84,12 @@ def queue_if_eligible(connection, item: int, *, who: str) -> int | None:
         return ident
 
 
-def open_runs(connection) -> list[dict]:
-    """Every unreleased draft run, oldest first."""
+def open_runs(connection, hosts=None) -> list[dict]:
+    """Every unreleased draft run, oldest first; with `hosts`, only those hosts' runs (`build.mine`)."""
     return [dict(row) for row in connection.execute(
         "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
         "WHERE runner_run.released_at IS NULL AND assignment.scope = ? ORDER BY runner_run.created_at, runner_run.id",
-        (SCOPE,))]
+        (SCOPE,)) if hosts is None or build.mine(row, hosts)]
 
 
 def claim(connection, *, owner: str, available: dict) -> dict | None:
@@ -128,7 +128,7 @@ def claim(connection, *, owner: str, available: dict) -> dict | None:
 def _refusal(connection, row) -> str | None:
     if row["status"] != "planning":
         return f"item {row['item']} moved to {row['status']} before its draft ran"
-    refused = build._repo_refusal(connection.execute(build._REPO, (row["item"],)).fetchone())
+    refused = build._repo_refusal(connection.execute(build._REPO, (row["item"],)).fetchone(), hub_only=True)
     return f"{refused} before its draft ran" if refused else None
 
 
@@ -258,9 +258,9 @@ def end(connection, ident: str, outcome: str, detail: str) -> dict | None:
         return _settle(connection, row, block=detail if outcome == "blocked" else None, quiet=True)
 
 
-def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) -> list[dict]:
+def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group, hosts=None) -> list[dict]:
     """`build.reap` over the draft runs: a lost one is killed, then retried once or blocked (`_settle`)."""
-    return build._reap(connection, open_runs, _settle, now=now, probe=probe, kill=kill)
+    return build._reap(connection, open_runs, _settle, now=now, probe=probe, kill=kill, hosts=hosts)
 
 
 def _settle(connection, read: dict, *, block: str | None = None, quiet: bool = False) -> dict | None:

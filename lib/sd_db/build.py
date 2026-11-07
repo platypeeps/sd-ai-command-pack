@@ -39,9 +39,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import paths, reads
-from .database import transaction
+from .database import served_by, transaction
 from .errors import SdDbError
 from .runner import IN_SESSION, OWNING, RUNNABLE_KINDS, queue_state, restoration_pending
+from .ship import this_host
 from .writes import (
     add_note,
     cancel_done_blocked,
@@ -121,11 +122,13 @@ class BuildRefused(SdDbError):
     """A press or a claim refused, with nothing written."""
 
 
-def _repo_refusal(row) -> str | None:
+def _repo_refusal(row, *, hub_only: bool = False) -> str | None:
     """Why the item's repository takes no build, or None: the one repository rule `queue` and `claim` read.
 
     `row` carries the item's `id` and `repo`, and the repository's `repo_path`,
-    `managed`, `remote` and `lane_host` (`_REPO`'s columns).
+    `managed`, `remote` and `lane_host` (`_REPO`'s columns). A build runs on
+    its lane host (pack sd:7933); `hub_only`, for auto-pickup and drafts,
+    refuses a lane on a satellite, as they run on the hub only.
     """
     item = row["id"]
     if row["repo_path"] is None:
@@ -134,17 +137,42 @@ def _repo_refusal(row) -> str | None:
         return f"item {item}'s repository {row['repo']} is not managed"
     if not row["remote"]:
         return f"item {item}'s repository {row['repo']} has no remote"
-    if row["lane_host"] is not None:
-        return f"item {item}'s lane runs on {row['lane_host']}; builds run on the hub only"
+    if hub_only and row["lane_host"] is not None:
+        return f"item {item}'s lane runs on {row['lane_host']}; auto-pickup and drafts run on the hub only"
     return None
+
+
+def lane_hosts(connection) -> frozenset[str | None]:
+    """The lane hosts this machine builds for: its own name, and None (the hub's lanes) when it is the hub.
+
+    As `ship._lane` reads a lane: NULL is the hub's, a name is that machine's.
+    A satellite is a machine whose connection a hub serves (pack sd:7933).
+    """
+    here = this_host()
+    return frozenset({here}) if served_by(connection) is not None else frozenset({None, here})
+
+
+def run_owner(owner: str, lane_host: str | None) -> str:
+    """The `runner_run.owner` a claim writes: the role on a hub lane, `<role>@<lane host>` on a satellite's."""
+    return owner if lane_host is None else f"{owner}@{lane_host}"
+
+
+def run_host(owner: str | None) -> str | None:
+    """The host whose dispatcher owns a run, from its `owner`: the part after `@`, or None for the hub."""
+    return (owner.rpartition("@")[2] or None) if owner and "@" in owner else None
+
+
+def mine(row, hosts: Collection[str | None]) -> bool:
+    """Whether this machine's dispatcher owns the run `row`: only it probes, signals, watches or sweeps it."""
+    return run_host(row["owner"]) in hosts
 
 
 _REPO = ("SELECT item.*, repo.path AS repo_path, repo.remote, repo.managed, repo.lane_host "
          "FROM item LEFT JOIN repo ON repo.path = item.repo WHERE item.id = ?")
 
 
-def _item(connection, item: int) -> dict:
-    """The item a build may take, or the refusal that names why not."""
+def _item(connection, item: int, *, hub_only: bool = False) -> dict:
+    """The item a build may take, or the refusal that names why not; `hub_only` as `_repo_refusal`."""
     row = connection.execute(_REPO, (item,)).fetchone()
     if row is None:
         raise BuildRefused(f"no item {item}")
@@ -153,7 +181,7 @@ def _item(connection, item: int) -> dict:
                            f"{', '.join(RUNNABLE_KINDS[:-1])} and {RUNNABLE_KINDS[-1]} items")
     if row["status"] != "ready":
         raise BuildRefused(f"item {item} is {row['status']}; a build takes a ready item")
-    refused = _repo_refusal(row)
+    refused = _repo_refusal(row, hub_only=hub_only)
     if refused:
         raise BuildRefused(refused)
     active = connection.execute(
@@ -200,14 +228,15 @@ def eligible(connection, *, now: str | None = None) -> list[dict]:
     """The ready items a build may take, highest priority first: auto-pickup's selection.
 
     `reads.backlog_items` gives the unparked rows in priority order; a
-    scheduled occurrence and every row `queue` would refuse are left out.
+    scheduled occurrence, every row `queue` would refuse and a satellite's
+    lane (auto-pickup runs on the hub only, pack sd:7933) are left out.
     """
     found = []
     for row in reads.backlog_items(connection, status="ready", now=now):
         if row["scheduled"]:
             continue
         try:
-            _item(connection, row["id"])
+            _item(connection, row["id"], hub_only=True)
         except BuildRefused:
             continue
         found.append({"id": row["id"], "title": row["title"], "repo": row["repo"], "priority": row["priority"]})
@@ -333,6 +362,10 @@ def _key(repo: str | None) -> str | None:
     return paths.key(repo) if isinstance(repo, str) and repo.startswith("/") else repo
 
 
+#: `room`'s answers for an input it did not read: the tick claims nothing and says which.
+UNREAD = ("the load was not read", "the interactive builders were not counted")
+
+
 def over_load(load: float, cap: float) -> str:
     """Why no builder starts under this five-minute load, or "" (pack sd:6111).
 
@@ -342,7 +375,8 @@ def over_load(load: float, cap: float) -> str:
     return f"the five-minute load is {load:g}, above the cap of {cap:g}" if 0 < cap < load else ""
 
 
-def room(connection, *, load: float | None, load_cap: float | None, interactive: list[dict] | None) -> dict:
+def room(connection, *, load: float | None, load_cap: float | None, interactive: list[dict] | None,
+         hosts: Collection[str | None] | None = None) -> dict:
     """Builders that may start now: `machine`, `used` and `held` by repository, and `why` there is none.
 
     `load` and `load_cap` are the five-minute load and its cap from `sd gate
@@ -351,22 +385,25 @@ def room(connection, *, load: float | None, load_cap: float | None, interactive:
     when its cwd names none. Either unread
     (None) is no room, never room. A headless run's own session is not counted
     twice. A repository holding an exclusive or quarantined lease of any other
-    kind has no room (`held`).
+    kind has no room (`held`). Only the runs of `hosts` (`lane_hosts` when
+    None) count: each host's dispatcher has its own caps (pack sd:7933).
     """
+    hosts = lane_hosts(connection) if hosts is None else hosts
     why = ""
     if not (isinstance(load, (int, float)) and isinstance(load_cap, (int, float))
             and math.isfinite(load) and math.isfinite(load_cap)):
-        why = "the load was not read"
+        why = UNREAD[0]
     elif interactive is None:
-        why = "the interactive builders were not counted"
+        why = UNREAD[1]
     leases = connection.execute(
-        "SELECT lease.repo, lease.exclusive, run.quarantine, run.session_id, assignment.scope "
+        "SELECT lease.repo, lease.exclusive, run.quarantine, run.session_id, run.owner, assignment.scope "
         "FROM runner_lease lease JOIN runner_run run ON run.id = lease.run "
         "LEFT JOIN assignment ON assignment.id = run.assignment WHERE lease.released_at IS NULL").fetchall()
-    builds = [row for row in leases if row["scope"] == SCOPE]
-    drafts = connection.execute(
-        "SELECT runner_run.session_id FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
-        "WHERE runner_run.released_at IS NULL AND assignment.scope = ?", (DRAFT,)).fetchall()
+    builds = [row for row in leases if row["scope"] == SCOPE and mine(row, hosts)]
+    drafts = [row for row in connection.execute(
+        "SELECT runner_run.session_id, runner_run.owner FROM runner_run JOIN assignment "
+        "ON assignment.id = runner_run.assignment WHERE runner_run.released_at IS NULL AND assignment.scope = ?",
+        (DRAFT,)).fetchall() if mine(row, hosts)]
     headless = {row["session_id"] for row in [*builds, *drafts] if row["session_id"]}
     used: dict[str, int] = {}
     for row in builds:
@@ -448,7 +485,7 @@ _RECHECK = (f"EXISTS (SELECT 1 FROM item WHERE item.id = assignment.item AND ite
 
 
 def claim(connection, *, owner: str, load: float | None, load_cap: float | None, interactive: list[dict] | None,
-          root: Path | None = None) -> dict | None:
+          root: Path | None = None, hosts: Collection[str | None] | None = None) -> dict | None:
     """Claim one bundle under one `BEGIN IMMEDIATE`; None when nothing may start now.
 
     The repository with room whose best queued build ranks first (priority,
@@ -460,23 +497,28 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
     Each member's `item.branch` becomes the run's branch, so a design-only
     build is not left with an empty one (pack sd:6756).
 
-    A queued build whose repository `queue` would now refuse (unmanaged, no
-    remote, a satellite lane host: `_repo_refusal`) ends `blocked` with that
-    reason before the bundle is picked, its item left as it is, and the same
-    claim goes on to the next repository (pack sd:6103).
+    A claim takes only the rows whose repository's lane runs on one of
+    `hosts` (`lane_hosts` when None), and skips the rest, unblocked, for
+    their lane host's dispatcher; the run's owner names that host
+    (`run_owner`, pack sd:7933). A queued build of its own whose repository
+    `queue` would now refuse (unmanaged, no remote: `_repo_refusal`) ends
+    `blocked` with that reason before the bundle is picked, its item left as
+    it is, and the same claim goes on to the next repository (pack sd:6103).
     """
+    hosts = lane_hosts(connection) if hosts is None else hosts
     with transaction(connection):
         if restoration_pending(connection):
             raise BuildRefused("database restore reimport is incomplete; builds are held")
-        available = room(connection, load=load, load_cap=load_cap, interactive=interactive)
+        available = room(connection, load=load, load_cap=load_cap, interactive=interactive, hosts=hosts)
         if available["why"]:
             return None
         queued = connection.execute(
-            "SELECT assignment.id, assignment.item, assignment.parent, assignment.run_count, item.repo "
-            "FROM assignment JOIN item ON item.id = assignment.item "
+            "SELECT assignment.id, assignment.item, assignment.parent, assignment.run_count, item.repo, "
+            "repo.lane_host FROM assignment JOIN item ON item.id = assignment.item "
+            "LEFT JOIN repo ON repo.path = item.repo "
             "WHERE assignment.status = 'queued' AND assignment.scope = ? AND item.repo IS NOT NULL "
             "ORDER BY item.priority IS NULL, item.priority, assignment.queued_at, assignment.id", (SCOPE,)).fetchall()
-        queued = [row for row in queued if not _refused_repo(connection, row)]
+        queued = [row for row in queued if row["lane_host"] in hosts and not _refused_repo(connection, row)]
         repo = next((row["repo"] for row in queued if room_for(available, row["repo"]) > 0), None)
         if repo is None:
             return None
@@ -494,7 +536,8 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
                     (stamp, lead, lead, *ids, SCOPE)).rowcount
                 if taken != len(ids):
                     raise _Moved
-                ident = _open_run(connection, lead, repo=repo, owner=owner, step="claimed",
+                ident = _open_run(connection, lead, repo=repo, owner=run_owner(owner, bundle[0]["lane_host"]),
+                                  step="claimed",
                                   model=_model(connection, [row["item"] for row in bundle]),
                                   work=worktree(repo, lead, root=root), stamp=stamp)
                 for row in bundle:
@@ -580,12 +623,12 @@ def run(connection, ident: str) -> dict:
     return result
 
 
-def open_runs(connection) -> list[dict]:
-    """Every unreleased build run, oldest first."""
+def open_runs(connection, hosts: Collection[str | None] | None = None) -> list[dict]:
+    """Every unreleased build run, oldest first; with `hosts`, only the runs those hosts own (`mine`)."""
     return [dict(row) for row in connection.execute(
         "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
         "WHERE runner_run.released_at IS NULL AND assignment.scope = ? ORDER BY runner_run.created_at, runner_run.id",
-        (SCOPE,))]
+        (SCOPE,)) if hosts is None or mine(row, hosts)]
 
 
 def ended_runs(connection, *, limit: int) -> list[dict]:
@@ -976,7 +1019,8 @@ def kill_group(pgid: int) -> bool:
     return False
 
 
-def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) -> list[dict]:
+def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group,
+         hosts: Collection[str | None] | None = None) -> list[dict]:
     """End every open build run that fails `alive`; the runs settled, each `{run, outcome, retry}`.
 
     1. Compare-and-set `outcome` (`interrupted`, or `cancelled` when a cancel
@@ -998,17 +1042,21 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     reimport is pending: `abandon` ended
     every run the restore found, and a run it did not find is not this
     store's to judge.
+
+    Only the runs of `hosts` (`lane_hosts` when None) are judged: a pid or a
+    group of another machine's run means nothing here (pack sd:7933).
     """
-    return _reap(connection, open_runs, _settle, now=now, probe=probe, kill=kill)
+    return _reap(connection, open_runs, _settle, now=now, probe=probe, kill=kill, hosts=hosts)
 
 
-def _reap(connection, runs, settle, *, now: str | None, probe, kill) -> list[dict]:
-    """`reap` over `runs(connection)`, each ended run passed to `settle`: a draft run's reap is this one too."""
+def _reap(connection, runs, settle, *, now: str | None, probe, kill,
+          hosts: Collection[str | None] | None = None) -> list[dict]:
+    """`reap` over `runs(connection, hosts)`, each ended run passed to `settle`: a draft run's reap is this one too."""
     now = now or clock()
     settled: list[dict] = []
     if restoration_pending(connection):
         return settled
-    for row in runs(connection):
+    for row in runs(connection, lane_hosts(connection) if hosts is None else hosts):
         if row["outcome"] in HELD:
             _release(connection, row, probe=probe)
             continue
