@@ -86,7 +86,7 @@ class Queue(Case):
         self.assertIn(f"Draft assignment {assignment} queued by dashboard", self.notes(item)[-1]["body"])
 
     def test_an_ineligible_item_queues_nothing(self):
-        """The repository rule is `build._repo_refusal` as it is: managed, a remote, a hub lane."""
+        """The repository rule is `draft.repo_refusal`: managed, a remote, a hub lane."""
         upsert_repo(self.db, "/fixture/off", remote="/fixture/r-off", managed=0)
         upsert_repo(self.db, "/fixture/none", managed=1)
         upsert_repo(self.db, "/fixture/sat", remote="/fixture/r-sat", managed=1)
@@ -99,6 +99,23 @@ class Queue(Case):
             with self.subTest(case=case):
                 self.assertIsNone(draft.queue_if_eligible(self.db, item, who="dashboard"))
         self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), 0)
+
+    def test_an_unmanaged_github_task_queues_no_draft(self):
+        """Pack sd:7868 lets a build take an unmanaged repository on GitHub; a paid draft run stays managed-only."""
+        upsert_repo(self.db, "/fixture/gh", remote="https://github.com/example/anvil.git", managed=0)
+        item = self.item(repo="/fixture/gh")
+        self.assertIsNone(draft.queue_if_eligible(self.db, item, who="dashboard"))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), 0)
+
+    def test_a_queued_draft_whose_repo_turned_unmanaged_is_cancelled_at_the_claim(self):
+        """Pack sd:7868: the claim reads the same managed-only rule, so no draft runs once the repository is unmanaged."""
+        item, assignment = self.queued()
+        self.db.execute("UPDATE repo SET managed = 0, remote = 'https://github.com/example/anvil.git' WHERE path = ?",
+                        (A,))
+        self.assertIsNone(self.claim())
+        row = self.db.execute("SELECT status, result FROM assignment WHERE id = ?", (assignment,)).fetchone()
+        self.assertEqual(row["status"], "cancelled")
+        self.assertIn("is not managed", row["result"])
 
     def test_a_restore_reimport_queues_and_claims_nothing(self):
         queued, _ = self.queued()

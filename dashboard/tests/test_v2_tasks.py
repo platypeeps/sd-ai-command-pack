@@ -1050,6 +1050,47 @@ open({port}); await flush(); R.port = ELS.details.html;""")
         self.assertIn("<b>running</b>", port_html)
         self.assertIn("docs/work/port/prd.md", port_html)
 
+    def linked_pull(self, *, draft):
+        """Pack sd:7868: link a pull request on the seeded `plan` task, as a build in an unmanaged repository does, and
+        observe it open, as the operator's draft or not; then rebuild the Details documents."""
+        from sd_db import contributions
+
+        plan, url = self.ids["plan"], "https://github.com/example/anvil/pull/41"
+        contributions.configure(self.connection, plan, {"pull_url": url}, who="build")
+        observed = {"complete": True, "observed_at": NOW, "operator": {"id": "1", "login": "author"},
+                    "author": {"id": "1", "login": "author"}, "repo": "example/anvil", "title": "Plan the review",
+                    "state": "open", "head": "a" * 40, "base": "b" * 40, "draft": draft, "mergeable": "mergeable",
+                    "ci": "success", "ci_head": "a" * 40, "ci_ids": ["check:1"], "why": ["author"], "blocking_labels": [],
+                    "labels": [], "reviews": [], "events": []}
+        contributions.observe_pull(self.connection, url, observed, expected_revision=contributions.snapshot(
+            self.connection, "github:" + url)["revision"])
+        self.details[str(plan)] = tasks_screen.details(self.connection, plan, now=NOW)
+        return plan, url
+
+    def test_details_link_the_items_pull_request_in_a_new_tab(self):
+        """Pack sd:7868: the pull request a build opened is one click away on the item's Details; a ready one is no flag."""
+        plan, url = self.linked_pull(draft=False)
+        out = self.run_page(f"open({plan}); await flush(); R.html = ELS.details.html;")
+        html = out["R"]["html"]
+        self.assertIn("<h3>Pull request", html)
+        self.assertIn(f'<a class="ext" href="{url}" target="_blank" rel="noopener noreferrer"', html)
+        self.assertNotIn("data-needs-you", html)
+        port = self.ids["port"]
+        out = self.run_page(f"open({port}); await flush(); R.html = ELS.details.html;")
+        self.assertNotIn("<h3>Pull request", out["R"]["html"])
+
+    def test_details_flag_the_operators_open_draft_as_needing_them(self):
+        """Pack sd:7868: a draft the build opened waits on the operator (mark it ready, or hand it to the owners)."""
+        from sd_db import contributions
+
+        plan, url = self.linked_pull(draft=True)
+        out = self.run_page(f"open({plan}); await flush(); R.html = ELS.details.html;")
+        html = out["R"]["html"]
+        self.assertIn(f'href="{url}"', html)
+        self.assertIn("awaiting you", html)
+        self.assertIn('<p class="why" data-needs-you=""><b>Needs you:</b>', html)
+        self.assertIn(contributions.DRAFTED, html)
+
     def test_details_show_what_each_assignment_and_the_item_cost(self):
         """sd:6031: an item page shows its cost, each assignment's spent cost rows, `~` when one is an estimate."""
         port = self.ids["port"]

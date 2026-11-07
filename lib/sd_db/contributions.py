@@ -51,6 +51,8 @@ EVENTS = frozenset({"comment", "label_added", "label_removed", "converted_to_dra
                     "closed", "closed_completed", "closed_not_planned", "reopened"})
 ISSUE_EVENTS = EVENTS - {"converted_to_draft", "ready_for_review"}
 # An issue observation carries none of these; one that does was read as a pull.
+#: The reason an item's open draft pull request reads `awaiting_you` (pack sd:7868).
+DRAFTED = "Draft pull request: mark it ready for review"
 PULL_ONLY = frozenset({"reviews", "ci", "ci_head", "ci_ids", "head", "base", "mergeable", "draft"})
 #: Who writes the attention followups and the lane notes.
 OBSERVER = "contribution-observer"
@@ -829,9 +831,19 @@ def _freshness(heartbeats, sources) -> dict:
     return result
 
 
-def _lane(sources, observation, url, waiting, dismissed) -> tuple[str, bool]:
-    """The row's lane and whether it needs the operator: the one rule the projection and `record_lane` read."""
-    needs_you = any(s["attention"] for s in sources) or (not url and not waiting)
+def _drafted(observation) -> bool:
+    """Whether the observation is an open draft pull request the operator wrote (pack sd:7868)."""
+    operator = str((observation.get("operator") or {}).get("id") or "")
+    return observation.get("state") == "open" and observation.get("draft") is True and bool(operator) \
+        and str((observation.get("author") or {}).get("id") or "") == operator
+
+
+def _lane(sources, observation, url, waiting, dismissed, drafted=False) -> tuple[str, bool]:
+    """The row's lane and whether it needs the operator: the one rule the projection and `record_lane` read.
+
+    `drafted` is an item's open draft by the operator (`_drafted`): it waits on them, not on reviewers.
+    """
+    needs_you = any(s["attention"] for s in sources) or (not url and not waiting) or drafted
     # An issue or a pull request closed without merge awaits no one; a later
     # observation that reads `open` returns the row to live work. A dismissed
     # row (sd:3432) is closed too, until new attention or a lifecycle change.
@@ -953,7 +965,8 @@ def record_lane(connection, item) -> int | None:
         observation = sources[1]["observation"] or {}  # the pull request's: `OBSERVED` names it first
         if observation.get("state") not in {"open", "closed", "merged"}:
             return None
-        lane, _ = _lane(sources, observation, url, bool(metadata.get("blocked_on") or metadata.get("depends_on")), None)
+        lane, _ = _lane(sources, observation, url, bool(metadata.get("blocked_on") or metadata.get("depends_on")), None,
+                        _drafted(observation))
         notes, written = lane_notes(connection, item, url), None
         if not notes:
             history, skipped = _history(connection, item, url, observation["state"])
@@ -1126,7 +1139,9 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
     active.sort(key=lambda a: (0 if any(e["kind"] == "newly_unblocked" for s in sources if s["key"] == a["key"] for e in s["attention"]) else 1, a["key"]))
     primary = active[0] if active else {"key": source["key"], "revision": source["revision"], "event_ids": [], "reasons": []}
     waiting = bool(metadata.get("blocked_on") or metadata.get("depends_on"))
-    lane, needs_you = _lane(sources, observation, url, waiting, dismissed)
+    # An item's open draft the operator wrote waits on them to mark it ready, not on reviewers (pack sd:7868).
+    drafted = bool(row.get("id")) and _drafted(observation)
+    lane, needs_you = _lane(sources, observation, url, waiting, dismissed, drafted)
     try:
         verified = _local_proof(metadata)
     except WorkflowError:
@@ -1140,6 +1155,8 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
         except WorkflowError:
             pass
     reasons = list(dict.fromkeys(reason for a in active for reason in a["reasons"]))
+    if drafted:
+        reasons.append(DRAFTED)
     if not url and draft:
         reasons.append("Issue draft has not been filed" if draft_verified else "Issue draft has not been filed; draft body is unverified")
     elif not url:
