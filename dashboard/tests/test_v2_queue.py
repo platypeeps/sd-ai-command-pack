@@ -1283,7 +1283,7 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
            "working": "working: live sessions, build runs and lane gates now running",
            "next": "next: queued in the lane, not started",
            "blocked": "blocked: stopped in the lane, or waiting on a pull request, until someone acts",
-           "suggested": "suggested: up to 6 ready or planned tasks to do next"}
+           "suggested": "suggested: up to 9 ready or planned tasks to do next"}
 
     def test_each_box_says_its_count_and_what_it_counts_on_hover(self):
         # Pack sd:7383: the native title names the count and the meaning; the aria-label stays.
@@ -1350,7 +1350,7 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
                             " R.html = ELS.queue.html; R.filters = ELS['queue-filters'].html;")
         self.assertNotIn("beta:false", out["R"]["before"])
         self.assertIn("beta:false", out["R"]["after"])
-        self.assertEqual(out["R"]["kids"].count("suggested"), 4, "all four, under the cap of six (sd:7869)")
+        self.assertEqual(out["R"]["kids"].count("suggested"), 4, "all four, under the cap of nine (sd:8008)")
         self.assertIn("#60 Ready 60", out["R"]["html"])
         self.assertIn("#63 Ready 63", out["R"]["html"])
         self.assertEqual(out["urls"], [{"show": "suggested"}])
@@ -1373,17 +1373,17 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
                 self.assertIn('data-f="qshow" data-v="suggested" aria-pressed="false"', kept["R"]["filters"])
                 self.assertNotIn("beta:false", kept["R"]["repos"])
 
-    def test_a_repo_with_seven_suggested_items_draws_six(self):
-        # sd:7869 (operator 2026-11-06): Suggested keeps at most six items per repo, in sd-next's order.
+    def test_a_repo_with_ten_suggested_items_draws_nine(self):
+        # sd:7869, sd:8008 (operator 2026-11-07): Suggested keeps at most nine items per repo, in sd-next's order.
         self.doc["queues"]["suggested"] = [{"id": n, "repo": "~/repos/example/system", "title": f"Next {n}", "status": "ready",
-                                            "why": "ready", "due": None, "priority": None} for n in range(61, 68)]
+                                            "why": "ready", "due": None, "priority": None} for n in range(61, 71)]
         out = self.run_view("open('system'); R.html = ELS.queue.html;", search="?show=suggested")
         drawn = re.findall(r'<tr class="child" data-type="suggested" data-item="(\d+)"', out["R"]["html"])
-        self.assertEqual(drawn, [str(n) for n in range(61, 67)])
+        self.assertEqual(drawn, [str(n) for n in range(61, 70)])
 
-    def test_suggested_is_sd_nexts_order_less_live_items_six_per_repo_each_with_why(self):
+    def test_suggested_is_sd_nexts_order_less_live_items_nine_per_repo_each_with_why(self):
         # pack sd:7314: Suggested is what sd-next offers next, ranked server-side (sd_db.today.suggested): ready, then
-        # planned, then unscheduled. The view drops a live item and keeps the first six per repo (sd:7869). Each detail says why;
+        # planned, then unscheduled. The view drops a live item and keeps the first nine per repo (sd:8008). Each detail says why;
         # a row that is not ready shows its status and offers no Build.
         def row(n, why, status, priority=None, due=None):
             return {"id": n, "repo": "~/repos/example/system", "title": f"Next {n}", "status": status, "why": why,
