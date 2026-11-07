@@ -274,6 +274,14 @@ class BuildsPanel(Fixture):
         os.utime(log, (0, 0))
         self.assertEqual(self.panel()["runs"][0]["state"], "stalled")
 
+    def test_a_beat_stamped_far_ahead_is_lost_and_a_small_lead_works(self):
+        """sd:7986: a satellite clock far ahead read as a live run; `build._lead_age` rules."""
+        run = self.claimed([self.ready()])
+        build.write(self.connection, run["id"], heartbeat_at="2099-01-02T01:10:01Z")
+        self.assertEqual((self.panel()["runs"][0]["state"], self.panel()["runs"][0]["beat"]), ("lost", None))
+        build.write(self.connection, run["id"], heartbeat_at="2099-01-02T01:01:00Z")
+        self.assertEqual((self.panel()["runs"][0]["state"], self.panel()["runs"][0]["beat"]), ("working", 0))
+
     def test_an_open_question_makes_a_run_wait_on_the_operator(self):
         item = self.ready()
         run = self.claimed([item])

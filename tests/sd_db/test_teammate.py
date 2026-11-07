@@ -455,6 +455,16 @@ class Release(Case):
         self.assertEqual(teammate.overdue(open_run, later(run["created_at"], 150 * 60)), "")
         self.assertNotEqual(teammate.overdue(open_run, later(beat, 120 * 60)), "")
 
+    def test_a_beat_stamped_far_ahead_reads_overdue_and_a_small_lead_does_not(self):
+        """sd:7986: a beat from a clock far ahead never read overdue; `build._lead_age` rules."""
+        run = self.start([self.item()])
+        open_run = teammate.open_runs(self.db)[0]
+        now = later(run["created_at"], 10 * 60)
+        open_run["heartbeat_at"] = later(now, build.STALE_SECONDS + 1)
+        self.assertIn("ahead of this clock", teammate.overdue(open_run, now))
+        open_run["heartbeat_at"] = later(now, 60)
+        self.assertEqual(teammate.overdue(open_run, now), "")
+
     def test_a_run_whose_items_are_all_done_stays_held_until_its_lead_ends_it(self):
         """An item done is no proof its builder stopped (round 4): only the lead's `--end` releases the run."""
         first, second = self.item(), self.item()

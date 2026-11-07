@@ -133,6 +133,14 @@ class TheBuilders(TodayCase):
                          {"quiet": ("building", "stalled"), "lane": ("lane", "running"), "held": ("building", "blocked")})
         self.assertEqual(rows["quiet"]["quiet"], 600)
 
+    def test_a_beat_stamped_far_ahead_reads_stalled_and_a_small_lead_running(self):
+        """sd:7986: a satellite clock far ahead gave a negative quiet that read running; `build._lead_age` rules."""
+        self.run_row("ahead", created=ago(minutes=40), beat=ago(seconds=-601))
+        self.run_row("skew", created=ago(minutes=40), beat=ago(seconds=-60))
+        rows = {row["run"]: row for row in self.today()["builders"]["rows"]}
+        self.assertEqual({run: (row["state"], row["quiet"]) for run, row in rows.items()},
+                         {"ahead": ("stalled", None), "skew": ("running", 0)})
+
     def test_a_teammate_run_shows_its_items_worktree_and_budget_as_its_eta(self):
         """pack sd:7221: a lead's in-session builder is a builder row too; its ETA is its start plus the budget."""
         from sd_db import teammate
