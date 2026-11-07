@@ -682,7 +682,7 @@
       const cost = a => `${a.estimated ? '~' : ''}$${Number(a.usd).toFixed(2)}`;
       const open = d.notes.filter(n => n.kind === 'followup' && !n.resolved).length;
       const docs = d.documents || [];
-      return html`${desc}${baseOf(t, d)}
+      return html`${desc}${baseOf(t, d)}${pull(d)}
         <h3>Documents ${src('Documents', `The files linked to this task: its path, its work folder, design files that name sd:${t.id}, and paths its notes name.`)}</h3>
         ${docs.length ? html`<ol class="rec">${docs.map(x => html`<li><span>${x.url ? html`<a class="ext" href="${x.url}" target="_blank" rel="noopener noreferrer">${x.path}</a>` : html`<code>${x.path}</code>`} <small>${x.why}</small></span></li>`)}</ol>` : html`<p class="why">No design or document names this item.</p>`}
         ${published(t, d.published || [])}
@@ -740,6 +740,16 @@
     function src(name, says, cmd = '') {
       if (!cmd) return hint(name, says);
       return html`<button class="help src" type="button" aria-label="Help: ${name}" data-help="${`${says} Press to copy the command: <code>${cmd}</code>`}" data-copy="${cmd}">${ICON('circle-help')}</button>`;
+    }
+    // pack sd:7868: the item's linked pull request (a build's draft in an unmanaged repository), with a link that opens it,
+    // and its needs-you flag while the contribution lane says it waits on the operator, such as a draft not yet ready.
+    function pull(d) {
+      const p = d.pull; if (!p) return '';
+      return html`<h3>Pull request ${src('Pull request', 'The pull request this task is linked to, and whether it waits on you.')}</h3>
+        <dl><dt>Link</dt><dd><a class="ext" href="${p.url}" target="_blank" rel="noopener noreferrer" aria-label="Open the pull request of sd:${d.item.id} on GitHub">${p.url}</a></dd>
+          <dt>State</dt><dd>${p.state || 'not observed yet'}${p.lane ? ` · ${p.lane.replace('_', ' ')}` : ''}</dd></dl>
+        ${p.needs_you ? html`<p class="why" data-needs-you=""><b>Needs you:</b> ${p.reasons.join('; ') || 'it waits on you'}</p>` : ''}
+        ${p.error ? html`<p class="why">${p.error}</p>` : ''}`;
     }
     // build: v1's External context (screens.external_context), the shadow row and its collector's freshness, when the item
     // has a tracker reference. Local status is the item's own; the tracker's state is dated context beside it.

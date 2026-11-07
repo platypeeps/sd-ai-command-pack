@@ -4,6 +4,7 @@ The design's failure table names most of these tests: system
 `docs/work/2026-10-24-build-dispatcher/design.md`.
 """
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -101,6 +102,7 @@ class Queue(Case):
         busy = self.item()
         build.queue(self.db, [busy], who="operator")
         upsert_repo(self.db, "/fixture/off", remote="/fixture/r-off", managed=0)
+        upsert_repo(self.db, "/fixture/gh", remote="https://github.com/owner/third-party.git", managed=0)
         upsert_repo(self.db, "/fixture/none", managed=1)
         stale = self.item()
         revision = item_state(self.db, stale)["revision"]
@@ -108,7 +110,8 @@ class Queue(Case):
         cases = {
             "is planning; a build takes a ready item": ([ready, planning], None),
             "has queued assignment": ([ready, busy], None),
-            "is not managed": ([ready, self.item(repo="/fixture/off")], None),
+            "is not managed and its remote is not on GitHub": ([ready, self.item(repo="/fixture/off")], None),
+            "takes task items only": ([ready, self.item(repo="/fixture/gh", kind="report")], None),
             "has no remote": ([ready, self.item(repo="/fixture/none")], None),
             "is a followup item": ([ready, self.item(kind="followup")], None),
             "needs a registered repository": ([ready, self.item(repo=None)], None),
@@ -290,7 +293,65 @@ class Claim(Case):
         self.assertEqual([member["item"] for member in claims.popitem()[1]["members"]], [newer])
 
     def test_claim_skips_a_repository_unmanaged_after_the_press(self):
-        self.ineligible_after_press("UPDATE repo SET managed = 0 WHERE path = ?", "is not managed")
+        self.ineligible_after_press("UPDATE repo SET managed = 0 WHERE path = ?",
+                                    "is not managed and its remote is not on GitHub")
+
+    def test_a_press_takes_a_task_in_an_unmanaged_github_repository(self):
+        """Pack sd:7868: an unmanaged repository's task builds to a draft pull request, by press and by pickup."""
+        upsert_repo(self.db, "/fixture/gh", remote="git@github.com:owner/third-party.git", managed=0)
+        item = self.item(repo="/fixture/gh")
+        self.assertEqual([row["id"] for row in build.eligible(self.db)], [item])
+        queued = build.queue(self.db, [item], who="operator")
+        self.assertEqual([row["status"] for row in queued], ["queued"])
+        taken = self.claim()
+        self.assertEqual(([m["item"] for m in taken["members"]], self.statuses([item])), ([item], ["in_progress"]))
+
+    LINKED = {"issue_url": ("https://github.com/owner/third-party/issues/3", "already links the issue"),
+              "pull_url": ("https://github.com/owner/third-party/pull/4", "already links the pull request")}
+
+    def test_a_press_refuses_an_unmanaged_task_whose_contribution_is_already_linked(self):
+        """Review of 3072db937: a task linked to an issue or another pull request takes no build that would push and
+        open a draft, then fail to link it, on every Retry."""
+        from sd_db import contributions
+
+        upsert_repo(self.db, "/fixture/gh", remote="git@github.com:owner/third-party.git", managed=0)
+        for name, (url, reason) in self.LINKED.items():
+            with self.subTest(link=name):
+                item = self.item(repo="/fixture/gh")
+                contributions.configure(self.db, item, {name: url}, who="operator")
+                self.assertNotIn(item, [row["id"] for row in build.eligible(self.db)])
+                with self.assertRaisesRegex(build.BuildRefused, reason):
+                    build.queue(self.db, [item], who="operator")
+
+    def test_a_claim_refuses_an_unmanaged_task_linked_after_the_press(self):
+        """Review of 3072db937: the claim reads the same rule, so a link made after the press pushes nothing."""
+        from sd_db import contributions
+
+        upsert_repo(self.db, "/fixture/gh", remote="git@github.com:owner/third-party.git", managed=0)
+        for name, (url, reason) in self.LINKED.items():
+            with self.subTest(link=name):
+                item = self.item(repo="/fixture/gh")
+                (queued,) = build.queue(self.db, [item], who="operator")
+                contributions.configure(self.db, item, {name: url}, who="operator")
+                self.assertIsNone(self.claim())
+                row = self.db.execute("SELECT status, result FROM assignment WHERE id = ?", (queued["id"],)).fetchone()
+                self.assertEqual(row["status"], "blocked")
+                self.assertIn(reason, row["result"])
+
+    def test_a_kill_whose_descendants_did_not_read_passes_once_its_group_is_gone(self):
+        """Review of 3072db937: a failed `ps` read with the recorded group gone blocked every reap, managed too."""
+        gone = subprocess.Popen(["true"], start_new_session=True)
+        gone.wait()
+        with mock.patch.object(build, "descendant_groups", return_value=None):
+            self.assertTrue(build.kill_group(gone.pid))
+
+    def test_pickup_queues_an_unmanaged_task(self):
+        """Pack sd:7868: auto-pickup, once on, picks what a press takes."""
+        upsert_repo(self.db, "/fixture/gh", remote="https://github.com/owner/third-party", managed=0)
+        item = self.item(repo="/fixture/gh")
+        build.set_pickup(self.db, True)
+        available = build.room(self.db, **IDLE)
+        self.assertEqual(build.pickup(self.db, available), [item])
 
     def test_claim_skips_a_repository_without_a_remote_after_the_press(self):
         self.ineligible_after_press("UPDATE repo SET remote = NULL WHERE path = ?", "has no remote")

@@ -1264,6 +1264,48 @@ class DismissTests(ContributionCase):
         self.assertEqual(observed["revision"], c._digest({"key": "github:" + URL, "id": row["id"], "body": body}))
 
 
+class DraftWaitsOnYou(ContributionCase):
+    """Pack sd:7868: a build's draft pull request, linked on its item, waits on the operator until it is ready."""
+
+    def linked(self):
+        return c.capture(self.db, title="Built in a third-party repository", changes={"pull_url": URL},
+                         who="build")["item"]["id"]
+
+    def lane(self, url=URL):
+        return next(row for row in c.projection(self.db) if row["url"] == url)
+
+    def test_an_items_open_draft_reads_awaiting_you_until_marked_ready(self):
+        item = self.linked()
+        self.observe(draft=True)
+        row = self.lane()
+        self.assertEqual((row["item_id"], row["lane"], row["needs_you"]), (item, "awaiting_you", True))
+        self.assertIn(c.DRAFTED, row["reasons"])
+        self.observe(draft=False, observed_at=T1)
+        row = self.lane()
+        self.assertEqual((row["lane"], row["needs_you"]), ("awaiting_them", False))
+        self.assertNotIn(c.DRAFTED, row["reasons"])
+
+    def test_a_draft_with_no_item_or_by_another_author_keeps_its_lane(self):
+        """No item: an observed draft is not the operator's work item; another author's draft waits on them."""
+        self.observe(draft=True)
+        self.assertEqual(self.lane()["lane"], "awaiting_them")
+        self.linked()
+        self.observe(draft=True, observed_at=T1, author={"id": "2", "login": "other"})
+        self.assertEqual(self.lane()["lane"], "awaiting_them")
+
+    def test_a_merged_draft_is_merged(self):
+        self.linked()
+        self.observe(draft=True, state="merged")
+        self.assertEqual(self.lane()["lane"], "merged")
+
+    def test_the_lane_note_reads_the_draft_as_awaiting_you(self):
+        """sd:7859's lane notes read `_lane`, as the projection does: the draft waits on the operator there too."""
+        item = self.linked()
+        self.observe(draft=True)
+        c.record_lane(self.db, item)
+        self.assertEqual([note["lane"] for note in c.lane_notes(self.db, item)][-1:], ["awaiting_you"])
+
+
 class LaneNoteTests(ContributionCase):
     """sd:7859: each lane change of an item's pull request is a `comment` note; checkpoints get pruned, notes stay."""
 

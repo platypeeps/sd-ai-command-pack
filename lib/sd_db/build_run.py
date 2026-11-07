@@ -21,6 +21,9 @@ A write that changes no row stops the supervisor before its next child.
 The builder is judged by its last stream line, never its exit code (probe
 #28947). Nothing before `enqueuing` pushes: `sd-ship lane enqueue` publishes
 the head, behind the enqueuing compare-and-set that a requested cancel fails.
+An unmanaged repository's run (pack sd:7868) runs the repository's own checks
+after its review, then pushes and opens a draft pull request at that step
+instead; the tick's watch reads that pull request's observed state, not the lane.
 
 The same tick reaps and claims draft runs (`sd_db.draft`, pack sd:6361), one
 at a time, and `DraftSupervisor` walks one: a read-only `claude -p` in the
@@ -35,6 +38,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import sqlite3
 import subprocess
@@ -45,11 +49,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import build, draft, paths, sessions
+from . import build, contributions, draft, paths, sessions
 from .build import Probe
 from .config import system_checkout
 from .database import Patient
 from .ship import this_host
+from .workflow import WorkflowError
 from .writes import add_note, now, record_cost, record_state
 
 #: A child past this many seconds is ended: TERM to its group, `GRACE_SECONDS`, KILL.
@@ -190,6 +195,14 @@ class Tools:
     #: `checking`'s two steps after an auto-pickup merge: `<sync> refresh <repo>`, then `<health> health`.
     sync: list[str] = field(default_factory=lambda: [str(system_checkout() / "local-repo-sync" / "repo-sync.sh")])
     health: list[str] = field(default_factory=lambda: [str(PACK / "dashboard" / "dashboard.sh")])
+    #: An unmanaged repository's run (pack sd:7868): its own checks wait for a gate slot through `<gate>`,
+    #: and its draft pull request opens through `<gh>`.
+    gate: list[str] = field(default_factory=lambda: [sys.executable, str(PACK / "bin" / "sd_gate_slots.py"), "run"])
+    gh: list[str] = field(default_factory=lambda: ["gh"])
+    #: Before that push, `<guard>` reads the title, body and commits on stdin: `leak-guard.sh scan`, run whatever
+    #: pre-push hook the repository has, since an unmanaged one normally has none (review of pack sd:7868).
+    guard: list[str] = field(default_factory=lambda: ["sh", str(system_checkout() / "local-leak-guard" / "leak-guard.sh"),
+                                                      "scan"])
 
 
 def judge(lines: list[str], *, session: str | None = None) -> dict:
@@ -264,6 +277,19 @@ def _read(argv: list[str], *, env: dict | None = None) -> str:
     return done.stdout
 
 
+def _read_bytes(argv: list[str], *, env: dict | None = None) -> bytes:
+    """`_read` for output in no known encoding: its stdout as bytes, `Unread` the same way."""
+    try:
+        done = subprocess.run(argv, capture_output=True, timeout=READ_SECONDS, check=False, stdin=subprocess.DEVNULL,
+                              env=env)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Unread(f"{argv[0]} gave no answer: {error}") from None
+    if done.returncode != 0:
+        said = done.stderr.decode("utf-8", "replace").strip()[:200]
+        raise Unread(f"{' '.join(argv[:4])} failed: exit {done.returncode}: {said}")
+    return done.stdout
+
+
 def kept_files(git: Collection[str], work: str, *, env: dict | None = None) -> str:
     """The status lines of `work` that `git worktree remove` would lose: changes, untracked and ignored
     files, those config hides too, less the ignored ones under a `DISPOSABLE` folder; "" when it may go."""
@@ -309,6 +335,18 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
     for row in build.open_runs(connection, build.lane_hosts(connection) if hosts is None else hosts):
         if row["step"] != "enqueued" or row["outcome"] is not None:
             continue
+        url = build.draft_pull(row)
+        if url is not None:
+            # An unmanaged repository's draft pull request: the owners merge it, and the contribution
+            # observation of its url says when (pack sd:7868). The lane holds nothing of it.
+            status = pull_state(connection, url)
+            if status == "merged" and build.verdict(row, probe=probe)[0] == build.GONE:
+                if build.pull_merged(connection, row, url):
+                    moved.append({"run": row["id"], "step": "cleaning"})
+            elif status == "closed" and build.verdict(row, probe=probe)[0] == build.GONE:
+                if build.lane_failed(connection, row, f"{build.DRAFT_PULL}{url} was closed without a merge"):
+                    moved.append({"run": row["id"], "outcome": "lane_failed"})
+            continue
         delivered = [member["item"] for member in build.run(connection, row["id"])["members"]
                      if member["status"] == "done"]
         try:
@@ -325,6 +363,15 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
             if build.lane_failed(connection, row, reason):
                 moved.append({"run": row["id"], "outcome": "lane_failed"})
     return moved
+
+
+def pull_state(connection, url: str) -> str | None:
+    """The state the contribution observer last read of `url` (`open`, `closed`, `merged`), or None unread."""
+    try:
+        observation = contributions.snapshot(connection, "github:" + url).get("observation")
+    except WorkflowError:
+        return None
+    return observation.get("state") if isinstance(observation, dict) else None
 
 
 def sweep(connection, *, git: Collection[str] = ("git",), hosts: Collection[str | None] | None = None) -> list[str]:
@@ -479,16 +526,24 @@ def _environ(environ: dict | None) -> dict:
 class Supervisor:
     """One run's supervisor: `run()` walks its steps and returns how it ended."""
 
+    #: While a child that asked for it runs, the groups its descendants started, apart from its own (`sd gate
+    #: run` starts its command in a new group), each with its leader's start: `end_group` ends one that
+    #: outlived its parent only while it is still that group. None for every other child.
+    groups: dict[int, str] | None = None
+
     def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path,
                  cited: Callable[[Path, str, str, str], Collection[int] | None], environ: dict | None = None,
                  beat_seconds: float = BEAT_SECONDS, timeout: float = TIMEOUT_SECONDS, grace: float = GRACE_SECONDS,
-                 probe=Probe, checked: Callable[[Path, str, str, str, str], list[str]] | None = None):
+                 probe=Probe, checked: Callable[[Path, str, str, str, str], list[str]] | None = None,
+                 checks: Callable[[Path], list[list[str]]] | None = None):
         """`cited(worktree, base, head, body)` is the items the lane reads the branch as delivering, None when unread:
         the lane's own reader, which lives beside it in `bin/`. `checked(worktree, base, head, title, body)` is
         what enqueue and its push would refuse, the line check and the leak guard (pack sd:6926); None checks
-        nothing."""
+        nothing. `checks(worktree)` is the argv of each check an unmanaged repository's run runs after a clean
+        review, as `sd-check` detects them, or ValueError when they do not read (pack sd:7868); None runs none."""
         self.db: Any = Patient(connection)  # duck-types the connection the writes are annotated with
         self.ident, self.tools, self.probe, self.cited, self.checked = ident, tools, probe, cited, checked
+        self.checks = checks
         self.beat_seconds, self.timeout, self.grace = beat_seconds, timeout, grace
         self.row = build.run(self.db, ident)
         self.logs = log_dir(log_root, self.row["repo"])
@@ -606,14 +661,65 @@ class Supervisor:
         if answer is None:
             return self.finish("blocked", f"the review gave no answer twice at {head[:12]}; see {self.out('review')}")
         if answer["status"] in ("clean", "advisory"):
+            # `sd-review` runs no gate in an unmanaged checkout (sd:5953): the repository's own checks run here.
+            failed = self.own_checks(head) if build.unmanaged(self.db, self.row["repo"]) else []
+            if isinstance(failed, dict):
+                return failed
+            if failed:
+                return self.blocked_round(failed)
             self.reviewed = head
             return "enqueuing"
         return self.blocked_round(answer["blockers"])
 
+    def own_checks(self, head: str) -> list[dict] | dict:
+        """Run an unmanaged repository's own checks at `head`, each in a gate slot; a blocker per failure.
+
+        No check found is noted on the lead item and passes: a repository with none did not fail one.
+        Entrypoints that do not read are a configuration fault, no code blocker: the run's blocked end (a
+        dict), not a paid fix round; a `git` that gave no answer raises `Unread` in `checks`.
+        """
+        if self.checks is None:
+            return []
+        try:
+            commands = self.checks(self.work)
+        except ValueError as error:
+            return self.finish("blocked", f"the repository's check entrypoints did not read, a configuration "
+                                          f"fault no fix round can mend: {error}")
+        if not commands:
+            add_note(self.db, self.lead, "comment",
+                     f"Build run {self.ident}: no check entrypoint found in the repository; no tests ran at {head[:12]}")
+            return []
+        passed = []
+        for argv in commands:
+            said = shlex.join(argv)
+            for name in ("checks", "checks.err"):
+                self.out(name).write_bytes(b"")
+            code = self.child([*self.tools.gate, "--label", f"build {self.row['branch']} checks", "--", *argv],
+                              cwd=self.work, name="checks", descendants=True)
+            if code == 125:  # `sd gate run` did not start the command: unknown, never a failure of the code
+                raise Unread(f"sd gate run did not start `{said}`; see {self.out('checks.err')}")
+            if code != 0:
+                tail = "".join(path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+                               for path in (self.out("checks"), self.out("checks.err")))
+                return [{"path": said, "line": "-", "summary": f"exit {code}: {tail.strip()[-1500:]}"}]
+            # A check that rewrote a tracked file tested a tree `head` does not hold; an unread status raises Unread.
+            changed = _read([*self.tools.git, "-C", str(self.work), "-c", "core.quotePath=false", "status",
+                             "--porcelain", "--untracked-files=no"], env=self.env)
+            if changed.strip():
+                paths = ", ".join(line[3:] for line in changed.splitlines() if line.strip())
+                return [{"path": said, "line": "-", "summary": f"exit 0, but it changed tracked files: {paths}; "
+                         "commit or undo them, so the checked tree is the pushed head"}]
+            passed.append(f"`{said}`")
+        add_note(self.db, self.lead, "comment", f"Build run {self.ident}: {', '.join(passed)} passed at {head[:12]}")
+        return []
+
     def prechecked(self, head: str) -> list[str]:
         if self.checked is None:
             return []
-        title, body = (path.read_text(encoding="utf-8") if path.exists() else "" for path in (self.title, self.body))
+        try:
+            title, body = (path.read_text(encoding="utf-8") if path.exists() else "" for path in (self.title, self.body))
+        except ValueError:  # not UTF-8: the builder rewrites it, as for any other refusal
+            return [f"the title at {self.title} or the body at {self.body} is not UTF-8 text"]
         return self.checked(self.work, self.base(), head, title.strip(), body)
 
     def blocked_round(self, blockers: list[dict]) -> str | dict:
@@ -640,7 +746,10 @@ class Supervisor:
             raise Lost
         self.last_beat = time.monotonic()
         head = self.head()
-        if self.reviewed is not None and head != self.reviewed:
+        unmanaged = build.unmanaged(self.db, self.row["repo"])
+        # No lane gate re-checks an unmanaged head: it publishes only the head this supervisor's review and
+        # checks passed, so a resumed or retried run reviews and tests again first (review of pack sd:7868).
+        if head != self.reviewed and (unmanaged or self.reviewed is not None):
             if not build.write(self.db, self.ident, step="reviewing"):
                 raise Lost
             return "reviewing"
@@ -648,6 +757,8 @@ class Supervisor:
             body = self.body.read_text(encoding="utf-8")
         except OSError:
             body = ""
+        except ValueError:
+            return self.finish("blocked", f"the body at {self.body} is not UTF-8 text")
         cited = self.cited(self.work, self.base(), head, body)
         if cited is None:
             raise Unread(f"the commits {head[:12]} adds were not read")
@@ -669,18 +780,22 @@ class Supervisor:
         if not delivered:
             return self.finish("blocked", "the branch delivers no item: no commit has a `Closes: sd:N` trailer "
                                           "for one of the run's items")
-        entry = lane_entry(self.tools.ship, self.work, delivered, env=self.env)
-        if entry and entry.get("status") != "cancelled" and entry.get("expected_head") == head:
-            return self.lane_done(entry, delivered)
+        if not unmanaged:
+            entry = lane_entry(self.tools.ship, self.work, delivered, env=self.env)
+            if entry and entry.get("status") != "cancelled" and entry.get("expected_head") == head:
+                return self.lane_done(entry, delivered)
         try:
             title = self.title.read_text(encoding="utf-8").strip()
-        except OSError:
+        except (OSError, ValueError):  # missing or not UTF-8: refused just below
             title = ""
         if not title or len(title) > TITLE_MAX or "\n" in title:
-            return self.finish("blocked", f"the title at {self.title} is missing or over {TITLE_MAX} characters")
+            return self.finish("blocked", f"the title at {self.title} is missing, not UTF-8 text, or over "
+                                          f"{TITLE_MAX} characters")
         errors = self.out("lint.err")
         errors.write_bytes(b"")
-        if self.child([*self.tools.lint, "--pr-body", str(self.body)], cwd=self.work, name="lint") != 0:
+        # A foreign repository's docs tree follows none of this pack's rules: only the body is linted there.
+        only = ["--body-only"] if unmanaged else []
+        if self.child([*self.tools.lint, "--pr-body", str(self.body), *only], cwd=self.work, name="lint") != 0:
             # The lint prints its failures on stderr; its stdout holds only notes (pack sd:6402).
             try:
                 failures = [line[5:] for line in errors.read_text(encoding="utf-8").splitlines()
@@ -689,6 +804,8 @@ class Supervisor:
                 failures = []
             return self.finish("blocked", f"sd-docs-lint refused the body at {self.body}: "
                                           f"{'; '.join(failures[:3]) or 'no FAIL line'}; see {errors}")
+        if unmanaged:
+            return self.publish(head, title, delivered)
         out = self.out("enqueue")
         out.write_bytes(b"")
         items = [arg for item in delivered for arg in ("--item", str(item))]
@@ -714,6 +831,160 @@ class Supervisor:
             return self.finish("blocked", f"a cancel was asked after the lane entry was written; cancel it with "
                                           f"`sd-ship lane cancel {delivered[0]}`")
         raise Lost
+
+    def publish(self, head: str, title: str, delivered: list[int]) -> str | dict:
+        """An unmanaged repository's end (pack sd:7868): push the branch, open or find its draft pull request,
+        link it on the first delivered task, then `enqueued` with the run's `detail` naming it. No lane, no merge.
+
+        Each step finds its own state on a retry: the push of the same head is a no-op, an open pull request
+        for the branch is reused, and the link of the same url changes nothing.
+        """
+        remote = self.db.execute(f"SELECT remote FROM repo WHERE path IN ({paths.placeholders(paths.keys(self.row['repo']))})",
+                                 paths.keys(self.row["repo"])).fetchone()
+        repository = build.github_repository(remote["remote"] if remote else None)
+        if not repository:
+            return self.finish("blocked", "the repository's remote is not on GitHub, so no draft pull request opens")
+        branch = self.row["branch"]
+        # The owners of a private repository already see work names; a public one, or one whose visibility did
+        # not read, is scanned first, as machine-setup guards only public clones (operator ruling, pack sd:7868).
+        if self.private(repository):
+            add_note(self.db, self.lead, "comment", f"Build run {self.ident}: {repository} is private, so the "
+                                                    f"privacy-pattern scan before the push was skipped")
+        else:
+            leaked = self.leaks(head, title)
+            if leaked:
+                return self.finish("blocked", f"nothing was pushed: {leaked}")
+        if self.child([*self.tools.git, "-C", str(self.work), "push", "-q", "origin", f"{head}:refs/heads/{branch}"],
+                      cwd=self.work, name="push") != 0:
+            return self.finish("blocked", f"git push of {branch} to origin failed; see {self.out('push.err')}")
+        url = self.open_pull(repository, branch, title, head)
+        if isinstance(url, dict):
+            return url
+        try:
+            contributions.configure(self.db, delivered[0], {"pull_url": url}, who="build")
+        except WorkflowError as error:
+            return self.finish("blocked", f"{url} is open, but linking it on sd:{delivered[0]} failed: {error}")
+        if not build.write(self.db, self.ident, detail=build.DRAFT_PULL + url):
+            raise Lost
+        if build.enqueued(self.db, self.ident, delivered, held_by=build.DRAFT_PULL + url):
+            add_note(self.db, delivered[0], "comment",
+                     f"Build run {self.ident} pushed {branch} and opened {build.DRAFT_PULL}{url}; "
+                     f"its owners merge it, and the merge closes the delivered items")
+            return "enqueued"
+        if self.fresh()["cancel_requested"]:
+            return self.finish("blocked", f"a cancel was asked after {url} opened; close it on GitHub")
+        raise Lost
+
+    def private(self, repository: str) -> bool:
+        """True only when `gh repo view` reads `repository` as private; a failed or odd read is False (public)."""
+        try:
+            done = subprocess.run([*self.tools.gh, "repo", "view", repository, "--json", "isPrivate"],
+                                  capture_output=True, text=True, timeout=READ_SECONDS, check=False,
+                                  stdin=subprocess.DEVNULL, env=self.env)
+            answer = json.loads(done.stdout) if done.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        return isinstance(answer, dict) and answer.get("isPrivate") is True
+
+    def leaks(self, head: str, title: str) -> str:
+        """What the privacy-pattern scan refuses in the text a publish sends; "" when it passed.
+
+        It reads the title, the body, and each commit in base..head as `leak-guard.sh check` does: its message,
+        the paths it touches and its added lines. A scan that matches, fails or has no pattern is a refusal:
+        unknown is not clean before a push to someone else's repository.
+        """
+        # Bytes throughout, split on LF alone: a file or body that is not UTF-8 is scanned, not a crash, and a CR
+        # or form feed inside a line does not cut it in two (review of ac8175265). Patterns match ASCII values.
+        try:
+            body = self.body.read_bytes()
+        except OSError:
+            body = b""
+        span = f"{self.base()}..{head}"
+        # A merge commit's diff is against its first parent, the branch: every byte the merge adds to the
+        # branch, a conflict resolution's too, which plain `git log` leaves out (review of 5a5adca64). Beside it
+        # come main's bytes, already in the target repository: a match there blocks, it never leaks. `--cc`
+        # would show only the resolution, in a combined format this parse does not read. A root commit's diff
+        # is forced on, whatever `log.showRoot` says.
+        git = [*self.tools.git, "-C", str(self.work), "-c", "core.quotePath=false", "-c", "log.showRoot=true",
+               "log", "--no-color", "--no-ext-diff", "--no-renames", "--diff-merges=first-parent"]
+        messages = _read_bytes([*git, "--format=%B", span], env=self.env)
+        touched = _read_bytes([*git, "--format=", "--name-only", "-z", span], env=self.env)
+        diff = _read_bytes([*git, "--format=", "-p", "--unified=0", span], env=self.env)
+        # A file's header runs from `diff --git` to its first `@@`: mode, index, rename, `Binary files` and the
+        # `---`/`+++` lines are skipped there, and a hunk line is `+`, `-` or `\`, so `+++x` in a hunk is the
+        # added line `++x`. Messages and paths come from their own reads, never from this parse.
+        added, header = [], False
+        for line in diff.split(b"\n"):
+            if line.startswith(b"diff --git "):
+                header = True
+            elif line.startswith(b"@@"):
+                header = False
+            elif not header and line.startswith(b"+"):
+                added.append(line[1:])
+        parts = [("the title", [title.encode("utf-8", "surrogateescape")]), ("the body", body.split(b"\n")),
+                 ("the commits", [*messages.split(b"\n"), *(name for name in touched.split(b"\0") if name), *added])]
+        text = b"".join(line.replace(b"\n", b" ") + b"\n" for _part, lines in parts for line in lines)
+        try:
+            done = subprocess.run(self.tools.guard, input=text, capture_output=True, timeout=READ_SECONDS,
+                                  check=False, env=self.env)
+        except (OSError, subprocess.SubprocessError) as error:
+            return f"the privacy-pattern scan did not run: {type(error).__name__}"
+        if done.returncode == 0:
+            return ""
+        if done.returncode != 1:
+            return (f"the privacy-pattern scan could not check the text (exit {done.returncode}; 3 is no pattern "
+                    f"file): {done.stderr.decode('utf-8', 'replace').strip()[-300:]}")
+        hits, first = set(), 1
+        numbers = {int(word) for word in done.stdout.split() if word.isdigit()}
+        for part, lines in parts:
+            if any(first <= number < first + len(lines) for number in numbers):
+                hits.add(part)
+            first += len(lines)
+        return f"a privacy pattern matches {', '.join(sorted(hits)) or 'the text'}; replace the value with a synthetic one"
+
+    def open_pull(self, repository: str, branch: str, title: str, head: str) -> str | dict:
+        """The open pull request for `branch`, or a new draft one; its url, or the run's blocked end.
+
+        `gh pr list --head` matches the branch name alone, so a fork's pull request with the same name is
+        listed too, and is never this run's: only one from `repository` itself counts. That one must target
+        the run's base and hold the pushed `head`, or it is not linked (review of b34af431e). GitHub moves
+        `headRefOid` a moment after a push, so another head is unread, for the reap's retry to read again.
+        """
+        listed = _read([*self.tools.gh, "pr", "list", "--repo", repository, "--head", branch, "--state", "open",
+                        "--json", "url,isCrossRepository,baseRefName,headRefOid", "--limit", "5"], env=self.env)
+        try:
+            rows = json.loads(listed)
+        except ValueError:
+            raise Unread("gh pr list answered no JSON") from None
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            raise Unread("gh pr list gave no list of pull requests")
+        if not all(isinstance(row.get("url"), str) and contributions.PULL.fullmatch(row["url"])
+                   and isinstance(row.get("isCrossRepository"), bool) for row in rows):
+            raise Unread("gh pr list gave no pull-request urls with their head repository")
+        own = [row for row in rows if row["isCrossRepository"] is False]
+        if len(own) > 1:
+            return self.finish("blocked", f"{len(own)} open pull requests use {branch}: "
+                                          f"{', '.join(row['url'] for row in own)}")
+        if own:
+            url, base = own[0]["url"], self.base().removeprefix("origin/")
+            if own[0].get("baseRefName") != base:
+                return self.finish("blocked", f"{url} uses {branch} but targets {own[0].get('baseRefName')!r}, "
+                                              f"not {base!r}; it was not linked: close it or retarget it")
+            if own[0].get("headRefOid") != head:
+                raise Unread(f"{url} reads head {own[0].get('headRefOid')!r}, not the pushed {head[:12]}")
+            return url
+        out = self.out("pull")
+        out.write_bytes(b"")
+        if self.child([*self.tools.gh, "pr", "create", "--repo", repository, "--draft", "--head", branch,
+                       "--base", self.base().removeprefix("origin/"), "--title", title, "--body-file", str(self.body)],
+                      cwd=self.work, name="pull") != 0:
+            return self.finish("blocked", f"gh pr create refused the draft pull request; see {self.out('pull.err')}")
+        found = [line.strip() for line in out.read_text(encoding="utf-8").splitlines()
+                 if contributions.PULL.fullmatch(line.strip())]
+        if not found:
+            # Opened, perhaps, with its url unread: the retry's list finds it, so none opens twice.
+            raise Unread(f"gh pr create printed no pull-request url; see {out}")
+        return found[-1]
 
     def checking(self) -> str:
         """After an auto-pickup merge: refresh the repository, then the dashboard's health (design, "Auto-pickup").
@@ -923,7 +1194,8 @@ class Supervisor:
 
     # -------------------------------------------------------------- children
 
-    def child(self, argv: list[str], *, cwd: Path, name: str, out: Path | None = None, session: bool = False) -> int:
+    def child(self, argv: list[str], *, cwd: Path, name: str, out: Path | None = None, session: bool = False,
+              descendants: bool = False) -> int:
         """Run one child in its own process group, recorded before it runs; its exit code.
 
         The child waits on a pipe until `builder_pgid` and `builder_start`
@@ -931,6 +1203,10 @@ class Supervisor:
         the child exits unrun. While it runs, the supervisor beats, stops at
         a requested cancel or a lost run, and ends it past `timeout`. Its
         group must read gone after it exits, or the run is a `Survivor`.
+        The groups its descendants run in (`sd gate run` puts its command in
+        one) are ended with it and must read gone too. With `descendants`,
+        each is also recorded while it runs, so one that outlives its parent
+        is still ended (`ours`).
         """
         target = out or self.out(name)
         read, gate = os.pipe()
@@ -955,12 +1231,16 @@ class Supervisor:
             process.wait()
             raise Lost
         deadline = time.monotonic() + self.timeout
+        self.groups = {} if descendants else None
         while True:
             try:
                 code = process.wait(timeout=min(1.0, self.beat_seconds))
                 break
             except subprocess.TimeoutExpired:
                 pass
+            if self.groups is not None:
+                for group, start in (build.descendant_groups(process.pid) or {}).items():
+                    self.groups.setdefault(group, start)
             try:
                 if session:
                     self.watch_session()
@@ -1015,31 +1295,54 @@ class Supervisor:
                     return
 
     def end_group(self, pgid: int, process: subprocess.Popen | None = None) -> bool:
-        """TERM the group, `grace` seconds, then SIGKILL; True once ESRCH answers.
+        """TERM the group and the groups below it, `grace` seconds, then SIGKILL; True once ESRCH answers on each.
 
+        The groups below are read live before each signal (`build.descendant_groups`), so each is one this
+        run's processes started; `ours` adds a group the child started that outlived its parent. A `ps` that
+        did not answer adds none: the groups known are signalled, and their ESRCH is True, as
+        `build.kill_group` reads it. An unread `ps` once set a flag no later read cleared, so a clean
+        managed run ended as a survivor (review of b34af431e).
         The leader is reaped as it dies (`process.poll`): a zombie leader is
         still a member of its group, and would read as a survivor.
         """
+        groups = {pgid}
+
+        def widen() -> None:
+            groups.update(build.descendant_groups(pgid) or ())
+            groups.update(group for group, start in (self.groups or {}).items() if self.ours(group, start))
+
         def gone() -> bool:
             if process is not None:
                 process.poll()
-            return self.probe.group(pgid) is False
+            return all(self.probe.group(group) is False for group in groups)
 
-        if gone():
-            return True
         for sent, wait in ((signal.SIGTERM, self.grace), (signal.SIGKILL, 5.0)):
-            try:
-                os.killpg(pgid, sent)
-            except ProcessLookupError:
+            widen()
+            if gone():
                 return True
-            except OSError:
-                pass  # EPERM may be a group of zombies only (sd:6406): `gone` decides
+            for group in sorted(groups):
+                try:
+                    os.killpg(group, sent)
+                except OSError:
+                    pass  # ESRCH: gone; EPERM may be a group of zombies only (sd:6406): `gone` decides
             stop = time.monotonic() + wait
             while time.monotonic() < stop:
                 if gone():
                     return True
                 time.sleep(0.05)
         return gone()
+
+    def ours(self, group: int, start: str) -> bool:
+        """Whether a group the child started, read with its leader's `start`, is still that group.
+
+        It must have a live member (EPERM is another user's group: never one this run started), and a leader
+        that started at `start`, or none: a pid is not reused while a group of that number has a member. So a
+        number a reused pid holds now is never signalled (review of pack sd:7868).
+        """
+        if self.probe.group(group) is not True:
+            return False
+        leader = self.probe.alive(group)
+        return leader is False or (leader is True and bool(start) and self.probe.started(group) == start)
 
 
 class DraftSupervisor(Supervisor):

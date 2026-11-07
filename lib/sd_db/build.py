@@ -104,6 +104,9 @@ LOSSES = ("interrupted", "timed_out", "error_max_turns", "denied")
 #: The steps from `enqueued` on: the lease is released, the members are `done`, and step 7 releases the run.
 #: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
+#: An unmanaged repository's run at `enqueued` names its draft pull request in `detail`, which a lane run leaves
+#: unset until it ends: the tick's watch reads that pull request, not the lane (pack sd:7868).
+DRAFT_PULL = "draft pull request "
 #: The steps a cancel may stop: from `enqueuing` on, the lane may hold the branch (design, "Liveness").
 CANCELLABLE = ("claimed", "worktree", "building", "reviewing", "fixing")
 ACTIVE = ("queued", "running", "ending")
@@ -134,7 +137,25 @@ def _repo_refusal(row, *, hub_only: bool = False) -> str | None:
     if row["repo_path"] is None:
         return f"item {item} needs a registered repository"
     if not row["managed"]:
-        return f"item {item}'s repository {row['repo']} is not managed"
+        # An unmanaged repository's build ends in a draft pull request the owners merge (pack sd:7868):
+        # it needs GitHub to open one, and a task to track it as the item's contribution `pull_url`.
+        if not github_repository(row["remote"]):
+            return (f"item {item}'s repository {row['repo']} is not managed and its remote is not on GitHub, "
+                    f"where its build opens a draft pull request")
+        if row["kind"] != "task":
+            return (f"item {item} is a {row['kind']} item; a build in the unmanaged repository {row['repo']} "
+                    f"takes task items only")
+        # Its draft becomes the task's one contribution. One already linked would refuse that link only after the
+        # push and the draft, on every Retry (review of 3072db937). A press or a claim precedes every run, so
+        # no link here is this build's own: a retry passes through neither.
+        try:
+            linked = json.loads(row["fields"] or "{}").get("contribution") or {}
+        except (ValueError, AttributeError):
+            linked = {}
+        for name, what in (("issue_url", "the issue"), ("pull_url", "the pull request")):
+            if isinstance(linked, dict) and linked.get(name):
+                return (f"item {item} already links {what} {linked[name]}; a build in the unmanaged repository "
+                        f"{row['repo']} would push and open a draft pull request it cannot link")
     if not row["remote"]:
         return f"item {item}'s repository {row['repo']} has no remote"
     if hub_only and row["lane_host"] is not None:
@@ -168,6 +189,25 @@ def run_host(owner: str | None) -> str | None:
 def mine(row, hosts: Collection[str | None]) -> bool:
     """Whether this machine's dispatcher owns the run `row`: only it probes, signals, watches or sweeps it."""
     return run_host(row["owner"]) in hosts
+
+
+def github_repository(remote: str | None) -> str:
+    """`owner/name` of a GitHub remote, or "" for none or another host."""
+    from .ship import _github_repository
+    from .workflow import WorkflowError
+
+    try:
+        return _github_repository(remote) if remote else ""
+    except WorkflowError:
+        return ""
+
+
+def unmanaged(connection, repo: str) -> bool:
+    """Whether the repository row reads `managed = 0`: its builds end in a draft pull request (pack sd:7868)."""
+    probe = paths.keys(repo)
+    row = connection.execute(f"SELECT managed FROM repo WHERE path IN ({paths.placeholders(probe)})",
+                             probe).fetchone()
+    return row is not None and not row["managed"]
 
 
 _REPO = ("SELECT item.*, repo.path AS repo_path, repo.remote, repo.managed, repo.lane_host "
@@ -659,9 +699,11 @@ def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str
 
     probe = paths.keys(repo)  # a run row written before migration 014 holds the absolute form
     row = connection.execute(
-        f"SELECT remote FROM repo WHERE path IN ({paths.placeholders(probe)})", probe).fetchone()
+        f"SELECT remote, managed FROM repo WHERE path IN ({paths.placeholders(probe)})", probe).fetchone()
     if not branch or row is None or not row["remote"]:
         return ""
+    if not row["managed"]:
+        return _contribution_pull(connection, items)
     try:
         repository = ship._github_repository(row["remote"])
         for item in items:
@@ -671,6 +713,19 @@ def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str
                 return url
     except WorkflowError:
         return ""
+    return ""
+
+
+def _contribution_pull(connection, items: list[int]) -> str:
+    """An unmanaged repository's build links its draft pull request on the first delivered task (pack sd:7868)."""
+    for item in items:
+        row = connection.execute("SELECT fields FROM item WHERE id = ?", (item,)).fetchone()
+        try:
+            url = (json.loads(row["fields"] or "{}").get("contribution") or {}).get("pull_url") if row else None
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(url, str) and url.startswith("https://github.com/"):
+            return url
     return ""
 
 
@@ -734,7 +789,7 @@ def enqueuing(connection, ident: str) -> bool:
             "AND cancel_requested IS NULL", (clock(), clock(), ident)).rowcount == 1
 
 
-def enqueued(connection, ident: str, delivered: Collection[int] | None = None) -> bool:
+def enqueued(connection, ident: str, delivered: Collection[int] | None = None, *, held_by: str = "the lane") -> bool:
     """The `enqueued` step: the lease released and the members `done`, the items left `in_progress` for the lane.
 
     `delivered` is the items the lane entry delivers; a member outside it
@@ -743,7 +798,8 @@ def enqueued(connection, ident: str, delivered: Collection[int] | None = None) -
     `released_at` and `outcome` null, until step 7 ends it; `reap` skips it
     meanwhile. One compare-and-set on the run, open and not yet at a lane
     step; False, with no row changed, for a late supervisor whose run was
-    reaped or retried, or one already enqueued.
+    reaped or retried, or one already enqueued. `held_by` names what holds
+    the branch now: the lane, or an unmanaged repository's draft pull request.
     """
     marks = ", ".join("?" for _ in LANE_STEPS)
     with transaction(connection):
@@ -762,7 +818,7 @@ def enqueued(connection, ident: str, delivered: Collection[int] | None = None) -
         for member in members:
             if member not in skipped:
                 connection.execute("UPDATE assignment SET status = 'done', ended = ?, result = ? WHERE id = ?",
-                                   (stamp, f"build run {ident} enqueued in the lane", member["id"]))
+                                   (stamp, f"build run {ident} enqueued in {held_by}", member["id"]))
         for member in skipped:
             _block(connection, [member], f"build run {ident} enqueued no commit with a `Closes: sd:{member['item']}` "
                                          "trailer, so the merge leaves this item open", stamp)
@@ -817,13 +873,47 @@ def merged(connection, read: dict) -> bool:
     tick spawns a fresh one and the reap judges it as any step.
     """
     with transaction(connection):
-        stamp = clock()
-        step = "checking" if picked(connection, read["assignment"]) else "cleaning"
-        return connection.execute(
-            f"UPDATE runner_run SET step = ?, heartbeat_at = ?, supervisor_pid = NULL, "
-            f"supervisor_pgid = NULL, supervisor_start = NULL, builder_pgid = NULL, builder_start = NULL, "
-            f"updated_at = ? WHERE id = ? AND step = 'enqueued' AND {_SAME}",
-            (step, stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount == 1
+        return _after_merge(connection, read, "checking" if picked(connection, read["assignment"]) else "cleaning")
+
+
+def _after_merge(connection, read: dict, step: str) -> bool:
+    stamp = clock()
+    return connection.execute(
+        f"UPDATE runner_run SET step = ?, heartbeat_at = ?, supervisor_pid = NULL, "
+        f"supervisor_pgid = NULL, supervisor_start = NULL, builder_pgid = NULL, builder_start = NULL, "
+        f"updated_at = ? WHERE id = ? AND step = 'enqueued' AND {_SAME}",
+        (step, stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount == 1
+
+
+def draft_pull(read: dict) -> str | None:
+    """The draft pull request an open `enqueued` run of an unmanaged repository waits on, or None (lane runs)."""
+    detail = read.get("detail") or ""
+    if read.get("step") != "enqueued" or read.get("outcome") is not None or not detail.startswith(DRAFT_PULL):
+        return None
+    return detail[len(DRAFT_PULL):].strip() or None
+
+
+def pull_merged(connection, read: dict, url: str) -> bool:
+    """The owners merged an unmanaged repository's draft pull request: the run goes to `cleaning`, never `checking`
+    (nothing of ours deploys), and each delivered task still `in_progress` moves to `done`, in one transaction.
+
+    The same compare-and-set as `merged`; False, with nothing written, when the run moved. A member the operator
+    moved on stays as it is, and one that is no task gets a note: only a task closes by status.
+    """
+    with transaction(connection):
+        if not _after_merge(connection, read, "cleaning"):
+            return False
+        for member in _members(connection, read["assignment"], "done"):
+            row = connection.execute("SELECT kind, status FROM item WHERE id = ?", (member["item"],)).fetchone()
+            if row is None or row["status"] != "in_progress":
+                continue
+            if row["kind"] != "task":
+                add_note(connection, member["item"], "followup",
+                         f"Build run {read['id']}: {url} merged; close this {row['kind']} item by hand")
+                continue
+            transition(connection, member["item"], "done", who="build",
+                       reason=f"build run {read['id']}: its draft pull request {url} merged")
+        return True
 
 
 def lane_failed(connection, read: dict, reason: str) -> bool:
@@ -1010,18 +1100,65 @@ def verdict(row: dict, *, probe=Probe) -> tuple[str, list[int]]:
     return state, [group for side, group in sides if side == OURS] if state == OURS else []
 
 
+def descendant_groups(pgid: int) -> dict[int, str] | None:
+    """The groups that descendants of `pgid`'s members run in now, apart from `pgid`, each with its leader's
+    start (`ps lstart`, "" when no leader lives); None when `ps` did not answer.
+
+    `sd gate run` puts an unmanaged run's check in a group of its own, so a kill of the recorded groups alone
+    left it running beside the retry (review of pack sd:7868). Read live, every group is one the run's own
+    processes started, not a recorded number a reused pid may hold now.
+    """
+    try:
+        listing = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,lstart="], capture_output=True, text=True,
+                                 timeout=10, check=False, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if listing.returncode != 0:
+        return None
+    children: dict[int, list[tuple[int, int]]] = {}
+    starts: dict[int, str] = {}
+    todo: list[int] = []
+    for line in listing.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 3 or not all(field.isdigit() for field in fields[:3]):
+            continue
+        pid, parent, group = map(int, fields[:3])
+        starts[pid] = " ".join(fields[3:])
+        children.setdefault(parent, []).append((pid, group))
+        if group == pgid:
+            todo.append(pid)
+    found: dict[int, str] = {}
+    seen = set(todo)
+    while todo:
+        for pid, group in children.get(todo.pop(), []):
+            if pid not in seen:
+                seen.add(pid)
+                todo.append(pid)
+                if group not in (pgid, os.getpgrp()) and group > 1:
+                    found[group] = starts.get(group, "")
+    return found
+
+
 def kill_group(pgid: int) -> bool:
-    """SIGKILL a builder's process group; True once no member lives (ESRCH), False while one may."""
+    """SIGKILL a builder's process group and each group its members' descendants run in; True once ESRCH
+    answers on every one, False while one may live.
+
+    A `ps` that did not answer leaves only the recorded group to signal and
+    read: its ESRCH is True, as `end_group` reads it. A failed read blocked
+    every reap, of managed builds too, with every group gone (review of
+    3072db937).
+    """
     if not isinstance(pgid, int) or pgid <= 1 or pgid == os.getpgrp():
         return False
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        return True
-    except OSError:
-        pass  # EPERM may be a group of zombies only: the probe decides
+    below = descendant_groups(pgid)
+    groups = [pgid, *sorted(below or ())]
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except OSError:
+            pass  # ESRCH: gone; EPERM may be a group of zombies only: the probe decides
     for _ in range(20):
-        if Probe.group(pgid) is False:
+        if all(Probe.group(group) is False for group in groups):
             return True
         time.sleep(0.1)
     return False
