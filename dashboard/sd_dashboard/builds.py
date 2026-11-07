@@ -221,7 +221,9 @@ def _members(connection, run: dict) -> list[dict]:
 def _open_row(connection, run: dict, now: str) -> dict:
     members = _members(connection, run)
     step = run["step"] or "claimed"
-    beat = _seconds(run["heartbeat_at"] or run["created_at"], now)
+    # A satellite stamps its beat on its own clock: one too far ahead has no age and reads lost (sd:7986).
+    age = build._lead_age(run["heartbeat_at"] or run["created_at"], now)
+    beat = None if age is None else int(age)
     # A satellite's run logs on its own disk: the row names the host and the path, and reads no log here (sd:7933).
     host = build.lane_of(connection, build.run_host(run["owner"])) or ""
     quiet = None if host else _log_quiet(run["log_path"], now)
