@@ -820,8 +820,8 @@ def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> 
     Called inside `change_status`'s transaction, after the completion. The
     new row copies what the obligation is -- kind, title, body, priority,
     repository -- and not what one instance of it carried: `branch`, `path`
-    and the producer-owned `fields`. The rule, its anchor and its lead move
-    together (pack sd:5648): the lead is copied as stored, since a read treats
+    and the producer-owned `fields`, all but the area (pack sd:8010). The
+    rule, its anchor and its lead move together (pack sd:5648): the lead is copied as stored, since a read treats
     a value `_fields` would refuse as open rather than hiding the row.
     Clearing the rule on the completed row is what makes a reopen and a
     second completion spawn nothing.
@@ -866,6 +866,9 @@ def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> 
     )
     if row["body"] is not None:
         set_item_fields(connection, spawned, body=row["body"])
+    if (area := item_area(row)) is not None:
+        # The area is the operator's, not the producer's: it recurs (pack sd:8010).
+        set_item_fields(connection, spawned, fields={"area": area})
     set_item_fields(connection, row["id"], **CLEARED)
     add_note(connection, row["id"], "comment",
              f"Next occurrence: item {spawned}, due {due} ({rule.text()}, {anchor}-anchored) by {who}",
