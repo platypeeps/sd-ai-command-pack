@@ -20,7 +20,7 @@ from .database import transaction
 from .repos import same_remote
 from .shadow_sync import read_watermark
 from .workflow import WorkflowError, _checked_state, _text, item_state
-from .writes import _transition, add_note, set_item_fields, stamp
+from .writes import _transition, add_note, resolve_note, set_item_fields, stamp
 from .writes import now as current_time
 
 
@@ -249,7 +249,15 @@ def cancel_work(
             "at": current_time(), "who": who, "reason": reason,
         }
         set_item_fields(connection, item, fields=fields)
-        _transition(connection, item, "done", who=who, reason=f"cancelled: {reason}")
+        # A cancel is the operator's answer to the item's open questions: no
+        # one will do it, so none waits in Decisions (sd:7992). A delivery
+        # answers none (`change_status`, pack sd:6329).
+        asked = [note["id"] for note in state["notes"] if note["kind"] == "question" and not note["resolved_at"]]
+        for note in asked:
+            resolve_note(connection, note)
+        closed = (f"; resolved open question{'s' if len(asked) > 1 else ''} " + ", ".join(map(str, asked))
+                  if asked else "")
+        _transition(connection, item, "done", who=who, reason=f"cancelled: {reason}{closed}")
         return item_state(connection, item)
 
 
