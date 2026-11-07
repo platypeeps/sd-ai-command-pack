@@ -312,6 +312,31 @@ def _external(connection, row, *, now: str) -> dict | None:
                           "reason": freshness["reason"]}}
 
 
+def _pull(connection, state) -> dict | None:
+    """The item's linked pull request (its contribution `pull_url`), with the lane the contribution projection reads.
+
+    A build in an unmanaged repository links its draft here (pack sd:7868); `needs_you` and `reasons` are the
+    projection's, so an open draft the operator wrote reads "mark it ready for review". None when the item links none.
+    """
+    from sd_db import contributions
+
+    try:
+        url = (json.loads(state["item"]["fields"] or "{}").get("contribution") or {}).get("pull_url")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(url, str) or not url.startswith("https://github.com/"):
+        return None
+    try:
+        found = next((row for row in contributions.projection(connection) if row.get("item_id") == state["item"]["id"]
+                      and row.get("url") == url), None)
+    except (contributions.WorkflowError, ValueError) as error:
+        return {"url": url, "lane": None, "state": None, "needs_you": False, "reasons": [],
+                "error": f"the contribution lane was not read: {error}"}
+    found = found or {}
+    return {"url": url, "lane": found.get("lane"), "state": found.get("external_state"),
+            "needs_you": bool(found.get("needs_you")), "reasons": list(found.get("reasons") or []), "error": ""}
+
+
 #: A file path a body or note names: absolute, `~/`, or repo-relative with at least one folder.
 _NAMED_PATH = re.compile(r"(?<![\w./~-])((?:~?/)?[\w.-]+(?:/[\w.-]+)+\.(?:md|html))")
 
@@ -396,6 +421,7 @@ def _details(connection, item: int, *, now: str) -> dict:
         "notes": [_note(note) for note in state["notes"] if note["kind"] != "status_change"],
         "assignments": assignments, "allowed": workflow.allowed_statuses(connection, item, state=state),
         "external": _external(connection, row, now=now),
+        "pull": _pull(connection, state),
         "documents": _documents(connection, state),
         "published": _published(connection, state),
         # `sd work relink` and `sd work cancel` availability, as the mutation checks it under its lock

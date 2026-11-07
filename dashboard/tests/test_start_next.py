@@ -101,7 +101,8 @@ class StartNext(ScreenCase):
         self.assertIn("not a directory on this machine", why[nowhere])
         self.assertEqual(why[launched], "Fix started a session for it already")
         self.assertEqual(why[named], "a live Claude session works on it")
-        self.assertEqual(why[unmanaged], f"item {unmanaged}'s repository /repos/unmanaged is not managed")
+        self.assertEqual(why[unmanaged], f"item {unmanaged}'s repository /repos/unmanaged is not managed and its remote "
+                         "is not on GitHub, where its build opens a draft pull request")
         self.assertRegex(why[pressed], rf"^item {pressed} has queued assignment \d+$")
 
     def test_the_room_is_the_cap_less_the_running_builders(self):

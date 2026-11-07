@@ -21,6 +21,7 @@ import textwrap
 import threading
 import time
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -50,6 +51,7 @@ with mock.patch("sys.path", [str(BIN), *sys.path]):
     ADAPTER = importlib.import_module("sd_operations")
     LANE = importlib.import_module("sd_lane")  # loaded now: `cited` imports it, and the lane's body reader, by name
     importlib.import_module("sd_ship_body")
+    SD_LIB = importlib.import_module("sd_lib")  # the adapter's entrypoint detection, for its git fault
 
 #: One fake for every tool: its role is its file name, its answers come from `<plans>/<role>.json`.
 FAKE = textwrap.dedent('''
@@ -60,8 +62,16 @@ FAKE = textwrap.dedent('''
         log.write(json.dumps({"role": role, "argv": sys.argv[1:], "cwd": os.getcwd()}) + "\\n")
     plan = plans / f"{role}.json"
     queue = json.loads(plan.read_text()) if plan.exists() else []
-    mode = queue.pop(0) if queue else "default"
+    # `gh repo view` (the visibility read) takes no plan: plans/visibility.txt answers it.
+    viewing = role == "gh" and sys.argv[1:3] == ["repo", "view"]
+    mode = queue.pop(0) if queue and not viewing else "default"
     plan.write_text(json.dumps(queue))
+    if viewing:  # `gh repo view R --json isPrivate`: public unless plans/visibility.txt says otherwise
+        said = (plans / "visibility.txt").read_text().strip() if (plans / "visibility.txt").exists() else "public"
+        if said == "unread":
+            sys.exit("gh: HTTP 502")
+        print(json.dumps({"isPrivate": said == "private"}))
+        sys.exit(0)
     def git(*args):
         return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
     def real(name):
@@ -112,13 +122,37 @@ FAKE = textwrap.dedent('''
         Path("work.txt").write_text(Path("work.txt").read_text() + mode + "\\n" if Path("work.txt").exists()
                                     else mode + "\\n")
         git("add", "work.txt")
+        # `extra`: plans/extra.json adds files (name to hex bytes) and message lines, as a builder may write.
+        extra = json.loads((plans / "extra.json").read_text()) if mode == "extra" else {}
+        for name, data in extra.get("files", {}).items():
+            Path(name).write_bytes(bytes.fromhex(data))
+            git("add", "--", name)
+        for old, new in extra.get("move", {}).items():
+            git("mv", old, new)
         # One `Closes: sd:N` trailer per item the brief lists, as the brief asks; `skip` leaves out the last
         # one, as a builder that skips an item for the operator does, and `none` delivers nothing.
         prompt = sys.argv[sys.argv.index("-p") + 1]
         items = re.findall(r"^- sd:(\\d+)", prompt, re.M)
         items = [] if mode == "none" else items[:-1] if mode == "skip" else items
         trailers = "".join(f"\\nCloses: sd:{item}" for item in items)
-        git("-c", "commit.gpgsign=false", "commit", "-qm", f"fix: {mode}" + (f"\\n{trailers}" if items else ""))
+        message = f"fix: {mode}" + "".join("\\n\\n" + text for text in extra.get("message", []))
+        git("-c", "commit.gpgsign=false", "commit", "-qm", message + (f"\\n{trailers}" if items else ""))
+        # `merge`: main moves `file` to `theirs`, and the builder merges it, resolving the conflict with
+        # `resolved`: bytes that only the merge commit adds, as a conflict resolution does.
+        merge = extra.get("merge")
+        if merge:
+            git("checkout", "-q", "-b", "sd-side", "origin/main")
+            Path(merge["file"]).write_bytes(bytes.fromhex(merge["theirs"]))
+            git("add", "--", merge["file"])
+            git("-c", "commit.gpgsign=false", "commit", "-qm", "chore: main moves on")
+            git("push", "-q", "origin", "sd-side:main")
+            git("checkout", "-q", "-")
+            git("branch", "-q", "-D", "sd-side")
+            git("fetch", "-q", "origin")
+            git("-c", "commit.gpgsign=false", "merge", "-q", "--no-edit", "origin/main")
+            Path(merge["file"]).write_bytes(bytes.fromhex(merge["resolved"]))
+            git("add", "--", merge["file"])
+            git("-c", "commit.gpgsign=false", "commit", "-q", "--no-edit")
         final = {"type": "result", "subtype": "success", "is_error": False, "permission_denials": [],
                  "session_id": session, "result": f"built ({mode})", "total_cost_usd": 0.42,
                  "usage": {"input_tokens": 10, "output_tokens": 20}}
@@ -182,6 +216,54 @@ FAKE = textwrap.dedent('''
                  "expected_head": argv[argv.index("--expected-head") + 1]}
         lane.write_text(json.dumps(entries + [entry]))
         print(json.dumps({"ok": True, **entry}))
+    if role == "gh":  # pack sd:7868: an unmanaged repository's draft pull request, kept in `<plans>/pulls.json`
+        pulls_file = plans / "pulls.json"
+        pulls = json.loads(pulls_file.read_text()) if pulls_file.exists() else []
+        argv = sys.argv[1:]
+        def opt(name):
+            return argv[argv.index(name) + 1]
+        if argv[:2] == ["pr", "list"]:
+            # As GitHub answers: `--head` matches the name in forks too; the head is the branch's tip now.
+            def tip(name):
+                done = subprocess.run(["git", "-C", str(plans.parent / "origin.git"), "rev-parse", "--verify",
+                                       "--quiet", f"refs/heads/{name}"], capture_output=True, text=True)
+                return done.stdout.strip() or None
+            print(json.dumps([{"url": row["url"], "isCrossRepository": row.get("fork", False),
+                               "baseRefName": row["base"], "headRefOid": row.get("sha") or tip(row["head"])}
+                              for row in pulls if row["head"] == opt("--head") and row["state"] == "open"]))
+            sys.exit(0)
+        if argv[:2] == ["pr", "create"]:
+            assert "--draft" in argv and Path(opt("--body-file")).is_file(), argv
+            if mode == "refuse":
+                print("pull request create failed: GraphQL: not allowed", file=sys.stderr)
+                sys.exit(1)
+            url = f"https://github.com/{opt('--repo')}/pull/{len(pulls) + 1}"
+            pulls_file.write_text(json.dumps(pulls + [{"url": url, "head": opt("--head"), "state": "open",
+                                                       "base": opt("--base"), "title": opt("--title")}]))
+            print("Creating draft pull request", file=sys.stderr)
+            if mode != "mute":
+                print(url)
+            sys.exit(0)
+        sys.exit(f"gh fake: no such call {argv}")
+    if role == "gate":  # `sd gate run --label L -- <command>`: its exit code the command's own
+        # As `run_gated` does: the command in a process group of its own, INT, TERM and HUP sent on to that
+        # group, and a wait for the command to end.
+        argv = sys.argv[1:]
+        assert argv[0] == "--label" and argv[2] == "--", argv
+        import signal
+        child = subprocess.Popen(argv[3:], process_group=0)
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(signum, lambda number, _frame: os.killpg(child.pid, number))
+        code = child.wait()
+        sys.exit(128 - code if code < 0 else code)
+    if role == "guard":  # `leak-guard.sh scan`: bytes on stdin, lines numbered on LF as `grep -a -n` does
+        text = sys.stdin.buffer.read()
+        (plans / "guard.txt").write_bytes(text)
+        if mode == "none":  # no pattern file: unknown, exit 3
+            sys.exit(3)
+        hits = [str(number) for number, line in enumerate(text.split(b"\\n"), 1) if b"PRIVATE" in line]
+        print(" ".join(hits))
+        sys.exit(1 if hits else 0)
     if role == "sd-docs-lint":
         _, args = real("sd-docs-lint")
         assert args.pr_body is not None and args.pr_body.is_file(), args
@@ -193,6 +275,12 @@ FAKE = textwrap.dedent('''
             sys.exit(1)
         sys.exit(0)
 ''')
+
+
+def end(process):
+    """SIGKILL a process the test started, and reap it."""
+    process.kill()
+    process.wait()
 
 
 def group_gone(pgid):
@@ -458,6 +546,16 @@ class Supervise(Case):
             time.sleep(0.05)
         self.assertIs(build.Probe.group(leader.pid), False)
         self.assertTrue(self.supervisor().end_group(leader.pid))
+
+    def test_an_unread_ps_does_not_fail_an_end_once_the_group_is_gone(self):
+        """Review of b34af431e: an unread `ps` set a flag no later read cleared, so a run whose group read
+        ESRCH ended a survivor, managed builds too. Its known groups' ESRCH is True, as `kill_group` reads it."""
+        self.press()
+        leader = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(end, leader)
+        with mock.patch.object(build, "descendant_groups", return_value=None):
+            self.assertTrue(self.supervisor().end_group(leader.pid, leader))
+        self.assertIsNotNone(leader.poll(), "the group was signalled and is gone")
 
     def questions(self):
         return [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'question'",
@@ -1002,6 +1100,616 @@ class Supervise(Case):
         with mock.patch.dict(os.environ, {"FAKE_PLANS": str(self.plans), "FAKE_BIN": str(BIN)}):
             moved = build_run.watch(self.db, lane=lane, probe=exited)
         self.assertEqual(moved, [{"run": self.bundle["id"], "step": "cleaning"}])
+
+
+#: An unmanaged repository's check: it passes once the builder's fix round wrote `fix` into work.txt.
+CHECK = [sys.executable, "-c", "import sys; sys.exit(0 if 'fix' in open('work.txt').read() else 1)"]
+PASS = [sys.executable, "-c", "print('ok')"]
+#: A supervisor in a process of its own, as `spawn` starts one, so a test can SIGKILL or pause it mid-check.
+SUPERVISE = textwrap.dedent("""\
+    import json, os, sys
+    from pathlib import Path
+    spec = json.loads(sys.argv[1])
+    sys.path[:0] = spec["path"]
+    import sd_operations
+    from sd_db import build_run
+    from sd_db.database import connect
+    build_run.Supervisor(connect(spec["db"]), spec["ident"], tools=build_run.Tools(**spec["tools"]),
+                         log_root=Path(spec["logs"]), environ=dict(os.environ), cited=sd_operations.cited,
+                         checks=lambda work: [spec["check"]], beat_seconds=0.2, timeout=90, grace=0.5).run()
+""")
+
+
+class Unmanaged(Case):
+    """Pack sd:7868: an unmanaged repository's run ends in a pushed branch and a draft pull request, no lane."""
+
+    def setUp(self):
+        super().setUp()
+        self.db.execute("UPDATE repo SET managed = 0")
+        tools = self.root / "tools"
+        for role in ("gh", "gate", "guard"):
+            (tools / f"{role}.py").write_text(FAKE, encoding="utf-8")
+        self.tools = dataclasses.replace(self.tools, gh=[sys.executable, str(tools / "gh.py")],
+                                         gate=[sys.executable, str(tools / "gate.py")],
+                                         guard=[sys.executable, str(tools / "guard.py")])
+
+    def pulls(self):
+        path = self.plans / "pulls.json"
+        return json.loads(path.read_text()) if path.exists() else []
+
+    def contribution(self, item):
+        return json.loads(item_state(self.db, item)["item"]["fields"] or "{}").get("contribution") or {}
+
+    def test_a_clean_run_pushes_the_branch_and_opens_one_draft(self):
+        self.press(2)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended, {"run": self.bundle["id"], "outcome": None, "step": "enqueued"})
+        branch = self.bundle["branch"]
+        self.assertEqual(self.calls("sd-ship"), [], "no lane: not even its list")
+        self.assertIn(branch, self.remote_branches().split())
+        url = "https://github.com/fixture/repo/pull/1"
+        self.assertEqual([(row["url"], row["head"], row["base"]) for row in self.pulls()], [(url, branch, "main")])
+        create = next(call["argv"] for call in self.calls("gh") if call["argv"][:2] == ["pr", "create"])
+        self.assertEqual(create[create.index("--title") + 1], "feat(fixture): build the fixture")
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["step"], row["detail"], build.draft_pull(row)), ("enqueued", build.DRAFT_PULL + url, url))
+        self.assertEqual([m["status"] for m in row["members"]], ["done", "done"])
+        self.assertEqual(self.statuses(), ["in_progress", "in_progress"], "open until the owners merge")
+        self.assertEqual(self.contribution(self.items[0]).get("pull_url"), url)
+        self.assertEqual(build.pull_url(self.db, self.bundle["repo"], branch, self.items), url)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL").fetchone()[0], 0)
+        notes = [r["body"] for r in self.db.execute("SELECT body FROM note WHERE item = ?", (self.items[0],))]
+        self.assertTrue(any(f"`{sd_quote(PASS)}` passed at" in body for body in notes), notes)
+        self.assertTrue(any(url in body and "owners merge" in body for body in notes), notes)
+
+    def test_a_failing_check_goes_back_to_the_builder(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass", "fix"], sd_review=["clean", "clean"])
+        self.assertEqual(self.supervisor(checks=lambda work: [CHECK]).run()["step"], "enqueued")
+        self.assertEqual(len(self.calls("claude")), 2)
+        fix = self.calls("claude")[1]["argv"]
+        self.assertIn("exit 1", fix[fix.index("-p") + 1])
+        self.assertEqual(build.run(self.db, self.bundle["id"])["review_round"], 1)
+        self.assertEqual(len(self.pulls()), 1)
+
+    def test_a_check_that_edits_a_tracked_file_is_a_failure_not_a_pass(self):
+        """Lane review of b64873f13: a check that rewrites a tracked file and exits 0 tested a tree the head does
+        not hold; it goes back to the builder naming the path, and nothing is published."""
+        edit = [sys.executable, "-c", "open('README.md', 'a').write('regenerated\\n')"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass", "fix", "fix", "fix"], sd_review=["clean"] * 4)
+        ended = self.supervisor(checks=lambda work: [edit]).run()
+        self.assertNotEqual(ended.get("step"), "enqueued", ended)
+        self.assertEqual(self.pulls(), [])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+        fix = self.calls("claude")[1]["argv"]
+        self.assertIn("README.md", fix[fix.index("-p") + 1])
+        notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", (self.items[0],))]
+        self.assertFalse([body for body in notes if "passed at" in body], notes)
+
+    def test_a_check_that_ignores_sigterm_ends_with_the_run(self):
+        """Review of 8fa8c7cca: `sd gate run` puts the check in a group of its own; a timeout ends that group too."""
+        pid_file = self.root / "check.pid"
+        hang = [sys.executable, "-c", "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(120)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [hang], timeout=4).run()
+        pid = int(pid_file.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True, check=False))
+        self.assertEqual(ended["outcome"], "timed_out")
+        try:
+            os.kill(pid, 0)
+            alive = True
+        except ProcessLookupError:
+            alive = False
+        self.assertFalse(alive, f"the check {pid} outlived the run it was ended with")
+        self.assertEqual(self.pulls(), [])
+
+    def lose_the_supervisor_during_a_check(self, number):
+        """Run a supervisor in a process of its own up to a check that ignores SIGTERM, send it `number`, then
+        reap past a stale beat as the dispatcher's tick does; the check's pid and the reap's answer."""
+        pid_file = self.root / "check.pid"
+        hang = [sys.executable, "-c", "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(120)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        script = self.root / "supervise.py"
+        script.write_text(SUPERVISE, encoding="utf-8")
+        spec = {"path": [str(Path(build_run.__file__).resolve().parents[1]), str(BIN)], "db": str(self.database),
+                "ident": self.bundle["id"], "tools": dataclasses.asdict(self.tools), "logs": str(self.logs),
+                "check": hang}
+        with open(self.root / "supervise.err", "wb") as errors:
+            supervisor = subprocess.Popen([sys.executable, str(script), json.dumps(spec)], env=self.env,
+                                          stdin=subprocess.DEVNULL, stdout=errors, stderr=errors,
+                                          start_new_session=True)
+        self.addCleanup(end, supervisor)
+        deadline = time.monotonic() + 60
+        while not (pid_file.exists() and pid_file.read_text()):
+            self.assertIsNone(supervisor.poll(), (self.root / "supervise.err").read_text())
+            self.assertLess(time.monotonic(), deadline, "the check never started")
+            time.sleep(0.05)
+        check = int(pid_file.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(check)], capture_output=True, check=False))
+        os.kill(supervisor.pid, number)
+        if number == signal.SIGKILL:
+            supervisor.wait()
+        beat = datetime.fromisoformat(self.latest()["heartbeat_at"])
+        settled = build.reap(self.db, now=(beat + timedelta(seconds=build.STALE_SECONDS + 30)).isoformat())
+        return check, settled
+
+    def assert_ended(self, pid):
+        """`pid` ends within 5 s: a killed check is a zombie until its reparented parent reaps it."""
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            done = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False)
+            if done.returncode != 0 or done.stdout.strip().startswith("Z"):
+                return
+            time.sleep(0.05)
+        self.fail(f"the check {pid} outlived the reaped run, beside its retry")
+
+    def test_a_supervisor_killed_during_a_check_leaves_no_check_for_the_retry(self):
+        """Review of 4773ed48a: SIGKILL on the supervisor, then the reap; the check's own group goes too."""
+        check, settled = self.lose_the_supervisor_during_a_check(signal.SIGKILL)
+        self.assert_ended(check)
+        self.assertIsNotNone(settled[0]["retry"], settled)
+
+    def test_a_supervisor_whose_beat_stopped_during_a_check_leaves_no_check(self):
+        """Review of 4773ed48a: a paused supervisor (no beat), then the reap; the check's own group goes too."""
+        check, settled = self.lose_the_supervisor_during_a_check(signal.SIGSTOP)
+        self.assert_ended(check)
+        self.assertIsNotNone(settled[0]["retry"], settled)
+
+    def test_a_group_the_check_started_and_that_ended_is_not_signalled(self):
+        """Review of 4773ed48a: a pgid read during the run is no proof at its end, when the pid may be reused."""
+        pid_file = self.root / "short.pid"
+        hang = [sys.executable, "-c", "import os, signal, subprocess, time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "short = subprocess.Popen(['sleep', '1.5'], process_group=0); "
+                f"open({str(pid_file)!r}, 'w').write(str(short.pid)); short.wait(); time.sleep(120)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        with mock.patch("os.killpg", wraps=os.killpg) as killpg:
+            ended = self.supervisor(checks=lambda work: [hang], timeout=5).run()
+        self.assertEqual(ended["outcome"], "timed_out")
+        short = int(pid_file.read_text())
+        self.assertEqual([call.args for call in killpg.call_args_list if call.args[0] == short and call.args[1]],
+                         [], "the ended group was signalled")
+
+    def test_a_recorded_group_now_led_by_another_process_is_left_alone(self):
+        """Review of 4773ed48a: a recorded group whose leader started at another time is not the run's."""
+        self.press()
+        other = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(end, other)
+        leader = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(end, leader)
+        supervisor = self.supervisor()
+        supervisor.groups = {other.pid: "Thu Jan  1 00:00:00 2026"}
+        self.assertTrue(supervisor.end_group(leader.pid, leader))
+        self.assertIsNone(other.poll(), "a process the run did not start was signalled")
+
+    def test_a_cancel_during_a_check_ends_the_checks_own_group(self):
+        """End paths, cancel: the beat's cancel ends the gate's group and the check's, which ignores SIGTERM."""
+        pid_file = self.root / "check.pid"
+        hang = [sys.executable, "-c", "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(120)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+
+        def cancel():
+            other = connect(self.database)
+            try:
+                for _ in range(600):
+                    if pid_file.exists() and pid_file.read_text():
+                        break
+                    time.sleep(0.05)
+                state = operations.assignment_state(other, self.bundle["assignment"])
+                operations.cancel_assignment(other, self.bundle["assignment"], expected_revision=state["revision"],
+                                             who="operator")
+            finally:
+                other.close()
+
+        thread = threading.Thread(target=cancel)
+        thread.start()
+        ended = self.supervisor(checks=lambda work: [hang]).run()
+        thread.join()
+        check = int(pid_file.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(check)], capture_output=True, check=False))
+        self.assertEqual(ended["outcome"], "cancelled", self.latest()["detail"])
+        self.assert_ended(check)
+        self.assertEqual(self.pulls(), [])
+
+    def test_a_check_that_exits_leaves_no_process_of_its_group(self):
+        """End paths, normal exit: a process the check left in its own group goes once the gate returns."""
+        pid_file = self.root / "left.pid"
+        leave = [sys.executable, "-c", "import subprocess, time; left = subprocess.Popen(['sleep', '60']); "
+                 f"open({str(pid_file)!r}, 'w').write(str(left.pid)); time.sleep(1)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [leave]).run()
+        left = int(pid_file.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(left)], capture_output=True, check=False))
+        self.assertEqual(ended["step"], "enqueued", self.latest()["detail"])
+        self.assert_ended(left)
+
+    def test_a_gate_that_starts_no_check_leaves_no_group(self):
+        """End paths, gate refusal: `sd gate run` exits 125 with nothing started; its group reads gone."""
+        pid_file = self.root / "check.pid"
+        self.tools = dataclasses.replace(self.tools, gate=[sys.executable, "-c", "import sys; sys.exit(125)"])
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [[sys.executable, "-c",
+                                                      f"open({str(pid_file)!r}, 'w').write('ran')"]]).run()
+        self.assertFalse(pid_file.exists(), "the check ran")
+        self.assertTrue(group_gone(self.latest()["builder_pgid"]), ended)
+        self.assertEqual(self.pulls(), [])
+
+    def test_no_check_entrypoint_runs_none_and_says_so(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.assertEqual(self.supervisor(checks=lambda work: []).run()["step"], "enqueued")
+        self.assertEqual(self.calls("gate"), [])
+        note = self.db.execute("SELECT body FROM note WHERE item = ? AND body LIKE '%no check entrypoint%'",
+                               (self.items[0],)).fetchone()
+        self.assertIsNotNone(note)
+
+    def test_a_refused_push_blocks_and_opens_nothing(self):
+        self.press()
+        self.write_pr()
+        support.git(self.repo, "remote", "set-url", "--push", "origin", str(self.root / "missing.git"))
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("git push", ended["blocked"])
+        self.assertEqual(([c for c in self.calls("gh") if c["argv"][0] == "pr"], self.pulls()), ([], []))
+
+    def test_a_refused_create_blocks(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"], gh=["list", "refuse"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("gh pr create refused", ended["blocked"])
+        self.assertEqual(self.contribution(self.items[0]), {})
+
+    def test_a_retry_reuses_the_draft_a_lost_run_opened(self):
+        """Lost after the create (its url unread): the retry lists the branch's open pull request, opens none."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"], gh=["list", "mute"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], None)
+        self.assertIn("printed no pull-request url", ended["why"])
+        self.assertEqual(len(self.pulls()), 1)
+        row = self.latest()
+        build.end(self.db, row["id"], "interrupted", "lost after the create")
+        retry = self.latest()
+        self.assertEqual((retry["step"], retry["id"] != row["id"]), ("enqueuing", True))
+        self.assertEqual(self.supervisor(retry["id"], checks=lambda work: [PASS]).run()["step"], "enqueued")
+        self.assertEqual(len(self.pulls()), 1, "one draft, never two")
+        self.assertEqual(self.contribution(self.items[0]).get("pull_url"), self.pulls()[0]["url"])
+
+    def seed_pull(self, **row):
+        """An open pull request already on GitHub for the run's branch: the fake gh's `pulls.json` row."""
+        url = f"https://github.com/fixture/repo/pull/{len(self.pulls()) + 1}"
+        (self.plans / "pulls.json").write_text(json.dumps(self.pulls() + [
+            {"url": url, "head": self.bundle["branch"], "state": "open", "base": "main", "title": "x", **row}]))
+        return url
+
+    def test_a_forks_pull_request_on_the_branch_name_is_never_linked(self):
+        """Review of b34af431e: `gh pr list --head` matches a fork's branch of the same name; its merge
+        must not close the tasks. The run opens its own draft and links that."""
+        self.press()
+        fork = self.seed_pull(fork=True, sha="0" * 40)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["step"], "enqueued", ended)
+        own = self.pulls()[-1]["url"]
+        self.assertNotEqual(own, fork)
+        self.assertEqual(self.contribution(self.items[0]).get("pull_url"), own)
+        self.observed(fork, "merged")
+        self.assertEqual(self.watched(), [])
+        self.assertEqual(self.statuses(), ["in_progress"])
+
+    def test_a_pull_request_into_another_base_is_not_linked(self):
+        """Review of b34af431e: the sole pull request on the branch targets another base: blocked, unlinked."""
+        self.press()
+        other = self.seed_pull(base="release")
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked", ended)
+        self.assertIn("targets 'release', not 'main'; it was not linked", ended["blocked"])
+        self.assertEqual((self.contribution(self.items[0]), len(self.pulls())), ({}, 1))
+        self.observed(other, "merged")
+        self.assertEqual(self.watched(), [])
+        self.assertEqual(self.statuses(), ["blocked"], "the blocked run's task, never done")
+
+    def test_a_pull_request_on_another_head_is_unread_and_not_linked(self):
+        """Review of b34af431e: the pull request reads a head that is not the pushed one: unknown, unlinked."""
+        self.press()
+        self.seed_pull(sha="f" * 40)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], None, ended)
+        self.assertIn("not the pushed", ended["why"])
+        self.assertEqual(self.contribution(self.items[0]), {})
+
+    def test_check_entrypoints_that_do_not_read_end_the_run_not_a_fix_round(self):
+        """Review of b34af431e: a declaration fault (CLAUDE.local.md) is the operator's, not the builder's."""
+        def broken(work):
+            raise ValueError("CLAUDE.local.md: the sd-check block does not parse")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass", "fix"], sd_review=["clean", "clean"])
+        ended = self.supervisor(checks=broken).run()
+        self.assertEqual(ended["outcome"], "blocked", ended)
+        self.assertIn("configuration fault", ended["blocked"])
+        self.assertIn("CLAUDE.local.md", ended["blocked"])
+        self.assertEqual((len(self.calls("claude")), self.pulls()), (1, []), "no paid fix round, nothing published")
+
+    def test_a_git_that_gave_no_answer_to_the_entrypoints_is_unread(self):
+        """Review of b34af431e: `GitUnavailable` is transient: Unread, for the reap's retry, not a fix round."""
+        with mock.patch.object(SD_LIB, "detect_entrypoints", side_effect=SD_LIB.GitUnavailable("git timed out")):
+            with self.assertRaises(build_run.Unread):
+                ADAPTER.own_checks(self.root)
+            self.press()
+            self.write_pr()
+            self.plan(claude=["pass", "fix"], sd_review=["clean", "clean"])
+            ended = self.supervisor(checks=ADAPTER.own_checks).run()
+        self.assertEqual(ended["outcome"], None, ended)
+        self.assertIn("git timed out", ended["why"])
+        self.assertEqual((len(self.calls("claude")), self.pulls()), (1, []))
+
+    def test_a_private_value_in_a_commit_blocks_before_the_push(self):
+        """Review of 8fa8c7cca: an unmanaged repository has no leak-guard hook; the scan runs before the push."""
+        (self.plans / "visibility.txt").write_text("public")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["PRIVATE"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("nothing was pushed: a privacy pattern matches the commits", ended["blocked"])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+        self.assertEqual((self.pulls(), [c for c in self.calls("gh") if c["argv"][:2] == ["pr", "create"]]), ([], []))
+        scanned = (self.plans / "guard.txt").read_text()
+        self.assertIn("feat(fixture): build the fixture", scanned.splitlines()[0], "the title is line 1")
+        self.assertIn("work.txt", scanned, "the paths each commit touches")
+
+    def extra(self, files=None, message=None, move=None, merge=None):
+        """A builder commit with `files` (name to bytes), `message` lines and `move`s (old to new path), then a
+        `merge` of main (`file`, `theirs`, `resolved` bytes) when given, through the public scan."""
+        (self.plans / "extra.json").write_text(json.dumps({
+            "files": {name: data.hex() for name, data in (files or {}).items()}, "message": message or [],
+            "move": move or {},
+            "merge": merge and {"file": merge["file"], "theirs": merge["theirs"].hex(),
+                                "resolved": merge["resolved"].hex()}}))
+        self.press()
+        self.write_pr()
+        self.plan(claude=["extra"], sd_review=["clean"])
+        return self.supervisor(checks=lambda work: [PASS]).run()
+
+    def scan_blocks(self, **case):
+        ended = self.extra(**case)
+        self.assertEqual(ended.get("outcome"), "blocked", ended)
+        self.assertIn("nothing was pushed: a privacy pattern matches the commits", ended["blocked"])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+
+    # Review of ac8175265, class: the scan's diff parse. Each holds PRIVATE where only a misread drops it.
+
+    def test_the_scan_reads_an_added_line_that_starts_with_plus_plus(self):
+        """An added `++PRIVATE` shows as `+++PRIVATE`: a hunk line, not the `+++ ` file header."""
+        self.scan_blocks(files={"plus.txt": b"++PRIVATE\n"})
+
+    def test_the_scan_reads_a_file_that_is_not_utf8(self):
+        """A Latin-1 file: `git log -p` is no UTF-8, and a strict decode crashed the supervisor."""
+        self.scan_blocks(files={"latin.txt": b"caf\xe9 PRIVATE\n"})
+
+    def test_the_scan_keeps_a_line_whole_across_a_cr_or_form_feed(self):
+        """splitlines cut a line at CR or form feed, and the part after lost its `+`; only LF ends a line now."""
+        self.scan_blocks(files={"cr.txt": b"ok\rPRIVATE\n"})
+        self.assertIn(b"ok\rPRIVATE", (self.plans / "guard.txt").read_bytes())
+
+    def test_the_scan_reads_a_message_line_that_looks_like_a_diff_header(self):
+        """A message line `diff --git ...` ended the message for the mixed parse; messages are read apart now."""
+        self.scan_blocks(message=["diff --git a/x b/x\nPRIVATE"])
+
+    def test_the_scan_reads_a_binary_files_path(self):
+        """A binary file has no `+++` line; its path still reaches the scan."""
+        self.scan_blocks(files={"PRIVATE.bin": b"\x00\xff\x00"})
+
+    # Review of 5a5adca64, class: every git read the scan makes, for merge, root and renamed commits.
+
+    def test_the_scan_reads_a_value_only_a_conflict_resolution_adds(self):
+        """`git log -p` and `--name-only` print no diff for a merge, so a value typed while resolving a
+        conflict with main was pushed unscanned."""
+        self.scan_blocks(files={"conflict.txt": b"ours\n"},
+                         merge={"file": "conflict.txt", "theirs": b"theirs\n", "resolved": b"PRIVATE\n"})
+        commits = support.git(Path(self.bundle["work_path"]), "rev-list", "--merges", "origin/main..HEAD")
+        self.assertTrue(commits, "the branch holds a merge commit")
+
+    def test_a_merge_that_takes_one_side_passes(self):
+        """A clean resolution adds no new bytes beyond main's, which is the target repository's own text."""
+        ended = self.extra(files={"conflict.txt": b"ours\n"},
+                           merge={"file": "conflict.txt", "theirs": b"theirs\n", "resolved": b"ours\n"})
+        self.assertEqual(ended.get("step"), "enqueued", ended)
+
+    def test_the_scan_reads_a_renamed_files_new_path(self):
+        """With renames off a move reads as a delete and an add: the new path reaches the scan."""
+        self.scan_blocks(move={"README.md": "PRIVATE.md"})
+
+    def test_binary_content_and_a_missing_final_newline_are_not_scanned(self):
+        """Binary content is not read, as `leak-guard.sh check` reads none; `\\ No newline` is git's marker."""
+        ended = self.extra(files={"bin.dat": b"\x00PRIVATE\x00", "tail.txt": b"no newline"})
+        self.assertEqual(ended.get("step"), "enqueued", ended)
+
+    def test_a_body_that_is_not_utf8_blocks_and_does_not_crash(self):
+        """Review of ac8175265: the body read caught only OSError, so a Latin-1 body killed the supervisor."""
+        self.press()
+        self.write_pr()
+        logs = build_run.log_dir(self.logs, self.bundle["repo"])
+        (logs / f"sd-{self.bundle['assignment']}.body.md").write_bytes(b"## Summary\n\ncaf\xe9\n")
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended.get("outcome"), "blocked", ended)
+        self.assertIn("is not UTF-8 text", ended["blocked"])
+        self.assertEqual(self.pulls(), [])
+
+    def test_a_private_repository_publishes_without_the_scan(self):
+        """Operator ruling on sd:7868: a private repository's owners see work names already, so no scan runs."""
+        (self.plans / "visibility.txt").write_text("private")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["PRIVATE"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended.get("step"), "enqueued", ended)
+        self.assertEqual(self.calls("guard"), [])
+        self.assertIn(self.bundle["branch"], self.remote_branches().split())
+        self.assertEqual(len(self.pulls()), 1)
+
+    def test_an_unread_visibility_scans_as_public(self):
+        """Fail closed: a visibility `gh repo view` did not read is public, so the scan runs and blocks."""
+        (self.plans / "visibility.txt").write_text("unread")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["PRIVATE"], sd_review=["clean"])
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("nothing was pushed: a privacy pattern matches the commits", ended["blocked"])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+
+    def scan_refused(self, title, guard, said):
+        self.press()
+        self.write_pr(title=title)
+        self.plan(claude=["pass"], sd_review=["clean"], guard=guard)
+        ended = self.supervisor(checks=lambda work: [PASS]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn(said, ended["blocked"])
+        self.assertNotIn(self.bundle["branch"], self.remote_branches().split())
+        self.assertEqual(self.pulls(), [])
+
+    def test_a_private_title_blocks_before_the_push(self):
+        self.scan_refused("feat(fixture): PRIVATE", [], "nothing was pushed: a privacy pattern matches the title")
+
+    def test_a_scan_with_no_pattern_file_blocks_before_the_push(self):
+        """Unknown is not clean: a scan that cannot check (no pattern file, exit 3) is a refusal, not a pass."""
+        self.scan_refused("feat(fixture): build the fixture", ["none"], "could not check the text (exit 3")
+
+    def test_a_retry_at_enqueuing_reviews_and_tests_before_it_publishes(self):
+        """Review of 8fa8c7cca: no lane gate re-checks an unmanaged head, so a retry never publishes it untested."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"], gh=["list", "mute"])
+        self.supervisor(checks=lambda work: [PASS]).run()
+        row = self.latest()
+        build.end(self.db, row["id"], "interrupted", "lost after the create")
+        retry = self.latest()
+        self.assertEqual(retry["step"], "enqueuing")
+        self.assertEqual(self.supervisor(retry["id"], checks=lambda work: [PASS]).run()["step"], "enqueued")
+        self.assertEqual((len(self.calls("sd-review")), len(self.calls("gate"))), (2, 2),
+                         "the retry reviewed and tested the head it published")
+
+    def test_the_body_lint_skips_a_foreign_docs_tree(self):
+        """Review of 8fa8c7cca: `--body-only` in an unmanaged repository; a managed one keeps the tree rules."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.assertEqual(self.supervisor(checks=lambda work: [PASS]).run()["step"], "enqueued")
+        (lint,) = self.calls("sd-docs-lint")
+        self.assertIn("--body-only", lint["argv"])
+
+    def test_a_managed_run_never_calls_gh_or_its_checks(self):
+        self.db.execute("UPDATE repo SET managed = 1")
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.assertEqual(self.supervisor(checks=lambda work: [CHECK]).run()["step"], "enqueued")
+        self.assertEqual((self.calls("gh"), self.calls("gate"), self.calls("guard")), ([], [], []))
+        self.assertIsNone(build.run(self.db, self.bundle["id"])["detail"])
+        self.assertTrue(all("--body-only" not in call["argv"] for call in self.calls("sd-docs-lint")))
+
+    def observed(self, url, state):
+        from sd_db import contributions
+        with database.transaction(self.db):
+            snapshot = contributions.snapshot(self.db, "github:" + url)
+            snapshot["observation"] = {"state": state}
+            contributions._save(self.db, snapshot)
+
+    def watched(self):
+        def lane(row, items):
+            raise AssertionError("an unmanaged run reads no lane")
+        exited = build.Probe()
+        exited.alive = lambda pid: False if pid == os.getpid() else build.Probe.alive(pid)  # type: ignore[method-assign]
+        exited.group = lambda pgid: False if pgid == os.getpgrp() else build.Probe.group(pgid)  # type: ignore[method-assign]
+        return build_run.watch(self.db, lane=lane, probe=exited)
+
+    def test_the_owners_merge_closes_the_tasks_and_cleans(self):
+        self.press(2)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor(checks=lambda work: [PASS]).run()
+        url = self.pulls()[0]["url"]
+        self.assertEqual(self.watched(), [], "unobserved: nothing moves")
+        self.observed(url, "open")
+        self.assertEqual(self.watched(), [])
+        self.observed(url, "merged")
+        self.assertEqual(self.watched(), [{"run": self.bundle["id"], "step": "cleaning"}])
+        self.assertEqual(self.statuses(), ["done", "done"])
+        self.assertEqual(build.run(self.db, self.bundle["id"])["step"], "cleaning", "never checking")
+        self.assertEqual(self.supervisor().run()["outcome"], "done")
+        self.assertFalse(Path(self.bundle["work_path"]).exists())
+
+    def test_another_pull_requests_merge_moves_nothing(self):
+        """Evidence: the watch reads the url the run recorded; a merge observed on any other url is not this run's."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor(checks=lambda work: [PASS]).run()
+        url = self.pulls()[0]["url"]
+        self.observed(url.replace("/pull/1", "/pull/2"), "merged")
+        self.observed("https://github.com/other/repo/pull/1", "merged")
+        self.assertEqual(self.watched(), [])
+        self.assertEqual((build.run(self.db, self.bundle["id"])["step"], self.statuses()), ("enqueued", ["in_progress"]))
+
+    def test_a_draft_closed_without_a_merge_ends_lane_failed(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor(checks=lambda work: [PASS]).run()
+        url = self.pulls()[0]["url"]
+        self.observed(url, "closed")
+        self.assertEqual(self.watched(), [{"run": self.bundle["id"], "outcome": "lane_failed"}])
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["outcome"], self.statuses()), ("lane_failed", ["in_progress"]))
+        self.assertIn("closed without a merge", row["detail"])
+
+    def test_own_checks_pick_as_sd_check_does(self):
+        """The adapter's `own_checks`: the aggregate `check` alone, else each of `test` and `lint`, else none."""
+        work = self.root / "checks"
+        work.mkdir()
+        self.assertEqual(ADAPTER.own_checks(work), [])
+        (work / "package.json").write_text(json.dumps({"scripts": {"test": "node t.js", "lint": "eslint ."}}))
+        self.assertEqual(len(ADAPTER.own_checks(work)), 2)
+        (work / "Makefile").write_text("check:\n\ttrue\ntest:\n\ttrue\n")
+        self.assertEqual(ADAPTER.own_checks(work), [["make", "check"]])
+
+
+def sd_quote(argv):
+    import shlex
+    return shlex.join(argv)
 
 
 class Tick(Case):

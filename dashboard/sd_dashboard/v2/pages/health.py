@@ -18,7 +18,7 @@ def _seams(read) -> dict:
 def _read(read):
     from ... import health_screen
 
-    return health_screen.document(read.connection, now=read.now, **_seams(read))
+    return health_screen.document(read.connection, now=read.now, release=read.release, **_seams(read))
 
 
 def _part(read):
@@ -30,7 +30,8 @@ def _part(read):
         return health_screen.summary(read.connection, now=read.now, **_seams(read))
     if name not in health_screen.VIEW_AREAS:
         return 404, {"error": f"Health has no view {name!r}: it has summary, {', '.join(health_screen.VIEW_AREAS)}."}
-    return health_screen.part(read.connection, name, now=read.now, **_seams(read))
+    # A view gives its read slot back before it waits on a walker (sd:7898); the summary waits on none.
+    return health_screen.part(read.connection, name, now=read.now, release=read.release, **_seams(read))
 
 
 def _cleanup(payload, principal):

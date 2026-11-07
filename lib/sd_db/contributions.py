@@ -54,6 +54,8 @@ EVENTS = frozenset({"comment", "label_added", "label_removed", "converted_to_dra
                     "closed", "closed_completed", "closed_not_planned", "reopened"})
 ISSUE_EVENTS = EVENTS - {"converted_to_draft", "ready_for_review"}
 # An issue observation carries none of these; one that does was read as a pull.
+#: The reason an item's open draft pull request reads `awaiting_you` (pack sd:7868).
+DRAFTED = "Draft pull request: mark it ready for review"
 PULL_ONLY = frozenset({"reviews", "ci", "ci_head", "ci_ids", "head", "base", "mergeable", "draft"})
 #: Who writes the attention followups and the lane notes.
 OBSERVER = "contribution-observer"
@@ -318,7 +320,9 @@ def _configuration(connection, item: int, old: dict, changes: dict) -> dict:
         _dependency(dependency)
     if len({_digest(d) for d in dependencies}) != len(dependencies):
         raise WorkflowError("duplicate dependencies are not allowed")
-    graph = {row["id"]: metadata.get("depends_on", []) for row, metadata in _registered(connection)}
+    # Another item's malformed metadata holds no value to compare with, and failed every link (sd:7863): skip it.
+    others = _registered(connection, [])
+    graph = {row["id"]: metadata.get("depends_on", []) for row, metadata in others}
     graph[item] = dependencies
 
     def visit(node, ancestors):
@@ -332,7 +336,7 @@ def _configuration(connection, item: int, old: dict, changes: dict) -> dict:
 
     visit(item, set())
     _local_proof(value)
-    for row, metadata in _registered(connection):
+    for row, metadata in others:
         if row["id"] == item:
             continue
         if value.get("pull_url") and metadata.get("pull_url") == value["pull_url"]:
@@ -701,6 +705,8 @@ def observe_issue(connection, url, observation, *, expected_revision) -> dict:
         _publish_attention(connection, state, attention, item)
         result = _save(connection, state)
         record_state(connection, "heartbeat", key="contribution-observe:" + state["key"], body={"ok": True})
+        if item is not None:
+            _note_lane(connection, item)  # the issue is one of the lane's sources (sd:7863)
         return result
 
 
@@ -828,9 +834,19 @@ def _freshness(heartbeats, sources) -> dict:
     return result
 
 
-def _lane(sources, observation, url, waiting, dismissed) -> tuple[str, bool]:
-    """The row's lane and whether it needs the operator: the one rule the projection and `record_lane` read."""
-    needs_you = any(s["attention"] for s in sources) or (not url and not waiting)
+def _drafted(observation) -> bool:
+    """Whether the observation is an open draft pull request the operator wrote (pack sd:7868)."""
+    operator = str((observation.get("operator") or {}).get("id") or "")
+    return observation.get("state") == "open" and observation.get("draft") is True and bool(operator) \
+        and str((observation.get("author") or {}).get("id") or "") == operator
+
+
+def _lane(sources, observation, url, waiting, dismissed, drafted=False) -> tuple[str, bool]:
+    """The row's lane and whether it needs the operator: the one rule the projection and `record_lane` read.
+
+    `drafted` is an item's open draft by the operator (`_drafted`): it waits on them, not on reviewers.
+    """
+    needs_you = any(s["attention"] for s in sources) or (not url and not waiting) or drafted
     # An issue or a pull request closed without merge awaits no one; a later
     # observation that reads `open` returns the row to live work. A dismissed
     # row (sd:3432) is closed too, until new attention or a lifecycle change.
@@ -840,6 +856,13 @@ def _lane(sources, observation, url, waiting, dismissed) -> tuple[str, bool]:
     if any(e["kind"] == "newly_unblocked" for s in sources for e in s["attention"]):
         lane = "newly_unblocked"
     return lane, needs_you
+
+
+def _sources(connection, item, metadata, latest=None) -> list[dict]:
+    """The item's checkpoint, then one per url it names (`OBSERVED`): the one input set `_lane` reads, for the
+    projection and `record_lane` alike (sd:7863). `latest` is `_latest`'s checkpoints, as `snapshot` takes them."""
+    return [snapshot(connection, f"item:{item}", latest),
+            *(snapshot(connection, prefix + metadata[name], latest) for prefix, name in OBSERVED.items() if metadata.get(name))]
 
 
 def _shadow_times(connection, url) -> dict:
@@ -867,13 +890,16 @@ def lane_notes(connection, item, url=None) -> list[dict]:
     return found
 
 
-def _history(connection, item, url) -> tuple[list[tuple[str, str, str]], list[str]]:
+def _history(connection, item, url, state) -> tuple[list[tuple[str, str, str]], list[str]]:
     """What history still holds of the item's pull request before its first lane note: `(at, lane, state)`, oldest
     first, and each time it skipped because it names no instant (a time with no zone).
 
-    The shadow's `created_at` opens it on reviewers; each `contribution-observer` followup on the item is on you from
-    its time to its `resolved_at`; the shadow's `merged_at`, else `closed_at`, ends it. A span the shadow never saw,
-    or attention that was never a followup, is not recoverable.
+    The shadow's `created_at` opens it on reviewers; each followup the pull request's own attention raised (its
+    checkpoint's `notifications`) is on you from its time, or the pull request's creation if that is later, to its
+    `resolved_at`; the shadow's `merged_at`, else `closed_at`, ends it. A followup of another source or an older pull
+    request is not this one's wait (sd:7908). A pull request observed in `state` merged or closed with no end time
+    has no history: its open span would run to this sync, not to its end. A span the shadow never saw, or attention
+    that was never a followup, is not recoverable.
     """
     times = _shadow_times(connection, url)
     events, skipped = [], []
@@ -887,15 +913,27 @@ def _history(connection, item, url) -> tuple[list[tuple[str, str, str]], list[st
             skipped.append(value)
             return None
 
-    if times.get("created_at") and instant(times["created_at"]):
-        events.append((times["created_at"], 0))
-    for note in connection.execute("SELECT timestamp, resolved_at FROM note WHERE item = ? AND kind = 'followup' "
-                                   "AND session = ?", (item, OBSERVER)):
-        if instant(note["timestamp"]):
-            events.append((note["timestamp"], 1))
-            if note["resolved_at"] and instant(note["resolved_at"]):
-                events.append((note["resolved_at"], -1))
+    created = times.get("created_at") if times.get("created_at") and instant(times["created_at"]) else None
+    if created:
+        events.append((created, 0))
+    raised = {notice.get("note_id") for notice in snapshot(connection, "github:" + url)["notifications"].values()
+              if isinstance(notice, dict)}
+    for note in connection.execute("SELECT id, timestamp, resolved_at FROM note WHERE item = ? AND kind = 'followup' "
+                                   "AND session = ? ORDER BY id", (item, OBSERVER)):
+        if note["id"] not in raised or not instant(note["timestamp"]):
+            continue
+        resolved = note["resolved_at"] if note["resolved_at"] and instant(note["resolved_at"]) else None
+        start = note["timestamp"]
+        if created and _moment(start) < _moment(created):
+            if resolved and _moment(resolved) <= _moment(created):
+                continue
+            start = created
+        events.append((start, 1))
+        if resolved:
+            events.append((resolved, -1))
     end = next((value for value in (times.get("merged_at"), times.get("closed_at")) if value and instant(value)), None)
+    if state in ("merged", "closed") and not end:
+        return [], skipped
     merged = bool(end) and end == times.get("merged_at")
     history: list[tuple[str, str, str]] = []
     open_attention = 0
@@ -926,15 +964,15 @@ def record_lane(connection, item) -> int | None:
         url = metadata.get("pull_url")
         if not url:
             return None
-        pull = snapshot(connection, "github:" + url)
-        observation = pull["observation"] or {}
+        sources = _sources(connection, item, metadata)
+        observation = sources[1]["observation"] or {}  # the pull request's: `OBSERVED` names it first
         if observation.get("state") not in {"open", "closed", "merged"}:
             return None
-        lane, _ = _lane([snapshot(connection, f"item:{item}"), pull], observation, url,
-                        bool(metadata.get("blocked_on") or metadata.get("depends_on")), None)
+        lane, _ = _lane(sources, observation, url, bool(metadata.get("blocked_on") or metadata.get("depends_on")), None,
+                        _drafted(observation))
         notes, written = lane_notes(connection, item, url), None
         if not notes:
-            history, skipped = _history(connection, item, url)
+            history, skipped = _history(connection, item, url, observation["state"])
             for at, old, state in history:
                 written = add_note(connection, item, "comment", f"{LANE_NOTE}{old} · {state} · {url} (backfilled)",
                                    session=OBSERVER, timestamp=at)
@@ -986,12 +1024,22 @@ def record_lanes(connection) -> tuple[list[int], list[str]]:
     return written, errors
 
 
+def _state(connection, url: str):
+    """The observed state of the pull request at `url`, or None when none is observed."""
+    return (snapshot(connection, "github:" + url)["observation"] or {}).get("state")
+
+
 def link_shipped(connection) -> tuple[list[int], list[str]]:
     """Link the pull request `sd-ship prepare` opened to its item as the item's `pull_url` (sd:7859).
 
     The receipt holds the item and its `pull_request` url; the operator's own pull request is observed already, so
-    the link makes its lane the item's. A receipt that merged, an item that is done or names a pull request or
-    issue, and a url another item holds (a bundle's second item) are left alone; so a rerun links nothing.
+    the link makes its lane the item's. Each item reads its newest receipt alone, and items go in number order, so a
+    bundle's pull request goes to its lowest item (sd:7863). A newest receipt that merged, an item that is done or
+    names an issue, and a url another item holds (a bundle's second item) are left alone. An item that names a pull
+    request keeps it unless that one is observed closed and the newest receipt names another: a receipt has no
+    closed phase, so a re-prepare after a closed pull request is that newer receipt. The newest receipt replaces a
+    closed link only when it postdates it, the link being an older receipt's, or names a pull request observed open:
+    a link the operator set by hand after the receipt stays (sd:7931). A rerun links nothing.
     Each link is `configure`'s one transaction, which notes the lane too. Returns the items linked and an error per
     receipt that could not be read or linked; a bad receipt is said and skipped, so it stops no other.
     """
@@ -999,20 +1047,27 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
 
     errors: list[str] = []
     taken = {metadata["pull_url"] for _, metadata in _registered(connection, errors) if metadata.get("pull_url")}
-    receipts = []
-    for key in _latest(connection, "checkpoint", "ship:"):
+    newest: dict[int, tuple[int, str, dict]] = {}
+    shipped: dict[int, set[str]] = {}
+    for key, row in _latest(connection, "checkpoint", "ship:").items():
         try:
-            receipts.append((key, ship.read(connection, key)[1]))
+            receipt = ship.read(connection, key)[1]
         except ROW_ERRORS as error:
             errors.append(f"ship receipt {key}: {error}")
-    linked: list[int] = []
-    for key, receipt in sorted(receipts, key=lambda pair: str(pair[1].get("item"))):
-        pull = receipt.get("pull_request")
+            continue
+        pull, item = receipt.get("pull_request"), receipt.get("item")
         if pull is not None and not isinstance(pull, dict):
             errors.append(f"ship receipt {key}: pull_request is not an object")
             continue
-        url, item = (pull or {}).get("url"), receipt.get("item")
-        if type(item) is not int or not isinstance(url, str) or receipt.get("phase") == "merged":
+        if type(item) is int and isinstance((pull or {}).get("url"), str):
+            shipped.setdefault(item, set()).add((pull or {})["url"])
+        if type(item) is int and (item not in newest or row["id"] > newest[item][0]):
+            newest[item] = (row["id"], key, receipt)
+    linked: list[int] = []
+    for item in sorted(newest):
+        _, key, receipt = newest[item]
+        url = (receipt.get("pull_request") or {}).get("url")
+        if not isinstance(url, str) or receipt.get("phase") == "merged":
             continue
         try:
             url = _url(url)
@@ -1020,7 +1075,11 @@ def link_shipped(connection) -> tuple[list[int], list[str]]:
             if url in taken or row is None or row["kind"] not in KINDS or row["status"] == "done":
                 continue
             metadata = _metadata(dict(row)) or {}
-            if metadata.get("pull_url") or metadata.get("issue_url"):
+            if metadata.get("issue_url"):
+                continue
+            held = metadata.get("pull_url")
+            if held and (_state(connection, held) != "closed" or not (
+                    held in {_url(other) for other in shipped[item] if other != url} or _state(connection, url) == "open")):
                 continue
             configure(connection, item, {"pull_url": url}, who=OBSERVER)
         except ROW_ERRORS as error:
@@ -1035,18 +1094,19 @@ def _seconds(start, end) -> int:
     return max(0, int((_moment(end) - _moment(start)).total_seconds()))
 
 
-def pr_waits(connection, *, now=None) -> list[dict]:
+def pr_waits(connection, *, now=None, errors: list[str] | None = None) -> list[dict]:
     """Each item's pull-request wait, from its lane notes (sd:7859), newest-noted first.
 
     `on_you` and `on_reviewers` are seconds: the span after each note of an open pull request goes to its lane
     (`ON_YOU`, `ON_REVIEWERS`), and the last one runs to `now`; a span after the pull request closed or merged is no
-    wait, whatever attention its lane still shows. `to_merge` is the first note to the first `merged`
-    one, or None. `open` is a pull request still open in a waiting lane, `on` who it waits on (`you`, `reviewers`)
-    and `since` when that lane began.
+    wait, whatever attention its lane still shows. `to_merge` is the first `open` note to the first `merged` one
+    after it, or None: a pull request first seen merged has no time to merge (sd:7908). `open` is a pull request still
+    open in a waiting lane, `on` who it waits on (`you`, `reviewers`) and `since` when that lane began. With
+    `errors`, an item whose metadata is malformed is said there and skipped (sd:7863); without, it fails the read.
     """
     end = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
     found = []
-    for row, metadata in _registered(connection):
+    for row, metadata in _registered(connection, errors):
         url = metadata.get("pull_url")
         if not url:
             continue
@@ -1059,14 +1119,15 @@ def pr_waits(connection, *, now=None) -> list[dict]:
             if who and note["state"] == "open":  # a closed or merged pull request waits on no one
                 spans[who] += _seconds(note["at"], after["at"] if after else end)
         last = notes[-1]
-        merged = next((note for note in notes if note["lane"] == "merged" or note["state"] == "merged"), None)
+        opened = next((index for index, note in enumerate(notes) if note["state"] == "open"), len(notes))
+        merged = next((note for note in notes[opened:] if note["lane"] == "merged" or note["state"] == "merged"), None)
         waiting = last["state"] == "open" and (last["lane"] in ON_YOU or last["lane"] in ON_REVIEWERS)
         found.append({"item": row["id"], "title": row["title"], "repo": row["repo"], "status": row["status"],
                       "url": url, "lane": last["lane"], "state": last["state"], "open": waiting,
                       "on": ("you" if last["lane"] in ON_YOU else "reviewers") if waiting else None,
                       "since": last["at"], "waited": _seconds(last["at"], end) if waiting else None,
                       "on_you": spans["you"], "on_reviewers": spans["reviewers"],
-                      "to_merge": _seconds(notes[0]["at"], merged["at"]) if merged else None})
+                      "to_merge": _seconds(notes[opened]["at"], merged["at"]) if merged else None})
     return sorted(found, key=lambda value: (value["since"], value["item"]), reverse=True)
 
 
@@ -1081,7 +1142,9 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
     active.sort(key=lambda a: (0 if any(e["kind"] == "newly_unblocked" for s in sources if s["key"] == a["key"] for e in s["attention"]) else 1, a["key"]))
     primary = active[0] if active else {"key": source["key"], "revision": source["revision"], "event_ids": [], "reasons": []}
     waiting = bool(metadata.get("blocked_on") or metadata.get("depends_on"))
-    lane, needs_you = _lane(sources, observation, url, waiting, dismissed)
+    # An item's open draft the operator wrote waits on them to mark it ready, not on reviewers (pack sd:7868).
+    drafted = bool(row.get("id")) and _drafted(observation)
+    lane, needs_you = _lane(sources, observation, url, waiting, dismissed, drafted)
     try:
         verified = _local_proof(metadata)
     except WorkflowError:
@@ -1095,6 +1158,8 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
         except WorkflowError:
             pass
     reasons = list(dict.fromkeys(reason for a in active for reason in a["reasons"]))
+    if drafted:
+        reasons.append(DRAFTED)
     if not url and draft:
         reasons.append("Issue draft has not been filed" if draft_verified else "Issue draft has not been filed; draft body is unverified")
     elif not url:
@@ -1198,16 +1263,12 @@ def projection(connection, *, repo=None) -> list[dict]:
     connection.execute("SAVEPOINT contribution_projection")
     try:
         result = []
-        registered_urls = set()
+        registered_urls: set[str] = set()
         checkpoints = _latest(connection, "checkpoint", "contribution:")
         heartbeats = _latest(connection, "heartbeat", "contribution-observe:")
         for row, metadata in _registered(connection):
-            sources = [snapshot(connection, f"item:{row['id']}", checkpoints)]
-            for prefix, name in OBSERVED.items():
-                if metadata.get(name):
-                    registered_urls.add(metadata[name])
-                    sources.append(snapshot(connection, prefix + metadata[name], checkpoints))
-            value = _projection_row(heartbeats, row, metadata, sources)
+            registered_urls.update(metadata[name] for name in OBSERVED.values() if metadata.get(name))
+            value = _projection_row(heartbeats, row, metadata, _sources(connection, row["id"], metadata, checkpoints))
             if filters is None or filters.intersection({value["repo"], row.get("repo"), metadata.get("local_clone")}):
                 result.append(value)
         keys = connection.execute("SELECT DISTINCT key FROM state WHERE kind='checkpoint' AND ("
