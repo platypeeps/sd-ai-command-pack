@@ -310,10 +310,12 @@ class Case(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
         # The fixtures name a satellite lane `work`, which a real machine may be called too: each test runs as the
-        # hub `hub` unless it says otherwise (review round 3).
-        pinned = mock.patch.object(build, "this_host", return_value="hub")
-        pinned.start()
-        self.addCleanup(pinned.stop)
+        # hub `hub` unless it says otherwise (review round 3). A real `hub.json` in this HOME would make it a
+        # satellite under the wire harness, so it reads none (pack sd:7955).
+        for pinned in (mock.patch.object(build, "this_host", return_value="hub"),
+                       mock.patch("sd_db.hub.configured", return_value=False)):
+            pinned.start()
+            self.addCleanup(pinned.stop)
         self.database = self.root / "sd.db"
         initialise(self.database)
         self.db = connect(self.database)
