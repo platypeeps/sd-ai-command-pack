@@ -501,6 +501,90 @@ class ContributionSync(SyncCase):
         self.assertEqual(adapter._queue(self.db)["pending"][0]["url"], URL)
         self.assertEqual(core.projection(self.db), [])
 
+    def test_stale_open_rows_come_before_the_unobserved_backlog(self):
+        # sd:7864: thousands of authored search rows buried the few last
+        # observed open, so a closed PR with no item read open for weeks.
+        now = "2026-10-18T08:00:00+00:00"
+        keys = [f"github:backlog/{n}" for n in range(8)] + ["github:merged", "github:fresh", "github:stale"]
+        pending = [{"key": key, "explicit": False} for key in keys]
+        snapshots: dict[str, dict] = {key: {"observation": None} for key in keys}
+        snapshots["github:merged"] = {"observation": {"state": "merged", "observed_at": "2026-10-15T08:00:00+00:00"}}
+        snapshots["github:fresh"] = {"observation": {"state": "open", "observed_at": "2026-10-18T07:00:00+00:00"}}
+        snapshots["github:stale"] = {"observation": {"state": "open", "observed_at": "2026-10-15T08:00:00+00:00"}}
+        ordered = [row["key"] for row in adapter._order(pending, snapshots=snapshots, observed_at=now)]
+        self.assertEqual(ordered[2], "github:stale")
+        self.assertGreater(ordered.index("github:fresh"), ordered.index("github:backlog/7"))
+        self.assertEqual(sorted(ordered), sorted(keys))
+
+    def stale_rows(self, count):
+        """`count` rows last observed open three days before 2026-10-18 08:00."""
+        rows = [{"key": f"github:stale/{n}", "explicit": False} for n in range(count)]
+        old = {"observation": {"state": "open", "observed_at": "2026-10-15T08:00:00+00:00"}}
+        return rows, {row["key"]: old for row in rows}
+
+    def test_failing_stale_pulls_take_a_few_slots_and_the_backlog_keeps_its_turn(self):
+        # Review of sd:7864: a pull whose reads keep failing leaves only a
+        # heartbeat, so its observation stays stale; uncapped, enough of them
+        # went ahead of the whole backlog every run.
+        slots = 10
+        stale, snapshots = self.stale_rows(slots + 2)
+        backlog = [{"key": f"github:backlog/{n}", "explicit": False} for n in range(4)]
+        keys = [row["key"] for row in adapter._order(
+            [*backlog, *stale], snapshots=snapshots, observed_at="2026-10-18T08:00:00+00:00")]
+        # The two head slots, then the capped stale tier, then queue order.
+        self.assertEqual(keys[2:2 + slots], [row["key"] for row in stale[:slots]])
+        self.assertEqual(keys[2 + slots:], ["github:backlog/2", "github:backlog/3",
+                                            *(row["key"] for row in stale[slots:])])
+        self.assertEqual(adapter.STALE_SLOTS, slots)
+
+    def test_explicit_work_past_the_first_three_stays_ahead_of_stale_pulls(self):
+        # Review of sd:7864: explicit rows past the first three, `item:`
+        # dependency entries included, sorted after every stale pull.
+        explicit = [{"key": f"item:{n}", "explicit": True} for n in range(5)]
+        stale, snapshots = self.stale_rows(3)
+        keys = [row["key"] for row in adapter._order(
+            [*stale, *explicit], snapshots=snapshots, observed_at="2026-10-18T08:00:00+00:00")]
+        self.assertEqual(keys, ["item:0", "item:1", "item:2", "github:stale/0", "github:stale/1",
+                                "item:3", "item:4", "github:stale/2"])
+
+    def test_every_key_is_ordered_once_whatever_tiers_it_falls_in(self):
+        # Review of 6037f294a: explicit rows past the first three went on
+        # again after the fresh tier had taken them, so a run read a key
+        # twice and the second read failed its revision check.
+        explicit = [{"key": f"item:{n}", "explicit": True} for n in range(5)]
+        keys = [row["key"] for row in adapter._order(explicit, {row["key"] for row in explicit})]
+        self.assertEqual(keys, ["item:0", "item:1", "item:2", "item:4", "item:3"])
+        # Every tier at once: each row explicit or not, and fresh, unread
+        # and stale together, with more rows than any tier's cap.
+        for explicit_every in (1, 2, 3):
+            stale, snapshots = self.stale_rows(30)
+            pending = [{**row, "explicit": n % explicit_every == 0} for n, row in enumerate(stale)]
+            every = {row["key"] for row in pending}
+            keys = [row["key"] for row in adapter._order(pending, every, every, snapshots=snapshots,
+                                                         observed_at="2026-10-18T08:00:00+00:00")]
+            self.assertEqual(sorted(keys), sorted(every), explicit_every)
+
+    def test_a_stale_open_pull_with_no_item_reads_closed_next_run(self):
+        urls = self.clone_pull(range(7, 20))
+        self.assertTrue(self.run_sync(urls[:1]).ok)
+        self.assertEqual(core.projection(self.db)[0]["external_state"], "open")
+        # Twelve never-read pulls an old search left queue ahead of it,
+        # neither open in the shadow store nor explicit, as the authored
+        # backlog does.
+        saved = adapter._queue(self.db)
+        backlog = [{"key": "github:" + url, "url": url, "why": ["author"], "blocking_labels": [],
+                    "explicit": False} for url in urls[1:]]
+        adapter._save_queue(self.db, backlog + saved["pending"], saved["revision"])
+        self.now += timedelta(days=2)
+        self.api.detail.update(state="closed")
+        # Eight reads: the two head slots, the five newest never-read, then
+        # the stale open pull ahead of the other five.
+        self.assertTrue(self.run_sync(max_requests=4 + 1 + 9 * 8).ok)
+        rows = {row["url"]: row for row in core.projection(self.db)}
+        self.assertEqual(rows[urls[0]]["external_state"], "closed")
+        self.assertEqual(rows[urls[0]]["lane"], "closed")
+        self.assertNotIn(urls[3], rows)
+
     def backlog(self, numbers):
         """Stage never-read pulls in the queue, as an old search left them."""
         urls = self.clone_pull([7, *numbers])[1:]

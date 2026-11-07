@@ -35,6 +35,10 @@ DEPENDENCY_REQUESTS = {"item": 0, "merge": 1, "release": 7, "issue": 2}
 #: Open pulls no run has read, taken first each run (pack sd:7844). Capped so
 #: a pull whose read keeps failing cannot take the whole budget every run.
 UNREAD_SLOTS = 10
+#: Rows last observed open over a day ago, read after the explicit work
+#: (sd:7864). Capped for the same reason: a failed read leaves only a
+#: heartbeat, so its observation stays stale run after run.
+STALE_SLOTS = 10
 
 
 def _queue(connection):
@@ -80,7 +84,7 @@ def _merge(pending, additions):
 FRESH_SLOTS = 5
 
 
-def _order(pending, fresh=frozenset(), unread=frozenset()):
+def _order(pending, fresh=frozenset(), unread=frozenset(), *, snapshots=None, observed_at=None):
     # Explicit local work gets priority, while ordinary authored work has two
     # guaranteed slots before the rest follow in queue order. The budget, not a
     # count, decides how far down the list a run gets; rotation in `refresh`
@@ -95,6 +99,27 @@ def _order(pending, fresh=frozenset(), unread=frozenset()):
     # explicit work and observed open pulls for weeks. A failed read leaves a
     # heartbeat, so the key is no longer fresh, nor unread, and rotates like
     # any other.
+    # Explicit rows past the first three come next, then the first
+    # STALE_SLOTS rows last observed open, and stale as the projection counts
+    # it: search queues every authored pull, thousands, and a run reads a
+    # few dozen, so a closed pull with no item read open for weeks
+    # (sd:7864). A read resets that age, so these are the operator's open
+    # pulls once a day, not the backlog; one whose read keeps failing
+    # rotates to the end of the queue and takes one slot at most.
+    from . import contributions as core
+
+    snapshots = snapshots or {}
+
+    def stale(row):
+        observation = (snapshots.get(row["key"]) or {}).get("observation") or {}
+        if observation.get("state") != "open" or observed_at is None:
+            return False
+        try:
+            age = core._moment(observed_at) - core._moment(observation.get("observed_at"))
+        except (WorkflowError, TypeError, ValueError):
+            return True
+        return age.total_seconds() > core.STALE_SECONDS
+
     explicit = [row for row in pending if row.get("explicit")]
     first = [row for row in pending if not row.get("explicit") and row["key"] in unread][:UNREAD_SLOTS]
     taken = {row["key"] for row in first}
@@ -102,6 +127,12 @@ def _order(pending, fresh=frozenset(), unread=frozenset()):
     ordered = explicit[:3] + first + ordinary[:2]
     taken = {row["key"] for row in ordered}
     ordered += [row for row in reversed(pending) if row["key"] in fresh and row["key"] not in taken][:FRESH_SLOTS]
+    taken = {row["key"] for row in ordered}
+    # Every tier past the first skips the keys already taken: the fresh tier
+    # can hold explicit rows, and a key read twice fails its revision check.
+    ordered += [row for row in explicit[3:] if row["key"] not in taken]
+    taken = {row["key"] for row in ordered}
+    ordered += [row for row in pending if row["key"] not in taken and stale(row)][:STALE_SLOTS]
     taken = {row["key"] for row in ordered}
     return ordered + [row for row in pending if row["key"] not in taken]
 
@@ -279,7 +310,8 @@ def refresh(connection, planned, issues, *, client, observed_at, search_complete
         return {"errors": [str(error)], "queued": len(pending), "attempted": 0, "completed_keys": [], "incomplete": [], "staged": False}
     snapshots = dict(planned["snapshots"])
     fresh = _fresh(connection, pending, snapshots)
-    ordered = _order(pending, fresh, _unread_open(connection, issues, fresh))
+    ordered = _order(pending, fresh, _unread_open(connection, issues, fresh),
+                     snapshots=snapshots, observed_at=observed_at)
     completed, incomplete, attempted, terminal = [], [], [], set()
     operator, identified = None, False
     # Pagination is not priced, so the client itself stops at the reserve: an
