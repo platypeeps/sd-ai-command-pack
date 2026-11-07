@@ -516,6 +516,37 @@ class ContributionSync(SyncCase):
         self.assertGreater(ordered.index("github:fresh"), ordered.index("github:backlog/7"))
         self.assertEqual(sorted(ordered), sorted(keys))
 
+    def stale_rows(self, count):
+        """`count` rows last observed open three days before 2026-10-18 08:00."""
+        rows = [{"key": f"github:stale/{n}", "explicit": False} for n in range(count)]
+        old = {"observation": {"state": "open", "observed_at": "2026-10-15T08:00:00+00:00"}}
+        return rows, {row["key"]: old for row in rows}
+
+    def test_failing_stale_pulls_take_a_few_slots_and_the_backlog_keeps_its_turn(self):
+        # Review of sd:7864: a pull whose reads keep failing leaves only a
+        # heartbeat, so its observation stays stale; uncapped, enough of them
+        # went ahead of the whole backlog every run.
+        slots = 10
+        stale, snapshots = self.stale_rows(slots + 2)
+        backlog = [{"key": f"github:backlog/{n}", "explicit": False} for n in range(4)]
+        keys = [row["key"] for row in adapter._order(
+            [*backlog, *stale], snapshots=snapshots, observed_at="2026-10-18T08:00:00+00:00")]
+        # The two head slots, then the capped stale tier, then queue order.
+        self.assertEqual(keys[2:2 + slots], [row["key"] for row in stale[:slots]])
+        self.assertEqual(keys[2 + slots:], ["github:backlog/2", "github:backlog/3",
+                                            *(row["key"] for row in stale[slots:])])
+        self.assertEqual(adapter.STALE_SLOTS, slots)
+
+    def test_explicit_work_past_the_first_three_stays_ahead_of_stale_pulls(self):
+        # Review of sd:7864: explicit rows past the first three, `item:`
+        # dependency entries included, sorted after every stale pull.
+        explicit = [{"key": f"item:{n}", "explicit": True} for n in range(5)]
+        stale, snapshots = self.stale_rows(3)
+        keys = [row["key"] for row in adapter._order(
+            [*stale, *explicit], snapshots=snapshots, observed_at="2026-10-18T08:00:00+00:00")]
+        self.assertEqual(keys, ["item:0", "item:1", "item:2", "github:stale/0", "github:stale/1",
+                                "item:3", "item:4", "github:stale/2"])
+
     def test_a_stale_open_pull_with_no_item_reads_closed_next_run(self):
         urls = self.clone_pull(range(7, 20))
         self.assertTrue(self.run_sync(urls[:1]).ok)

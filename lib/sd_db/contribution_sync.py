@@ -35,6 +35,10 @@ DEPENDENCY_REQUESTS = {"item": 0, "merge": 1, "release": 7, "issue": 2}
 #: Open pulls no run has read, taken first each run (pack sd:7844). Capped so
 #: a pull whose read keeps failing cannot take the whole budget every run.
 UNREAD_SLOTS = 10
+#: Rows last observed open over a day ago, read after the explicit work
+#: (sd:7864). Capped for the same reason: a failed read leaves only a
+#: heartbeat, so its observation stays stale run after run.
+STALE_SLOTS = 10
 
 
 def _queue(connection):
@@ -95,11 +99,13 @@ def _order(pending, fresh=frozenset(), unread=frozenset(), *, snapshots=None, ob
     # explicit work and observed open pulls for weeks. A failed read leaves a
     # heartbeat, so the key is no longer fresh, nor unread, and rotates like
     # any other.
-    # Rows last observed open, and stale as the projection counts it, come
-    # next: search queues every authored pull, thousands, and a run reads a
+    # Explicit rows past the first three come next, then the first
+    # STALE_SLOTS rows last observed open, and stale as the projection counts
+    # it: search queues every authored pull, thousands, and a run reads a
     # few dozen, so a closed pull with no item read open for weeks
     # (sd:7864). A read resets that age, so these are the operator's open
-    # pulls once a day, not the backlog.
+    # pulls once a day, not the backlog; one whose read keeps failing
+    # rotates to the end of the queue and takes one slot at most.
     from . import contributions as core
 
     snapshots = snapshots or {}
@@ -122,7 +128,9 @@ def _order(pending, fresh=frozenset(), unread=frozenset(), *, snapshots=None, ob
     taken = {row["key"] for row in ordered}
     ordered += [row for row in reversed(pending) if row["key"] in fresh and row["key"] not in taken][:FRESH_SLOTS]
     taken = {row["key"] for row in ordered}
-    ordered += [row for row in pending if row["key"] not in taken and stale(row)]
+    ordered += explicit[3:]
+    taken = {row["key"] for row in ordered}
+    ordered += [row for row in pending if row["key"] not in taken and stale(row)][:STALE_SLOTS]
     taken = {row["key"] for row in ordered}
     return ordered + [row for row in pending if row["key"] not in taken]
 
