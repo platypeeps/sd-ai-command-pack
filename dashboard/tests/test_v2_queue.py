@@ -1465,6 +1465,36 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertIn('href="https://github.com/example/system/pull/5"', rows[0])
         self.assertEqual(out["R"]["html"].count('data-item="5"'), 2, "Retry and Approve, on that one row")
 
+    def test_an_unmanaged_builds_draft_is_blocked_on_its_pr_and_waits_on_you(self):
+        # pack sd:7868 (operator 2026-11-06): a build in an unmanaged repository ends in a draft PR the operator must
+        # mark ready. From the real observation, not a written row: the draft reads `awaiting_you`, so Queue draws the
+        # item blocked by that PR, linked, as needing the operator.
+        from sd_db import contributions
+        from sd_db.writes import create_item
+
+        repo = Path(self.tmp.name) / "anvil"
+        upsert_repo(self.connection, str(repo), remote="https://github.com/example/anvil.git", managed=0)
+        item = create_item(self.connection, kind="task", title="Built in a third-party repository", repo=str(repo),
+                           status="in_progress")
+        url = "https://github.com/example/anvil/pull/41"
+        contributions.configure(self.connection, item, {"pull_url": url}, who="build")
+        observed = {"complete": True, "observed_at": "2026-09-06T11:00:00Z", "operator": {"id": "1", "login": "author"},
+                    "author": {"id": "1", "login": "author"}, "repo": "example/anvil", "title": "Built",
+                    "state": "open", "head": "a" * 40, "base": "b" * 40, "draft": True, "mergeable": "mergeable",
+                    "ci": "success", "ci_head": "a" * 40, "ci_ids": ["check:1"], "why": ["author"],
+                    "blocking_labels": [], "labels": [], "reviews": [], "events": []}
+        contributions.observe_pull(self.connection, url, observed, expected_revision=contributions.snapshot(
+            self.connection, "github:" + url)["revision"])
+        self.connection.commit()
+        out = self.run_view("const names = [...ELS.queue.html.matchAll(/data-repo=\"([^\"]*)\"/g)].map(m => m[1]);"
+                            " for (const n of names) open(n); R.open = ELS.queue.html;")
+        rows = dict(re.findall(r'<tr class="child" data-type="blocked" data-pr="(\d+)">(.*?)</tr>', out["R"]["open"],
+                               re.S))
+        self.assertIn(str(item), rows, out["R"]["open"][-3000:])
+        self.assertIn("<b>blocked: PR</b> · on you", rows[str(item)])
+        self.assertIn(f'href="{url}"', rows[str(item)])
+        self.assertIn('<span class="sr">needs you · </span>blocked', rows[str(item)])
+
     def test_a_pr_wait_that_was_not_read_is_said_under_the_table(self):
         lanes = queue_screen.document(self.connection, now=NOW)
         lanes["prs"] = {"rows": [], "error": "pull-request waits were not read: OperationalError: database is locked"}

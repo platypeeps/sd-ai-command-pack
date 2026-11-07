@@ -58,6 +58,9 @@ These run without being asked.
   `sd-ship`, `sd-check`, `sd-status` and `sd-ship lane enqueue` refuse there, dry runs included.
   `sd-review` runs there, review only: it reads a diff, and its gate check does not run (sd:5953).
   The refusal names the remedy: `sd fleet standard` in that checkout, which sets managed last (sd:7710).
+  The Build press and auto-pickup still take a task there, with a GitHub remote (sd:7868).
+  Its run reviews, runs the repository's own checks, pushes the branch and opens a draft pull request.
+  No lane, merge or pack file reaches the repository; the owners merge, and the merge closes the task.
   A checkout with no row proceeds; only a row marked unmanaged refuses.
 - `sd-status` reports. It never writes.
 - An item reference a person reads names its repository: `system sd:5103`, or `fleet sd:5103` for an item in none (sd:5124).
