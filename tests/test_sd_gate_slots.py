@@ -524,7 +524,7 @@ class ARefusalSaysItStartedNothing(unittest.TestCase):
 
     def run_gate(self, *argv: str, environ: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, str(SLOTS), "run", *argv], capture_output=True, text=True,
-                              env=clean_environment(SD_GATE_SLOTS="0", **(environ or {})), timeout=60,
+                              env=clean_environment(**{"SD_GATE_SLOTS": "0", **(environ or {})}), timeout=60,
                               check=False, stdin=subprocess.DEVNULL)
 
     def test_a_run_with_no_command_says_it_started_nothing(self):
