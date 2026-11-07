@@ -59,6 +59,13 @@ class FollowCase(unittest.TestCase):
                        rerun=lambda argv, env: self.reruns.append((argv, env)), **options)
         return self.out.getvalue()
 
+    def reap(self, pid: Path):
+        """Kill the process whose pid the script wrote to `pid`, if it wrote one and the process still runs."""
+        try:
+            os.kill(int(pid.read_text()), signal.SIGKILL)
+        except (OSError, ValueError):
+            pass
+
     def logged(self) -> list[str]:
         return self.log.read_text().splitlines() if self.log.exists() else []
 
@@ -96,7 +103,10 @@ class TheFollow(FollowCase):
 
     def test_a_timeout_whose_group_kill_is_refused_kills_the_shell(self):
         # sd:7900: macOS or a sandbox answers EPERM to killpg; the follow must still end, not raise.
-        root = self.script("sleep 30")
+        # Only the shell dies, so its `sleep` is reaped here, not left running for 30 s (sd:7920).
+        pid = self.root / "sleep.pid"
+        root = self.script(f'sleep 30 & echo $! > "{pid}"; wait')
+        self.addCleanup(self.reap, pid)
         began = time.monotonic()
         with mock.patch.object(follow.os, "killpg", side_effect=PermissionError(1, "Operation not permitted")):
             text = self.attempt([root], timeout=0.5)

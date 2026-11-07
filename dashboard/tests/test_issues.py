@@ -251,6 +251,28 @@ window.shell = { aside: (() => { const { html } = window.markup;
         self.assertIn('data-cat-open="repo:kiln"', drawn["issues"])
         self.assertIn("3 open", drawn["issues-tally"])
 
+    def test_an_assigned_row_carries_the_assigned_to_you_marker_and_a_filed_one_does_not(self):
+        # pack sd:7930: an issue assigned to the operator stands apart from one only filed, from either source.
+        upsert_shadow(self.connection, tracker="github", url="https://github.com/upstream/tool/issues/9",
+                      repo="upstream/tool", number=9, kind="issue", title="Upstream crash", state="open",
+                      reason="assigned", assignee="me")
+        upsert_shadow(self.connection, tracker="github", url="https://github.com/upstream/tool/issues/5",
+                      repo="upstream/tool", number=5, kind="issue", title="Upstream typo", state="open",
+                      reason="filed", filed=True, author="me")
+        self.connection.commit()
+        with stub(return_value=FOUND):
+            found = github_issues(self.connection)
+        rows = {row["ref"]: row for row in found["issues"]}
+        self.assertEqual({ref: row.get("assigned") for ref, row in rows.items()},
+                         {"EXAMPLE-8": False, "#12": True, "#3": True, "#9": True, "#5": False})
+        marker = '<span class="tag real">assigned to you</span>'
+        for ref, want in (("#9", True), ("#5", False), ("EXAMPLE-8", False)):
+            row = {**rows[ref], "state": "open"}
+            drawn = self.drawn({"issues": [row], "error": ""}, search="?iss=closed")["issues"]
+            with self.subTest(ref=ref):
+                self.assertIn(f"{row['tracker']} {row['ref']}", drawn)
+                self.assertEqual(marker in drawn, want, f"{ref}: {drawn}")
+
     def test_each_row_says_when_it_was_last_updated(self):
         # pack sd:7464: an Updated column, the stored updated_at as a relative time; none stored says so.
         rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix", "reason": "filed",

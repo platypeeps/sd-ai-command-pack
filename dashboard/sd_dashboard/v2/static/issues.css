@@ -22,6 +22,8 @@
 .issues .ref a:hover, .issues .ref a:active, .issues .what a:hover, .issues .what a:active { text-decoration: underline; }
 .issues .ref a:focus-visible, .issues .what a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .issues .what { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+/* pack sd:7930: a row assigned to the operator, apart from one only filed; the tag of hoa.css and task-details.css. */
+.issues .tag { display: inline-block; padding: 0 4px; border: var(--rule-hair) solid var(--color-accent); border-radius: var(--radius-sm); font: 500 var(--text-2xs)/1.4 var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-2); vertical-align: 1px; white-space: nowrap; }
 .issues tr.empty td { color: var(--color-muted); padding-block: var(--space-sm); }
 .issues .refused { margin: var(--space-2xs) 0 0; white-space: normal; text-align: right; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-warning); }
 @media (max-width: 899px) {

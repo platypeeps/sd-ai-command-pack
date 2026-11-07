@@ -11,7 +11,9 @@ from __future__ import annotations
 import os
 import signal
 import tempfile
+import threading
 import time
+import types
 import unittest
 from io import StringIO
 from pathlib import Path
@@ -80,6 +82,83 @@ class TheCleanupReadIsBounded(unittest.TestCase):
                                                                                StringIO(), lambda: None))
         self.assertEqual(code, hoa_download.EXIT_NONE)
         self.assertRegex(said, "^no login within")
+
+
+class Chatty:
+    """A stdout that prints a line each millisecond until `stop`, faster than the reader below takes them."""
+
+    def __init__(self):
+        self.stop = threading.Event()
+
+    def __iter__(self):
+        while not self.stop.wait(0.001):
+            yield "still here\n"
+
+    def close(self):
+        pass
+
+
+class Broken:
+    """A stdout whose second line is not UTF-8, as a text-mode pipe reads it."""
+
+    def __iter__(self):
+        yield "a line\n"
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    def close(self):
+        pass
+
+
+class TheOutputRead(unittest.TestCase):
+    """`_lines` keeps its bound against a chatty survivor and says a failed read (sd:7920)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def test_a_survivor_that_keeps_printing_does_not_hold_the_read_past_its_bound(self):
+        stdout, timer = Chatty(), types.SimpleNamespace(fired=True)
+        self.addCleanup(stdout.stop.set)
+        began = time.monotonic()
+        with mock.patch.object(hoa_download, "REAP_SECONDS", 0.3):
+            for _ in hoa_download._lines(types.SimpleNamespace(stdout=stdout), timer):
+                time.sleep(0.01)
+                if time.monotonic() - began > 3:
+                    self.fail("the read still yielded lines 3 s after a 0.3 s bound")
+
+    def test_a_read_that_fails_is_said_at_once(self):
+        timer = types.SimpleNamespace(fired=False)
+        late = threading.Timer(2, setattr, (timer, "fired", True))
+        late.daemon = True
+        late.start()
+        self.addCleanup(late.cancel)
+        with mock.patch.object(hoa_download, "REAP_SECONDS", 0.3), \
+                self.assertRaisesRegex(Exception, "UnicodeDecodeError"):
+            list(hoa_download._lines(types.SimpleNamespace(stdout=Broken()), timer))
+
+    def output(self, run):
+        began = time.monotonic()
+        code, said = run()
+        self.assertLess(time.monotonic() - began, 2, "the run waited for its timeout after its read failed")
+        return code, said
+
+    def test_a_download_whose_output_is_not_text_says_so(self):
+        sources = {"x": {"label": "X", "argv": ("sh", "-c", "printf 'ok\\n\\377\\n'; exec sleep 30")}}
+        with mock.patch.object(hoa_download, "SOURCES", sources), mock.patch.object(hoa_download, "DOWNLOAD_SECONDS", 4):
+            code, said = self.output(lambda: hoa_download.download("x", self.dir, (), StringIO()))
+        self.assertEqual(code, hoa_download.EXIT_ERROR)
+        self.assertRegex(said, "^cannot read .*'s output: UnicodeDecodeError")
+
+    def test_a_login_whose_output_is_not_text_says_so(self):
+        with mock.patch.object(hoa_download, "claude_binary", return_value="sh"), \
+                mock.patch.object(hoa_download, "claude_argv",
+                                  return_value=["sh", "-c", "printf '\\377\\n'; exec sleep 30"]), \
+                mock.patch.object(hoa_download, "LOGIN_SECONDS", 4):
+            code, said = self.output(lambda: hoa_download.login("x", "https://example.test", self.dir, (), StringIO(),
+                                                                lambda: None))
+        self.assertEqual(code, hoa_download.EXIT_ERROR)
+        self.assertRegex(said, "^cannot read sh's output: UnicodeDecodeError")
 
 
 if __name__ == "__main__":
