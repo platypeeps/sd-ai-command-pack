@@ -2251,6 +2251,33 @@ class Hosts(Case):
         with self.on("hub"):
             self.assertEqual(self.tick()["spawned"], hub["claimed"], "nor the satellite's on the hub")
 
+    def test_a_tick_that_cannot_claim_says_why_in_its_beat(self):
+        """Review round 4: a satellite whose tick claims nothing beats with the reason, and the hub refuses its
+        presses with it, rather than read the beat as a dispatcher that would claim."""
+        sat = create_item(self.db, kind="task", title="Satellite", repo=str(self.satellite), status="ready")
+
+        def beat():
+            row = self.db.execute("SELECT body FROM state WHERE kind = 'heartbeat' AND key = 'build-dispatch@work' "
+                                  "ORDER BY id DESC LIMIT 1").fetchone()
+            return json.loads(row["body"]).get("why")
+        unset = "sd.bulk_storage_root is unset, so a build run has no log folder"
+        for inputs, why in (({"why": unset}, unset), ({"load": None}, build.UNREAD[0]),
+                            ({"interactive": None}, build.UNREAD[1]), ({}, "")):
+            with self.subTest(inputs=inputs):
+                with self.on("work"):
+                    self.assertEqual(self.tick(**inputs)["why"], why)
+                self.assertEqual(beat(), why)
+                with self.on("hub"):
+                    if why:
+                        with self.assertRaisesRegex(build.BuildRefused, f"build-dispatch@work claims nothing: {why}"):
+                            build.queue(self.db, [sat], who="operator")
+                    else:
+                        self.assertEqual(len(build.queue(self.db, [sat], who="operator")), 1)
+        record_state(self.db, "restore", body={})
+        with self.on("work"):
+            self.assertEqual(self.tick()["why"], build.RESTORING)
+        self.assertEqual(beat(), build.RESTORING)
+
     def test_each_tick_watches_only_its_own_runs(self):
         sat = create_item(self.db, kind="task", title="Satellite", repo=str(self.satellite), status="ready")
         build.queue(self.db, [sat], who="operator")

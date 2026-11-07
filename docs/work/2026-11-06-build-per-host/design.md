@@ -40,12 +40,19 @@ None (the hub's) for NULL and for this machine's own name on the hub, as
 `sd_lane.ended_kind` reads it; the host's name otherwise. A satellite cannot
 tell the hub's name, so it reads a lane named for the hub as another host's.
 
-The hub settles another host's rows once that host goes quiet: no
-`build-dispatch@<host>` beat under `STALE_SECONDS` (`build.dispatcher_gone`,
-the press's check too). Its claim blocks such a queued row with that reason.
-Its reap ends such an open run whose own beat is that old too, without a
-probe or a signal: cancelled when a cancel was asked, else blocked and
-released; a held run is released. A run at a lane step waits on that host's lane.
+The hub cannot see another host's processes, so it never releases that
+host's lease. A tick beats first, with `why` in its body: the reason it
+claims nothing (no log folder, an unread load, a restore pending), else "".
+`build.dispatcher_refusal` refuses a press, and the hub's claim blocks a
+queued row with the reason, when that host has no beat under
+`STALE_SECONDS` (`build.dispatcher_gone`) or its newest beat names a `why`.
+The hub's reap ends an open run blocked, with no probe or signal, only
+when no beat comes from that host or from the run for `STALE_SECONDS`.
+The run keeps its lease, a pending cancel named in its reason, so Retry
+and the claim refuse its items until that host's own reap reads its groups
+gone and releases it. A held run stays held. A run at a lane step waits on
+that host's lane. A beat that names a `why` still counts for the reap,
+since the tick reaps before it claims.
 
 1. Press: `_repo_refusal` no longer refuses a lane host. A press queues for a
    satellite lane only while that host's `build-dispatch@<host>` beat is under
@@ -109,12 +116,14 @@ Hub-named lane, dashboard | plan, press answer, panel rows | the plan shows no r
 Hub-named lane, run sets | room, reap, watch, sweep, spawn, push | none: lane_hosts on the hub holds None and its own name | unchanged | test_build.Hosts.test_lane_of_reads_this_hubs_own_name_as_the_hub
 Foreign queued row, host quiet | the assignment blocked with why, item free | the hub skipped it forever with no note | the hub's claim blocks it when dispatcher_gone | test_build.Hosts.test_the_hub_blocks_a_quiet_satellites_queued_row_with_why
 Foreign queued row, lane moved after the press | the same | moved to a host that never beat | the same check: no beat is gone | test_build.Hosts.test_the_hub_blocks_a_row_whose_lane_moved_to_a_host_that_never_beat
-Foreign open run, host quiet | outcome blocked, run and lease released, items blocked and parked | stays open and locks its items | _strand: dispatcher_gone and no run beat for STALE_SECONDS; no probe, no signal | test_build.Hosts.test_the_hub_ends_a_quiet_satellites_run_blocked_and_releases_it
-Foreign open run, cancel asked | outcome cancelled, items ready | cancel_requested waits for a tick that never comes | _strand ends it cancelled | test_build.Hosts.test_the_hub_completes_a_cancel_a_quiet_satellite_never_read
-Foreign held run, host quiet | released_at, lease, park | a blocked run waits for that host's release | _strand releases it with a probe that answers gone | test_build.Hosts.test_the_hub_releases_a_quiet_satellites_held_run
-Foreign run, supervisor still beats | nothing | the dispatcher died but its supervisor runs | the run's own beat keeps it | test_build.Hosts.test_the_hub_ends_a_quiet_satellites_run_blocked_and_releases_it (after=60)
+Foreign open run, host quiet | outcome blocked with the reason, items blocked; run and lease kept | a missing beat read as stopped processes: a release lets Retry start a second builder in the same worktree | _strand blocks it, keeps the lease; that host's own reap releases it | test_build.Hosts.test_the_hub_blocks_a_quiet_satellites_run_and_keeps_its_lease, test_build_panel.BuildsPanel.test_retry_refuses_a_run_the_hub_blocked_for_a_quiet_satellite
+Foreign open run, cancel asked | outcome blocked, the cancel named in the reason; lease kept | a release while that host's builder may still run | the same: blocked, not cancelled | test_build.Hosts.test_a_cancel_on_a_quiet_satellite_blocks_and_keeps_the_lease
+Foreign held run, host quiet | nothing | a release on a probe that answers gone for anything | it stays held until that host reads its groups gone | test_build.Hosts.test_the_hub_leaves_a_quiet_satellites_held_run_held
+Foreign run, supervisor still beats | nothing | the dispatcher died but its supervisor runs | the run's own beat keeps it | test_build.Hosts.test_the_hub_blocks_a_quiet_satellites_run_and_keeps_its_lease (after=60)
+Satellite beats but claims nothing | its beat body names why | a fresh beat read as a dispatcher that claims: the press locks items nothing claims | the tick writes why in its beat; the press refuses with it and the hub's claim blocks queued rows with it | test_build_run.Hosts.test_a_tick_that_cannot_claim_says_why_in_its_beat, test_build.Hosts.test_a_press_refuses_a_satellite_whose_beat_says_it_claims_nothing, test_build.Hosts.test_the_hub_blocks_a_queued_row_whose_satellite_claims_nothing
+Satellite beats, claims nothing, runs open | nothing | the hub blocks runs the satellite still reaps | _strand reads only staleness: the tick reaps before it claims | test_build.Hosts.test_a_satellite_that_beats_and_claims_nothing_still_owns_its_runs
 Foreign run at a lane step | nothing | its branch waits on that host's lane | stays; that host's watch ends it when it returns | none: no state to settle here
-Satellite returns after the hub ended its run | its supervisor's next write | it acts on a run the hub ended | build.write changes no row, so the supervisor stops; the run is released | test_build_run.Supervise.test_a_lost_run_stops_before_the_next_step
+Satellite returns after the hub ended its run | its supervisor's next write | it acts on a run the hub ended | build.write changes no row, so the supervisor stops; its reap releases the run once its groups read gone | test_build_run.Supervise.test_a_lost_run_stops_before_the_next_step
 Rollback | the previous pack on the hub | its reap acts on every run and reads a live satellite pid as gone | before a rollback, cancel each open satellite run on the Builds panel and let the satellite end it | none: a procedure
 ```
 

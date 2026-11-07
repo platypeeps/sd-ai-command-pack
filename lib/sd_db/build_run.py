@@ -460,8 +460,12 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     """
     hosts = build.lane_hosts(connection)
     hub = None in hosts
+    # The beat carries why this tick claims nothing: the hub reads a satellite's beat as one that would claim a
+    # press only when `why` is empty (`build.dispatcher_refusal`, review round 4).
+    why = why or build.unread(load, load_cap, interactive) or (
+        build.RESTORING if build.restoration_pending(connection) else "")
     record_state(connection, "heartbeat", key=HEARTBEAT if hub else f"{HEARTBEAT}@{build.this_host()}",
-                 body={"pid": os.getpid(), "owner": owner})
+                 body={"pid": os.getpid(), "owner": owner, "why": why})
     reaped = build.reap(connection, probe=probe, kill=kill, hosts=hosts)
     if hub:
         reaped += draft.reap(connection, probe=probe, kill=kill, hosts=hosts)
@@ -469,12 +473,9 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     swept = sweep(connection, hosts=hosts)
     stopped = build.stop_on_blocks(connection) if hub else None
     picked: list[int] = []
-    if not why:
-        available = build.room(connection, load=load, load_cap=load_cap, interactive=interactive, hosts=hosts)
-        # An unread input claims nothing; the tick says which (pack sd:7933, design "Claim, load unread").
-        why = available["why"] if available["why"] in build.UNREAD else ""
     if not why and hub:
-        picked = build.pickup(connection, available)
+        picked = build.pickup(connection, build.room(connection, load=load, load_cap=load_cap,
+                                                     interactive=interactive, hosts=hosts))
     claimed: list[str] = []
     while not why and len(claimed) < build.MACHINE_CAP:
         try:

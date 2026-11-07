@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sd_dashboard import builds
-from sd_db import build, ship, upsert_repo
+from sd_db import build, runner, ship, upsert_repo
 from sd_db.workflow import item_state
 from sd_db.writes import now as clock
 from sd_db.writes import record_state
@@ -210,6 +210,21 @@ class BuildsPanel(Fixture):
             row = {row["run"]: row for row in builds.panel(self.connection, now="2099-01-02T01:00:00Z")["runs"]}[run["id"]]
         self.assertEqual(row["host"], "", "an older run owned build-dispatch@hub is the hub's")
         self.assertIsNotNone(row["quiet"], "its log is read here")
+
+    def test_retry_refuses_a_run_the_hub_blocked_for_a_quiet_satellite(self):
+        """Review round 4: the hub blocks a quiet satellite's run but keeps its lease, so Retry cannot start a
+        second builder in its worktree while work's processes may still run there."""
+        item = self.ready()
+        run = self.claimed([item])
+        self.connection.execute("UPDATE runner_run SET owner = 'build-dispatch@work' WHERE id = ?", (run["id"],))
+        [settled] = build.reap(self.connection, now="2099-01-02T00:00:00Z")
+        self.assertEqual(settled["outcome"], "blocked")
+        self.assertEqual(item_state(self.connection, item)["item"]["status"], "blocked")
+        revision = runner.queue_state(self.connection, run["assignment"])["revision"]
+        status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"], "revision": revision})
+        self.assertEqual(status, 400, body)
+        self.assertIn("the run still holds its lease", body["error"])
+        self.assertEqual(self.builds_of(item), 1, "nothing queued again")
 
     def test_a_teammate_run_is_a_working_row_with_its_worktree_due_time_and_no_cancel(self):
         """pack sd:7221: a lead's in-session builder shows beside the headless runs; past its budget it is stalled."""

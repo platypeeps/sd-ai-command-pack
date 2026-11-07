@@ -195,12 +195,30 @@ def lane_of(connection, host: str | None) -> str | None:
 
 
 def dispatcher_gone(connection, host: str) -> str | None:
-    """Why no build-dispatch tick on the satellite `host` acts now, or None: its newest beat is under
-    `STALE_SECONDS`, the reap's own rule. A press, the hub's claim and the hub's reap ask it."""
+    """Why no build-dispatch tick on the satellite `host` runs now, or None: its newest beat is under
+    `STALE_SECONDS`, the reap's own rule. The hub's reap asks it: a tick that beats reaps its own runs."""
     beat = dispatcher_beat(connection, host)
     if beat is not None and beat < STALE_SECONDS:
         return None
     return f"no {HEARTBEAT}@{host} beat is under {STALE_SECONDS} s old"
+
+
+def dispatcher_refusal(connection, host: str) -> str | None:
+    """Why no build-dispatch tick on the satellite `host` would claim a press, or None: `dispatcher_gone`, or
+    the `why` its newest beat names (review round 4). A press and the hub's claim ask it.
+
+    A tick beats before it claims, so a beat alone does not say it can: one
+    with no log folder, an unread load or a restore pending claims nothing.
+    """
+    gone = dispatcher_gone(connection, host)
+    if gone:
+        return gone
+    row = _beat(connection, host)
+    try:
+        why = json.loads(row["body"]).get("why") if row else None
+    except (TypeError, ValueError, AttributeError):
+        why = None
+    return f"{HEARTBEAT}@{host} claims nothing: {why}" if isinstance(why, str) and why else None
 
 
 def run_owner(owner: str, lane_host: str | None) -> str:
@@ -255,7 +273,7 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
     if refused:
         raise BuildRefused(refused)
     away = lane_of(connection, row["lane_host"])
-    gone = dispatcher_gone(connection, away) if away else None
+    gone = dispatcher_refusal(connection, away) if away else None
     if gone:
         # Nothing claims a satellite's press until its own dispatcher ticks, and the press locks the item.
         raise BuildRefused(f"item {item}'s lane runs on {away}, and {gone}: no dispatcher there would claim it")
@@ -272,12 +290,16 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
 def dispatcher_beat(connection, host: str) -> int | None:
     """Seconds since the build-dispatch tick on the satellite `host` last beat; None when it never did, or when
     its beat does not read: an unread beat is no beat."""
-    row = connection.execute("SELECT timestamp FROM state WHERE kind = 'heartbeat' AND key = ? ORDER BY id DESC LIMIT 1",
-                             (f"{HEARTBEAT}@{host}",)).fetchone()
+    row = _beat(connection, host)
     try:
         return int(_age(row["timestamp"], clock())) if row else None
     except (TypeError, ValueError):
         return None
+
+
+def _beat(connection, host: str):
+    return connection.execute("SELECT timestamp, body FROM state WHERE kind = 'heartbeat' AND key = ? "
+                              "ORDER BY id DESC LIMIT 1", (f"{HEARTBEAT}@{host}",)).fetchone()
 
 
 def queue(connection, items: list[int], *, who: str, expected_revisions: dict | None = None) -> list[dict]:
@@ -288,7 +310,7 @@ def queue(connection, items: list[int], *, who: str, expected_revisions: dict | 
         raise BuildRefused("a press names who pressed it")
     with transaction(connection):
         if restoration_pending(connection):
-            raise BuildRefused("database restore reimport is incomplete; builds are held")
+            raise BuildRefused(RESTORING)
         if expected_revisions is not None:
             from .workflow import item_state
             if {str(key) for key in expected_revisions} != {str(item) for item in items}:
@@ -455,6 +477,16 @@ def _key(repo: str | None) -> str | None:
 
 #: `room`'s answers for an input it did not read: the tick claims nothing and says which.
 UNREAD = ("the load was not read", "the interactive builders were not counted")
+#: Why nothing claims while a restore reimport is pending: the press, the claim and the tick's beat say it.
+RESTORING = "database restore reimport is incomplete; builds are held"
+
+
+def unread(load: float | None, load_cap: float | None, interactive: list[dict] | None) -> str:
+    """`room`'s `UNREAD` answer for these inputs, or "": the tick reads it before its beat, `room` after."""
+    if not (isinstance(load, (int, float)) and isinstance(load_cap, (int, float))
+            and math.isfinite(load) and math.isfinite(load_cap)):
+        return UNREAD[0]
+    return UNREAD[1] if interactive is None else ""
 
 
 def over_load(load: float, cap: float) -> str:
@@ -480,12 +512,7 @@ def room(connection, *, load: float | None, load_cap: float | None, interactive:
     None) count: each host's dispatcher has its own caps (pack sd:7933).
     """
     hosts = lane_hosts(connection) if hosts is None else hosts
-    why = ""
-    if not (isinstance(load, (int, float)) and isinstance(load_cap, (int, float))
-            and math.isfinite(load) and math.isfinite(load_cap)):
-        why = UNREAD[0]
-    elif interactive is None:
-        why = UNREAD[1]
+    why = unread(load, load_cap, interactive)
     leases = connection.execute(
         "SELECT lease.repo, lease.exclusive, run.quarantine, run.session_id, run.owner, assignment.scope "
         "FROM runner_lease lease JOIN runner_run run ON run.id = lease.run "
@@ -599,7 +626,7 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
     hosts = lane_hosts(connection) if hosts is None else hosts
     with transaction(connection):
         if restoration_pending(connection):
-            raise BuildRefused("database restore reimport is incomplete; builds are held")
+            raise BuildRefused(RESTORING)
         queued = connection.execute(
             "SELECT assignment.id, assignment.item, assignment.parent, assignment.run_count, item.repo, "
             "repo.lane_host FROM assignment JOIN item ON item.id = assignment.item "
@@ -608,11 +635,12 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
             "ORDER BY item.priority IS NULL, item.priority, assignment.queued_at, assignment.id", (SCOPE,)).fetchall()
         lanes = {row["id"]: lane_of(connection, row["lane_host"]) for row in queued}
         if None in hosts:
-            # The hub settles another host's row once that host's dispatcher went quiet: a lane moved after
-            # the press, or a dispatcher that died after it, would leave the item locked with no word.
+            # The hub blocks another host's row once that host's dispatcher went quiet or beats that it claims
+            # nothing: a lane moved after the press, or a dispatcher that died or broke after it, would leave the
+            # item locked with no word. A queued row has no process, so nothing is left running.
             for row in queued:
                 away = lanes[row["id"]]
-                gone = dispatcher_gone(connection, away) if away is not None and away not in hosts else None
+                gone = dispatcher_refusal(connection, away) if away is not None and away not in hosts else None
                 if gone:
                     _refuse(connection, row, f"item {row['item']}'s lane runs on {away}, and {gone}")
         available = room(connection, load=load, load_cap=load_cap, interactive=interactive, hosts=hosts)
@@ -1242,7 +1270,7 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group,
 
     Only the runs of `hosts` (`lane_hosts` when None) are judged: a pid or a
     group of another machine's run means nothing here (pack sd:7933). The
-    hub then settles another host's quiet runs without a probe (`_strand`).
+    hub then blocks another host's quiet runs without a probe, their leases kept (`_strand`).
     """
     hosts = lane_hosts(connection) if hosts is None else hosts
     settled = _reap(connection, open_runs, _settle, now=now, probe=probe, kill=kill, hosts=hosts)
@@ -1251,59 +1279,37 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group,
     return settled
 
 
-class _Away(Probe):
-    """Another machine's processes, read from here: none answers. `_strand` passes it so nothing is signalled."""
-
-    @staticmethod
-    def alive(pid: int) -> bool | None:
-        return False
-
-    @staticmethod
-    def group(pgid: int) -> bool | None:
-        return False
-
-    @staticmethod
-    def started(pid: int) -> str | None:
-        return None
-
-
 def _strand(connection, hosts: Collection[str | None], *, now: str) -> list[dict]:
-    """The hub ends another host's open runs once both its dispatcher and the run went quiet (review round 3).
+    """The hub ends another host's open runs blocked once both its dispatcher and the run went quiet (review
+    rounds 3 and 4).
 
     Quiet is `dispatcher_gone` for the run's host and no run beat for
-    `STALE_SECONDS`. A cancel asked ends the run cancelled, its items ready;
-    any other run ends blocked, released, its items blocked and parked; a held
-    run is released. No pid or group is probed or signalled: they are another
-    machine's. A run at a lane step waits on that host's lane, and stays.
+    `STALE_SECONDS`. A missing beat does not prove that host's processes
+    stopped, so the run keeps its lease: it ends `blocked` with the reason
+    (a pending cancel named in it), unreleased, and no Retry or claim takes
+    its items until that host's own reap reads its groups gone and releases
+    it. A held run stays held. No pid or group is probed or signalled: they
+    are another machine's. A run at a lane step waits on that host's lane.
     """
     settled: list[dict] = []
     for row in open_runs(connection):
         host = run_host(row["owner"])
-        if (mine(row, hosts) or host is None or row["step"] in LANE_STEPS
+        if (mine(row, hosts) or host is None or row["outcome"] is not None or row["step"] in LANE_STEPS
                 or _age(row["heartbeat_at"] or row["created_at"], now) < STALE_SECONDS):
             continue
         gone = dispatcher_gone(connection, host)
         if gone is None:
             continue
-        if row["outcome"] in HELD:
-            _release(connection, row, probe=_Away)
-            continue
-        if row["outcome"] is not None:
-            continue
-        cancel = bool(row["cancel_requested"])
-        outcome = "cancelled" if cancel else "interrupted"
-        detail = (row["cancel_requested"] if cancel
-                  else f"{host}'s dispatcher went quiet ({gone}) and the run sent no beat for {STALE_SECONDS} s")
+        detail = f"{host}'s dispatcher went quiet ({gone}) and the run sent no beat for {STALE_SECONDS} s"
+        if row["cancel_requested"]:
+            detail = f"{row['cancel_requested']}, but {detail}"
         with transaction(connection):
             if connection.execute(
-                    f"UPDATE runner_run SET outcome = ?, detail = ?, updated_at = ? WHERE id = ? AND {_SAME}",
-                    (outcome, detail, clock(), row["id"], *(row[name] for name in REAP_READS))).rowcount != 1:
+                    f"UPDATE runner_run SET outcome = 'interrupted', detail = ?, updated_at = ? WHERE id = ? "
+                    f"AND {_SAME}", (detail, clock(), row["id"], *(row[name] for name in REAP_READS))).rowcount != 1:
                 continue
-        result = _settle(connection, {**row, "outcome": outcome, "detail": detail},
-                         block=None if cancel else f"the hub ended it on {host}: {detail}")
-        if result is not None and not cancel:
-            _release(connection, run(connection, row["id"]), probe=_Away)
-            result["outcome"] = "blocked"
+        result = _settle(connection, {**row, "outcome": "interrupted", "detail": detail},
+                         block=f"the hub ended it on {host}: {detail}; it releases once {host} reads its groups gone")
         if result is not None:
             settled.append(result)
     return settled

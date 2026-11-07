@@ -1435,6 +1435,35 @@ class Hosts(Case):
         self.assertIsNone(self.claim(hosts=HUB))
         self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked")
 
+    # Review round 4: a fresh beat that names why its tick claims nothing is no dispatcher that would claim.
+
+    UNSET = "sd.bulk_storage_root is unset, so a build run has no log folder"
+
+    def test_a_press_refuses_a_satellite_whose_beat_says_it_claims_nothing(self):
+        item = self.item(repo=SAT)
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": self.UNSET})
+        with self.assertRaisesRegex(build.BuildRefused, f"lane runs on work, and build-dispatch@work claims "
+                                                        f"nothing: {self.UNSET}"):
+            build.queue(self.db, [item], who="operator")
+        self.assertEqual(self.count("SELECT COUNT(*) FROM assignment WHERE item = ?", item), 0, "nothing locked")
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": ""})
+        self.assertEqual(len(build.queue(self.db, [item], who="operator")), 1, "a beat that claims takes the press")
+
+    def test_the_hub_blocks_a_queued_row_whose_satellite_claims_nothing(self):
+        item = self.item(repo=SAT)
+        lead = build.queue(self.db, [item], who="operator")[0]["id"]
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": self.UNSET})
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked")
+        self.assertIn(self.UNSET, self.count("SELECT body FROM note WHERE item = ? ORDER BY id DESC LIMIT 1", item))
+
+    def test_a_satellite_that_beats_and_claims_nothing_still_owns_its_runs(self):
+        """Its tick reaps before it claims, so the hub leaves its runs: the beat says it is there."""
+        run = self.satellite_run()
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": self.UNSET})
+        self.assertEqual(self.strand(run), [])
+        self.assertIsNone(build.run(self.db, run["id"])["outcome"])
+
     def strand(self, run, *, after=build.STALE_SECONDS + 1):
         class Untouched(Probe):
             def alive(self, pid):
@@ -1448,8 +1477,15 @@ class Hosts(Case):
         self.assertEqual(kill.calls, [], "the hub kills nothing of another machine")
         return settled
 
-    def test_the_hub_ends_a_quiet_satellites_run_blocked_and_releases_it(self):
+    # Review round 4: a missing beat does not prove another machine's processes stopped. The hub marks the run
+    # blocked with a reason and keeps its lease; only that host's own probe releases it.
+
+    def lease_held(self, run):
+        return self.count("SELECT COUNT(*) FROM runner_lease WHERE run = ? AND released_at IS NULL", run["id"]) == 1
+
+    def test_the_hub_blocks_a_quiet_satellites_run_and_keeps_its_lease(self):
         run = self.satellite_run()
+        item = run["members"][0]["item"]
         build.register(self.db, run["id"], pid=4242, pgid=4242, start=START)
         self.assertEqual(self.strand(run), [], "a live dispatcher there keeps it")
         self.quiet()
@@ -1457,28 +1493,38 @@ class Hosts(Case):
         [settled] = self.strand(run)
         self.assertEqual((settled["run"], settled["outcome"]), (run["id"], "blocked"))
         ended = build.run(self.db, run["id"])
-        self.assertIsNotNone(ended["released_at"])
         self.assertIn("no build-dispatch@work beat", ended["detail"])
-        self.assertEqual(self.statuses([run["members"][0]["item"]]), ["blocked"])
+        self.assertIsNone(ended["released_at"], "the hub cannot see work's processes stop")
+        self.assertTrue(self.lease_held(run))
+        self.assertEqual(self.statuses([item]), ["blocked"])
+        self.assertIn(f"held by build run {run['id']} (blocked)", build._held(self.db, item) or "")
+        self.assertEqual(self.strand(run), [], "a second hub reap leaves it as it is")
+        self.assertTrue(self.lease_held(run))
+        build.reap(self.db, now=later(run["created_at"], build.STALE_SECONDS + 1), probe=Probe(alive=False),
+                   hosts=WORK)
+        self.assertIsNotNone(build.run(self.db, run["id"])["released_at"], "work's own probe releases it")
+        self.assertFalse(self.lease_held(run))
 
-    def test_the_hub_completes_a_cancel_a_quiet_satellite_never_read(self):
+    def test_a_cancel_on_a_quiet_satellite_blocks_and_keeps_the_lease(self):
         run = self.satellite_run()
         lead = run["assignment"]
         operations.cancel_assignment(self.db, lead, expected_revision=operations.assignment_state(
             self.db, lead)["revision"], who="dashboard")
         self.quiet()
         [settled] = self.strand(run)
-        self.assertEqual(settled["outcome"], "cancelled")
-        self.assertIsNotNone(build.run(self.db, run["id"])["released_at"])
-        self.assertEqual(self.statuses([run["members"][0]["item"]]), ["ready"])
+        self.assertEqual(settled["outcome"], "blocked")
+        ended = build.run(self.db, run["id"])
+        self.assertIn("cancelled by dashboard", ended["detail"])
+        self.assertIsNone(ended["released_at"])
+        self.assertTrue(self.lease_held(run))
 
-    def test_the_hub_releases_a_quiet_satellites_held_run(self):
+    def test_the_hub_leaves_a_quiet_satellites_held_run_held(self):
         run = self.satellite_run()
         build.end(self.db, run["id"], "blocked", "the review left blockers")
-        self.assertIsNone(build.run(self.db, run["id"])["released_at"], "held until its groups read gone")
         self.quiet()
-        self.strand(run)
-        self.assertIsNotNone(build.run(self.db, run["id"])["released_at"])
+        self.assertEqual(self.strand(run), [])
+        self.assertIsNone(build.run(self.db, run["id"])["released_at"], "held until work reads its groups gone")
+        self.assertTrue(self.lease_held(run))
 
     def test_a_hub_cancel_lands_on_the_satellite_reap(self):
         run = self.satellite_run()
