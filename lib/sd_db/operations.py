@@ -539,8 +539,8 @@ def assignment_state(connection: sqlite3.Connection, assignment: int) -> dict:
     elif row["status"] == "running" and row["scope"] == "build" and row["build_run"]:
         # From `enqueuing` on the lane may hold the branch: the lane entry is what to cancel (pack sd:6094).
         reason = ("" if row["build_step"] is None or row["build_step"] in build.CANCELLABLE
-                  else f"build run {row['build_run']} is at {row['build_step']}, so the lane may hold its branch; "
-                       f"cancel its lane entry with `sd-ship lane cancel {row['item']}`")
+                  else f"build run {row['build_run']} is at {row['build_step']}; "
+                       f"{build.stop_step(connection, row['build_run'], row['item'])}")
     elif row["status"] == "running":
         reason = "running assignment has no supported cancellation backend"
     elif row["status"] != "blocked":
@@ -580,7 +580,7 @@ def cancel_assignment(connection: sqlite3.Connection, assignment: int, *, expect
                                   (f"cancelled by {who}", ended, current["build_run"], *build.CANCELLABLE)
                                   ).rowcount != 1:
                 raise WorkflowError(f"build run {current['build_run']} moved past the steps a cancel may stop; "
-                                    f"cancel its lane entry with `sd-ship lane cancel {current['item']}`")
+                                    f"{build.stop_step(connection, current['build_run'], current['item'])}")
             audit = {"assignment": assignment, "run": current["build_run"], "status": "cancel_requested",
                      "who": who, "at": ended}
             row = record_state(connection, "checkpoint", key=f"operations:assignment:{assignment}", body=audit)

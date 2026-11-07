@@ -81,6 +81,9 @@ LANE_ENDED = ("failed", "skipped", "prepared", "cancelled")
 #: the -F file inside the worktree; the brief does.
 ALLOWED = ("Bash(git commit -m:*)", "Bash(git commit -F:*)")
 
+#: `sd_gate_slots.NOT_STARTED`: the gate's last stderr line when it started nothing; a check's own 125 lacks it.
+GATE_NOT_STARTED = "sd gate run: the command did not start (exit 125)"
+
 #: The child waits for one byte on its pipe, written once its group is recorded, then execs the command.
 GATE = ("import os, sys\n"
         "fd = int(sys.argv[1])\n"
@@ -697,7 +700,7 @@ class Supervisor:
                 self.out(name).write_bytes(b"")
             code = self.child([*self.tools.gate, "--label", f"build {self.row['branch']} checks", "--", *argv],
                               cwd=self.work, name="checks", descendants=True)
-            if code == 125:  # `sd gate run` did not start the command: unknown, never a failure of the code
+            if code == 125 and self.refused():  # the gate started nothing: unknown, never a failure of the code
                 raise Unread(f"sd gate run did not start `{said}`; see {self.out('checks.err')}")
             if code != 0:
                 tail = "".join(path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
@@ -713,6 +716,11 @@ class Supervisor:
             passed.append(f"`{said}`")
         add_note(self.db, self.lead, "comment", f"Build run {self.ident}: {', '.join(passed)} passed at {head[:12]}")
         return []
+
+    def refused(self) -> bool:
+        """The gate's own refusal ends `checks.err`; a check that exits 125 itself prints no such line."""
+        said = self.out("checks.err").read_text(encoding="utf-8", errors="replace").splitlines()
+        return bool(said) and said[-1] == GATE_NOT_STARTED
 
     def prechecked(self, head: str) -> list[str]:
         if self.checked is None:
@@ -1242,6 +1250,9 @@ class Supervisor:
             if self.groups is not None:
                 for group, start in (build.descendant_groups(process.pid) or {}).items():
                     self.groups.setdefault(group, start)
+                # Only groups still the run's stay: one that ended leaves at this poll, before a pid wrap can
+                # give its number to an unrelated group whose EPERM read as a Survivor (sd:7909).
+                self.groups = {group: start for group, start in self.groups.items() if self.ours(group, start)}
             try:
                 if session:
                     self.watch_session()

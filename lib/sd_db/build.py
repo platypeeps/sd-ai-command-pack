@@ -269,6 +269,15 @@ def mine(row, hosts: Collection[str | None]) -> bool:
     return run_host(row["owner"]) in hosts
 
 
+def stop_step(connection, run: str, item) -> str:
+    """How to stop a build run past the steps a cancel may stop: its lane entry, or, in an unmanaged repository,
+    its draft pull request, which `sd-ship lane cancel` refuses there (sd:7909)."""
+    row = connection.execute("SELECT repo FROM runner_run WHERE id = ?", (run,)).fetchone()
+    if row is not None and unmanaged(connection, row["repo"]):
+        return "close its draft pull request on GitHub"
+    return f"the lane may hold its branch; cancel its lane entry with `sd-ship lane cancel {item}`"
+
+
 def github_repository(remote: str | None) -> str:
     """`owner/name` of a GitHub remote, or "" for none or another host."""
     from .ship import _github_repository

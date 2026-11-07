@@ -1301,6 +1301,20 @@ class Unmanaged(Case):
         self.assertTrue(supervisor.end_group(leader.pid, leader))
         self.assertIsNone(other.poll(), "a process the run did not start was signalled")
 
+    def test_a_recorded_group_that_ended_leaves_at_the_next_poll(self):
+        """sd:7909: a recorded group is dropped once it ends, so a later pid wrap cannot make it a Survivor."""
+        self.press()
+        ended = subprocess.Popen(["true"], start_new_session=True)
+        ended.wait()
+        reads = iter([{ended.pid: ""}])
+        supervisor = self.supervisor()
+        supervisor.logs.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(build, "descendant_groups", side_effect=lambda pgid: next(reads, {})):
+            code = supervisor.child([sys.executable, "-c", "import time; time.sleep(2.5)"], cwd=self.root,
+                                    name="poll", descendants=True)
+        self.assertEqual(code, 0)
+        self.assertNotIn(ended.pid, supervisor.groups)
+
     def test_a_cancel_during_a_check_ends_the_checks_own_group(self):
         """End paths, cancel: the beat's cancel ends the gate's group and the check's, which ignores SIGTERM."""
         pid_file = self.root / "check.pid"
@@ -1350,7 +1364,8 @@ class Unmanaged(Case):
     def test_a_gate_that_starts_no_check_leaves_no_group(self):
         """End paths, gate refusal: `sd gate run` exits 125 with nothing started; its group reads gone."""
         pid_file = self.root / "check.pid"
-        self.tools = dataclasses.replace(self.tools, gate=[sys.executable, "-c", "import sys; sys.exit(125)"])
+        refuse = f"import sys; print({build_run.GATE_NOT_STARTED!r}, file=sys.stderr); sys.exit(125)"
+        self.tools = dataclasses.replace(self.tools, gate=[sys.executable, "-c", refuse])
         self.press()
         self.write_pr()
         self.plan(claude=["pass"], sd_review=["clean"])
@@ -1359,6 +1374,18 @@ class Unmanaged(Case):
         self.assertFalse(pid_file.exists(), "the check ran")
         self.assertTrue(group_gone(self.latest()["builder_pgid"]), ended)
         self.assertEqual(self.pulls(), [])
+
+    def test_a_check_that_itself_exits_125_goes_back_to_the_builder(self):
+        """Pack sd:7899: the gate passes a check's own 125 through. With no refusal on the gate's stderr it
+        is a failure of the code, sent to the builder, not an unknown the run retries."""
+        own = [sys.executable, "-c", "import sys; sys.exit(0 if 'fix' in open('work.txt').read() else 125)"]
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass", "fix"], sd_review=["clean", "clean"])
+        ended = self.supervisor(checks=lambda work: [own]).run()
+        self.assertEqual(ended.get("step"), "enqueued", ended)
+        fix = self.calls("claude")[1]["argv"]
+        self.assertIn("exit 125", fix[fix.index("-p") + 1])
 
     def test_no_check_entrypoint_runs_none_and_says_so(self):
         self.press()

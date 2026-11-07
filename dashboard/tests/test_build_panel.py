@@ -281,6 +281,17 @@ class BuildsPanel(Fixture):
         self.assertEqual(row["state"], "waiting")
         self.assertIn("question note", row["why"])
 
+    def test_an_unmanaged_run_past_enqueuing_says_to_close_its_draft(self):
+        """sd:7909: `sd-ship lane cancel` refuses an unmanaged repository, so the row names the draft instead."""
+        items = [self.ready()]
+        run = self.claimed(items)
+        upsert_repo(self.connection, REPO, remote="https://github.com/example/alpha.git", managed=0)
+        build.write(self.connection, run["id"], step="enqueuing")
+        cancel = self.panel(run["created_at"])["runs"][0]["cancel"]
+        self.assertFalse(cancel["allowed"])
+        self.assertIn("close its draft pull request", cancel["reason"])
+        self.assertNotIn("sd-ship lane cancel", cancel["reason"])
+
     def test_a_run_whose_branch_shipped_carries_its_pull_request_from_the_ship_receipt(self):
         """Pack sd:6020 ruling #31553: the row's Open PR reads `sd-ship`'s receipt for the branch; nothing asks GitHub."""
         items = [self.ready(), self.ready()]

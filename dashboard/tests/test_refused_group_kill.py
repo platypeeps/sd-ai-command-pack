@@ -137,29 +137,6 @@ class TheOutputRead(unittest.TestCase):
                 self.assertRaisesRegex(Exception, "UnicodeDecodeError"):
             list(hoa_download._lines(types.SimpleNamespace(stdout=Broken()), timer))
 
-    def output(self, run):
-        began = time.monotonic()
-        code, said = run()
-        self.assertLess(time.monotonic() - began, 2, "the run waited for its timeout after its read failed")
-        return code, said
-
-    def test_a_download_whose_output_is_not_text_says_so(self):
-        sources = {"x": {"label": "X", "argv": ("sh", "-c", "printf 'ok\\n\\377\\n'; exec sleep 30")}}
-        with mock.patch.object(hoa_download, "SOURCES", sources), mock.patch.object(hoa_download, "DOWNLOAD_SECONDS", 4):
-            code, said = self.output(lambda: hoa_download.download("x", self.dir, (), StringIO()))
-        self.assertEqual(code, hoa_download.EXIT_ERROR)
-        self.assertRegex(said, "^cannot read .*'s output: UnicodeDecodeError")
-
-    def test_a_login_whose_output_is_not_text_says_so(self):
-        with mock.patch.object(hoa_download, "claude_binary", return_value="sh"), \
-                mock.patch.object(hoa_download, "claude_argv",
-                                  return_value=["sh", "-c", "printf '\\377\\n'; exec sleep 30"]), \
-                mock.patch.object(hoa_download, "LOGIN_SECONDS", 4):
-            code, said = self.output(lambda: hoa_download.login("x", "https://example.test", self.dir, (), StringIO(),
-                                                                lambda: None))
-        self.assertEqual(code, hoa_download.EXIT_ERROR)
-        self.assertRegex(said, "^cannot read sh's output: UnicodeDecodeError")
-
 
 if __name__ == "__main__":
     unittest.main()

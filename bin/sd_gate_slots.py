@@ -107,6 +107,8 @@ TIMED_OUT = 4
 RUN_NO_SLOT = 75
 RUN_NOT_STARTED = 125
 RUN_NOT_FOUND = 127
+#: The last stderr line of every `RUN_NOT_STARTED`: the command's own 125 passes through without it (pack sd:7899).
+NOT_STARTED = "sd gate run: the command did not start (exit 125)"
 
 #: The load rule (sd:2262): off by default since sd:2607, with 45 s between two starts.
 LOAD_VARIABLE = "SD_GATE_LOAD_MAX"
@@ -813,12 +815,12 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
     started never holds one.
     """
     if not command:
-        stream.write("error: name a command to run after --\n")
+        stream.write(f"error: name a command to run after --\n{NOT_STARTED}\n")
         return RUN_NOT_STARTED
     try:
         slot = acquire(slots, environ, stream=stream, timeout=max_wait, rule=rule, label=label or shlex.join(command))
     except LauncherExited:
-        stream.write("error: the process that started this gate exited while it waited for a slot\n")
+        stream.write(f"error: the process that started this gate exited while it waited for a slot\n{NOT_STARTED}\n")
         return RUN_NOT_STARTED
     except KeyboardInterrupt:
         return 128 + signal.SIGINT
@@ -1037,7 +1039,10 @@ def slot_command(argv: list[str] | None = None) -> int:
             return gate_verb(args, os.environ, slots, rule)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
-        return RUN_NOT_STARTED if args.command_name == "run" else 2
+        if args.command_name != "run":
+            return 2
+        print(NOT_STARTED, file=sys.stderr)
+        return RUN_NOT_STARTED
     gate_gone = launcher_watch(args.pid, args.ppid)
     shell = os.getppid()
     where = pathlib.Path(args.dir)

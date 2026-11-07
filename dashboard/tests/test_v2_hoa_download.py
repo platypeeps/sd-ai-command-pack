@@ -43,6 +43,9 @@ if mode.startswith("chromeless"):
 elif mode == "chrome-no-result":
     init.update(tools=["ToolSearch"], mcp_servers=[{"name": "claude-in-chrome", "status": "connected"}])
 print(json.dumps(init), flush=True)
+if (here / "binary").exists():
+    sys.stdout.buffer.write(b"\xff a byte that is not UTF-8\n")
+    sys.stdout.flush()
 if mode == "crash":
     print("boom: no browser extension", flush=True)
     sys.exit(2)
@@ -65,6 +68,7 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "re
 MISSION = '''#!/bin/sh
 echo "mission $1" >> "$STUB_DIR/downloads.txt"
 code="$(cat "$STUB_DIR/code" 2>/dev/null || echo 0)"
+[ -e "$STUB_DIR/binary" ] && printf '\377 a byte that is not UTF-8\n'
 echo "mission export: pulled six exports"
 [ "$code" = 0 ] || echo "mission export: the portal session is logged out"
 exit "$code"
@@ -237,6 +241,13 @@ class TheRun(Stubs, unittest.TestCase):
             self.assertEqual(self.run_now(), 3)
         self.assertRegex(self.record()["reason"], "^no login within")
         self.assertEqual(self.downloads(), [])
+
+    def test_a_byte_that_is_not_utf8_in_either_output_stops_no_run(self):
+        # sd:7939 followup: one such byte in the login or the download output ended the run EXIT_ERROR.
+        (self.stub / "binary").touch()
+        self.assertEqual(self.run_now(), 0)
+        self.assertEqual(self.downloads(), ["mission export"])
+        self.assertEqual(self.record()["reason"], "mission export: pulled six exports")
 
     def test_the_downloads_exit_3_is_unavailable_and_any_other_failed_with_its_last_line(self):
         (self.stub / "code").write_text("3")

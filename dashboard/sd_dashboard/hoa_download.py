@@ -278,7 +278,8 @@ def _lines(proc: subprocess.Popen, timer: threading.Timer):
     the grandchild, since closing a pipe another thread reads blocks on that read.
 
     The bound is checked before each line, so a survivor that keeps printing cannot hold the read past it. A read
-    that fails, such as output that is not UTF-8, raises here, never leaves the caller waiting (sd:7920).
+    that fails raises here, never leaves the caller waiting (sd:7920). Output that is not UTF-8 is no failure: both
+    pipes read it with `errors="replace"` (sd:7939).
     """
     feed: queue.Queue = queue.Queue()
 
@@ -339,7 +340,7 @@ def login(source: str, url: str, cwd: Path, keep: tuple[int, ...], out, on_waiti
     argv = claude_argv(claude_binary(), source, url)
     try:
         proc = subprocess.Popen([*alarmed(LOGIN_SECONDS + GRACE), "sh", "-c", NO_TOKEN, "claude-run", *argv], cwd=cwd,
-                                env={**os.environ, "SD_HANDOFF_RESTORE": "0"}, text=True, stdin=subprocess.DEVNULL,
+                                env={**os.environ, "SD_HANDOFF_RESTORE": "0"}, text=True, errors="replace", stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True, pass_fds=keep)
     except OSError as error:
         return EXIT_ERROR, f"cannot start {argv[0]}: {error}"
@@ -400,8 +401,8 @@ def download(source: str, place: Path, keep: tuple[int, ...], out) -> tuple[int,
     """Step 3: the checkout's command; its exit code, and its last output line as the reason."""
     argv = [sys.executable if part == "python3" else part for part in SOURCES[source]["argv"]]
     try:
-        proc = subprocess.Popen([*alarmed(DOWNLOAD_SECONDS + GRACE), *argv], cwd=place, text=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, start_new_session=True, pass_fds=keep)
+        proc = subprocess.Popen([*alarmed(DOWNLOAD_SECONDS + GRACE), *argv], cwd=place, text=True, errors="replace",
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True, pass_fds=keep)
     except OSError as error:
         return EXIT_ERROR, f"cannot start {_command(source)}: {error}"
     timer, last = _bounded(proc, DOWNLOAD_SECONDS), ""
