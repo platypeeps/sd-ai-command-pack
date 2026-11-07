@@ -486,6 +486,20 @@ class Writes(Case):
                                          who="operator")
         self.assertIsNone(build.run(self.db, self.bundle["id"])["cancel_requested"])
 
+    def test_an_unmanaged_run_past_enqueuing_names_its_draft_not_the_lane(self):
+        """sd:7909: `sd-ship lane cancel` refuses an unmanaged repository; the refusal names its draft instead."""
+        upsert_repo(self.db, A, remote="https://github.com/owner/third-party.git", managed=0)
+        build.write(self.db, self.bundle["id"], step="reviewing")
+        state = operations.assignment_state(self.db, self.bundle["assignment"])
+        self.assertTrue(build.enqueuing(self.db, self.bundle["id"]))
+        reason = operations.assignment_state(self.db, self.bundle["assignment"])["capabilities"]["cancel"]["reason"]
+        self.assertIn("close its draft pull request", reason)
+        self.assertNotIn("sd-ship lane cancel", reason)
+        with mock.patch.object(operations, "assignment_state", lambda connection, assignment: state):
+            with self.assertRaisesRegex(workflow.WorkflowError, "close its draft pull request"):
+                operations.cancel_assignment(self.db, self.bundle["assignment"], expected_revision=state["revision"],
+                                             who="operator")
+
     def test_cancel_write_checks_the_step(self):
         """A cancel read before the enqueuing compare-and-set and written after it changes nothing (one winner)."""
         build.write(self.db, self.bundle["id"], step="reviewing")

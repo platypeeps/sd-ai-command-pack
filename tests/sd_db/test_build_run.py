@@ -1295,6 +1295,20 @@ class Unmanaged(Case):
         self.assertTrue(supervisor.end_group(leader.pid, leader))
         self.assertIsNone(other.poll(), "a process the run did not start was signalled")
 
+    def test_a_recorded_group_that_ended_leaves_at_the_next_poll(self):
+        """sd:7909: a recorded group is dropped once it ends, so a later pid wrap cannot make it a Survivor."""
+        self.press()
+        ended = subprocess.Popen(["true"], start_new_session=True)
+        ended.wait()
+        reads = iter([{ended.pid: ""}])
+        supervisor = self.supervisor()
+        supervisor.logs.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(build, "descendant_groups", side_effect=lambda pgid: next(reads, {})):
+            code = supervisor.child([sys.executable, "-c", "import time; time.sleep(2.5)"], cwd=self.root,
+                                    name="poll", descendants=True)
+        self.assertEqual(code, 0)
+        self.assertNotIn(ended.pid, supervisor.groups)
+
     def test_a_cancel_during_a_check_ends_the_checks_own_group(self):
         """End paths, cancel: the beat's cancel ends the gate's group and the check's, which ignores SIGTERM."""
         pid_file = self.root / "check.pid"

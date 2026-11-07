@@ -224,8 +224,8 @@ def _open_row(connection, run: dict, now: str) -> dict:
     if cancel["allowed"] and run["cancel_requested"]:
         cancel.update(allowed=False, reason=f"{run['cancel_requested']}; the supervisor stops at its next beat")
     elif cancel["allowed"] and step not in build.CANCELLABLE:
-        cancel.update(allowed=False, reason=f"the run is at {step}; cancel its lane entry with "
-                                            f"sd-ship lane cancel {members[0]['item'] if members else '<item>'}")
+        cancel.update(allowed=False, reason=f"the run is at {step}; " + build.stop_step(
+            connection, run["id"], members[0]["item"] if members else "<item>"))
     return {"run": run["id"], "attempt": run["run"], "repo": run["repo"], "name": Path(run["repo"]).name,
             "items": members, "model": run["model"] or "", "step": step, "state": state, "why": waiting,
             "outcome": run["outcome"], "started": run["created_at"], "elapsed": _seconds(run["created_at"], now),
