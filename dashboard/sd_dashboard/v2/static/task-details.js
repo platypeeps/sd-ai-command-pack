@@ -159,12 +159,19 @@
     // never overwrites a change it did not make (review round 3). A landed write rereads the rows (shell.read's barrier);
     // `wait` holds the write's promise until that read ends, for a toast that names what the read brings.
     const CHANGED = 'it changed after this write, and Undo would overwrite that change';
+    // sd:8033: a write the server never answers rejects after WRITE_SECONDS, marked unknown: it may have landed, so the page
+    // reads the rows again (landing) and says so, and the row's next write is not held behind it. A browser without
+    // AbortSignal.timeout waits as before. A failed fetch got no answer either: its outcome is unknown too.
+    const WRITE_SECONDS = 30;
+    const bound = () => typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(WRITE_SECONDS * 1000) : undefined;
+    const unknown = e => Object.assign(new Error(`${e && e.name === 'TimeoutError' ? `the dashboard did not answer within ${WRITE_SECONDS} s`
+      : `no answer (${(e && e.message) || e})`}, so whether it changed is not known; the rows were read again`), { unknown: true });
     const pending = new Map();
     function write(key, path, body, { sent, check, rev, wait } = {}) {
       const p = (pending.get(key) || Promise.resolve()).then(() => { const t = byKey(key); if (!t) throw new Error('the task is no longer listed');
         if (rev !== undefined && t.revision !== rev) throw new Error(CHANGED);
         const on = check ? check(t) : true; if (on !== true) throw new Error(on);
-        sent?.(t); return window.shell.post(path(t), { ...body, revision: t.revision }); })
+        sent?.(t); return window.shell.post(path(t), { ...body, revision: t.revision }, undefined, bound()).catch(e => { throw e && e.status ? e : unknown(e); }); })
         .then(out => { absorb(key, out); host.render(); const again = host.reread(); return wait ? again.then(() => out) : out; });
       pending.set(key, p.catch(() => {}));
       return p;
@@ -195,7 +202,7 @@
         const undo = inverse && (() => { if (spent) return Promise.resolve(false); spent = true;
           return inverse(v).then(() => true, err => { if (err.stale) refused(); throw err; }); });
         return { text: text(v), undo };
-      }, err => { if (err.stale) refused(); throw err; });
+      }, err => { if (err.stale || err.unknown) refused(); throw err; });
     }
     // The command's undo: the shell passes what the run answered.
     const undoOf = (o, r) => r && r.undo ? r.undo() : false;

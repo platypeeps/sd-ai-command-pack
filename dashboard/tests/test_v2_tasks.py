@@ -2635,6 +2635,29 @@ shellRun(cmd('item.complete'), C.get('{plan}')); await flush(); R.listed = !!C.g
         self.assertTrue(out["R"]["listed"], "the next occurrence is not listed")
         self.assertEqual(out["toasts"], [[f"#{plan} Ready → Done · next occurrence #99 due Sep 16 · sd task status {plan} done", False]])
 
+    def test_a_completion_the_server_never_answers_says_so_and_frees_the_row(self):
+        # sd:8033: Done → next occurrence was confirmed, and nothing landed or showed. A write the server never answers
+        # stayed pending: no toast, and every later write on the row queued behind it. The write is bounded now: the
+        # page says the outcome is not known, reads the rows again, and the next write on the row is sent.
+        self.repeat_plan()
+        plan = self.ids["plan"]
+        answer = "(path, body) => new Promise(() => {})"
+        prelude = """var BOUNDS = [];
+var AbortSignal = { timeout: ms => { BOUNDS.push(ms); return { timedOut: true }; } };
+"""
+        out = self.run_page(f"""const F = fetch;
+fetch = (path, o) => o && o.signal && o.signal.timedOut ? (OUT.posts.push([path, JSON.parse(o.body), 64]),
+  Promise.reject(Object.assign(new Error('signal timed out'), {{ name: 'TimeoutError' }}))) : F(path, o);
+shellRun(cmd('item.complete'), C.get('{plan}')); await flush();
+R.bounds = BOUNDS.slice(); R.gets = OUT.gets.length;
+shellRun(cmd('item.p1'), C.get('{plan}')); await flush();""", answer, prelude=prelude)
+        self.assertEqual([p[0] for p in out["posts"]], [f"/api/items/{plan}/status", f"/api/items/{plan}"],
+                         "the next write on the row waited behind the unanswered one")
+        self.assertEqual(out["R"]["bounds"], [30000])
+        self.assertIn([f"#{plan} Plan the review: the dashboard did not answer within 30 s, so whether it changed is "
+                       "not known; the rows were read again", False], out["toasts"])
+        self.assertEqual(out["R"]["gets"], 2, "the rows were not read again after the unknown outcome")
+
     def test_a_queued_complete_asks_again_whether_the_task_still_repeats(self):
         # The mirror case: stop repeating is sent (the Details Repeat select, sd:5737), and 5 is confirmed before it answers. As the completion leaves, the task
         # no longer repeats, so it would end without a next occurrence the confirm promised: it refuses.
