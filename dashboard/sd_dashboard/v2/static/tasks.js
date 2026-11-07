@@ -360,7 +360,7 @@ addEventListener('DOMContentLoaded', () => {
   startDlg.className = 'palette date-dlg start-dlg'; startDlg.setAttribute('aria-labelledby', 'start-h');
   document.body.append(startDlg);
   const unread = v => v === null || v === undefined ? '▨' : v;
-  const queuedText = out => `Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${window.commands.kickText(out.kickstart)}`;
+  const queuedText = out => window.commands.queuedText(out);
   async function askStart() {
     let P;
     try { P = await window.shell.getJSON('/api/tasks/start-next'); } catch (err) { toast(`Start next not read: ${err.message}`); return; }

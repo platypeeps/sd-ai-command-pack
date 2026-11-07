@@ -130,8 +130,27 @@ class Queue(Case):
         upsert_repo(self.db, "/fixture/sat", remote="/fixture/r-sat", managed=1)
         self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/sat'")
         satellite = self.item(repo="/fixture/sat")
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
         queued = build.queue(self.db, [self.item(), satellite], who="operator")
         self.assertEqual([row["status"] for row in queued], ["queued", "queued"])
+
+    def test_a_press_for_a_satellite_whose_dispatcher_does_not_beat_refuses_and_locks_nothing(self):
+        """Review round 2: with no fresh build-dispatch@<host> beat nothing there claims the press, and its items
+        would sit locked; the press refuses, naming the host, under the reap's own STALE_SECONDS."""
+        upsert_repo(self.db, "/fixture/sat", remote="/fixture/r-sat", managed=1)
+        self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/sat'")
+        hub, satellite = self.item(), self.item(repo="/fixture/sat")
+        stale = (datetime.fromisoformat(build.clock()) - timedelta(seconds=build.STALE_SECONDS + 1)).isoformat()
+        for case, stamp in (("no beat", None), ("a stale beat", stale), ("a beat that does not read", "soon")):
+            with self.subTest(case=case):
+                if stamp is not None:
+                    record_state(self.db, "heartbeat", key="build-dispatch@work", timestamp=stamp, body={})
+                with self.assertRaisesRegex(build.BuildRefused, "lane runs on work, and no build-dispatch@work beat"):
+                    build.queue(self.db, [hub, satellite], who="operator")
+                self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), 0)
+                self.assertEqual(self.statuses([hub, satellite]), ["ready", "ready"])
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
+        self.assertEqual(len(build.queue(self.db, [hub, satellite], who="operator")), 2, "a fresh beat takes it")
 
     def test_a_press_queues_one_build_per_item_and_locks_its_status(self):
         items = [self.item(), self.item()]
@@ -1246,6 +1265,7 @@ class Hosts(Case):
         super().setUp()
         upsert_repo(self.db, SAT, remote="/fixture/remote-sat", managed=1)
         self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = ?", (SAT,))
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
 
     def satellite_run(self):
         build.queue(self.db, [self.item(repo=SAT)], who="operator")

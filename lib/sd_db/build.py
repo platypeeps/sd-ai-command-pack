@@ -68,6 +68,9 @@ BUDGET_MINUTES = 60
 #: A supervisor beats every 30 s; one silent this long, or unspawned this long after its claim, is lost.
 #: 600, not 180: a beat a held lock skips no longer ends a 60-minute build (pack sd:6741).
 STALE_SECONDS = 600
+#: The `heartbeat` state row each build-dispatch tick writes first: this key on the hub, `<key>@<host>` on a
+#: satellite (pack sd:7933).
+HEARTBEAT = "build-dispatch"
 #: Lost runs one bundle may retry before it blocks.
 RETRIES = 1
 # The note on an item a blocked run parked (pack sd:6132).
@@ -227,6 +230,12 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
     refused = _repo_refusal(row, hub_only=hub_only)
     if refused:
         raise BuildRefused(refused)
+    if row["lane_host"] is not None:
+        # Nothing claims a satellite's press until its own dispatcher ticks, and the press locks the item.
+        beat = dispatcher_beat(connection, row["lane_host"])
+        if beat is None or beat >= STALE_SECONDS:
+            raise BuildRefused(f"item {item}'s lane runs on {row['lane_host']}, and no {HEARTBEAT}@{row['lane_host']} "
+                               f"beat is under {STALE_SECONDS} s old: no dispatcher there would claim it")
     active = connection.execute(
         f"SELECT id, status FROM assignment WHERE item = ? AND status IN {OWNING} LIMIT 1", (item,)).fetchone()
     if active:
@@ -235,6 +244,17 @@ def _item(connection, item: int, *, hub_only: bool = False) -> dict:
     if held:
         raise BuildRefused(held)
     return dict(row)
+
+
+def dispatcher_beat(connection, host: str) -> int | None:
+    """Seconds since the build-dispatch tick on the satellite `host` last beat; None when it never did, or when
+    its beat does not read: an unread beat is no beat."""
+    row = connection.execute("SELECT timestamp FROM state WHERE kind = 'heartbeat' AND key = ? ORDER BY id DESC LIMIT 1",
+                             (f"{HEARTBEAT}@{host}",)).fetchone()
+    try:
+        return int(_age(row["timestamp"], clock())) if row else None
+    except (TypeError, ValueError):
+        return None
 
 
 def queue(connection, items: list[int], *, who: str, expected_revisions: dict | None = None) -> list[dict]:

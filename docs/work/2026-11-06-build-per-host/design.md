@@ -36,7 +36,9 @@ The file decides, not the transport: the wire harness runs the hub's tests
 over a served connection, and they stay the hub's. A run is mine when its host is in that set.
 That mirrors `ship._lane`: NULL is the hub's lane, a name is that machine's.
 
-1. Press: `_repo_refusal` no longer refuses a lane host. A press queues for any lane.
+1. Press: `_repo_refusal` no longer refuses a lane host. A press queues for a
+   satellite lane only while that host's `build-dispatch@<host>` beat is under
+   `STALE_SECONDS` old; otherwise nothing there claims it and the item stays locked.
 2. Claim: takes only queued rows whose repository's `lane_host` is in `lane_hosts`.
    It skips the others and blocks none; the claim writes the owner from the lane host.
 3. Room: counts only this host's build and draft runs against `MACHINE_CAP`
@@ -68,6 +70,7 @@ travels with every retry (`_settle`, `_health_unknown` copy it).
 ```text
 Step | State moved | Failure | Recovery | Test
 Press | build assignment queued for a satellite-lane item | the old refusal | none needed: the press queues for any lane; other refusals still refuse the whole selection | test_build.Queue.test_press_queues_a_satellite_lane_item
+Press, no dispatcher there | nothing: the press refuses | a press queues and locks items no dispatcher claims | the press and the plan refuse, naming the host, without a beat under STALE_SECONDS; the Build dialog shows the beat's age and the toast names the host that claims each row | test_build.Queue.test_a_press_for_a_satellite_whose_dispatcher_does_not_beat_refuses_and_locks_nothing, test_build_panel.BuildRoutes.test_a_satellite_press_names_its_host_and_starts_no_hub_tick
 Claim on the hub | hub-lane rows claimed, owner build-dispatch | the hub claims or blocks a satellite row | the claim skips a row whose lane host is not its own; the row stays queued | test_build.Hosts.test_the_hub_claim_skips_a_satellite_row
 Claim on a satellite | its rows claimed, owner build-dispatch@<host> | it claims a hub row or another satellite's | the same filter; the hub's rows stay queued | test_build.Hosts.test_a_satellite_claims_only_its_lane
 Claim, lane moved before it | the row goes to the host that holds the lane at claim time | a stale host from the press | the claim reads lane_host in its own transaction | test_build.Hosts.test_a_lane_move_before_the_claim_moves_the_claim

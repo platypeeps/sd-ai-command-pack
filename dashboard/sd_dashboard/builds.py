@@ -31,7 +31,7 @@ from sd_db.database import transaction
 from sd_db.errors import SdDbError
 from sd_db.writes import SettingStale, add_note, set_setting, transition
 
-__all__ = ["ENDED_MAX", "JOB", "QUIET_SECONDS", "kickstart", "panel", "pickup", "plan", "press", "retry"]
+__all__ = ["ENDED_MAX", "JOB", "QUIET_SECONDS", "answer", "kickstart", "panel", "pickup", "plan", "press", "retry"]
 
 #: The local-cron-jobs job that runs `sd assignments dispatch` (system, build-dispatch.job).
 JOB = "build-dispatch"
@@ -115,7 +115,8 @@ def plan(connection, items: list[int], *, now: str, sessions=None, gate=None) ->
 
     A refused item refuses the whole press, as `build.queue` does; the dialog shows why and offers no Build.
     `room` is informative: a press queues whatever the room, and the claim waits for room. A bundle whose lane
-    runs on a satellite names that `host`, whose dispatcher claims it; this room is not its own (pack sd:7933).
+    runs on a satellite names that `host` and its dispatcher's `beat` age in seconds; this room is not its own
+    (pack sd:7933).
     """
     taken, refused = [], []
     for item in items:
@@ -134,6 +135,7 @@ def plan(connection, items: list[int], *, now: str, sessions=None, gate=None) ->
             chunk = rows[start:start + build.BUNDLE_MAX]
             host = chunk[0]["lane_host"] or ""
             bundles.append({"repo": repo, "name": Path(repo).name, "host": host,
+                            "beat": build.dispatcher_beat(connection, host) if host else None,
                             "room": 0 if host else build.room_for(room, repo),
                             "model": build._model(connection, [row["id"] for row in chunk]),
                             "branch": "build/sd-<lead assignment>",
@@ -160,6 +162,16 @@ def kickstart(*, runner=subprocess.run) -> dict:
     return {"ok": True, "service": service, "why": ""}
 
 
+def answer(connection, queued: list[dict], start) -> dict:
+    """A press's answer: each queued row with the `host` whose dispatcher claims it ("" for the hub), and the
+    hub's `kickstart`, None when every row is a satellite's: the hub's tick claims none of those (pack sd:7933)."""
+    hosts = {row["item"]: connection.execute(build._REPO, (row["item"],)).fetchone()["lane_host"] or ""
+             for row in queued}
+    return {"queued": [{"id": row["id"], "item": row["item"], "status": row["status"], "host": hosts[row["item"]]}
+                       for row in queued],
+            "kickstart": start() if not all(hosts.values()) else None}
+
+
 def press(payload: dict, *, start=None):
     """POST /api/tasks/build: `{items, revisions}`; the write `action_route` runs, or ValueError for a bad body."""
     if set(payload) != {"items", "revisions"} or not isinstance(payload["revisions"], dict):
@@ -175,8 +187,7 @@ def press(payload: dict, *, start=None):
         except build.BuildRefused as refusal:
             # A refused press wrote nothing (`build.queue`'s one transaction): a 409, so the page reads again.
             return 409, {"error": f"Nothing queued: {refusal}.", "reload": True}
-        return {"queued": [{"id": row["id"], "item": row["item"], "status": row["status"]} for row in queued],
-                "kickstart": (start or kickstart)()}
+        return answer(connection, queued, start or kickstart)
 
     return write
 

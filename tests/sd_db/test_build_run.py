@@ -41,7 +41,7 @@ from sd_db.database import connect
 from sd_db.migrate import initialise
 from sd_db.ship import this_host
 from sd_db.workflow import item_state
-from sd_db.writes import add_note, create_item, upsert_repo
+from sd_db.writes import add_note, create_item, record_state, upsert_repo
 
 from . import support
 from .test_build import Probe as GoneProbe
@@ -2208,6 +2208,7 @@ class Hosts(Case):
         self.satellite = self.root / "satellite"
         upsert_repo(self.db, str(self.satellite), remote="https://github.com/fixture/sat.git", managed=1)
         self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = ?", (str(self.satellite),))
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
         self.db.commit()
         self.asked: list[int] = []
 
@@ -2282,7 +2283,7 @@ class Hosts(Case):
         with self.on("work"):
             self.tick()
         keys = [row[0] for row in self.db.execute("SELECT key FROM state WHERE kind = 'heartbeat'")]
-        self.assertEqual(keys, [f"{build_run.HEARTBEAT}@work"], "the hub's beat is the hub's job's alone")
+        self.assertEqual(set(keys), {f"{build_run.HEARTBEAT}@work"}, "the hub's beat is the hub's job's alone")
 
     def test_the_hub_over_the_wire_still_pushes(self):
         """Review round 1: a served connection on a machine with no hub.json is the hub's, and the hub pushes."""

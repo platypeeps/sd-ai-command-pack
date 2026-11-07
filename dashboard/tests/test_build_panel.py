@@ -12,6 +12,7 @@ from sd_dashboard import builds
 from sd_db import build, ship, upsert_repo
 from sd_db.workflow import item_state
 from sd_db.writes import now as clock
+from sd_db.writes import record_state
 from support import NOW
 from test_workflow_actions import BrowserSession
 
@@ -66,6 +67,21 @@ class BuildRoutes(Fixture):
         self.assertEqual((body["kickstart"]["ok"], len(self.kicks)), (True, 1))
         self.assertEqual((self.builds_of(first), self.builds_of(second)), (1, 1))
 
+    def test_a_satellite_press_names_its_host_and_starts_no_hub_tick(self):
+        """Review round 2: the hub's kickstart claims nothing on a satellite, so a press of only satellite items
+        starts no hub tick, and each queued row names the host whose dispatcher claims it."""
+        upsert_repo(self.connection, "/fixture/repos/sat", remote="/fixture/remote-sat", managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/repos/sat'")
+        record_state(self.connection, "heartbeat", key="build-dispatch@work", body={})
+        sat = self.item("Build me there", kind="task", status="ready", repo="/fixture/repos/sat")
+        status, _, body = self.post("/api/tasks/build", {"items": [sat], "revisions": {str(sat): self.revision(sat)}})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(([(row["item"], row["host"]) for row in body["queued"]], body["kickstart"], self.kicks),
+                         ([(sat, "work")], None, []))
+        hub = self.ready()
+        status, _, body = self.post("/api/tasks/build", {"items": [hub], "revisions": {str(hub): self.revision(hub)}})
+        self.assertEqual(([(row["item"], row["host"]) for row in body["queued"]], len(self.kicks)), ([(hub, "")], 1))
+
     def test_build_refuses_a_malformed_body_with_400(self):
         item = self.ready()
         for payload in ({"items": [item]}, {"items": [], "revisions": {}}, {"items": [item, item], "revisions": {}},
@@ -91,12 +107,19 @@ class BuildRoutes(Fixture):
         upsert_repo(self.connection, "/fixture/repos/sat", remote="/fixture/remote-sat", managed=1)
         self.connection.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/repos/sat'")
         sat = self.item("Build me there", kind="task", status="ready", repo="/fixture/repos/sat")
-        out = builds.plan(self.connection, [hub, sat], now=NOW,
-                          sessions=lambda connection, *, now: {"sessions": [], "builders": {"running": 0, "why": ""}},
-                          gate=lambda: {"load": [1.0, 1.0, 1.0], "load_max": 40.0})
+        plan = lambda: builds.plan(  # noqa: E731
+            self.connection, [hub, sat], now=NOW,
+            sessions=lambda connection, *, now: {"sessions": [], "builders": {"running": 0, "why": ""}},
+            gate=lambda: {"load": [1.0, 1.0, 1.0], "load_max": 40.0})
+        out = plan()
+        self.assertEqual([row["id"] for row in out["refused"]], [sat], "no dispatcher beats there")
+        self.assertIn("lane runs on work, and no build-dispatch@work beat", out["refused"][0]["why"])
+        record_state(self.connection, "heartbeat", key="build-dispatch@work",
+                     timestamp=(datetime.fromisoformat(build.clock()) - timedelta(seconds=42)).isoformat(), body={})
+        out = plan()
         self.assertEqual(out["refused"], [])
-        self.assertEqual([(bundle["name"], bundle["host"], bundle["room"]) for bundle in out["bundles"]],
-                         [("alpha", "", 3), ("sat", "work", 0)])
+        self.assertEqual([(bundle["name"], bundle["host"], bundle["room"], bundle["beat"])
+                          for bundle in out["bundles"]], [("alpha", "", 3, None), ("sat", "work", 0, 42)])
 
     def test_the_plan_shows_no_room_when_the_load_was_not_read(self):
         out = builds.plan(self.connection, [self.ready()], now=NOW,

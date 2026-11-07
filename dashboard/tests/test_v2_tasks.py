@@ -2233,12 +2233,15 @@ if (D) { D.returnValue = 'build'; D.onclose(); await flush(); }"""
         """Pack sd:7933. A bundle whose lane runs on a satellite names that host, not the hub's room."""
         plan = self.ids["plan"]
         planned = self.build_plan(plan)
-        planned["bundles"][0].update(host="work", room=0)
+        planned["bundles"][0].update(host="work", room=0, beat=42)
+        queued = f"[200, {{ queued: [{{ id: 9, item: {plan}, status: 'queued', host: 'work' }}], kickstart: null }}]"
         answer = (f"(path, body) => path.startsWith('/api/tasks/build/plan') ? [200, {json.dumps(planned)}] : "
-                  f"[404, {{ error: 'no answer' }}]")
+                  f"path === '/api/tasks/build' ? {queued} : [404, {{ error: 'no answer' }}]")
         out = self.run_page(self.BUILD.replace("ITEM", str(plan)), answer)
         self.assertIn("alpha <small>opus · branch build/sd-&lt;lead assignment&gt; · runs on work, whose dispatcher "
-                      "claims it</small>", out["R"]["shown"])
+                      "beat 42 s ago</small>", out["R"]["shown"])
+        self.assertEqual(out["toasts"][-1][0], f"Queued #{plan} for build · work's dispatcher claims #{plan} "
+                                               "at its next tick")
 
     def test_build_with_a_refused_item_offers_no_build_and_a_409_says_nothing_queued(self):
         plan = self.ids["plan"]
