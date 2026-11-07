@@ -788,7 +788,11 @@ class TheLedgerCanBeWrittenWithoutWaiting(JudgmentCase):
             record(fast, caller="c", stage="s", provider="p",
                    primitive="noul", outcome="ok", now=AT)
         waited = time.monotonic() - started
-        self.assertLess(waited, 1.0, f"waited {waited:.2f}s for a locked table")
+        # The wait SQLite allows is what this measures; the clock only
+        # separates no wait from the default 5 s one. A 1 s bound failed a
+        # loaded gate at 1.03 s (sd:7935).
+        self.assertEqual(fast.execute("PRAGMA busy_timeout").fetchone()[0], 0)
+        self.assertLess(waited, 2.5, f"waited {waited:.2f}s for a locked table")
         holder.execute("ROLLBACK")
 
     def test_the_default_still_waits_for_a_busy_database(self):
