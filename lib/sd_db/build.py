@@ -217,6 +217,28 @@ def dispatcher_refusal(connection, host: str) -> str | None:
     return f"{HEARTBEAT}@{host} claims nothing: {why}" if why else None
 
 
+def item_host(connection, item: int) -> str | None:
+    """`lane_of` the lane of `item`'s repository: the other machine whose dispatcher claims its build, or None."""
+    row = connection.execute(_REPO, (item,)).fetchone()
+    return lane_of(connection, row["lane_host"]) if row else None
+
+
+def unclaimed(connection) -> dict[str, str]:
+    """Each queued build assignment of another host's lane whose fresh beat names why it claims nothing, by id, to
+    "<host> claims nothing: <why>": the hub's claim leaves those rows queued, and the Builds panel names the reason
+    (review round 5)."""
+    found = {}
+    for row in connection.execute(
+            "SELECT assignment.id, repo.lane_host FROM assignment JOIN item ON item.id = assignment.item "
+            "LEFT JOIN repo ON repo.path = item.repo WHERE assignment.scope = ? AND assignment.status = 'queued'",
+            (SCOPE,)):
+        host = lane_of(connection, row["lane_host"])
+        why = dispatcher_why(connection, host) if host and not dispatcher_gone(connection, host) else None
+        if why:
+            found[str(row["id"])] = f"{host} claims nothing: {why}"
+    return found
+
+
 def dispatcher_why(connection, host: str) -> str | None:
     """The reason the newest beat of `host`'s tick names for claiming nothing, or None when it names none.
 

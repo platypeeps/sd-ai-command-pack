@@ -165,8 +165,7 @@ def kickstart(*, runner=subprocess.run) -> dict:
 def answer(connection, queued: list[dict], start) -> dict:
     """A press's answer: each queued row with the `host` whose dispatcher claims it ("" for the hub), and the
     hub's `kickstart`, None when every row is a satellite's: the hub's tick claims none of those (pack sd:7933)."""
-    hosts = {row["item"]: build.lane_of(connection, connection.execute(build._REPO, (row["item"],)).fetchone()["lane_host"]) or ""
-             for row in queued}
+    hosts = {row["item"]: build.item_host(connection, row["item"]) or "" for row in queued}
     return {"queued": [{"id": row["id"], "item": row["item"], "status": row["status"], "host": hosts[row["item"]]}
                        for row in queued],
             "kickstart": start() if not all(hosts.values()) else None}
@@ -306,7 +305,7 @@ def panel(connection, *, now: str, show: str = "active") -> dict:
     """
     try:
         rows = [_open_row(connection, run, now) for run in build.open_runs(connection)]
-        unclaimed = _unclaimed(connection)
+        unclaimed = build.unclaimed(connection)
         rows += [_teammate_row(connection, run, now) for run in teammate.open_runs(connection)]
         recent = []
         for row in build.ended_runs(connection, limit=ENDED_MAX) if show == "all" else []:
@@ -324,20 +323,6 @@ def panel(connection, *, now: str, show: str = "active") -> dict:
                 "show": show}
     return {"runs": rows, "recent": recent, "unclaimed": unclaimed, "error": "", "read": now, "quiet_seconds": QUIET_SECONDS,
             "stale_seconds": build.STALE_SECONDS, "show": show, "pickup": _pickup(connection, now)}
-
-
-def _unclaimed(connection) -> dict[str, str]:
-    """`panel`'s `unclaimed`: assignment id to the reason another host's dispatcher gives for claiming nothing."""
-    waiting = {}
-    for row in connection.execute(
-            "SELECT assignment.id, repo.lane_host FROM assignment JOIN item ON item.id = assignment.item "
-            "LEFT JOIN repo ON repo.path = item.repo WHERE assignment.scope = ? AND assignment.status = 'queued'",
-            (build.SCOPE,)):
-        host = build.lane_of(connection, row["lane_host"])
-        why = build.dispatcher_why(connection, host) if host and not build.dispatcher_gone(connection, host) else None
-        if why:
-            waiting[str(row["id"])] = f"{host} claims nothing: {why}"
-    return waiting
 
 
 def _pickup(connection, now: str) -> dict:
