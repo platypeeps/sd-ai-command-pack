@@ -1224,6 +1224,9 @@ class Supervisor:
             if self.groups is not None:
                 for group, start in (build.descendant_groups(process.pid) or {}).items():
                     self.groups.setdefault(group, start)
+                # Only groups still the run's stay: one that ended leaves at this poll, before a pid wrap can
+                # give its number to an unrelated group whose EPERM read as a Survivor (sd:7909).
+                self.groups = {group: start for group, start in self.groups.items() if self.ours(group, start)}
             try:
                 if session:
                     self.watch_session()
