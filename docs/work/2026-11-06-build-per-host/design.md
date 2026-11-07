@@ -30,8 +30,10 @@ A satellite-lane run gets `owner = "build-dispatch@<lane_host>"`.
 `build.run_host(owner)` is the part after `@`, or None for the hub.
 
 `build.lane_hosts(connection)` is the set of lane hosts this machine builds for:
-`{this_host()}` on a satellite (`served_by(connection)` names a hub),
-and `{None, this_host()}` on the hub. A run is mine when its host is in that set.
+`{this_host()}` on a satellite, and `{None, this_host()}` on the hub.
+A satellite is a machine with a `hub.json` whose connection the hub serves.
+The file decides, not the transport: the wire harness runs the hub's tests
+over a served connection, and they stay the hub's. A run is mine when its host is in that set.
 That mirrors `ship._lane`: NULL is the hub's lane, a name is that machine's.
 
 1. Press: `_repo_refusal` no longer refuses a lane host. A press queues for any lane.
@@ -81,6 +83,8 @@ Sweep | a done bundle's worktree removed | the hub removes a path that names a s
 Report back | notes, run row, cost rows in the one database | the hub stats a satellite log path | the panel row names host and log path and reads no log for it | test_build_panel.Panel.test_a_satellite_run_names_its_host
 Push failure | one ntfy push per failed run or entry | hub and satellite both push one failure | push_failures returns nothing on a satellite; the hub pushes every host's | test_build_run.Hosts.test_a_satellite_pushes_nothing
 Drafts and pickup | draft runs, auto-pickup queue | a satellite tick claims a draft or picks hub items | the satellite tick skips pickup, stop-on-blocks, draft claim and draft reap; eligible skips a satellite lane | test_build.Hosts.test_auto_pickup_skips_a_satellite_lane, test_build_run.Hosts.test_a_satellite_tick_runs_no_draft_or_pickup
+Pickup, satellite press queued | nothing | a satellite press the hub never claims holds hub pickup, forever with no satellite dispatcher | pickup holds only for a queued press of this host's lanes | test_build.Hosts.test_a_satellite_press_leaves_the_hub_pickup_running
+Host identity | which lanes this tick acts on | a served connection on the hub reads as a satellite: the wire run claims, reaps and pushes nothing | hub.json and a served connection make a satellite; no hub.json is the hub | test_build.Hosts.test_the_hub_over_the_wire_is_still_the_hub, test_build_run.Hosts.test_the_hub_over_the_wire_still_pushes, the wire run of test_build, test_build_run, test_draft
 Heartbeat | state heartbeat row | the satellite's beat hides a dead hub job | the satellite beats build-dispatch@<host> | test_build_run.Hosts.test_a_satellite_tick_beats_its_own_key
 Older state | runs from before this change | an owner with no @ | reads as the hub's, as before | the existing test_build and test_build_run suites
 Rollback | the previous pack on the hub | its reap acts on every run and reads a live satellite pid as gone | before a rollback, cancel each open satellite run on the Builds panel and let the satellite end it | none: a procedure

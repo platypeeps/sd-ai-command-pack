@@ -38,7 +38,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import paths, reads
+from . import hub, paths, reads
 from .database import served_by, transaction
 from .errors import SdDbError
 from .runner import IN_SESSION, OWNING, RUNNABLE_KINDS, queue_state, restoration_pending
@@ -146,10 +146,13 @@ def lane_hosts(connection) -> frozenset[str | None]:
     """The lane hosts this machine builds for: its own name, and None (the hub's lanes) when it is the hub.
 
     As `ship._lane` reads a lane: NULL is the hub's, a name is that machine's.
-    A satellite is a machine whose connection a hub serves (pack sd:7933).
+    A satellite is a machine with a `hub.json` whose connection the hub
+    serves (pack sd:7933). The file decides, not the transport: the wire
+    harness serves the hub's own tests, and those tests stay the hub's.
     """
     here = this_host()
-    return frozenset({here}) if served_by(connection) is not None else frozenset({None, here})
+    satellite = hub.configured() and served_by(connection) is not None
+    return frozenset({here}) if satellite else frozenset({None, here})
 
 
 def run_owner(owner: str, lane_host: str | None) -> str:

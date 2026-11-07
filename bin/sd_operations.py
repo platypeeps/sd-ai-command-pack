@@ -327,9 +327,9 @@ def push_failures(connection: Any, environ: dict[str, str] | None = None) -> lis
     """
     import sd_lib
     sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
-    from sd_db import database, today
+    from sd_db import build, today
     from sd_db.writes import record_state
-    if database.served_by(connection) is not None:
+    if None not in build.lane_hosts(connection):
         return []
     env = os.environ if environ is None else environ
     notify = env.get("SD_NOTIFY") or shutil.which("notify", path=env.get("PATH"))

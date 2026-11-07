@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, operations, recovery, runner, workflow
+from sd_db import build, operations, recovery, remote, runner, workflow
 from sd_db.database import connect
 from sd_db.errors import BackupError
 from sd_db.migrate import initialise
@@ -1193,13 +1193,25 @@ class Hosts(Case):
         return run
 
     def test_lane_hosts_is_the_hub_and_this_name_or_this_name_alone(self):
-        with mock.patch.object(build, "this_host", return_value="work"):
+        with mock.patch.object(build, "this_host", return_value="work"), \
+                mock.patch("sd_db.hub.configured", return_value=True):
             with mock.patch.object(build, "served_by", return_value=None):
                 self.assertEqual(build.lane_hosts(self.db), {None, "work"})
             with mock.patch.object(build, "served_by", return_value="hub.example.test:7000"):
                 self.assertEqual(build.lane_hosts(self.db), {"work"})
         self.assertEqual([build.run_host(owner) for owner in ("build-dispatch", "build-dispatch@work", None, "x@")],
                          [None, "work", None, None])
+
+    def test_the_hub_over_the_wire_is_still_the_hub(self):
+        """Review round 1: hub.json decides, not the transport; the wire harness serves the hub's own tests."""
+        wire = mock.Mock(spec=remote.Connection, host="127.0.0.1", port=7000)
+        with mock.patch.object(build, "this_host", return_value="hub"):
+            with mock.patch("sd_db.hub.configured", return_value=False):
+                self.assertEqual(build.lane_hosts(wire), {None, "hub"}, "no hub.json: the hub, over the wire too")
+            with mock.patch("sd_db.hub.configured", return_value=True):
+                self.assertEqual(build.lane_hosts(wire), {"hub"}, "hub.json and a served connection: a satellite")
+                self.assertEqual(build.lane_hosts(mock.Mock(spec=sqlite3.Connection)), {None, "hub"},
+                                 "a local database is a hub's")
 
     def test_a_satellite_press_leaves_the_hub_pickup_running(self):
         """Review round 1: the hub never claims a satellite's press, so it must not hold the hub's pickup."""

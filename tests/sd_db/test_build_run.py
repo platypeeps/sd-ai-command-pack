@@ -1513,9 +1513,10 @@ class Hosts(Case):
                                   **{"load": 1.0, "load_cap": 40.0, "interactive": [], **inputs})
 
     def on(self, host):
-        """Run the next tick as the hub (`hub`) or as the satellite `work`: this_host and served_by stubbed."""
+        """Run the next tick as the hub (`hub`) or as the satellite `work`: this_host, hub.json and served_by stubbed."""
         stack = contextlib.ExitStack()
         stack.enter_context(mock.patch.object(build, "this_host", return_value=host))
+        stack.enter_context(mock.patch("sd_db.hub.configured", return_value=host != "hub"))
         stack.enter_context(mock.patch.object(build, "served_by",
                                               return_value=None if host == "hub" else "hub.example.test:7000"))
         return stack
@@ -1575,6 +1576,23 @@ class Hosts(Case):
         keys = [row[0] for row in self.db.execute("SELECT key FROM state WHERE kind = 'heartbeat'")]
         self.assertEqual(keys, [f"{build_run.HEARTBEAT}@work"], "the hub's beat is the hub's job's alone")
 
+    def test_the_hub_over_the_wire_still_pushes(self):
+        """Review round 1: a served connection on a machine with no hub.json is the hub's, and the hub pushes."""
+        hub, _ = self.both()
+        with self.on("hub"):
+            run = build.claim(self.db, owner="fixture", load=1.0, load_cap=40.0, interactive=[],
+                              root=self.root / "worktrees")
+        assert run is not None
+        build.end(self.db, run["id"], "blocked", "the review left blockers")
+        notify = self.root / "notify"
+        notify.write_text("#!/bin/sh\nexit 0\n")
+        notify.chmod(0o755)
+        environ = {**os.environ, "SD_NOTIFY": str(notify)}
+        with mock.patch.object(database, "served_by", return_value="127.0.0.1:7000"), \
+                mock.patch.object(build, "served_by", return_value="127.0.0.1:7000"), \
+                mock.patch("sd_db.hub.configured", return_value=False):
+            self.assertEqual(ADAPTER.push_failures(self.db, environ), [f"build:{run['id']}"])
+
     def test_a_satellite_pushes_nothing(self):
         """The hub pushes every host's failures once; a satellite's tick would send each a second time."""
         hub, _ = self.both()
@@ -1587,7 +1605,7 @@ class Hosts(Case):
         notify.write_text("#!/bin/sh\nexit 0\n")
         notify.chmod(0o755)
         environ = {**os.environ, "SD_NOTIFY": str(notify)}
-        with mock.patch.object(database, "served_by", return_value="hub.example.test:7000"):
+        with self.on("work"):
             self.assertEqual(ADAPTER.push_failures(self.db, environ), [])
         self.assertEqual(ADAPTER.push_failures(self.db, environ), [f"build:{run['id']}"])
 
