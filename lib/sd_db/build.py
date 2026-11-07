@@ -281,15 +281,20 @@ def picked(connection, lead: int) -> bool:
 def pickup(connection, available: dict, *, now: str | None = None) -> list[int]:
     """One tick of auto-pickup while it is on: queue `eligible` items, as `PICKUP`, to fill the room; the items.
 
-    The press queue goes first: while any build is queued, nothing is picked
-    and the claim drains it. Each free builder slot takes one bundle of up
-    to `BUNDLE_MAX` items of one repository, each repository at most its
-    `room_for`. No room, or no item, queues nothing.
+    The press queue goes first: while any build of this host's lanes is
+    queued, nothing is picked and the claim drains it. Each free builder
+    slot takes one bundle of up to `BUNDLE_MAX` items of one repository,
+    each repository at most its `room_for`. No room, or no item, queues
+    nothing.
     """
     if available["why"] or not pickup_state(connection, now=now)["on"]:
         return []
-    if connection.execute("SELECT 1 FROM assignment WHERE status = 'queued' AND scope = ? LIMIT 1",
-                          (SCOPE,)).fetchone():
+    # Only this host's presses hold it: the hub never claims a satellite's.
+    hosts = lane_hosts(connection)
+    if any(row["lane_host"] in hosts for row in connection.execute(
+            "SELECT repo.lane_host FROM assignment JOIN item ON item.id = assignment.item "
+            "LEFT JOIN repo ON repo.path = item.repo WHERE assignment.status = 'queued' AND assignment.scope = ?",
+            (SCOPE,))):
         return []
     slots, chosen = available["machine"], []
     bundles: dict[str, list[list[int]]] = {}

@@ -1201,6 +1201,13 @@ class Hosts(Case):
         self.assertEqual([build.run_host(owner) for owner in ("build-dispatch", "build-dispatch@work", None, "x@")],
                          [None, "work", None, None])
 
+    def test_a_satellite_press_leaves_the_hub_pickup_running(self):
+        """Review round 1: the hub never claims a satellite's press, so it must not hold the hub's pickup."""
+        build.queue(self.db, [self.item(repo=SAT)], who="operator")
+        ready = self.item()
+        build.set_pickup(self.db, True, now=Pickup.NOW)
+        self.assertEqual(build.pickup(self.db, build.room(self.db, **IDLE, hosts=HUB), now=Pickup.NOW), [ready])
+
     def test_the_hub_claim_skips_a_satellite_row(self):
         build.queue(self.db, [self.item(repo=SAT)], who="operator")
         self.assertIsNone(self.claim(hosts=HUB))
