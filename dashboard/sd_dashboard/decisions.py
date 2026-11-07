@@ -13,8 +13,8 @@ place of buttons. An old prose "Decision needed" comment stays a comment: it lis
 `question` note asks.
 
 - `document` is `/api/decisions`: every unresolved decision on an open item Tasks lists (`reads.backlog_items`,
-  `reads.brief_notes`), and on a done item (`reads.open_notes`): closing an item answers none of its questions
-  (pack sd:6329). The item's priority first, then the oldest, each with the revision `workflow.item_state` gives,
+  `reads.brief_notes`), and on a done item (`reads.open_notes`): a delivery answers none of its questions
+  (pack sd:6329); a cancel answers them all (`progress.cancel_work`, sd:7992). The item's priority first, then the oldest, each with the revision `workflow.item_state` gives,
   read for every item in one `reads.revisions`.
   `recommended` is the index of the option the note recommends, or null (sd:5306): one option that ends
   "(Recommended)" or starts "(Recommended)" or "Recommended:", else a line "Recommendation: <text>" that names an

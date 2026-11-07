@@ -282,11 +282,17 @@ def overdue(run: dict, now: str) -> str:
     """Why Today reads `run` overdue: no beat for its budget plus `GRACE_MINUTES`; '' otherwise.
 
     It ends nothing. A builder beats only at commits and reports, so silence
-    is no proof it stopped; only the lead's `--end` ends a run.
+    is no proof it stopped; only the lead's `--end` ends a run. A beat
+    stamped too far ahead has no age (`build._lead_age`) and reads overdue
+    (sd:7986).
     """
     if not run.get("budget_minutes"):
         return ""
-    quiet = build._age(run["heartbeat_at"] or run["created_at"], now)
+    stamp = run["heartbeat_at"] or run["created_at"]
+    quiet = build._lead_age(stamp, now)
+    if quiet is None:
+        return (f"overdue: its beat {stamp} is ahead of this clock past {build.STALE_SECONDS} s, so it has "
+                f"no age; check that machine's clock; its lead ends it")
     if quiet < (run["budget_minutes"] + GRACE_MINUTES) * 60:
         return ""
     return (f"overdue: no beat for {int(quiet // 60)} min, past its {run['budget_minutes']} min budget and "
