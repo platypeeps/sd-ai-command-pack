@@ -2199,10 +2199,6 @@ class Spawn(unittest.TestCase):
                 os.killpg(pid, signal.SIGKILL)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Hosts(Case):
     """Pack sd:7933: the hub's tick and a satellite's each act on their own lanes' runs only."""
 
@@ -2323,3 +2319,6 @@ class Hosts(Case):
             self.assertEqual(ADAPTER.push_failures(self.db, environ), [])
         self.assertEqual(ADAPTER.push_failures(self.db, environ), [f"build:{run['id']}"])
 
+
+if __name__ == "__main__":
+    unittest.main()

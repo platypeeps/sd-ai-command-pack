@@ -1258,10 +1258,6 @@ class Pickup(Case):
         self.assertEqual(self.count("SELECT COUNT(*) FROM item WHERE title LIKE 'Auto-pickup off%'"), 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 SAT = "/fixture/sat"
 HUB, WORK = frozenset({None, "hub"}), frozenset({"work"})
 
@@ -1496,3 +1492,6 @@ class Hosts(Case):
         self.assertEqual(settled[0]["outcome"], "cancelled")
         self.assertEqual(self.statuses([run["members"][0]["item"]]), ["ready"])
 
+
+if __name__ == "__main__":
+    unittest.main()
