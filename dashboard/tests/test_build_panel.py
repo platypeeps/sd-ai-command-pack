@@ -28,6 +28,10 @@ class Fixture(BrowserSession):
         kick = patch.object(builds, "kickstart", lambda: self.kicks.append(1) or {"ok": True, "service": "x", "why": ""})
         kick.start()
         self.addCleanup(kick.stop)
+        # The fixtures name a satellite lane `work`, which a real machine may be called too: run as the hub `hub`.
+        pinned = patch.object(build, "this_host", return_value="hub")
+        pinned.start()
+        self.addCleanup(pinned.stop)
 
     def ready(self, status="ready", **columns):
         return self.item("Build me", kind="task", status=status, repo=REPO, **columns)
@@ -184,6 +188,28 @@ class BuildsPanel(Fixture):
         rows = {row["run"]: row for row in builds.panel(self.connection, now="2099-01-02T01:00:00Z")["runs"]}
         self.assertEqual(rows[hub["id"]]["host"], "")
         self.assertIsNotNone(rows[hub["id"]]["quiet"], "the hub's own run's log is read")
+
+    def test_a_lane_named_for_the_hub_is_the_hubs_on_the_panel(self):
+        """Review round 3, class A: a lane named for the hub plans with the hub's room, kicks the hub's tick, and its
+        run's log is read here, as `build.lane_of` reads it."""
+        upsert_repo(self.connection, "/fixture/repos/own", remote="/fixture/remote-own", managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = 'hub' WHERE path = '/fixture/repos/own'")
+        own = self.item("Build me here", kind="task", status="ready", repo="/fixture/repos/own")
+        with patch.object(build, "this_host", return_value="hub"):
+            out = builds.plan(self.connection, [own], now=NOW,
+                              sessions=lambda connection, *, now: {"sessions": [], "builders": {"running": 0, "why": ""}},
+                              gate=lambda: {"load": [1.0, 1.0, 1.0], "load_max": 40.0})
+            self.assertEqual((out["refused"], [(b["host"], b["room"]) for b in out["bundles"]]), ([], [("", 3)]))
+            status, _, body = self.post("/api/tasks/build", {"items": [own], "revisions": {str(own): self.revision(own)}})
+            self.assertEqual((status, [row["host"] for row in body["queued"]], len(self.kicks)), (200, [""], 1), body)
+            run = self.claimed([self.ready()])
+            log = self.path.parent / "own.jsonl"
+            log.write_text("{}\n")
+            self.connection.execute("UPDATE runner_run SET owner = 'build-dispatch@hub', log_path = ? WHERE id = ?",
+                                    (str(log), run["id"]))
+            row = {row["run"]: row for row in builds.panel(self.connection, now="2099-01-02T01:00:00Z")["runs"]}[run["id"]]
+        self.assertEqual(row["host"], "", "an older run owned build-dispatch@hub is the hub's")
+        self.assertIsNotNone(row["quiet"], "its log is read here")
 
     def test_a_teammate_run_is_a_working_row_with_its_worktree_due_time_and_no_cancel(self):
         """pack sd:7221: a lead's in-session builder shows beside the headless runs; past its budget it is stalled."""

@@ -35,6 +35,17 @@ A satellite is a machine with a `hub.json` whose connection the hub serves.
 The file decides, not the transport: the wire harness runs the hub's tests
 over a served connection, and they stay the hub's. A run is mine when its host is in that set.
 That mirrors `ship._lane`: NULL is the hub's lane, a name is that machine's.
+`build.lane_of(connection, host)` is the one rule for a single lane or run:
+None (the hub's) for NULL and for this machine's own name on the hub, as
+`sd_lane.ended_kind` reads it; the host's name otherwise. A satellite cannot
+tell the hub's name, so it reads a lane named for the hub as another host's.
+
+The hub settles another host's rows once that host goes quiet: no
+`build-dispatch@<host>` beat under `STALE_SECONDS` (`build.dispatcher_gone`,
+the press's check too). Its claim blocks such a queued row with that reason.
+Its reap ends such an open run whose own beat is that old too, without a
+probe or a signal: cancelled when a cancel was asked, else blocked and
+released; a held run is released. A run at a lane step waits on that host's lane.
 
 1. Press: `_repo_refusal` no longer refuses a lane host. A press queues for a
    satellite lane only while that host's `build-dispatch@<host>` beat is under
@@ -90,6 +101,20 @@ Pickup, satellite press queued | nothing | a satellite press the hub never claim
 Host identity | which lanes this tick acts on | a served connection on the hub reads as a satellite: the wire run claims, reaps and pushes nothing | hub.json and a served connection make a satellite; no hub.json is the hub | test_build.Hosts.test_the_hub_over_the_wire_is_still_the_hub, test_build_run.Hosts.test_the_hub_over_the_wire_still_pushes, the wire run of test_build, test_build_run, test_draft
 Heartbeat | state heartbeat row | the satellite's beat hides a dead hub job | the satellite beats build-dispatch@<host> | test_build_run.Hosts.test_a_satellite_tick_beats_its_own_key
 Older state | runs from before this change | an owner with no @ | reads as the hub's, as before | the existing test_build and test_build_run suites
+Hub-named lane, press | assignment queued | a lane named for the hub needs a build-dispatch@hub beat the hub never writes | _item reads lane_of: the hub's lane needs no beat | test_build.Hosts.test_a_lane_named_for_the_hub_takes_a_press_pickup_and_draft_on_the_hub
+Hub-named lane, pickup and drafts | auto-pickup queue, draft runs | hub_only refuses the hub's own lane | _repo_refusal hub_only reads lane_of | the same test (eligible, draft.queue_if_eligible)
+Hub-named lane, pickup hold | nothing | a hub-named press is not counted as this host's | the hold reads lane_of | test_build.Hosts.test_a_satellite_press_leaves_the_hub_pickup_running (hosts filter now via lane_of)
+Hub-named lane, claim | run owner | the owner becomes build-dispatch@hub, so the panel hides its log | claim's filter and run_owner read lane_of: the bare role | test_build.Hosts.test_a_lane_named_for_the_hub_claims_with_the_hubs_bare_owner
+Hub-named lane, dashboard | plan, press answer, panel rows | the plan shows no room and runs on hub, the answer skips the kickstart, the panel reads no log, for build-dispatch@hub rows from before too | plan, answer, open and ended rows read lane_of | test_build_panel.BuildsPanel.test_a_lane_named_for_the_hub_is_the_hubs_on_the_panel
+Hub-named lane, run sets | room, reap, watch, sweep, spawn, push | none: lane_hosts on the hub holds None and its own name | unchanged | test_build.Hosts.test_lane_of_reads_this_hubs_own_name_as_the_hub
+Foreign queued row, host quiet | the assignment blocked with why, item free | the hub skipped it forever with no note | the hub's claim blocks it when dispatcher_gone | test_build.Hosts.test_the_hub_blocks_a_quiet_satellites_queued_row_with_why
+Foreign queued row, lane moved after the press | the same | moved to a host that never beat | the same check: no beat is gone | test_build.Hosts.test_the_hub_blocks_a_row_whose_lane_moved_to_a_host_that_never_beat
+Foreign open run, host quiet | outcome blocked, run and lease released, items blocked and parked | stays open and locks its items | _strand: dispatcher_gone and no run beat for STALE_SECONDS; no probe, no signal | test_build.Hosts.test_the_hub_ends_a_quiet_satellites_run_blocked_and_releases_it
+Foreign open run, cancel asked | outcome cancelled, items ready | cancel_requested waits for a tick that never comes | _strand ends it cancelled | test_build.Hosts.test_the_hub_completes_a_cancel_a_quiet_satellite_never_read
+Foreign held run, host quiet | released_at, lease, park | a blocked run waits for that host's release | _strand releases it with a probe that answers gone | test_build.Hosts.test_the_hub_releases_a_quiet_satellites_held_run
+Foreign run, supervisor still beats | nothing | the dispatcher died but its supervisor runs | the run's own beat keeps it | test_build.Hosts.test_the_hub_ends_a_quiet_satellites_run_blocked_and_releases_it (after=60)
+Foreign run at a lane step | nothing | its branch waits on that host's lane | stays; that host's watch ends it when it returns | none: no state to settle here
+Satellite returns after the hub ended its run | its supervisor's next write | it acts on a run the hub ended | build.write changes no row, so the supervisor stops; the run is released | test_build_run.Supervise.test_a_lost_run_stops_before_the_next_step
 Rollback | the previous pack on the hub | its reap acts on every run and reads a live satellite pid as gone | before a rollback, cancel each open satellite run on the Builds panel and let the satellite end it | none: a procedure
 ```
 

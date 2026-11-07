@@ -133,7 +133,7 @@ def plan(connection, items: list[int], *, now: str, sessions=None, gate=None) ->
     for repo, rows in groups.items():
         for start in range(0, len(rows), build.BUNDLE_MAX):
             chunk = rows[start:start + build.BUNDLE_MAX]
-            host = chunk[0]["lane_host"] or ""
+            host = build.lane_of(connection, chunk[0]["lane_host"]) or ""
             bundles.append({"repo": repo, "name": Path(repo).name, "host": host,
                             "beat": build.dispatcher_beat(connection, host) if host else None,
                             "room": 0 if host else build.room_for(room, repo),
@@ -165,7 +165,7 @@ def kickstart(*, runner=subprocess.run) -> dict:
 def answer(connection, queued: list[dict], start) -> dict:
     """A press's answer: each queued row with the `host` whose dispatcher claims it ("" for the hub), and the
     hub's `kickstart`, None when every row is a satellite's: the hub's tick claims none of those (pack sd:7933)."""
-    hosts = {row["item"]: connection.execute(build._REPO, (row["item"],)).fetchone()["lane_host"] or ""
+    hosts = {row["item"]: build.lane_of(connection, connection.execute(build._REPO, (row["item"],)).fetchone()["lane_host"]) or ""
              for row in queued}
     return {"queued": [{"id": row["id"], "item": row["item"], "status": row["status"], "host": hosts[row["item"]]}
                        for row in queued],
@@ -224,7 +224,7 @@ def _open_row(connection, run: dict, now: str) -> dict:
     step = run["step"] or "claimed"
     beat = _seconds(run["heartbeat_at"] or run["created_at"], now)
     # A satellite's run logs on its own disk: the row names the host and the path, and reads no log here (sd:7933).
-    host = build.run_host(run["owner"]) or ""
+    host = build.lane_of(connection, build.run_host(run["owner"])) or ""
     quiet = None if host else _log_quiet(run["log_path"], now)
     waiting = _waiting(connection, run, [member["item"] for member in members])
     lost = step != "enqueued" and run["outcome"] is None and (beat is None or beat >= build.STALE_SECONDS)
@@ -308,7 +308,7 @@ def panel(connection, *, now: str, show: str = "active") -> dict:
         for row in build.ended_runs(connection, limit=ENDED_MAX) if show == "all" else []:
             members = _members(connection, row)
             recent.append({"run": row["id"], "assignment": row["assignment"], "repo": row["repo"],
-                           "host": build.run_host(row["owner"]) or "",
+                           "host": build.lane_of(connection, build.run_host(row["owner"])) or "",
                            "name": Path(row["repo"]).name, "items": members,
                            "pull": build.pull_url(connection, row["repo"], row["branch"], [m["item"] for m in members]),
                            "outcome": row["outcome"], "detail": row["detail"] or "",

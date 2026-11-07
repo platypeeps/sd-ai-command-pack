@@ -9,6 +9,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from sd_db import build, draft, recovery
 from sd_db.database import connect
@@ -50,6 +51,11 @@ class Case(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.database = Path(self.tmp.name) / "sd.db"
+        # The fixtures name a satellite lane `work`, which a real machine may be called too: each test runs as the
+        # hub `hub` unless it says otherwise (review round 3).
+        pinned = mock.patch.object(build, "this_host", return_value="hub")
+        pinned.start()
+        self.addCleanup(pinned.stop)
         initialise(self.database)
         self.db = connect(self.database)
         self.addCleanup(self.db.close)

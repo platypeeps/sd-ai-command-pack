@@ -74,7 +74,7 @@ def queue_if_eligible(connection, item: int, *, who: str) -> int | None:
     with transaction(connection):
         row = connection.execute(build._REPO, (item,)).fetchone()
         if (row is None or row["kind"] not in RUNNABLE_KINDS or row["status"] != "planning"
-                or repo_refusal(row) is not None or restoration_pending(connection)):
+                or repo_refusal(row, connection) is not None or restoration_pending(connection)):
             return None
         ident = create_assignment(connection, item=item, role="author", status="queued", lane="parallel",
                                   budget_minutes=BUDGET_MINUTES)
@@ -125,14 +125,14 @@ def claim(connection, *, owner: str, available: dict) -> dict | None:
         return build.run(connection, ident)
 
 
-def repo_refusal(row) -> str | None:
+def repo_refusal(row, connection) -> str | None:
     """Why the item's repository takes no draft, or None: `build._repo_refusal`, and managed only.
 
     A build may take an unmanaged repository on GitHub (pack sd:7868), but a
     draft is a paid run the operator did not ask for there: it stays on the
     managed repositories it served before.
     """
-    refused = build._repo_refusal(row, hub_only=True)
+    refused = build._repo_refusal(row, connection, hub_only=True)
     if refused is None and not row["managed"]:
         return f"item {row['id']}'s repository {row['repo']} is not managed"
     return refused
@@ -141,7 +141,7 @@ def repo_refusal(row) -> str | None:
 def _refusal(connection, row) -> str | None:
     if row["status"] != "planning":
         return f"item {row['item']} moved to {row['status']} before its draft ran"
-    refused = repo_refusal(connection.execute(build._REPO, (row["item"],)).fetchone())
+    refused = repo_refusal(connection.execute(build._REPO, (row["item"],)).fetchone(), connection)
     return f"{refused} before its draft ran" if refused else None
 
 
