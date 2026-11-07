@@ -1497,6 +1497,26 @@ OUT.urls = []; window.shell.url = q => OUT.urls.push(q);
         self.assertEqual(out["R"]["kids"].count("working"), 2, "the lane builders stay; the live item is gone")
         self.assertIn('aria-label="1 merging, 2 working, 2 next, 4 blocked, 0 suggested"', html)
 
+    def test_pr_review_waits_count_split_on_you_and_on_reviewers(self):
+        # pack sd:8005 (operator 2026-11-07): PR waits folded into the blocked box and the tally with lane failures.
+        # The tally and the repo row now count them apart, split by who they wait on; the blocked box keeps them.
+        lanes = queue_screen.document(self.connection, now=NOW)
+        lanes["prs"] = {"error": "", "rows": [
+            {"item": 40, "title": "Live work", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/40",
+             "lane": "awaiting_you", "on": "you", "since": "2026-09-06T11:00:00+00:00", "waited": 3600},
+            {"item": 44, "title": "Reviewed", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/44",
+             "lane": "awaiting_them", "on": "reviewers", "since": "2026-09-06T10:00:00+00:00", "waited": 7260},
+            {"item": 5, "title": "Prepared only", "repo": "~/repos/example/system", "url": "https://github.com/example/system/pull/5",
+             "lane": "awaiting_them", "on": "reviewers", "since": "2026-09-06T10:00:00+00:00", "waited": 7200}]}
+        out = self.run_view("R.html = ELS.queue.html; R.tally = ELS['queue-tally'].html;", answers={"/api/queue": [200, lanes]})
+        self.assertIn("<span>3 PR review: 1 on you, 2 on reviewers</span>", out["R"]["tally"])
+        system = re.search(r'<tr class="repo" data-repo="system".*?</tr>', out["R"]["html"], re.S).group(0)
+        self.assertIn('<td class="num">3 PR review: 1 on you, 2 on reviewers</td>', system)
+        alpha = re.search(r'<tr class="repo" data-repo="alpha".*?</tr>', out["R"]["html"], re.S).group(0)
+        self.assertIn('<td class="num"></td>', alpha, "a repo with no PR wait says nothing")
+        out = self.run_view("R.tally = ELS['queue-tally'].html;")
+        self.assertNotIn("PR review", out["R"]["tally"], "no PR wait, no count")
+
     def test_a_prepared_entry_whose_pr_waits_on_review_is_one_row_that_leads_with_the_wait(self):
         # pack sd:7859: item 5 stopped prepared in a manual-merge lane; its PR waits on reviewers. One row, Approve kept.
         lanes = queue_screen.document(self.connection, now=NOW)
