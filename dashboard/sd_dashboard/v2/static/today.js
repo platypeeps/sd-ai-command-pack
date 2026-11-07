@@ -397,7 +397,9 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
   const bb = (act, r, label, aria, off) => html`<button class="btn quiet sm" type="button" data-build="${act}" data-run="${r.run}" aria-label="${aria}"${off ? html` disabled title="${off}"` : QV.busy ? html` disabled` : ''}>${label}</button>`;
   // Open PR (pack sd:6020 ruling #31553): the pull request `sd-ship` opened for the row's branch; none shows nothing.
   const prLink = r => r.pull ? html`<a class="btn quiet sm" href="${r.pull}" target="_blank" rel="noopener noreferrer" aria-label="Open the pull request of run ${r.run} on GitHub">Open PR</a>` : '';
-  const logBtn = r => r.log ? html`<button class="btn quiet sm" type="button" data-copy="${`tail -f ${shell.shq(r.log)}`}" aria-label="Copy the command that follows the log of run ${r.run}">Log</button>` : '';
+  // A satellite's run (pack sd:7933) logs on that host: the row names the host and the log path, and copies no tail here.
+  const hostFacts = r => r.host ? html` · on ${r.host} · log <code>${r.log || 'not recorded'}</code>` : '';
+  const logBtn = r => r.log && !r.host ? html`<button class="btn quiet sm" type="button" data-copy="${`tail -f ${shell.shq(r.log)}`}" aria-label="Copy the command that follows the log of run ${r.run}">Log</button>` : '';
   const asgBtn = n => html`<button class="btn quiet sm" type="button" data-copy="sd assignments get ${String(n)}" aria-label="Copy the command that shows assignment ${String(n)}">Show assignment</button>`;
   // A lead's in-session builder (pack sd:7221): its worktree, branch, budget's end and last beat; its lead ends it.
   const teamFacts = r => html`<b>${r.state}</b> · teammate · worktree <code>${r.worktree}</code> · branch ${r.branch || 'not recorded'} · due ${at(r.due)} · ${r.beat == null ? 'no beat yet' : `beat ${dur(r.beat)} ago`}`;
@@ -405,7 +407,7 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     const s = RUNSTATE[r.state] || 'unknown', id = `run:${r.run}`;
     return ['working', s, html`<tr class="child" data-type="working" data-run="${r.run}" data-id="${id}" aria-selected="${String(row() === id)}">${marker(s, 'working')}
       <td class="what">${names(r)}</td>
-      <td class="detail">${r.teammate ? teamFacts(r) : html`<b>${r.state}</b> · build ${r.run} · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${r.quiet == null ? 'no output yet' : `output ${dur(r.quiet)} ago`} · ${usd(r.usd || 0)} so far`}${r.why ? ` · ${r.why}` : ''}</td>
+      <td class="detail">${r.teammate ? teamFacts(r) : html`<b>${r.state}</b> · build ${r.run} · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${r.quiet == null ? 'no output yet' : `output ${dur(r.quiet)} ago`} · ${usd(r.usd || 0)} so far`}${hostFacts(r)}${r.why ? ` · ${r.why}` : ''}</td>
       <td class="num">${dur(r.elapsed)}</td>
       <td class="act"><div class="ctl" role="group" aria-label="Run ${r.run}">${bb('cancel', r, 'Cancel…', `Cancel build run ${r.run}`, r.cancel.allowed ? '' : r.cancel.reason || 'cancel is off')}${prLink(r)}${logBtn(r)}</div></td></tr>`];
   }
@@ -415,14 +417,16 @@ window.PAGE_VIEWS = [{ id: 'needs', label: 'Needs you', key: 'n' }, { id: 'queue
     const s = r.outcome === 'done' ? 'ok' : r.retry.bundle === 'blocked' ? 'warning' : 'queued', off = r.retry.allowed ? '' : r.retry.reason;
     return ['ended', s, html`<tr class="child" data-type="ended" data-run="${r.run}">${marker(s, 'ended')}
       <td class="what">${names(r)}</td>
-      <td class="detail"><b>${r.retry.bundle === 'blocked' ? 'blocked' : r.outcome || 'ended'}</b> · build ${r.run} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd || 0)}${r.detail ? ` · ${r.detail}` : ''}</td>
+      <td class="detail"><b>${r.retry.bundle === 'blocked' ? 'blocked' : r.outcome || 'ended'}</b> · build ${r.run} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd || 0)}${hostFacts(r)}${r.detail ? ` · ${r.detail}` : ''}</td>
       <td class="num"></td>
       <td class="act"><div class="ctl" role="group" aria-label="Run ${r.run}">${['blocked', 'cancelled'].includes(r.retry.bundle) ? html`${bb('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, off)}${bb('send', r, 'Send to builder…', `Send a finding to the builder of run ${r.run}`, off)}` : ''}${asgBtn(r.assignment)}${prLink(r)}${logBtn(r)}</div></td></tr>`];
   }
   // Runner assignments (pack sd:7115, sd:7217): the queued and running ones no open build run holds.
+  // A queued build of another host's lane whose dispatcher beats that it claims nothing names that reason (pack sd:7933).
+  const waitOn = a => ((QV.built || {}).unclaimed || {})[String(a.id)] || '';
   const asgRow = a => ['working', a.status === 'running' ? 'ok' : 'queued', html`<tr class="child" data-type="working">${marker(a.status === 'running' ? 'ok' : 'queued', 'working')}
     <td class="what">${a.item ? html`<a href="${shell.itemHref(a.item)}">#${a.item} ${a.title || a.role}</a>` : a.title || a.role}</td>
-    <td class="detail"><b>${a.status}</b> · assignment ${String(a.id)} · ${a.role} · since ${at(a.started || a.queued_at)}</td><td class="num"></td>
+    <td class="detail"><b>${a.status}</b> · assignment ${String(a.id)} · ${a.role} · since ${at(a.started || a.queued_at)}${waitOn(a) ? ` · ${waitOn(a)}` : ''}</td><td class="num"></td>
     <td class="act"><div class="ctl" role="group" aria-label="Assignment ${String(a.id)}">${asgBtn(a.id)}</div></td></tr>`];
   // A live item (In motion's sources: worktrees and processes, herdr agents, Fix notes, lane-less sessions): its sessions in
   // the row, Open item, Show assignment and Fix in its actions, and its Details on a click (sd:6714).

@@ -31,7 +31,7 @@ from sd_db.database import transaction
 from sd_db.errors import SdDbError
 from sd_db.writes import SettingStale, add_note, set_setting, transition
 
-__all__ = ["ENDED_MAX", "JOB", "QUIET_SECONDS", "kickstart", "panel", "pickup", "plan", "press", "retry"]
+__all__ = ["ENDED_MAX", "JOB", "QUIET_SECONDS", "answer", "kickstart", "panel", "pickup", "plan", "press", "retry"]
 
 #: The local-cron-jobs job that runs `sd assignments dispatch` (system, build-dispatch.job).
 JOB = "build-dispatch"
@@ -114,7 +114,9 @@ def plan(connection, items: list[int], *, now: str, sessions=None, gate=None) ->
     """What a Build press on `items` would queue: `bundles` by repository, `refused` with each reason, the `room` now.
 
     A refused item refuses the whole press, as `build.queue` does; the dialog shows why and offers no Build.
-    `room` is informative: a press queues whatever the room, and the claim waits for room.
+    `room` is informative: a press queues whatever the room, and the claim waits for room. A bundle whose lane
+    runs on a satellite names that `host` and its dispatcher's `beat` age in seconds; this room is not its own
+    (pack sd:7933).
     """
     taken, refused = [], []
     for item in items:
@@ -131,7 +133,10 @@ def plan(connection, items: list[int], *, now: str, sessions=None, gate=None) ->
     for repo, rows in groups.items():
         for start in range(0, len(rows), build.BUNDLE_MAX):
             chunk = rows[start:start + build.BUNDLE_MAX]
-            bundles.append({"repo": repo, "name": Path(repo).name, "room": build.room_for(room, repo),
+            host = build.lane_of(connection, chunk[0]["lane_host"]) or ""
+            bundles.append({"repo": repo, "name": Path(repo).name, "host": host,
+                            "beat": build.dispatcher_beat(connection, host) if host else None,
+                            "room": 0 if host else build.room_for(room, repo),
                             "model": build._model(connection, [row["id"] for row in chunk]),
                             "branch": "build/sd-<lead assignment>",
                             "items": [{"id": row["id"], "title": row["title"], "revision": revisions[row["id"]]}
@@ -157,6 +162,15 @@ def kickstart(*, runner=subprocess.run) -> dict:
     return {"ok": True, "service": service, "why": ""}
 
 
+def answer(connection, queued: list[dict], start) -> dict:
+    """A press's answer: each queued row with the `host` whose dispatcher claims it ("" for the hub), and the
+    hub's `kickstart`, None when every row is a satellite's: the hub's tick claims none of those (pack sd:7933)."""
+    hosts = {row["item"]: build.item_host(connection, row["item"]) or "" for row in queued}
+    return {"queued": [{"id": row["id"], "item": row["item"], "status": row["status"], "host": hosts[row["item"]]}
+                       for row in queued],
+            "kickstart": start() if not all(hosts.values()) else None}
+
+
 def press(payload: dict, *, start=None):
     """POST /api/tasks/build: `{items, revisions}`; the write `action_route` runs, or ValueError for a bad body."""
     if set(payload) != {"items", "revisions"} or not isinstance(payload["revisions"], dict):
@@ -172,8 +186,7 @@ def press(payload: dict, *, start=None):
         except build.BuildRefused as refusal:
             # A refused press wrote nothing (`build.queue`'s one transaction): a 409, so the page reads again.
             return 409, {"error": f"Nothing queued: {refusal}.", "reload": True}
-        return {"queued": [{"id": row["id"], "item": row["item"], "status": row["status"]} for row in queued],
-                "kickstart": (start or kickstart)()}
+        return answer(connection, queued, start or kickstart)
 
     return write
 
@@ -209,7 +222,9 @@ def _open_row(connection, run: dict, now: str) -> dict:
     members = _members(connection, run)
     step = run["step"] or "claimed"
     beat = _seconds(run["heartbeat_at"] or run["created_at"], now)
-    quiet = _log_quiet(run["log_path"], now)
+    # A satellite's run logs on its own disk: the row names the host and the path, and reads no log here (sd:7933).
+    host = build.lane_of(connection, build.run_host(run["owner"])) or ""
+    quiet = None if host else _log_quiet(run["log_path"], now)
     waiting = _waiting(connection, run, [member["item"] for member in members])
     lost = step != "enqueued" and run["outcome"] is None and (beat is None or beat >= build.STALE_SECONDS)
     state = ("waiting" if waiting else "lost" if lost
@@ -226,7 +241,7 @@ def _open_row(connection, run: dict, now: str) -> dict:
     elif cancel["allowed"] and step not in build.CANCELLABLE:
         cancel.update(allowed=False, reason=f"the run is at {step}; " + build.stop_step(
             connection, run["id"], members[0]["item"] if members else "<item>"))
-    return {"run": run["id"], "attempt": run["run"], "repo": run["repo"], "name": Path(run["repo"]).name,
+    return {"run": run["id"], "attempt": run["run"], "repo": run["repo"], "name": Path(run["repo"]).name, "host": host,
             "items": members, "model": run["model"] or "", "step": step, "state": state, "why": waiting,
             "outcome": run["outcome"], "started": run["created_at"], "elapsed": _seconds(run["created_at"], now),
             "beat": beat, "quiet": quiet, "usd": round(build.run_spent(connection, run["id"]), 2),
@@ -283,15 +298,20 @@ def panel(connection, *, now: str, show: str = "active") -> dict:
     """Queue's Builds panel: `runs`, each open build run, then each open teammate run (`_teammate_row`); `recent`, under `show` "all" only, the ended runs, newest
     first, up to `ENDED_MAX` (pack sd:6834).
 
+    `unclaimed` maps each queued build assignment of another host's lane, whose dispatcher beats that it claims
+    nothing, to "<host> claims nothing: <why>": the hub's claim leaves that row queued (review round 5).
+
     A read that failed is `error`, so the page says the builds were not read, never that none run.
     """
     try:
         rows = [_open_row(connection, run, now) for run in build.open_runs(connection)]
+        unclaimed = build.unclaimed(connection)
         rows += [_teammate_row(connection, run, now) for run in teammate.open_runs(connection)]
         recent = []
         for row in build.ended_runs(connection, limit=ENDED_MAX) if show == "all" else []:
             members = _members(connection, row)
             recent.append({"run": row["id"], "assignment": row["assignment"], "repo": row["repo"],
+                           "host": build.lane_of(connection, build.run_host(row["owner"])) or "",
                            "name": Path(row["repo"]).name, "items": members,
                            "pull": build.pull_url(connection, row["repo"], row["branch"], [m["item"] for m in members]),
                            "outcome": row["outcome"], "detail": row["detail"] or "",
@@ -301,7 +321,7 @@ def panel(connection, *, now: str, show: str = "active") -> dict:
     except (SdDbError, sqlite3.Error, ValueError, TypeError, KeyError) as failure:
         return {"runs": [], "recent": [], "error": str(failure) or "the build runs could not be read", "read": now,
                 "show": show}
-    return {"runs": rows, "recent": recent, "error": "", "read": now, "quiet_seconds": QUIET_SECONDS,
+    return {"runs": rows, "recent": recent, "unclaimed": unclaimed, "error": "", "read": now, "quiet_seconds": QUIET_SECONDS,
             "stale_seconds": build.STALE_SECONDS, "show": show, "pickup": _pickup(connection, now)}
 
 

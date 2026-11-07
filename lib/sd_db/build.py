@@ -38,10 +38,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import paths, reads
-from .database import transaction
+from . import hub, paths, reads
+from .database import served_by, transaction
 from .errors import SdDbError
 from .runner import IN_SESSION, OWNING, RUNNABLE_KINDS, queue_state, restoration_pending
+from .ship import this_host
 from .writes import (
     add_note,
     cancel_done_blocked,
@@ -67,6 +68,9 @@ BUDGET_MINUTES = 60
 #: A supervisor beats every 30 s; one silent this long, or unspawned this long after its claim, is lost.
 #: 600, not 180: a beat a held lock skips no longer ends a 60-minute build (pack sd:6741).
 STALE_SECONDS = 600
+#: The `heartbeat` state row each build-dispatch tick writes first: this key on the hub, `<key>@<host>` on a
+#: satellite (pack sd:7933).
+HEARTBEAT = "build-dispatch"
 #: Lost runs one bundle may retry before it blocks.
 RETRIES = 1
 # The note on an item a blocked run parked (pack sd:6132).
@@ -124,11 +128,14 @@ class BuildRefused(SdDbError):
     """A press or a claim refused, with nothing written."""
 
 
-def _repo_refusal(row) -> str | None:
+def _repo_refusal(row, connection=None, *, hub_only: bool = False) -> str | None:
     """Why the item's repository takes no build, or None: the one repository rule `queue` and `claim` read.
 
     `row` carries the item's `id` and `repo`, and the repository's `repo_path`,
-    `managed`, `remote` and `lane_host` (`_REPO`'s columns).
+    `managed`, `remote` and `lane_host` (`_REPO`'s columns). A build runs on
+    its lane host (pack sd:7933); `hub_only`, for auto-pickup and drafts,
+    refuses a lane on a satellite (`lane_of`, which reads `connection`), as
+    they run on the hub only.
     """
     item = row["id"]
     if row["repo_path"] is None:
@@ -155,9 +162,111 @@ def _repo_refusal(row) -> str | None:
                         f"{row['repo']} would push and open a draft pull request it cannot link")
     if not row["remote"]:
         return f"item {item}'s repository {row['repo']} has no remote"
-    if row["lane_host"] is not None:
-        return f"item {item}'s lane runs on {row['lane_host']}; builds run on the hub only"
+    if hub_only and lane_of(connection, row["lane_host"]) is not None:
+        return f"item {item}'s lane runs on {row['lane_host']}; auto-pickup and drafts run on the hub only"
     return None
+
+
+def lane_hosts(connection) -> frozenset[str | None]:
+    """The lane hosts this machine builds for: its own name, and None (the hub's lanes) when it is the hub.
+
+    As `ship._lane` reads a lane: NULL is the hub's, a name is that machine's.
+    A satellite is a machine with a `hub.json` whose connection the hub
+    serves (pack sd:7933). The file decides, not the transport: the wire
+    harness serves the hub's own tests, and those tests stay the hub's.
+    """
+    here = this_host()
+    satellite = hub.configured() and served_by(connection) is not None
+    return frozenset({here}) if satellite else frozenset({None, here})
+
+
+def lane_of(connection, host: str | None) -> str | None:
+    """The other machine whose dispatcher runs a lane on `host`, or None when the hub's does: the one rule for
+    a press, a claim, pickup, drafts and the dashboard (review round 3).
+
+    `host` is a `repo.lane_host` or a run's `run_host`. NULL is the hub's, and
+    so is this machine's own name on the hub, as `sd_lane.ended_kind` reads
+    it. A satellite cannot tell the hub's name, so it reads that as another
+    host's; its own name is its own satellite lane.
+    """
+    if host is None or (host == this_host() and None in lane_hosts(connection)):
+        return None
+    return host
+
+
+def dispatcher_gone(connection, host: str) -> str | None:
+    """Why no build-dispatch tick on the satellite `host` runs now, or None: its newest beat is under
+    `STALE_SECONDS`, the reap's own rule. The hub's reap asks it: a tick that beats reaps its own runs."""
+    beat = dispatcher_beat(connection, host)
+    if beat is not None and beat < STALE_SECONDS:
+        return None
+    return f"no {HEARTBEAT}@{host} beat is under {STALE_SECONDS} s old"
+
+
+def dispatcher_refusal(connection, host: str) -> str | None:
+    """Why no build-dispatch tick on the satellite `host` would claim a press, or None: `dispatcher_gone`, or
+    the `why` its newest beat names (review round 4). The press asks it.
+
+    A tick beats before it claims, so a beat alone does not say it can: one
+    with no log folder, an unread load or a restore pending claims nothing.
+    """
+    gone = dispatcher_gone(connection, host)
+    if gone:
+        return gone
+    why = dispatcher_why(connection, host)
+    return f"{HEARTBEAT}@{host} claims nothing: {why}" if why else None
+
+
+def item_host(connection, item: int) -> str | None:
+    """`lane_of` the lane of `item`'s repository: the other machine whose dispatcher claims its build, or None."""
+    row = connection.execute(_REPO, (item,)).fetchone()
+    return lane_of(connection, row["lane_host"]) if row else None
+
+
+def unclaimed(connection) -> dict[str, str]:
+    """Each queued build assignment of another host's lane whose fresh beat names why it claims nothing, by id, to
+    "<host> claims nothing: <why>": the hub's claim leaves those rows queued, and the Builds panel names the reason
+    (review round 5)."""
+    found = {}
+    for row in connection.execute(
+            "SELECT assignment.id, repo.lane_host FROM assignment JOIN item ON item.id = assignment.item "
+            "LEFT JOIN repo ON repo.path = item.repo WHERE assignment.scope = ? AND assignment.status = 'queued'",
+            (SCOPE,)):
+        host = lane_of(connection, row["lane_host"])
+        why = dispatcher_why(connection, host) if host and not dispatcher_gone(connection, host) else None
+        if why:
+            found[str(row["id"])] = f"{host} claims nothing: {why}"
+    return found
+
+
+def dispatcher_why(connection, host: str) -> str | None:
+    """The reason the newest beat of `host`'s tick names for claiming nothing, or None when it names none.
+
+    A reason may last one tick (an unread load), so the hub's claim leaves a
+    queued row queued on it and blocks only on `dispatcher_gone`; the Builds
+    panel shows it on the row (review round 5).
+    """
+    row = _beat(connection, host)
+    try:
+        why = json.loads(row["body"]).get("why") if row else None
+    except (TypeError, ValueError, AttributeError):
+        why = None
+    return why if isinstance(why, str) and why else None
+
+
+def run_owner(owner: str, lane_host: str | None) -> str:
+    """The `runner_run.owner` a claim writes: the role on a hub lane, `<role>@<lane host>` on a satellite's."""
+    return owner if lane_host is None else f"{owner}@{lane_host}"
+
+
+def run_host(owner: str | None) -> str | None:
+    """The host whose dispatcher owns a run, from its `owner`: the part after `@`, or None for the hub."""
+    return (owner.rpartition("@")[2] or None) if owner and "@" in owner else None
+
+
+def mine(row, hosts: Collection[str | None]) -> bool:
+    """Whether this machine's dispatcher owns the run `row`: only it probes, signals, watches or sweeps it."""
+    return run_host(row["owner"]) in hosts
 
 
 def stop_step(connection, run: str, item) -> str:
@@ -192,8 +301,8 @@ _REPO = ("SELECT item.*, repo.path AS repo_path, repo.remote, repo.managed, repo
          "FROM item LEFT JOIN repo ON repo.path = item.repo WHERE item.id = ?")
 
 
-def _item(connection, item: int) -> dict:
-    """The item a build may take, or the refusal that names why not."""
+def _item(connection, item: int, *, hub_only: bool = False) -> dict:
+    """The item a build may take, or the refusal that names why not; `hub_only` as `_repo_refusal`."""
     row = connection.execute(_REPO, (item,)).fetchone()
     if row is None:
         raise BuildRefused(f"no item {item}")
@@ -202,9 +311,14 @@ def _item(connection, item: int) -> dict:
                            f"{', '.join(RUNNABLE_KINDS[:-1])} and {RUNNABLE_KINDS[-1]} items")
     if row["status"] != "ready":
         raise BuildRefused(f"item {item} is {row['status']}; a build takes a ready item")
-    refused = _repo_refusal(row)
+    refused = _repo_refusal(row, connection, hub_only=hub_only)
     if refused:
         raise BuildRefused(refused)
+    away = lane_of(connection, row["lane_host"])
+    gone = dispatcher_refusal(connection, away) if away else None
+    if gone:
+        # Nothing claims a satellite's press until its own dispatcher ticks, and the press locks the item.
+        raise BuildRefused(f"item {item}'s lane runs on {away}, and {gone}: no dispatcher there would claim it")
     active = connection.execute(
         f"SELECT id, status FROM assignment WHERE item = ? AND status IN {OWNING} LIMIT 1", (item,)).fetchone()
     if active:
@@ -215,6 +329,21 @@ def _item(connection, item: int) -> dict:
     return dict(row)
 
 
+def dispatcher_beat(connection, host: str) -> int | None:
+    """Seconds since the build-dispatch tick on the satellite `host` last beat; None when it never did, or when
+    its beat does not read: an unread beat is no beat."""
+    row = _beat(connection, host)
+    try:
+        return int(_age(row["timestamp"], clock())) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _beat(connection, host: str):
+    return connection.execute("SELECT timestamp, body FROM state WHERE kind = 'heartbeat' AND key = ? "
+                              "ORDER BY id DESC LIMIT 1", (f"{HEARTBEAT}@{host}",)).fetchone()
+
+
 def queue(connection, items: list[int], *, who: str, expected_revisions: dict | None = None) -> list[dict]:
     """The Build press: one queued build assignment per item, or the whole selection refused."""
     if not items or len(set(items)) != len(items) or any(type(item) is not int for item in items):
@@ -223,7 +352,7 @@ def queue(connection, items: list[int], *, who: str, expected_revisions: dict | 
         raise BuildRefused("a press names who pressed it")
     with transaction(connection):
         if restoration_pending(connection):
-            raise BuildRefused("database restore reimport is incomplete; builds are held")
+            raise BuildRefused(RESTORING)
         if expected_revisions is not None:
             from .workflow import item_state
             if {str(key) for key in expected_revisions} != {str(item) for item in items}:
@@ -249,14 +378,15 @@ def eligible(connection, *, now: str | None = None) -> list[dict]:
     """The ready items a build may take, highest priority first: auto-pickup's selection.
 
     `reads.backlog_items` gives the unparked rows in priority order; a
-    scheduled occurrence and every row `queue` would refuse are left out.
+    scheduled occurrence, every row `queue` would refuse and a satellite's
+    lane (auto-pickup runs on the hub only, pack sd:7933) are left out.
     """
     found = []
     for row in reads.backlog_items(connection, status="ready", now=now):
         if row["scheduled"]:
             continue
         try:
-            _item(connection, row["id"])
+            _item(connection, row["id"], hub_only=True)
         except BuildRefused:
             continue
         found.append({"id": row["id"], "title": row["title"], "repo": row["repo"], "priority": row["priority"]})
@@ -301,15 +431,20 @@ def picked(connection, lead: int) -> bool:
 def pickup(connection, available: dict, *, now: str | None = None) -> list[int]:
     """One tick of auto-pickup while it is on: queue `eligible` items, as `PICKUP`, to fill the room; the items.
 
-    The press queue goes first: while any build is queued, nothing is picked
-    and the claim drains it. Each free builder slot takes one bundle of up
-    to `BUNDLE_MAX` items of one repository, each repository at most its
-    `room_for`. No room, or no item, queues nothing.
+    The press queue goes first: while any build of this host's lanes is
+    queued, nothing is picked and the claim drains it. Each free builder
+    slot takes one bundle of up to `BUNDLE_MAX` items of one repository,
+    each repository at most its `room_for`. No room, or no item, queues
+    nothing.
     """
     if available["why"] or not pickup_state(connection, now=now)["on"]:
         return []
-    if connection.execute("SELECT 1 FROM assignment WHERE status = 'queued' AND scope = ? LIMIT 1",
-                          (SCOPE,)).fetchone():
+    # Only this host's presses hold it: the hub never claims a satellite's.
+    hosts = lane_hosts(connection)
+    if any(lane_of(connection, row["lane_host"]) in hosts for row in connection.execute(
+            "SELECT repo.lane_host FROM assignment JOIN item ON item.id = assignment.item "
+            "LEFT JOIN repo ON repo.path = item.repo WHERE assignment.status = 'queued' AND assignment.scope = ?",
+            (SCOPE,))):
         return []
     slots, chosen = available["machine"], []
     bundles: dict[str, list[list[int]]] = {}
@@ -382,6 +517,20 @@ def _key(repo: str | None) -> str | None:
     return paths.key(repo) if isinstance(repo, str) and repo.startswith("/") else repo
 
 
+#: `room`'s answers for an input it did not read: the tick claims nothing and says which.
+UNREAD = ("the load was not read", "the interactive builders were not counted")
+#: Why nothing claims while a restore reimport is pending: the press, the claim and the tick's beat say it.
+RESTORING = "database restore reimport is incomplete; builds are held"
+
+
+def unread(load: float | None, load_cap: float | None, interactive: list[dict] | None) -> str:
+    """`room`'s `UNREAD` answer for these inputs, or "": the tick reads it before its beat, `room` after."""
+    if not (isinstance(load, (int, float)) and isinstance(load_cap, (int, float))
+            and math.isfinite(load) and math.isfinite(load_cap)):
+        return UNREAD[0]
+    return UNREAD[1] if interactive is None else ""
+
+
 def over_load(load: float, cap: float) -> str:
     """Why no builder starts under this five-minute load, or "" (pack sd:6111).
 
@@ -391,7 +540,8 @@ def over_load(load: float, cap: float) -> str:
     return f"the five-minute load is {load:g}, above the cap of {cap:g}" if 0 < cap < load else ""
 
 
-def room(connection, *, load: float | None, load_cap: float | None, interactive: list[dict] | None) -> dict:
+def room(connection, *, load: float | None, load_cap: float | None, interactive: list[dict] | None,
+         hosts: Collection[str | None] | None = None) -> dict:
     """Builders that may start now: `machine`, `used` and `held` by repository, and `why` there is none.
 
     `load` and `load_cap` are the five-minute load and its cap from `sd gate
@@ -400,22 +550,20 @@ def room(connection, *, load: float | None, load_cap: float | None, interactive:
     when its cwd names none. Either unread
     (None) is no room, never room. A headless run's own session is not counted
     twice. A repository holding an exclusive or quarantined lease of any other
-    kind has no room (`held`).
+    kind has no room (`held`). Only the runs of `hosts` (`lane_hosts` when
+    None) count: each host's dispatcher has its own caps (pack sd:7933).
     """
-    why = ""
-    if not (isinstance(load, (int, float)) and isinstance(load_cap, (int, float))
-            and math.isfinite(load) and math.isfinite(load_cap)):
-        why = "the load was not read"
-    elif interactive is None:
-        why = "the interactive builders were not counted"
+    hosts = lane_hosts(connection) if hosts is None else hosts
+    why = unread(load, load_cap, interactive)
     leases = connection.execute(
-        "SELECT lease.repo, lease.exclusive, run.quarantine, run.session_id, assignment.scope "
+        "SELECT lease.repo, lease.exclusive, run.quarantine, run.session_id, run.owner, assignment.scope "
         "FROM runner_lease lease JOIN runner_run run ON run.id = lease.run "
         "LEFT JOIN assignment ON assignment.id = run.assignment WHERE lease.released_at IS NULL").fetchall()
-    builds = [row for row in leases if row["scope"] == SCOPE]
-    drafts = connection.execute(
-        "SELECT runner_run.session_id FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
-        "WHERE runner_run.released_at IS NULL AND assignment.scope = ?", (DRAFT,)).fetchall()
+    builds = [row for row in leases if row["scope"] == SCOPE and mine(row, hosts)]
+    drafts = [row for row in connection.execute(
+        "SELECT runner_run.session_id, runner_run.owner FROM runner_run JOIN assignment "
+        "ON assignment.id = runner_run.assignment WHERE runner_run.released_at IS NULL AND assignment.scope = ?",
+        (DRAFT,)).fetchall() if mine(row, hosts)]
     headless = {row["session_id"] for row in [*builds, *drafts] if row["session_id"]}
     used: dict[str, int] = {}
     for row in builds:
@@ -497,7 +645,7 @@ _RECHECK = (f"EXISTS (SELECT 1 FROM item WHERE item.id = assignment.item AND ite
 
 
 def claim(connection, *, owner: str, load: float | None, load_cap: float | None, interactive: list[dict] | None,
-          root: Path | None = None) -> dict | None:
+          root: Path | None = None, hosts: Collection[str | None] | None = None) -> dict | None:
     """Claim one bundle under one `BEGIN IMMEDIATE`; None when nothing may start now.
 
     The repository with room whose best queued build ranks first (priority,
@@ -509,23 +657,38 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
     Each member's `item.branch` becomes the run's branch, so a design-only
     build is not left with an empty one (pack sd:6756).
 
-    A queued build whose repository `queue` would now refuse (unmanaged, no
-    remote, a satellite lane host: `_repo_refusal`) ends `blocked` with that
-    reason before the bundle is picked, its item left as it is, and the same
-    claim goes on to the next repository (pack sd:6103).
+    A claim takes only the rows whose repository's lane runs on one of
+    `hosts` (`lane_hosts` when None), and skips the rest, unblocked, for
+    their lane host's dispatcher; the run's owner names that host
+    (`run_owner`, pack sd:7933). A queued build of its own whose repository
+    `queue` would now refuse (unmanaged, no remote: `_repo_refusal`) ends
+    `blocked` with that reason before the bundle is picked, its item left as
+    it is, and the same claim goes on to the next repository (pack sd:6103).
     """
+    hosts = lane_hosts(connection) if hosts is None else hosts
     with transaction(connection):
         if restoration_pending(connection):
-            raise BuildRefused("database restore reimport is incomplete; builds are held")
-        available = room(connection, load=load, load_cap=load_cap, interactive=interactive)
-        if available["why"]:
-            return None
+            raise BuildRefused(RESTORING)
         queued = connection.execute(
-            "SELECT assignment.id, assignment.item, assignment.parent, assignment.run_count, item.repo "
-            "FROM assignment JOIN item ON item.id = assignment.item "
+            "SELECT assignment.id, assignment.item, assignment.parent, assignment.run_count, item.repo, "
+            "repo.lane_host FROM assignment JOIN item ON item.id = assignment.item "
+            "LEFT JOIN repo ON repo.path = item.repo "
             "WHERE assignment.status = 'queued' AND assignment.scope = ? AND item.repo IS NOT NULL "
             "ORDER BY item.priority IS NULL, item.priority, assignment.queued_at, assignment.id", (SCOPE,)).fetchall()
-        queued = [row for row in queued if not _refused_repo(connection, row)]
+        lanes = {row["id"]: lane_of(connection, row["lane_host"]) for row in queued}
+        if None in hosts:
+            # The hub blocks another host's row once that host's dispatcher went quiet: a lane moved after the
+            # press, or a dispatcher that died after it, would leave the item locked with no word. A fresh beat
+            # that names a `why` leaves the row queued, as that reason may last one tick (review round 5).
+            for row in queued:
+                away = lanes[row["id"]]
+                gone = dispatcher_gone(connection, away) if away is not None and away not in hosts else None
+                if gone:
+                    _refuse(connection, row, f"item {row['item']}'s lane runs on {away}, and {gone}")
+        available = room(connection, load=load, load_cap=load_cap, interactive=interactive, hosts=hosts)
+        if available["why"]:
+            return None
+        queued = [row for row in queued if lanes[row["id"]] in hosts and not _refused_repo(connection, row)]
         repo = next((row["repo"] for row in queued if room_for(available, row["repo"]) > 0), None)
         if repo is None:
             return None
@@ -543,7 +706,8 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
                     (stamp, lead, lead, *ids, SCOPE)).rowcount
                 if taken != len(ids):
                     raise _Moved
-                ident = _open_run(connection, lead, repo=repo, owner=owner, step="claimed",
+                ident = _open_run(connection, lead, repo=repo, owner=run_owner(owner, lanes[lead]),
+                                  step="claimed",
                                   model=_model(connection, [row["item"] for row in bundle]),
                                   work=worktree(repo, lead, root=root), stamp=stamp)
                 for row in bundle:
@@ -585,7 +749,7 @@ def _refuse(connection, row, reason: str) -> None:
 
 def _refused_repo(connection, row) -> bool:
     """End a queued build whose repository turned ineligible after the press (`_repo_refusal`); True if it did."""
-    refused = _repo_refusal(connection.execute(_REPO, (row["item"],)).fetchone())
+    refused = _repo_refusal(connection.execute(_REPO, (row["item"],)).fetchone(), connection)
     if refused:
         _refuse(connection, row, f"{refused} after the press")
     return refused is not None
@@ -629,12 +793,12 @@ def run(connection, ident: str) -> dict:
     return result
 
 
-def open_runs(connection) -> list[dict]:
-    """Every unreleased build run, oldest first."""
+def open_runs(connection, hosts: Collection[str | None] | None = None) -> list[dict]:
+    """Every unreleased build run, oldest first; with `hosts`, only the runs those hosts own (`mine`)."""
     return [dict(row) for row in connection.execute(
         "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
         "WHERE runner_run.released_at IS NULL AND assignment.scope = ? ORDER BY runner_run.created_at, runner_run.id",
-        (SCOPE,))]
+        (SCOPE,)) if hosts is None or mine(row, hosts)]
 
 
 def ended_runs(connection, *, limit: int) -> list[dict]:
@@ -1122,7 +1286,8 @@ def kill_group(pgid: int) -> bool:
     return False
 
 
-def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) -> list[dict]:
+def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group,
+         hosts: Collection[str | None] | None = None) -> list[dict]:
     """End every open build run that fails `alive`; the runs settled, each `{run, outcome, retry}`.
 
     1. Compare-and-set `outcome` (`interrupted`, or `cancelled` when a cancel
@@ -1144,17 +1309,62 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     reimport is pending: `abandon` ended
     every run the restore found, and a run it did not find is not this
     store's to judge.
+
+    Only the runs of `hosts` (`lane_hosts` when None) are judged: a pid or a
+    group of another machine's run means nothing here (pack sd:7933). The
+    hub then blocks another host's quiet runs without a probe, their leases kept (`_strand`).
     """
-    return _reap(connection, open_runs, _settle, now=now, probe=probe, kill=kill)
+    hosts = lane_hosts(connection) if hosts is None else hosts
+    settled = _reap(connection, open_runs, _settle, now=now, probe=probe, kill=kill, hosts=hosts)
+    if None in hosts and not restoration_pending(connection):
+        settled += _strand(connection, hosts, now=now or clock())
+    return settled
 
 
-def _reap(connection, runs, settle, *, now: str | None, probe, kill) -> list[dict]:
-    """`reap` over `runs(connection)`, each ended run passed to `settle`: a draft run's reap is this one too."""
+def _strand(connection, hosts: Collection[str | None], *, now: str) -> list[dict]:
+    """The hub ends another host's open runs blocked once both its dispatcher and the run went quiet (review
+    rounds 3 and 4).
+
+    Quiet is `dispatcher_gone` for the run's host and no run beat for
+    `STALE_SECONDS`. A missing beat does not prove that host's processes
+    stopped, so the run keeps its lease: it ends `blocked` with the reason
+    (a pending cancel named in it), unreleased, and no Retry or claim takes
+    its items until that host's own reap reads its groups gone and releases
+    it. A held run stays held. No pid or group is probed or signalled: they
+    are another machine's. A run at a lane step waits on that host's lane.
+    """
+    settled: list[dict] = []
+    for row in open_runs(connection):
+        host = run_host(row["owner"])
+        if (mine(row, hosts) or host is None or row["outcome"] is not None or row["step"] in LANE_STEPS
+                or _age(row["heartbeat_at"] or row["created_at"], now) < STALE_SECONDS):
+            continue
+        gone = dispatcher_gone(connection, host)
+        if gone is None:
+            continue
+        detail = f"{host}'s dispatcher went quiet ({gone}) and the run sent no beat for {STALE_SECONDS} s"
+        if row["cancel_requested"]:
+            detail = f"{row['cancel_requested']}, but {detail}"
+        with transaction(connection):
+            if connection.execute(
+                    f"UPDATE runner_run SET outcome = 'interrupted', detail = ?, updated_at = ? WHERE id = ? "
+                    f"AND {_SAME}", (detail, clock(), row["id"], *(row[name] for name in REAP_READS))).rowcount != 1:
+                continue
+        result = _settle(connection, {**row, "outcome": "interrupted", "detail": detail},
+                         block=f"the hub ended it on {host}: {detail}; it releases once {host} reads its groups gone")
+        if result is not None:
+            settled.append(result)
+    return settled
+
+
+def _reap(connection, runs, settle, *, now: str | None, probe, kill,
+          hosts: Collection[str | None] | None = None) -> list[dict]:
+    """`reap` over `runs(connection, hosts)`, each ended run passed to `settle`: a draft run's reap is this one too."""
     now = now or clock()
     settled: list[dict] = []
     if restoration_pending(connection):
         return settled
-    for row in runs(connection):
+    for row in runs(connection, lane_hosts(connection) if hosts is None else hosts):
         if row["outcome"] in HELD:
             _release(connection, row, probe=probe)
             continue

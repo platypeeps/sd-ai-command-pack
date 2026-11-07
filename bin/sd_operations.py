@@ -341,12 +341,15 @@ def push_failures(connection: Any, environ: dict[str, str] | None = None) -> lis
     The send goes through `SD_NOTIFY` or `notify` on PATH, as `sd-db
     backup` reports a failure. A key is recorded only once its send
     landed, so a failed send is tried again next tick. Success pushes
-    nothing.
+    nothing. Only the hub pushes, every host's failures: a satellite's tick
+    would send each one a second time (pack sd:7933).
     """
     import sd_lib
     sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
-    from sd_db import today
+    from sd_db import build, today
     from sd_db.writes import record_state
+    if None not in build.lane_hosts(connection):
+        return []
     env = os.environ if environ is None else environ
     notify = env.get("SD_NOTIFY") or shutil.which("notify", path=env.get("PATH"))
     if not notify:

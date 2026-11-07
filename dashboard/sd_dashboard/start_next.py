@@ -155,8 +155,7 @@ def run(connection, *, now: str, items: list[dict], who: str, sessions=None, gat
         except build.BuildRefused as refusal:
             # `build.queue` is one transaction: a refusal wrote nothing, so the page reads the plan again.
             return 409, {"error": f"Nothing queued: {refusal}.", "reload": True}
-        return {"queued": [{"id": row["id"], "item": row["item"], "status": row["status"]} for row in queued],
-                "kickstart": (start or builds.kickstart)()}
+        return builds.answer(connection, queued, start or builds.kickstart)
 
 
 def request(values: dict):

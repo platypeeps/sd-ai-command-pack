@@ -3,6 +3,7 @@
 The design's failure table names most of these tests: system
 `docs/work/2026-10-24-build-dispatcher/design.md`.
 """
+import contextlib
 import sqlite3
 import subprocess
 import sys
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, operations, recovery, runner, workflow
+from sd_db import build, draft, operations, recovery, remote, runner, workflow
 from sd_db.database import connect
 from sd_db.errors import BackupError
 from sd_db.migrate import initialise
@@ -74,6 +75,11 @@ class Case(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        # The fixtures name a satellite lane `work`, which a real machine may be called too: each test runs as the
+        # hub `hub` unless it says otherwise (review round 3).
+        pinned = mock.patch.object(build, "this_host", return_value="hub")
+        pinned.start()
+        self.addCleanup(pinned.stop)
         self.database = self.root / "sd.db"
         initialise(self.database)
         self.db = connect(self.database)
@@ -104,9 +110,6 @@ class Queue(Case):
         upsert_repo(self.db, "/fixture/off", remote="/fixture/r-off", managed=0)
         upsert_repo(self.db, "/fixture/gh", remote="https://github.com/owner/third-party.git", managed=0)
         upsert_repo(self.db, "/fixture/none", managed=1)
-        upsert_repo(self.db, "/fixture/sat", remote="/fixture/r-sat", managed=1)
-        satellite = self.item(repo="/fixture/sat")
-        self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/sat'")
         stale = self.item()
         revision = item_state(self.db, stale)["revision"]
         self.db.execute("UPDATE item SET title = 'moved' WHERE id = ?", (stale,))
@@ -116,7 +119,6 @@ class Queue(Case):
             "is not managed and its remote is not on GitHub": ([ready, self.item(repo="/fixture/off")], None),
             "takes task items only": ([ready, self.item(repo="/fixture/gh", kind="report")], None),
             "has no remote": ([ready, self.item(repo="/fixture/none")], None),
-            "builds run on the hub only": ([ready, satellite], None),
             "is a followup item": ([ready, self.item(kind="followup")], None),
             "needs a registered repository": ([ready, self.item(repo=None)], None),
             "changed; refresh the selection": ([stale], {stale: revision}),
@@ -128,6 +130,33 @@ class Queue(Case):
                     build.queue(self.db, items, who="operator", expected_revisions=revisions)
         self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), before)
         self.assertEqual(self.statuses([ready]), ["ready"])
+
+    def test_press_queues_a_satellite_lane_item(self):
+        """Pack sd:7933, failure table Press: a lane on a satellite takes a press; its host builds it."""
+        upsert_repo(self.db, "/fixture/sat", remote="/fixture/r-sat", managed=1)
+        self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/sat'")
+        satellite = self.item(repo="/fixture/sat")
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
+        queued = build.queue(self.db, [self.item(), satellite], who="operator")
+        self.assertEqual([row["status"] for row in queued], ["queued", "queued"])
+
+    def test_a_press_for_a_satellite_whose_dispatcher_does_not_beat_refuses_and_locks_nothing(self):
+        """Review round 2: with no fresh build-dispatch@<host> beat nothing there claims the press, and its items
+        would sit locked; the press refuses, naming the host, under the reap's own STALE_SECONDS."""
+        upsert_repo(self.db, "/fixture/sat", remote="/fixture/r-sat", managed=1)
+        self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/fixture/sat'")
+        hub, satellite = self.item(), self.item(repo="/fixture/sat")
+        stale = (datetime.fromisoformat(build.clock()) - timedelta(seconds=build.STALE_SECONDS + 1)).isoformat()
+        for case, stamp in (("no beat", None), ("a stale beat", stale), ("a beat that does not read", "soon")):
+            with self.subTest(case=case):
+                if stamp is not None:
+                    record_state(self.db, "heartbeat", key="build-dispatch@work", timestamp=stamp, body={})
+                with self.assertRaisesRegex(build.BuildRefused, "lane runs on work, and no build-dispatch@work beat"):
+                    build.queue(self.db, [hub, satellite], who="operator")
+                self.assertEqual(self.count("SELECT COUNT(*) FROM assignment"), 0)
+                self.assertEqual(self.statuses([hub, satellite]), ["ready", "ready"])
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
+        self.assertEqual(len(build.queue(self.db, [hub, satellite], who="operator")), 2, "a fresh beat takes it")
 
     def test_a_press_queues_one_build_per_item_and_locks_its_status(self):
         items = [self.item(), self.item()]
@@ -353,7 +382,18 @@ class Claim(Case):
         self.ineligible_after_press("UPDATE repo SET remote = NULL WHERE path = ?", "has no remote")
 
     def test_claim_skips_a_repository_moved_to_a_satellite_lane_after_the_press(self):
-        self.ineligible_after_press("UPDATE repo SET lane_host = 'work' WHERE path = ?", "builds run on the hub only")
+        """Pack sd:7933: the hub's claim leaves a live satellite's rows queued for it, blocks none, and goes on to B.
+        Once that satellite's dispatcher goes quiet the hub blocks them (Hosts, review round 3)."""
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
+        items = [self.item(priority=1)]
+        queued = build.queue(self.db, items, who="operator")
+        other = build.queue(self.db, [self.item(repo=B, priority=2)], who="operator")
+        self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = ?", (A,))
+        run = self.claim(hosts={None, "hub"})
+        self.assertEqual((run["repo"], [m["id"] for m in run["members"]]), (B, [other[0]["id"]]))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", queued[0]["id"]), "queued")
+        self.assertEqual(self.statuses(items), ["ready"])
+        self.assertIsNone(self.claim(hosts={None, "hub"}))
 
     def test_claim_respects_exclusive_lease(self):
         """Guard: an exclusive lease of any other kind in the repository leaves it no room."""
@@ -1006,8 +1046,8 @@ class Race(Case):
         """One reap whose `open_runs` read is followed by `writer`, as a supervisor or an operator landing then."""
         read = build.open_runs
 
-        def snapshot(connection):
-            rows = read(connection)
+        def snapshot(connection, hosts=None):
+            rows = read(connection, hosts)
             writer()
             return rows
 
@@ -1230,6 +1270,291 @@ class Pickup(Case):
         self.assertEqual((row["title"], row["repo"]), (build.HEALTH + run["branch"], A))
         self.assertEqual(build.health_failed(self.db, run["id"], "again"), filed)
         self.assertEqual(self.count("SELECT COUNT(*) FROM item WHERE title LIKE 'Auto-pickup off%'"), 1)
+
+
+SAT = "/fixture/sat"
+HUB, WORK = frozenset({None, "hub"}), frozenset({"work"})
+
+
+class Hosts(Case):
+    """Pack sd:7933: each host's dispatcher claims, counts, reaps and releases only its own lanes' runs."""
+
+    def setUp(self):
+        super().setUp()
+        upsert_repo(self.db, SAT, remote="/fixture/remote-sat", managed=1)
+        self.db.execute("UPDATE repo SET lane_host = 'work' WHERE path = ?", (SAT,))
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={})
+
+    def satellite_run(self):
+        build.queue(self.db, [self.item(repo=SAT)], who="operator")
+        run = self.claim(hosts=WORK)
+        assert run is not None
+        return run
+
+    def test_lane_hosts_is_the_hub_and_this_name_or_this_name_alone(self):
+        with mock.patch.object(build, "this_host", return_value="work"), \
+                mock.patch("sd_db.hub.configured", return_value=True):
+            with mock.patch.object(build, "served_by", return_value=None):
+                self.assertEqual(build.lane_hosts(self.db), {None, "work"})
+            with mock.patch.object(build, "served_by", return_value="hub.example.test:7000"):
+                self.assertEqual(build.lane_hosts(self.db), {"work"})
+        self.assertEqual([build.run_host(owner) for owner in ("build-dispatch", "build-dispatch@work", None, "x@")],
+                         [None, "work", None, None])
+
+    def test_the_hub_over_the_wire_is_still_the_hub(self):
+        """Review round 1: hub.json decides, not the transport; the wire harness serves the hub's own tests."""
+        wire = mock.Mock(spec=remote.Connection, host="127.0.0.1", port=7000)
+        with mock.patch.object(build, "this_host", return_value="hub"):
+            with mock.patch("sd_db.hub.configured", return_value=False):
+                self.assertEqual(build.lane_hosts(wire), {None, "hub"}, "no hub.json: the hub, over the wire too")
+            with mock.patch("sd_db.hub.configured", return_value=True):
+                self.assertEqual(build.lane_hosts(wire), {"hub"}, "hub.json and a served connection: a satellite")
+                self.assertEqual(build.lane_hosts(mock.Mock(spec=sqlite3.Connection)), {None, "hub"},
+                                 "a local database is a hub's")
+
+    def test_a_satellite_press_leaves_the_hub_pickup_running(self):
+        """Review round 1: the hub never claims a satellite's press, so it must not hold the hub's pickup."""
+        build.queue(self.db, [self.item(repo=SAT)], who="operator")
+        ready = self.item()
+        build.set_pickup(self.db, True, now=Pickup.NOW)
+        with mock.patch.object(build, "this_host", return_value="hub"):
+            self.assertEqual(build.pickup(self.db, build.room(self.db, **IDLE, hosts=HUB), now=Pickup.NOW), [ready])
+
+    def test_the_hub_claim_skips_a_satellite_row(self):
+        build.queue(self.db, [self.item(repo=SAT)], who="operator")
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment"), "queued", "skipped, not blocked")
+        self.assertEqual(self.count("SELECT COUNT(*) FROM note WHERE body LIKE '%blocked%'"), 0)
+
+    def test_a_satellite_claims_only_its_lane(self):
+        hub = build.queue(self.db, [self.item()], who="operator")
+        run = self.satellite_run()
+        self.assertEqual((run["repo"], run["owner"]), (SAT, "fixture@work"))
+        self.assertIsNone(self.claim(hosts=WORK), "the hub's row is not the satellite's")
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", hub[0]["id"]), "queued")
+        self.assertEqual(self.claim(hosts=HUB)["owner"], "fixture", "the hub's run keeps the role as its owner")
+
+    def test_a_lane_move_before_the_claim_moves_the_claim(self):
+        build.queue(self.db, [self.item(repo=SAT)], who="operator")
+        self.db.execute("UPDATE repo SET lane_host = NULL WHERE path = ?", (SAT,))
+        self.assertIsNone(self.claim(hosts=WORK))
+        self.assertEqual(self.claim(hosts=HUB)["owner"], "fixture")
+
+    def test_room_counts_only_this_hosts_runs(self):
+        self.satellite_run()
+        build.queue(self.db, [self.item()], who="operator")
+        self.claim(hosts=HUB)
+        for hosts, repo in ((HUB, A), (WORK, SAT)):
+            with self.subTest(hosts=hosts):
+                room = build.room(self.db, **IDLE, hosts=hosts)
+                self.assertEqual((room["machine"], room["used"]), (build.MACHINE_CAP - 1, {repo: 1}))
+
+    def test_auto_pickup_skips_a_satellite_lane(self):
+        hub, satellite = self.item(), self.item(repo=SAT)
+        self.assertEqual([row["id"] for row in build.eligible(self.db)], [hub])
+        with self.assertRaisesRegex(build.BuildRefused, "auto-pickup and drafts run on the hub only"):
+            build._item(self.db, satellite, hub_only=True)
+
+    def test_the_hub_never_signals_or_reaps_a_satellite_run(self):
+        """The hazard: the hub would probe pid 4242 here and kill group 777, which name a satellite's processes."""
+        run = self.satellite_run()
+        build.register(self.db, run["id"], pid=4242, pgid=4242, start=START)
+        build.write(self.db, run["id"], builder_pgid=777, builder_start=START)
+        stale = later(run["created_at"], build.STALE_SECONDS + 1)
+
+        class Asked(Probe):
+            calls: list = []
+
+            def alive(self, pid):
+                self.calls.append(("alive", pid))
+                return False
+
+            def group(self, pgid):
+                self.calls.append(("group", pgid))
+                return False
+
+        probe, kill = Asked(), Kill(self.db)
+        self.assertEqual(build.reap(self.db, now=stale, probe=probe, kill=kill, hosts=HUB), [])
+        self.db.execute("UPDATE runner_run SET outcome = 'blocked' WHERE id = ?", (run["id"],))
+        self.assertEqual(build.reap(self.db, now=stale, probe=probe, kill=kill, hosts=HUB), [])
+        self.assertEqual((probe.calls, kill.calls), ([], []), "nothing of the satellite's is probed or killed")
+        self.assertIsNone(build.run(self.db, run["id"])["released_at"])
+        build.reap(self.db, now=stale, probe=Probe(alive=False), kill=kill, hosts=WORK)
+        self.assertIsNotNone(build.run(self.db, run["id"])["released_at"], "the satellite releases its own")
+
+    def test_a_retry_keeps_the_satellite_owner(self):
+        run = self.satellite_run()
+        stale = later(run["created_at"], build.STALE_SECONDS + 1)
+        retry = build.reap(self.db, now=stale, probe=Probe(alive=False), hosts=WORK)[0]["retry"]
+        self.assertEqual(build.run(self.db, retry)["owner"], "fixture@work")
+
+    # Review round 3, class A: a lane named for the hub is the hub's, by one rule (`build.lane_of`).
+
+    def as_hub(self):
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(build, "this_host", return_value="hub"))
+        stack.enter_context(mock.patch("sd_db.hub.configured", return_value=False))
+        return stack
+
+    def hub_named(self, status="ready"):
+        upsert_repo(self.db, "/fixture/hubnamed", remote="/fixture/remote-hubnamed", managed=1)
+        self.db.execute("UPDATE repo SET lane_host = 'hub' WHERE path = '/fixture/hubnamed'")
+        return self.item(repo="/fixture/hubnamed", status=status)
+
+    def test_lane_of_reads_this_hubs_own_name_as_the_hub(self):
+        with self.as_hub():
+            self.assertEqual([build.lane_of(self.db, host) for host in (None, "hub", "work")], [None, None, "work"])
+        with mock.patch.object(build, "this_host", return_value="work"), \
+                mock.patch("sd_db.hub.configured", return_value=True), \
+                mock.patch.object(build, "served_by", return_value="hub.example.test:7000"):
+            self.assertEqual([build.lane_of(self.db, host) for host in (None, "work")], [None, "work"],
+                             "a satellite's own lane is a satellite's")
+
+    def test_a_lane_named_for_the_hub_takes_a_press_pickup_and_draft_on_the_hub(self):
+        with self.as_hub():
+            item = self.hub_named()
+            self.assertIn(item, [row["id"] for row in build.eligible(self.db)], "auto-pickup takes it")
+            self.assertEqual(len(build.queue(self.db, [item], who="operator")), 1, "no build-dispatch@hub beat needed")
+            self.assertIsNotNone(draft.queue_if_eligible(self.db, self.hub_named(status="planning"), who="dashboard"))
+
+    def test_a_lane_named_for_the_hub_claims_with_the_hubs_bare_owner(self):
+        with self.as_hub():
+            build.queue(self.db, [self.hub_named()], who="operator")
+            run = self.claim()
+        assert run is not None
+        self.assertEqual(run["owner"], "fixture", "the role, so the panel reads its log and a failover keeps it")
+
+    # Review round 3, class B: once a satellite's dispatcher goes quiet, the hub settles its rows and runs.
+
+    def quiet(self, host="work"):
+        stamp = (datetime.fromisoformat(build.clock()) - timedelta(seconds=build.STALE_SECONDS + 1)).isoformat()
+        record_state(self.db, "heartbeat", key=f"build-dispatch@{host}", timestamp=stamp, body={})
+
+    def test_the_hub_blocks_a_quiet_satellites_queued_row_with_why(self):
+        item = self.item(repo=SAT)
+        lead = build.queue(self.db, [item], who="operator")[0]["id"]
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "queued", "a live beat waits")
+        self.quiet()
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked")
+        self.assertIn("lane runs on work, and no build-dispatch@work beat",
+                      self.count("SELECT body FROM note WHERE item = ? ORDER BY id DESC LIMIT 1", item))
+        self.assertEqual(self.statuses([item]), ["ready"], "the item is free again")
+
+    def test_the_hub_blocks_a_row_whose_lane_moved_to_a_host_that_never_beat(self):
+        item = self.item()
+        lead = build.queue(self.db, [item], who="operator")[0]["id"]
+        self.db.execute("UPDATE repo SET lane_host = 'gone' WHERE path = ?", (A,))
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked")
+
+    # Review round 4: a fresh beat that names why its tick claims nothing is no dispatcher that would claim.
+
+    UNSET = "sd.bulk_storage_root is unset, so a build run has no log folder"
+
+    def test_a_press_refuses_a_satellite_whose_beat_says_it_claims_nothing(self):
+        item = self.item(repo=SAT)
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": self.UNSET})
+        with self.assertRaisesRegex(build.BuildRefused, f"lane runs on work, and build-dispatch@work claims "
+                                                        f"nothing: {self.UNSET}"):
+            build.queue(self.db, [item], who="operator")
+        self.assertEqual(self.count("SELECT COUNT(*) FROM assignment WHERE item = ?", item), 0, "nothing locked")
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": ""})
+        self.assertEqual(len(build.queue(self.db, [item], who="operator")), 1, "a beat that claims takes the press")
+
+    def test_a_queued_row_whose_satellite_claims_nothing_stays_queued(self):
+        """Review round 5: a `why` may last one tick (an unread load), so the hub's claim blocks only on a stale beat."""
+        item = self.item(repo=SAT)
+        lead = build.queue(self.db, [item], who="operator")[0]["id"]
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": self.UNSET})
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "queued")
+        self.assertEqual(build.dispatcher_why(self.db, "work"), self.UNSET)
+        self.quiet()
+        self.assertIsNone(self.claim(hosts=HUB))
+        self.assertEqual(self.count("SELECT status FROM assignment WHERE id = ?", lead), "blocked", "a stale beat blocks")
+
+    def test_a_satellite_that_beats_and_claims_nothing_still_owns_its_runs(self):
+        """Its tick reaps before it claims, so the hub leaves its runs: the beat says it is there."""
+        run = self.satellite_run()
+        record_state(self.db, "heartbeat", key="build-dispatch@work", body={"pid": 1, "why": self.UNSET})
+        self.assertEqual(self.strand(run), [])
+        self.assertIsNone(build.run(self.db, run["id"])["outcome"])
+
+    def strand(self, run, *, after=build.STALE_SECONDS + 1):
+        class Untouched(Probe):
+            def alive(self, pid):
+                raise AssertionError(f"probed pid {pid} of another machine")
+
+            def group(self, pgid):
+                raise AssertionError(f"probed group {pgid} of another machine")
+
+        kill = Kill(self.db)
+        settled = build.reap(self.db, now=later(run["created_at"], after), probe=Untouched(), kill=kill, hosts=HUB)
+        self.assertEqual(kill.calls, [], "the hub kills nothing of another machine")
+        return settled
+
+    # Review round 4: a missing beat does not prove another machine's processes stopped. The hub marks the run
+    # blocked with a reason and keeps its lease; only that host's own probe releases it.
+
+    def lease_held(self, run):
+        return self.count("SELECT COUNT(*) FROM runner_lease WHERE run = ? AND released_at IS NULL", run["id"]) == 1
+
+    def test_the_hub_blocks_a_quiet_satellites_run_and_keeps_its_lease(self):
+        run = self.satellite_run()
+        item = run["members"][0]["item"]
+        build.register(self.db, run["id"], pid=4242, pgid=4242, start=START)
+        self.assertEqual(self.strand(run), [], "a live dispatcher there keeps it")
+        self.quiet()
+        self.assertEqual(self.strand(run, after=60), [], "a run that beat lately keeps it")
+        [settled] = self.strand(run)
+        self.assertEqual((settled["run"], settled["outcome"]), (run["id"], "blocked"))
+        ended = build.run(self.db, run["id"])
+        self.assertIn("no build-dispatch@work beat", ended["detail"])
+        self.assertIsNone(ended["released_at"], "the hub cannot see work's processes stop")
+        self.assertTrue(self.lease_held(run))
+        self.assertEqual(self.statuses([item]), ["blocked"])
+        self.assertIn(f"held by build run {run['id']} (blocked)", build._held(self.db, item) or "")
+        self.assertEqual(self.strand(run), [], "a second hub reap leaves it as it is")
+        self.assertTrue(self.lease_held(run))
+        build.reap(self.db, now=later(run["created_at"], build.STALE_SECONDS + 1), probe=Probe(alive=False),
+                   hosts=WORK)
+        self.assertIsNotNone(build.run(self.db, run["id"])["released_at"], "work's own probe releases it")
+        self.assertFalse(self.lease_held(run))
+
+    def test_a_cancel_on_a_quiet_satellite_blocks_and_keeps_the_lease(self):
+        run = self.satellite_run()
+        lead = run["assignment"]
+        operations.cancel_assignment(self.db, lead, expected_revision=operations.assignment_state(
+            self.db, lead)["revision"], who="dashboard")
+        self.quiet()
+        [settled] = self.strand(run)
+        self.assertEqual(settled["outcome"], "blocked")
+        ended = build.run(self.db, run["id"])
+        self.assertIn("cancelled by dashboard", ended["detail"])
+        self.assertIsNone(ended["released_at"])
+        self.assertTrue(self.lease_held(run))
+
+    def test_the_hub_leaves_a_quiet_satellites_held_run_held(self):
+        run = self.satellite_run()
+        build.end(self.db, run["id"], "blocked", "the review left blockers")
+        self.quiet()
+        self.assertEqual(self.strand(run), [])
+        self.assertIsNone(build.run(self.db, run["id"])["released_at"], "held until work reads its groups gone")
+        self.assertTrue(self.lease_held(run))
+
+    def test_a_hub_cancel_lands_on_the_satellite_reap(self):
+        run = self.satellite_run()
+        lead = run["assignment"]
+        operations.cancel_assignment(self.db, lead, expected_revision=operations.assignment_state(
+            self.db, lead)["revision"], who="dashboard")
+        stale = later(run["created_at"], build.STALE_SECONDS + 1)
+        self.assertEqual(build.reap(self.db, now=stale, probe=Probe(alive=False), hosts=HUB), [])
+        self.assertEqual(build.run(self.db, run["id"])["cancel_requested"], "cancelled by dashboard")
+        settled = build.reap(self.db, now=stale, probe=Probe(alive=False), hosts=WORK)
+        self.assertEqual(settled[0]["outcome"], "cancelled")
+        self.assertEqual(self.statuses([run["members"][0]["item"]]), ["ready"])
 
 
 if __name__ == "__main__":

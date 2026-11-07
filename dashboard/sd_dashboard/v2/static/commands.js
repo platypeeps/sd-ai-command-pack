@@ -168,6 +168,9 @@
 
   // The dispatcher's kickstart after a build queues (tasks_screen.build): started now, or at its next slot and why.
   const kickText = k => !k ? '' : k.ok ? ' · the dispatcher was started' : ` · the dispatcher starts at its next slot (${k.why})`;
+  // A satellite's row waits for that host's own tick; the hub's kickstart claims none of it (pack sd:7933).
+  const hostText = q => q.filter(r => r.host).map(r => ` · ${r.host}'s dispatcher claims #${r.item} at its next tick`).join('');
+  const queuedText = out => `Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${kickText(out.kickstart)}${hostText(out.queued)}`;
   // Build (pack sd:6095): the press queues a headless build of each picked ready item (`sd assignments build`). The
   // dialog reads the server's plan first (builds.plan): each repository's bundles of up to 3 items, the model, the
   // room now, and every item the press would refuse with why. One refusal refuses the whole press, so the dialog then
@@ -195,7 +198,7 @@
         <p class="why">${room}</p>
         ${P.refused.length ? html`<p class="why">▲ Nothing can be queued while one item is refused:</p>
           <ul class="start-list">${P.refused.map(r => html`<li><code>#${String(r.id)}</code> ${r.why}</li>`)}</ul>` : ''}
-        ${P.bundles.map(b => html`<section class="build-bundle" aria-label="Bundle in ${b.name}"><h3>${b.name} <small>${b.model} · branch ${b.branch} · ${b.room ? `${b.room} may start now` : 'waits for room'}</small></h3>
+        ${P.bundles.map(b => html`<section class="build-bundle" aria-label="Bundle in ${b.name}"><h3>${b.name} <small>${b.model} · branch ${b.branch} · ${b.host ? `runs on ${b.host}, whose dispatcher beat ${b.beat} s ago` : b.room ? `${b.room} may start now` : 'waits for room'}</small></h3>
           <ol class="start-list">${b.items.map(r => html`<li><code>#${String(r.id)}</code> ${r.title}</li>`)}</ol></section>`)}
         <p class="why">One run per bundle, ${String(P.budget_minutes)} min each. The items lock until each run ends; Cancel on Queue › Builds stops one.</p>
         <div class="actions">
@@ -206,7 +209,7 @@
         if (dlg.returnValue !== 'build' || !ok) return;
         const revisions = Object.fromEntries(items.map(r => [String(r.id), r.revision]));
         window.shell.post('/api/tasks/build', { items: items.map(r => r.id), revisions }).then(out => {
-          toast(`Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${kickText(out.kickstart)}`); done?.(); reread();
+          toast(queuedText(out)); done?.(); reread();
         }, err => {
           // A 409 is a refused press that changed nothing; no status is no answer, so whether it queued is not known.
           toast(err.status === 409 ? err.message : err.status ? `Nothing queued: ${err.message}` : `Build got no answer, so what queued is not known: read the tasks again (${err.message})`);
@@ -447,5 +450,5 @@
       ${state ? html`<p class="why">${state}</p>` : ''}</section>`;
   }
 
-  window.commands = { answered, fix, dependabotFix, grill, applyReview, retry, runAction, showLog, logLine, printJob, showAssignment, kickText, build, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
+  window.commands = { answered, fix, dependabotFix, grill, applyReview, retry, runAction, showLog, logLine, printJob, showAssignment, queuedText, build, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
 })();
