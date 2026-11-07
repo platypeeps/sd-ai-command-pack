@@ -325,6 +325,20 @@ class TaskCancellation(ProgressCase):
                 again = cancel_work(self.db, item, reason="Superseded by sd:2", who="operator", guard=task_guard)
                 self.assertEqual(again, result)
 
+    def test_a_cancel_answers_the_open_questions_a_delivery_keeps(self):
+        # sd:7992: a cancelled item's open question kept it in Decisions.
+        from sd_db.writes import add_note
+        cancelled, delivered = self.task(), self.task()
+        asked = {item: add_note(self.db, item, "question", "Which?\nOption: A (Recommended)\nOption: B")
+                 for item in (cancelled, delivered)}
+        result = cancel_work(self.db, cancelled, reason="Not needed", who="operator", guard=task_guard)
+        change_status(self.db, delivered, "done", who="operator", reason="landed")
+        note = next(row for row in result["notes"] if row["id"] == asked[cancelled])
+        self.assertIsNotNone(note["resolved_at"])
+        self.assertIn(f"resolved open question {asked[cancelled]}", result["notes"][-1]["body"])
+        kept = next(row for row in item_state(self.db, delivered)["notes"] if row["id"] == asked[delivered])
+        self.assertIsNone(kept["resolved_at"])
+
     def test_the_default_guard_is_still_the_work_guard(self):
         item = self.task()
         with self.assertRaisesRegex(WorkflowError, "work items"):

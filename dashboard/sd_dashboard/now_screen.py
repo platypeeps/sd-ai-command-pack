@@ -902,8 +902,8 @@ def builders(connection: sqlite3.Connection, now: str) -> dict:
             for member in build.run(connection, run["id"])["members"]:
                 item = reads.item_by_id(connection, member["item"])
                 items.append({"item": member["item"], "title": item["title"] if item else "", "assignment": member["id"]})
-            beat = _at(run["heartbeat_at"] or run["created_at"])
-            quiet = (clock - beat).total_seconds() if beat else None
+            # A beat stamped too far ahead has no age and reads stalled (`build._lead_age`, sd:7986).
+            quiet = build._lead_age(run["heartbeat_at"] or run["created_at"], now)
             stalled = run["step"] != "enqueued" and (quiet is None or quiet >= build.STALE_SECONDS)
             rows.append({"run": run["id"], "repo": Path(run["repo"]).name, "items": items, "step": run["step"] or "claimed",
                          "stage": STAGE.get(run["step"] or "claimed", run["step"]), "model": run["model"] or "",
