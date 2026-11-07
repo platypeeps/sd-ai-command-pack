@@ -26,6 +26,8 @@ import time
 import unittest
 from unittest import mock
 
+from tests.clean_env import clean_environment
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD_CHECK = REPO_ROOT / "bin" / "sd-check"
 SLOTS = REPO_ROOT / "bin" / "sd_gate_slots.py"
@@ -511,6 +513,39 @@ class SignalForwarding(unittest.TestCase):
                                                stream=io.StringIO())
                 self.assertEqual(code, 0)
                 killpg.assert_called_once_with(Child.pid, signal.SIGTERM)
+
+
+class ARefusalSaysItStartedNothing(unittest.TestCase):
+    """Pack sd:7899: `run` passes the command's own exit code through, 125 too.
+
+    A caller cannot tell a check that exited 125 from a gate that started
+    nothing by the code, so every refusal ends its stderr with `NOT_STARTED`.
+    """
+
+    def run_gate(self, *argv: str, environ: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(SLOTS), "run", *argv], capture_output=True, text=True,
+                              env=clean_environment(SD_GATE_SLOTS="0", **(environ or {})), timeout=60,
+                              check=False, stdin=subprocess.DEVNULL)
+
+    def test_a_run_with_no_command_says_it_started_nothing(self):
+        done = self.run_gate("--")
+        self.assertEqual(done.returncode, sd_gate_slots.RUN_NOT_STARTED)
+        self.assertEqual(done.stderr.splitlines()[-1], sd_gate_slots.NOT_STARTED)
+
+    def test_unreadable_settings_say_it_started_nothing(self):
+        done = self.run_gate("--", "true", environ={"SD_GATE_SLOTS": "many"})
+        self.assertEqual(done.returncode, sd_gate_slots.RUN_NOT_STARTED, done.stderr)
+        self.assertEqual(done.stderr.splitlines()[-1], sd_gate_slots.NOT_STARTED)
+
+    def test_a_command_that_exits_125_carries_no_refusal(self):
+        done = self.run_gate("--", sys.executable, "-c", "import sys; sys.exit(125)")
+        self.assertEqual(done.returncode, 125)
+        self.assertNotIn(sd_gate_slots.NOT_STARTED, done.stderr)
+
+    def test_the_build_run_reads_the_same_marker(self):
+        sys.path.insert(0, str(REPO_ROOT / "lib"))
+        from sd_db import build_run
+        self.assertEqual(build_run.GATE_NOT_STARTED, sd_gate_slots.NOT_STARTED)
 
 
 if __name__ == "__main__":
