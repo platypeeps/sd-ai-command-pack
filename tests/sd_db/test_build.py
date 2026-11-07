@@ -1279,7 +1279,8 @@ class Hosts(Case):
         build.queue(self.db, [self.item(repo=SAT)], who="operator")
         ready = self.item()
         build.set_pickup(self.db, True, now=Pickup.NOW)
-        self.assertEqual(build.pickup(self.db, build.room(self.db, **IDLE, hosts=HUB), now=Pickup.NOW), [ready])
+        with mock.patch.object(build, "this_host", return_value="hub"):
+            self.assertEqual(build.pickup(self.db, build.room(self.db, **IDLE, hosts=HUB), now=Pickup.NOW), [ready])
 
     def test_the_hub_claim_skips_a_satellite_row(self):
         build.queue(self.db, [self.item(repo=SAT)], who="operator")
